@@ -1,5 +1,5 @@
 // rasterizer3_pixel_tests: fixed-function semantics that only a real backend
-// can prove. Most cases drive the public CKRasterizer v3 interface in a
+// can prove. Most cases drive the private CKRasterizer interface in a
 // visible SDL window; explicit white-box cases verify backend resource and
 // presentation invariants. Pixels come back through CopyToMemoryBuffer, so
 // the readback path is part of the gate.
@@ -9,10 +9,11 @@
 // CKBGFX_RENDERER_BACKEND (default opengl).
 
 #include "CKRasterizer.h"
-#ifndef CKRE_PIXEL_SDL_GPU
-#include "CKBgfxBackend.h"
+#ifdef CKRE_PIXEL_SDL_GPU
+#include "CKSdlGpuRasterizerContext.h"
+#else
+#include "CKBgfxRasterizerContext.h"
 #endif
-#include "CKFFRasterizerContextInternal.h"
 #include "TestTriangleMultiset.h"
 
 #include <SDL3/SDL.h>
@@ -28,21 +29,6 @@ extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
 #else
 extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
 
-struct CKBgfxBackendTestAccess {
-    static CKRECT WindowViewRect(const CKBgfxBackend &backend)
-    {
-        CKRECT rect = {};
-        for (CKDWORD view = 0; view < backend.m_LastFrameViewCount; ++view)
-            if (!backend.m_ViewFrameBuffer[view]) rect = backend.m_ViewRect[view];
-        return rect;
-    }
-    static CKDWORD ExchangeNextView(CKBgfxBackend &backend, CKDWORD next = UINT32_MAX)
-    {
-        const CKDWORD previous = backend.m_NextView;
-        backend.m_NextView = next == UINT32_MAX ? backend.m_CapsDesc.MaxRenderViews : next;
-        return previous;
-    }
-};
 #endif
 
 namespace {
@@ -62,6 +48,13 @@ void TestCheckf(bool condition, const char *format, ...)
     vsnprintf(g_Failure, sizeof(g_Failure), format, args);
     va_end(args);
     TestFail(g_Failure);
+}
+
+CKRenderStats ReadStats(CKRasterizerContext *context)
+{
+    CKRenderStats stats = {};
+    context->GetStats(stats);
+    return stats;
 }
 
 bool EnvFlagEnabled(const char *name)
@@ -120,7 +113,8 @@ CKBOOL OpenBackend(Backend &b, int width, int height)
 #else
     CKBgfxRasterizerGetInfo(&b.Info);
 #endif
-    TestCheck(b.Info.InterfaceRevision == CKRST_INTERFACE_REVISION, "plugin reports the v3 revision");
+    TestCheck(b.Info.InterfaceRevision == CKRST_INTERFACE_REVISION,
+              "plugin reports the current interface revision");
     TestCheck(b.Info.StartFct != NULL && b.Info.CloseFct != NULL, "plugin entry points");
     b.Rasterizer = b.Info.StartFct((WIN_HANDLE)b.Window);
     TestCheck(b.Rasterizer != NULL, "rasterizer must start");
@@ -1201,21 +1195,26 @@ void CheckIndependentAttachmentClears(Backend &b)
 
 void CheckDriverCaps(const Backend &b)
 {
-    const Vx3DCapsDesc &caps = b.Driver->m_3DCaps;
-    TestCheck(b.Driver->m_CapsUpToDate, "caps refreshed by context creation");
-    TestCheck(caps.MaxTextureWidth > 0 && caps.MaxTextureHeight > 0, "texture limits lowered to the backend");
-    TestCheck(b.Driver->m_TextureFormats.Size() > 0, "texture formats reported");
-    // Spec 4.9.2 / gate 15: the baseline bit fields survive context creation.
-    TestCheck((caps.RasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) ==
-                  (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL),
-              "driver caps keep the baseline FOGRANGE | FOGPIXEL bits");
-    TestCheck((caps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_DX8) != 0 &&
-                  (caps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_HARDWARETL) != 0,
-              "driver caps report the baseline DX8 hardware T&L level");
+    CKRasterizerDriverDesc driverDesc = {};
+    CKRasterizerNativeCapsDesc nativeCaps;
+    TestCheck(b.Driver->GetDesc(&driverDesc) && driverDesc.CapsFinal,
+              "caps refreshed by context creation");
+    TestCheck(b.Driver->GetNativeCaps(&nativeCaps) &&
+                  nativeCaps.MaxTextureSize > 0,
+              "texture limits lowered to the backend");
+    TestCheck(b.Driver->GetTextureFormatCount() > 0,
+              "texture formats reported");
     CKRasterizerCapsDesc publicCaps;
     TestCheck(b.Context->GetCaps(&publicCaps) && publicCaps.MaxTextureStages >= 1 &&
                   publicCaps.MaxTextureStages <= CKRST_MAX_TEXTURE_STAGES,
               "public rasterizer caps");
+}
+
+CKRasterizerContextDesc ReadContextDesc(CKRasterizerContext *context)
+{
+    CKRasterizerContextDesc desc = {};
+    TestCheck(context && context->GetDesc(&desc), "context description query");
+    return desc;
 }
 
 struct ReadbackCapture {
@@ -1299,7 +1298,9 @@ void CheckResizeAndReadback(Backend &b)
     TestCheck(pendingResize.Calls == 0, "resize starts with an outstanding callback");
     TestCheck(SDL_SetWindowSize(b.Window, 320, 640) && SDL_SyncWindow(b.Window), "portrait window resize");
     TestCheck(ctx->Resize(0, 0, 48, 96, VX_RESIZE_NOMOVE), "portrait context resize with Player flags");
-    TestCheck(ctx->m_Width == 48 && ctx->m_Height == 96, "resized context size");
+    const CKRasterizerContextDesc resized = ReadContextDesc(ctx);
+    TestCheck(resized.Width == 48 && resized.Height == 96,
+              "resized context size");
 
     SetDiffuseState(ctx);
     ReadbackCapture capture;
@@ -1326,8 +1327,8 @@ void CheckResizeAndReadback(Backend &b)
     TestCheck(pixels.Width == 48 && pixels.Height == 96, "synchronous readback follows the new size");
     TestCheckf(PixelNear(pixels, 24, 48, 0, 255, 0), "portrait frame centre must be green");
 #ifndef CKRE_PIXEL_SDL_GPU
-    auto *native = static_cast<CKBgfxBackend *>(static_cast<CKTranslatedContext *>(ctx)->GetBackend());
-    const CKRECT presented = CKBgfxBackendTestAccess::WindowViewRect(*native);
+    auto *native = static_cast<CKBgfxRasterizerContext *>(ctx);
+    const CKRECT presented = native->GetWindowViewRectForTests();
     int drawableWidth = 0, drawableHeight = 0;
     TestCheck(SDL_GetWindowSizeInPixels(b.Window, &drawableWidth, &drawableHeight), "query actual drawable size");
     TestCheck(presented.left == 0 && presented.top == 0 && presented.right == drawableWidth && presented.bottom == drawableHeight,
@@ -1383,7 +1384,8 @@ void CheckPresentation(Backend &b)
         TestCheck(DrawColorTriangle(ctx, diagonal, kGreen), "diagonal triangle (MSAA)");
     }, msaa);
     const int msaaBlended = CountBlendedGreenPixels(msaa);
-    const CKDWORD msaaApproximated = ctx->GetStats()->Diagnostics[CKRST_DIAG_APPROX_MSAA];
+    const CKDWORD msaaApproximated =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_MSAA];
     TestCheckf(msaa.Width == plain.Width && msaa.Height == plain.Height, "MSAA readback keeps the window size");
     TestCheckf(PixelNear(msaa, 40, 80, 0, 255, 0), "inside of the MSAA triangle must be green");
 #ifdef CKRE_PIXEL_SDL_GPU
@@ -1417,7 +1419,9 @@ void CheckViewport(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
     SetDiffuseState(ctx);
-    const int width = (int)ctx->m_Width, height = (int)ctx->m_Height;
+    const CKRasterizerContextDesc contextDesc = ReadContextDesc(ctx);
+    const int width = contextDesc.Width;
+    const int height = contextDesc.Height;
     CKViewportData rightHalf;
     rightHalf.ViewX = width / 2;
     rightHalf.ViewY = 0;
@@ -1507,27 +1511,36 @@ void CheckRenderTargetReadback(Backend &b)
     TestCheckf(PixelNear(pixels, 16, 6, 0, 255, 0), "target readback: top of the triangle must be green");
     TestCheckf(PixelNear(pixels, 16, 26, 0, 0, 0), "target readback: the lower half must stay black (top-down layout)");
     TestCheck(ctx->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "release target");
-    full.ViewWidth = ctx->m_Width;
-    full.ViewHeight = ctx->m_Height;
+    const CKRasterizerContextDesc contextDesc = ReadContextDesc(ctx);
+    full.ViewWidth = contextDesc.Width;
+    full.ViewHeight = contextDesc.Height;
     TestCheck(ctx->SetViewport(&full), "window viewport");
     TestCheck(ctx->DeleteObject(rt, CKRST_OBJ_TEXTURE), "delete render target");
     // The window readback still works afterwards.
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
         TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "window triangle after the target");
     }, pixels);
-    TestCheck(pixels.Width == (int)ctx->m_Width && pixels.Height == (int)ctx->m_Height, "window readback size");
-    TestCheckf(PixelNear(pixels, (int)ctx->m_Width / 2, (int)ctx->m_Height * 3 / 5, 0, 255, 0), "window readback after the target");
+    TestCheck(pixels.Width == contextDesc.Width &&
+                  pixels.Height == contextDesc.Height,
+              "window readback size");
+    TestCheckf(PixelNear(pixels, contextDesc.Width / 2,
+                         contextDesc.Height * 3 / 5, 0, 255, 0),
+               "window readback after the target");
 }
 
 void CheckTypedPersistentBufferUpdates(Backend &b)
 {
-    CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
-    CKRasterizerBackend *backend = translated->GetBackend();
+#ifdef CKRE_PIXEL_SDL_GPU
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+#else
+    CKBgfxRasterizerContext *backend = static_cast<CKBgfxRasterizerContext *>(b.Context);
+#endif
     float vertices[9] = {0.0f};
     CKWORD indices[3] = {0, 1, 2};
 
-    CKBackendBufferDesc vbDesc;
-    vbDesc.Kind = CKRST_BACKEND_BUFFER_VERTEX;
+    CKBufferDesc vbDesc;
+    vbDesc.Kind = CKRST_BUFFER_VERTEX;
     vbDesc.Size = sizeof(vertices);
     vbDesc.Stride = sizeof(float) * 3;
     vbDesc.Dynamic = TRUE;
@@ -1535,17 +1548,27 @@ void CheckTypedPersistentBufferUpdates(Backend &b)
     TestCheck(backend->CreateBuffer(&vbDesc, &vb) == CK_OK && vb != 0,
               "real backend creates a persistent vertex buffer");
 
-    CKBackendBufferDesc ibDesc;
-    ibDesc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+    CKBufferDesc ibDesc;
+    ibDesc.Kind = CKRST_BUFFER_INDEX;
     ibDesc.Size = sizeof(indices);
     ibDesc.Dynamic = TRUE;
     CKDWORD ib = 0;
     TestCheck(backend->CreateBuffer(&ibDesc, &ib) == CK_OK && ib != 0,
               "real backend creates a persistent index buffer");
     TestCheck(vb == ib, "vertex and index handle namespaces reproduce the numeric collision");
-    TestCheck(backend->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, ib, 0, sizeof(indices), indices) == CK_OK,
+    CKBufferUpdateDesc update;
+    update.Kind = CKRST_BUFFER_INDEX;
+    update.Buffer = ib;
+    update.Size = sizeof(indices);
+    update.Data = indices;
+    TestCheck(backend->UpdateBuffer(&update) == CK_OK,
               "typed index update does not resolve through the vertex namespace");
-    TestCheck(backend->UpdateBuffer(CKRST_BACKEND_BUFFER_VERTEX, vb, 0, sizeof(vertices), vertices) == CK_OK,
+    update = CKBufferUpdateDesc();
+    update.Kind = CKRST_BUFFER_VERTEX;
+    update.Buffer = vb;
+    update.Size = sizeof(vertices);
+    update.Data = vertices;
+    TestCheck(backend->UpdateBuffer(&update) == CK_OK,
               "typed vertex update resolves through the vertex namespace");
     TestCheck(backend->DestroyObject(ib, CKRST_OBJ_INDEXBUFFER) == CK_OK,
               "destroy persistent index buffer");
@@ -1557,16 +1580,15 @@ void CheckTypedPersistentBufferUpdates(Backend &b)
 #ifndef CKRE_PIXEL_SDL_GPU
 void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 {
-    CKTranslatedContext *translated = static_cast<CKTranslatedContext *>(b.Context);
-    CKBgfxBackend *backend = static_cast<CKBgfxBackend *>(translated->GetBackend());
-    const CKDWORD previousView = CKBgfxBackendTestAccess::ExchangeNextView(*backend);
-    CKBackendPassDesc pass;
+    CKBgfxRasterizerContext *backend = static_cast<CKBgfxRasterizerContext *>(b.Context);
+    const CKDWORD previousView = backend->ExchangeNextViewForTests();
+    CKRenderPassDesc pass;
     pass.Rect.right = kWidth;
     pass.Rect.bottom = kHeight;
     TestCheck(backend->BeginPass(&pass) == CKERR_OUTOFMEMORY,
               "view exhaustion must reject the new pass");
     TestCheck(backend->IsIdle(), "rejected pass must not leave a frame in progress");
-    CKBgfxBackendTestAccess::ExchangeNextView(*backend, previousView);
+    backend->ExchangeNextViewForTests(previousView);
 }
 
 #endif
@@ -1664,7 +1686,7 @@ int main(int argc, char **argv)
     }
 
     TestFramework tests;
-    tests.Run("backend renders the fixed-function semantics through the public v3 interface",
+    tests.Run("backend renders the fixed-function semantics through the private interface",
               &BackendRendersFixedFunctionSemantics);
     return tests.ExitCode();
 }

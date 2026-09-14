@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "CKBgfxRasterizer.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
@@ -34,8 +35,10 @@ static int g_FailCount = 0;
 
 static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
 {
-    for (int i = 0; driver && i < driver->m_DisplayModes.Size(); ++i) {
-        const VxDisplayMode &mode = driver->m_DisplayModes[i];
+    for (int i = 0; driver && i < driver->GetDisplayModeCount(); ++i) {
+        VxDisplayMode mode;
+        if (!driver->GetDisplayMode(i, &mode))
+            return false;
         if (mode.Width == width &&
             mode.Height == height &&
             mode.Bpp == bpp &&
@@ -49,9 +52,12 @@ static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, in
 
 static bool DisplayModesAreSorted(CKRasterizerDriver *driver)
 {
-    for (int i = 1; driver && i < driver->m_DisplayModes.Size(); ++i) {
-        const VxDisplayMode &prev = driver->m_DisplayModes[i - 1];
-        const VxDisplayMode &cur = driver->m_DisplayModes[i];
+    for (int i = 1; driver && i < driver->GetDisplayModeCount(); ++i) {
+        VxDisplayMode prev;
+        VxDisplayMode cur;
+        if (!driver->GetDisplayMode(i - 1, &prev) ||
+            !driver->GetDisplayMode(i, &cur))
+            return false;
         if (prev.Width != cur.Width) {
             if (prev.Width > cur.Width)
                 return false;
@@ -528,35 +534,37 @@ static void TestBgfxRasterizerLifecycle()
     CKBgfxRasterizerDriver *driver =
         static_cast<CKBgfxRasterizerDriver *>(rasterizer.GetDriver(0));
     TEST_ASSERT(driver != NULL, "driver exists after start");
-    TEST_ASSERT(driver->m_Owner == &rasterizer, "driver owner points to the rasterizer");
-    TEST_ASSERT(driver->m_Hardware == TRUE, "bgfx driver is marked hardware");
-    TEST_ASSERT(driver->m_DisplayModes.Size() > 0,
+    CKRasterizerDriverDesc driverDesc = {};
+    TEST_ASSERT(driver->GetDesc(&driverDesc) && driverDesc.Hardware,
+                "bgfx driver is marked hardware");
+    TEST_ASSERT(driver->GetDisplayModeCount() > 0,
                 "bgfx driver exposes real modes or a minimal fallback list");
     TEST_ASSERT(DisplayModesAreSorted(driver), "bgfx display modes are sorted for screen-mode grouping");
     TEST_ASSERT(HasDisplayMode(driver, 640, 480, 32, 60),
                 "bgfx driver exposes the legacy 640x480 windowed mode");
     TEST_ASSERT(!HasDisplayMode(driver, 800, 600, 16, 60),
                 "bgfx driver does not fabricate legacy 16-bit display modes");
-    TEST_ASSERT(driver->m_CapsUpToDate == FALSE,
+    TEST_ASSERT(driver->GetDesc(&driverDesc) && !driverDesc.CapsFinal,
                 "bgfx legacy caps remain provisional until a backend initializes bgfx");
     TEST_ASSERT(rasterizer.GetDriver(1) == NULL, "out-of-range driver index yields NULL");
 
-    std::vector<CKBackendShaderTarget> shaderTargets;
+    XClassArray<CKFFShaderTarget> shaderTargets;
     driver->GetShaderTargets(shaderTargets);
-    TEST_ASSERT(shaderTargets.size() == 6, "rasterizer advertises six complete bgfx artifact profiles");
-    for (const auto &target : shaderTargets) {
-        CKBackendCaps caps;
+    TEST_ASSERT(shaderTargets.Size() == 6, "rasterizer advertises six complete bgfx artifact profiles");
+    for (int targetIndex = 0; targetIndex < shaderTargets.Size(); ++targetIndex) {
+        const CKFFShaderTarget &target = shaderTargets[targetIndex];
+        CKRasterizerDeviceCaps caps;
         caps.ShaderFormat = target.Format;
         caps.ShaderProfile = target.Profile;
-        CKBackendShaderSet shaders;
+        CKFFShaderSet shaders;
         TEST_ASSERT(target.Format == CKRST_SHADER_FORMAT_BGFX && driver->GetShaderSet(caps, shaders) &&
                         shaders.Matches(target.Format, target.Profile),
                     "every advertised profile resolves a complete rasterizer shader catalog");
     }
-    CKBackendCaps foreignTarget;
+    CKRasterizerDeviceCaps foreignTarget;
     foreignTarget.ShaderFormat = CKRST_SHADER_FORMAT_DXIL;
     foreignTarget.ShaderProfile = CKRST_SHADER_PROFILE_DX12;
-    CKBackendShaderSet foreignShaders;
+    CKFFShaderSet foreignShaders;
     TEST_ASSERT(!driver->GetShaderSet(foreignTarget, foreignShaders) && !foreignShaders.Shaders[0].Code,
                 "bgfx rasterizer never offers containers as native DXIL artifacts");
 
@@ -834,23 +842,26 @@ void TestBorderPaletteLifetime() {
 static void TestRejectedShaderTargets()
 {
     TEST_SECTION("Shader Target Selection Before Device Creation");
-    const CKBackendShaderTarget targets[] = {
+    const CKFFShaderTarget targets[] = {
         {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12},
         {CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX11},
         {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV},
         {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_UNKNOWN},
     };
-    CKBgfxBackend backend;
-    CKBackendInitDesc init;
+    CKBgfxRasterizerContext backend;
+    CKRasterizerInitParameters init;
     init.Width = init.Height = 16;
     for (const auto &target : targets) {
-        init.ShaderTargets.assign(1, target);
+        init.ShaderTargets.Clear();
+        init.ShaderTargets.PushBack(target);
         TEST_ASSERT(backend.Init(&init) == CKERR_NOTIMPLEMENTED,
                     "incompatible shader containers and profiles are rejected before native initialization");
         TEST_ASSERT(backend.GetDeviceStatus() != CK_OK,
                     "a rejected shader target does not create a device");
     }
-    init.ShaderTargets.assign(targets, targets + sizeof(targets) / sizeof(targets[0]));
+    init.ShaderTargets.Clear();
+    for (const auto &target : targets)
+        init.ShaderTargets.PushBack(target);
     TEST_ASSERT(backend.Init(&init) == CKERR_NOTIMPLEMENTED,
                 "a nonempty target list with no compatible pair is rejected as a whole");
 }

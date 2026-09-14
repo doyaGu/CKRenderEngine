@@ -1,8 +1,8 @@
 // Pixel coverage for the complete SDL_gpu rasterizer.
-#include "CKSdlGpuBackend.h"
+#include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuNativeShaders.h"
 #include "CKSdlGpuShaders.h"
-#include "CKPresentStage.h"
+#include "CKSdlGpuPresentStage.h"
 #include <SDL3/SDL.h>
 #ifdef min
 #undef min
@@ -15,13 +15,14 @@
 #include <vector>
 #include <algorithm>
 
-static bool CheckReadback(CKSdlGpuBackend &backend, const CKBackendReadbackTicket &ticket,
+static bool CheckReadback(CKSdlGpuRasterizerContext &backend, const CKSdlGpuReadbackTicket &ticket,
                           const std::vector<CKDWORD> &expected, unsigned tolerance, const char *name)
 {
-    if (backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY || ticket->Data.size() != expected.size() * 4) return false;
+    const XArray<CKBYTE> &data = backend.GetReadbackData(ticket);
+    if (backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY || data.Size() != expected.size() * 4) return false;
     for (size_t i = 0; i < expected.size(); ++i) {
         CKDWORD pixel = 0;
-        std::memcpy(&pixel, ticket->Data.data() + i * 4, 4);
+        std::memcpy(&pixel, data.Begin() + i * 4, 4);
         for (unsigned channel = 0; channel < 32; channel += 8)
             if (unsigned(std::abs(int((pixel >> channel) & 255) - int((expected[i] >> channel) & 255))) > tolerance) {
                 std::fprintf(stderr, "%s pixel %u: %08x expected %08x (tolerance %u)\n", name,
@@ -170,7 +171,7 @@ static bool CheckExactCopyMatchesBlit(SDL_Window *window)
     return exact;
 }
 
-static bool CheckGenericProgram(CKSdlGpuBackend &backend)
+static bool CheckGenericProgram(CKSdlGpuRasterizerContext &backend)
 {
     CKShaderDesc vertex, fragment;
     const auto format = backend.GetCaps().ShaderFormat == CKRST_SHADER_FORMAT_DXIL ?
@@ -182,7 +183,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     desc.Uniforms[0].Slot = 28; desc.Uniforms[1].Slot = 29;
     desc.Samplers[0].Slot = 7; // one sampler is an ordinary volume input, at an arbitrary logical slot
     if (backend.CreateProgram(&desc, &program) != CK_OK) return false;
-    desc = {}; // the program must own all declarations and shader references
+    desc = CKFFProgramDesc(); // the program owns declarations and shader references
     backend.DestroyObject(vs, CKRST_OBJ_SHADER); backend.DestroyObject(fs, CKRST_OBJ_SHADER);
 
     CKTextureDesc image;
@@ -197,16 +198,16 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         if (backend.UpdateTexture(texture, 0, z, nullptr, &upload) != CK_OK) return false;
     image.Depth = 1; image.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
     if (backend.CreateTexture(&image, nullptr, &output) != CK_OK) return false;
-    CKBackendRenderTargetDesc attachment; attachment.ColorTexture = output;
+    CKRenderTargetDesc attachment; attachment.ColorTexture = output;
     if (backend.CreateRenderTarget(&attachment, &target) != CK_OK) return false;
-    CKBackendPassDesc pass; pass.RenderTarget = target; pass.Rect = {0, 0, 4, 4};
+    CKRenderPassDesc pass; pass.RenderTarget = target; pass.Rect = {0, 0, 4, 4};
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR;
     if (backend.BeginPass(&pass) != CK_OK) return false;
-    CKBackendPipelineState state;
-    CKBackendTextureBindings bindings;
-    CKBackendConstants constants;
-    auto submit = [&](const CKBackendDraw *source) {
-        CKBackendDraw packet = *source;
+    CKFFPipelineState state;
+    CKFFTextureBindings bindings;
+    CKFFConstantSet constants;
+    auto submit = [&](const CKDrawCommand *source) {
+        CKDrawCommand packet = *source;
         packet.Pipeline = state;
         packet.Textures = &bindings;
         packet.Constants = &constants;
@@ -222,17 +223,17 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (constants.Set(28, position, sizeof(position)) != CK_OK ||
         constants.Set(29, volume, sizeof(volume)) != CK_OK ||
         constants.Set(29, volume, 16) != CK_OK) return false; // preserve the trailing vector
-    CKBackendDraw draw; draw.Program = program; draw.VertexCount = 3; // no vertex buffer/layout
+    CKDrawCommand draw; draw.Program = program; draw.VertexCount = 3; // no vertex buffer/layout
     if (submit(&draw) != CK_OK) return false;
     std::fill(pixels.begin(), pixels.end(), 0xff0000ff);
     if (backend.UpdateTexture(texture, 0, 0, nullptr, &upload) != CK_OK) return false;
     state.Scissor = {2, 0, 4, 4};
     if (submit(&draw) != CK_OK) return false;
-    CKReadbackDesc read; CKBackendReadbackTicket ticket;
+    CKReadbackDesc read; CKSdlGpuReadbackTicket ticket;
     if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK) return false;
     // Repeated bindings/constants, A-B-A values and automatic batch splitting
     // must all preserve the draw at which each slice was selected.
-    CKBackendReadbackTicket repeated;
+    CKSdlGpuReadbackTicket repeated;
     if (backend.BeginPass(&pass) != CK_OK) return false;
     float sliceParams[8] = {4, 4, 2, 0, 4, 4, 2, 0};
     for (unsigned x = 0; x < 4; ++x) {
@@ -244,7 +245,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (backend.ReadTexture(output, 0, &read, &repeated) != CK_OK) return false;
     backend.DestroyObject(program, CKRST_OBJ_PROGRAM); backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
     backend.DestroyObject(target, CKRST_OBJ_FRAMEBUFFER); backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
-    if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+    if (backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
     for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x)
         pixels[y * 4 + x] = x < 2 ? 0xffff0000 : 0xff800080;
     if (!CheckReadback(backend, ticket, pixels, 1, "generic program ordered update")) return false;
@@ -256,34 +257,65 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
 
     // Use the existing textured shader to exercise real two-stream/indexed
     // geometry, including descriptors whose memory could be reused next frame.
-    CKBackendShaderSet shaders;
-    if (!CKSdlGpuShaderSet(format, shaders) ||
-        backend.CreateShader(&shaders.Shaders[CKRST_SHADER_PRESENT_VERTEX], &vs) != CK_OK ||
-        backend.CreateShader(&shaders.Shaders[CKRST_SHADER_PRESENT_FRAGMENT], &fs) != CK_OK) return false;
+    auto failGeometryStep = [](const char *step, CKERROR status) {
+        std::fprintf(stderr,
+                     "SDL_gpu generic geometry failed at %s (CKERROR=%d)\n",
+                     step, (int)status);
+        return false;
+    };
+    CKFFShaderSet shaders;
+    if (!CKSdlGpuShaderSet(format, shaders))
+        return failGeometryStep("load present shaders",
+                                CKERR_INVALIDPARAMETER);
+    CKERROR status = backend.CreateShader(
+        &shaders.Shaders[CKRST_SHADER_PRESENT_VERTEX], &vs);
+    if (status != CK_OK)
+        return failGeometryStep("create present vertex shader", status);
+    status = backend.CreateShader(
+        &shaders.Shaders[CKRST_SHADER_PRESENT_FRAGMENT], &fs);
+    if (status != CK_OK)
+        return failGeometryStep("create present fragment shader", status);
     desc = CKFFBuildProgramInterface(vs, fs, backend.GetCaps().ShaderFormat, TRUE);
-    if (backend.CreateProgram(&desc, &program) != CK_OK) return false;
+    status = backend.CreateProgram(&desc, &program);
+    if (status != CK_OK)
+        return failGeometryStep("create present program", status);
     backend.DestroyObject(vs, CKRST_OBJ_SHADER); backend.DestroyObject(fs, CKRST_OBJ_SHADER);
     CKVertexElementDesc element = {CKRST_ATTRIB_POSITION, CKRST_ATTRIBTYPE_FLOAT, 3, FALSE, FALSE, 0};
     CKVertexLayoutDesc layoutDesc = {&element, 1, 12};
     CKDWORD positionLayout = 0, texcoordLayout = 0, otherLayout = 0;
-    if (backend.CreateVertexLayout(&layoutDesc, &positionLayout) != CK_OK ||
-        backend.CreateVertexLayout(&layoutDesc, &otherLayout) != CK_OK) return false;
+    status = backend.CreateVertexLayout(&layoutDesc, &positionLayout);
+    if (status != CK_OK)
+        return failGeometryStep("create position layout", status);
+    status = backend.CreateVertexLayout(&layoutDesc, &otherLayout);
+    if (status != CK_OK)
+        return failGeometryStep("create alternate position layout", status);
     element.Attrib = CKRST_ATTRIB_TEXCOORD0; element.Count = 2; layoutDesc.Stride = 8;
-    if (backend.CreateVertexLayout(&layoutDesc, &texcoordLayout) != CK_OK ||
-        backend.CreateTexture(&image, nullptr, &output) != CK_OK) return false;
+    status = backend.CreateVertexLayout(&layoutDesc, &texcoordLayout);
+    if (status != CK_OK)
+        return failGeometryStep("create texcoord layout", status);
+    status = backend.CreateTexture(&image, nullptr, &output);
+    if (status != CK_OK)
+        return failGeometryStep("create geometry target texture", status);
     attachment.ColorTexture = output;
-    if (backend.CreateRenderTarget(&attachment, &target) != CK_OK) return false;
+    status = backend.CreateRenderTarget(&attachment, &target);
+    if (status != CK_OK)
+        return failGeometryStep("create geometry target", status);
     pass.RenderTarget = target;
-    if (backend.BeginPass(&pass) != CK_OK) return false;
+    status = backend.BeginPass(&pass);
+    if (status != CK_OK)
+        return failGeometryStep("begin geometry pass", status);
     state.ScissorEnabled = FALSE;
-    bindings[CKFF_SLOT_PRESENT] = CKBackendTextureBinding();
+    bindings[CKFF_SLOT_PRESENT] = CKFFTextureSlot();
     const float present[4] = {0.25f, 0.25f, 0, 0};
-    if (CKFFSetConstants(&constants, CKRST_BLOCK_PRESENT_PARAMS, present, 1) != CK_OK) return false;
+    if (CKFFSetConstants(
+            &constants, CKRST_BLOCK_PRESENT_PARAMS, present, 1) != CK_OK)
+        return failGeometryStep("set present constants",
+                                CKERR_INVALIDPARAMETER);
     const float positions[9] = {-1, -1, 0, 3, -1, 0, -1, 3, 0};
     const float texcoords[6] = {0, 1, 2, 1, 0, -1};
     const CKWORD indices[3] = {0, 1, 2};
-    auto allocate = [&](CKBackendTransientVertices &vertices, CKBackendTransientVertices &uv,
-                        CKBackendTransientIndices &index, unsigned vertexCount = 3) {
+    auto allocate = [&](CKTransientVertexData &vertices, CKTransientVertexData &uv,
+                        CKTransientIndexData &index, unsigned vertexCount = 3) {
         if (!backend.AllocTransientVertices(vertexCount, positionLayout, &vertices) ||
             !backend.AllocTransientVertices(vertexCount, texcoordLayout, &uv) ||
             !backend.AllocTransientIndices(3, FALSE, &index)) return false;
@@ -294,20 +326,24 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         std::memcpy(index.Data, indices, sizeof(indices));
         return true;
     };
-    CKBackendTransientVertices vertices, uv;
-    CKBackendTransientIndices index;
-    if (!allocate(vertices, uv, index)) return false;
-    draw = CKBackendDraw(); draw.Program = program; draw.Layout = positionLayout;
+    CKTransientVertexData vertices, uv;
+    CKTransientIndexData index;
+    if (!allocate(vertices, uv, index))
+        return failGeometryStep("allocate initial transient geometry",
+                                CKERR_INVALIDPARAMETER);
+    draw = CKDrawCommand(); draw.Program = program; draw.Layout = positionLayout;
     draw.Stream1Layout = texcoordLayout; draw.VertexCount = draw.IndexCount = 3;
     draw.TransientVertices = &vertices; draw.Stream1Transient = &uv; draw.TransientIndices = &index;
-    if (submit(&draw) != CK_OK) return false;
-    auto rejected = [&](const CKBackendDraw &candidate, const char *name) {
+    status = submit(&draw);
+    if (status != CK_OK)
+        return failGeometryStep("submit initial two-stream draw", status);
+    auto rejected = [&](const CKDrawCommand &candidate, const char *name) {
         if (submit(&candidate) == CKERR_INVALIDPARAMETER) return true;
         std::fprintf(stderr, "SDL_gpu accepted invalid transient descriptor: %s\n", name);
         return false;
     };
-    CKBackendTransientVertices badVertices = vertices;
-    CKBackendDraw badDraw = draw; badDraw.TransientVertices = &badVertices;
+    CKTransientVertexData badVertices = vertices;
+    CKDrawCommand badDraw = draw; badDraw.TransientVertices = &badVertices;
     badVertices.Token = 0;
     if (!rejected(badDraw, "zero vertex token")) return false;
     badVertices = vertices; badVertices.Token = index.Token;
@@ -320,10 +356,10 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (!rejected(badDraw, "vertex allocation layout")) return false;
     badVertices = vertices; badDraw.Layout = otherLayout;
     if (!rejected(badDraw, "draw layout disagrees with allocation")) return false;
-    CKBackendTransientVertices badUv = uv; ++badUv.Count;
+    CKTransientVertexData badUv = uv; ++badUv.Count;
     badDraw = draw; badDraw.Stream1Transient = &badUv;
     if (!rejected(badDraw, "stream 1 allocation size")) return false;
-    CKBackendTransientIndices badIndex = index;
+    CKTransientIndexData badIndex = index;
     badDraw = draw; badDraw.TransientIndices = &badIndex;
     badIndex.Token = vertices.Token;
     if (!rejected(badDraw, "wrong index token")) return false;
@@ -334,18 +370,18 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     badIndex = index; badIndex.Index32 = TRUE;
     if (!rejected(badDraw, "index allocation format")) return false;
     if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
-        backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK ||
+        backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK ||
         !CheckReadback(backend, ticket, std::vector<CKDWORD>(16, 0xffffffff), 0, "two-stream transient draw")) return false;
 
     // Distinct geometry in several batches of one submission and in many
     // in-flight submissions must survive staging-buffer reuse. Defer every
     // readback wait until all batches have been encoded and submitted.
-    struct GeometryCapture { CKBackendReadbackTicket Ticket; CKDWORD Color; };
+    struct GeometryCapture { CKSdlGpuReadbackTicket Ticket; CKDWORD Color; };
     std::vector<GeometryCapture> geometryCaptures;
     for (unsigned frame = 0; frame < 12; ++frame) {
         for (unsigned batch = 0; batch < 3; ++batch) {
-            CKBackendTransientVertices pooledVertices, pooledUv;
-            CKBackendTransientIndices pooledIndex;
+            CKTransientVertexData pooledVertices, pooledUv;
+            CKTransientIndexData pooledIndex;
             const unsigned vertexCount = frame % 3 == 1 ? 8192 : 3;
             if (!allocate(pooledVertices, pooledUv, pooledIndex, vertexCount)) return false;
             const bool visible = (frame + batch) % 2 == 0;
@@ -353,7 +389,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
                 auto *positions = static_cast<float *>(pooledVertices.Data);
                 for (unsigned vertex = 0; vertex < 3; ++vertex) positions[vertex * 3] += 10;
             }
-            CKBackendDraw pooledDraw = draw;
+            CKDrawCommand pooledDraw = draw;
             pooledDraw.VertexCount = vertexCount;
             pooledDraw.TransientVertices = &pooledVertices;
             pooledDraw.Stream1Transient = &pooledUv;
@@ -366,7 +402,7 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
                 backend.ReadTexture(output, 0, &read, &capture.Ticket) != CK_OK) return false;
             geometryCaptures.push_back(std::move(capture));
         }
-        if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+        if (backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
     }
     for (const auto &capture : geometryCaptures)
         if (!CheckReadback(backend, capture.Ticket, std::vector<CKDWORD>(16, capture.Color), 0,
@@ -383,12 +419,12 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     if (backend.CreateTexture(&sampleDesc, &samples, &texture) != CK_OK) return false;
     bindings[CKFF_SLOT_PRESENT].Texture = texture; bindings[CKFF_SLOT_PRESENT].Sampler = sampler;
     for (unsigned mutation = 0; mutation < 3; ++mutation) {
-        CKBackendTransientVertices snapshotVertices, snapshotUv;
-        CKBackendTransientIndices snapshotIndex;
+        CKTransientVertexData snapshotVertices, snapshotUv;
+        CKTransientIndexData snapshotIndex;
         if (!allocate(snapshotVertices, snapshotUv, snapshotIndex)) return false;
         float redUv[] = {0.25f, 0.5f, 0.25f, 0.5f, 0.25f, 0.5f};
         std::memcpy(snapshotUv.Data, redUv, sizeof(redUv));
-        CKBackendDraw snapshotDraw = draw;
+        CKDrawCommand snapshotDraw = draw;
         snapshotDraw.TransientVertices = &snapshotVertices;
         snapshotDraw.Stream1Transient = &snapshotUv;
         snapshotDraw.TransientIndices = &snapshotIndex;
@@ -408,12 +444,12 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         std::memcpy(snapshotUv.Data, redUv, sizeof(redUv));
         std::memcpy(snapshotIndex.Data, indices, sizeof(indices));
         if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
-            backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+            backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
         for (unsigned y = 0; y < 4; ++y) for (unsigned x = 0; x < 4; ++x)
             pixels[y * 4 + x] = x < 2 ? colors[0] : mutation == 1 ? colors[1] : pass.ClearColor;
         if (!CheckReadback(backend, ticket, pixels, 0, "transient draw-time snapshot")) return false;
     }
-    bindings[CKFF_SLOT_PRESENT] = CKBackendTextureBinding();
+    bindings[CKFF_SLOT_PRESENT] = CKFFTextureSlot();
     backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
     state.ScissorEnabled = FALSE;
     std::puts("SDL_gpu transient snapshots: position, UV and index mutations between deferred draws passed");
@@ -421,8 +457,8 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     // Both index widths validate only the requested subrange, including its
     // last element. Persistent updates and transient writes must be rechecked.
     for (bool wide : {false, true}) for (bool persistent : {false, true}) {
-        CKBackendTransientVertices boundsVertices, boundsUv;
-        CKBackendTransientIndices unusedIndex, boundsIndex;
+        CKTransientVertexData boundsVertices, boundsUv;
+        CKTransientIndexData unusedIndex, boundsIndex;
         if (!allocate(boundsVertices, boundsUv, unusedIndex) ||
             !backend.AllocTransientIndices(5, wide ? TRUE : FALSE, &boundsIndex)) return false;
         const unsigned indexSize = wide ? 4 : 2;
@@ -432,27 +468,35 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
         writeIndex(0, 65535); writeIndex(1, 0); writeIndex(2, 1); writeIndex(3, 2); writeIndex(4, 65535);
         CKDWORD indexBuffer = 0;
         if (persistent) {
-            CKBackendBufferDesc buffer;
-            buffer.Kind = CKRST_BACKEND_BUFFER_INDEX; buffer.Size = 5 * indexSize;
+            CKBufferDesc buffer;
+            buffer.Kind = CKRST_BUFFER_INDEX; buffer.Size = 5 * indexSize;
             buffer.Index32 = wide ? TRUE : FALSE; buffer.Dynamic = TRUE; buffer.InitialData = boundsIndex.Data;
             if (backend.CreateBuffer(&buffer, &indexBuffer) != CK_OK) return false;
         }
-        CKBackendDraw boundsDraw = draw;
+        auto updateIndexBuffer = [&](unsigned first, unsigned count) {
+            if (!persistent) return true;
+            CKBufferUpdateDesc update;
+            update.Kind = CKRST_BUFFER_INDEX;
+            update.Buffer = indexBuffer;
+            update.Offset = first * indexSize;
+            update.Size = count * indexSize;
+            update.Data = static_cast<CKBYTE *>(boundsIndex.Data) + update.Offset;
+            return backend.UpdateBuffer(&update) == CK_OK;
+        };
+        CKDrawCommand boundsDraw = draw;
         boundsDraw.TransientVertices = &boundsVertices; boundsDraw.Stream1Transient = &boundsUv;
         boundsDraw.TransientIndices = persistent ? nullptr : &boundsIndex;
         boundsDraw.IndexBuffer = indexBuffer; boundsDraw.StartIndex = 1;
         if (backend.BeginPass(&pass) != CK_OK || submit(&boundsDraw) != CK_OK) return false;
         for (CKDWORD invalid : {CKDWORD(3), CKDWORD(wide ? 0x10000 : 0xffff)}) {
             writeIndex(3, invalid);
-            if (persistent && backend.UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, indexBuffer, 3 * indexSize,
-                indexSize, static_cast<CKBYTE *>(boundsIndex.Data) + 3 * indexSize) != CK_OK) return false;
+            if (!updateIndexBuffer(3, 1)) return false;
             if (!rejected(boundsDraw, "out-of-range final index")) return false;
         }
         writeIndex(3, 2);
-        if (persistent && backend.UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, indexBuffer, 3 * indexSize,
-            indexSize, static_cast<CKBYTE *>(boundsIndex.Data) + 3 * indexSize) != CK_OK) return false;
+        if (!updateIndexBuffer(3, 1)) return false;
         if (submit(&boundsDraw) != CK_OK || backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
-            backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK ||
+            backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK ||
             !CheckReadback(backend, ticket, std::vector<CKDWORD>(16, 0xffffffff), 0, "validated index subrange")) return false;
         if (indexBuffer) backend.DestroyObject(indexBuffer, CKRST_OBJ_INDEXBUFFER);
     }
@@ -460,8 +504,8 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
 
     pass.ClearFlags = 0;
     if (backend.BeginPass(&pass) != CK_OK || !rejected(draw, "previous frame before reallocation")) return false;
-    CKBackendTransientVertices currentVertices, currentUv;
-    CKBackendTransientIndices currentIndex;
+    CKTransientVertexData currentVertices, currentUv;
+    CKTransientIndexData currentIndex;
     if (!allocate(currentVertices, currentUv, currentIndex) ||
         !rejected(draw, "previous frame after reallocation")) return false;
     draw.TransientVertices = &currentVertices; draw.Stream1Transient = &currentUv;
@@ -478,12 +522,12 @@ static bool CheckGenericProgram(CKSdlGpuBackend &backend)
     backend.DestroyObject(program, CKRST_OBJ_PROGRAM); backend.DestroyObject(target, CKRST_OBJ_FRAMEBUFFER);
     backend.DestroyObject(output, CKRST_OBJ_TEXTURE); backend.DestroyObject(positionLayout, CKRST_OBJ_VERTEXLAYOUT);
     backend.DestroyObject(texcoordLayout, CKRST_OBJ_VERTEXLAYOUT); backend.DestroyObject(otherLayout, CKRST_OBJ_VERTEXLAYOUT);
-    if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+    if (backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
     std::puts("SDL_gpu transient geometry: two streams, indices, descriptor identity and submission expiry passed");
     return true;
 }
 
-static bool CheckCompressedMips(CKSdlGpuBackend &backend)
+static bool CheckCompressedMips(CKSdlGpuRasterizerContext &backend)
 {
     const VX_PIXELFORMAT formats[] = {_DXT1, _DXT3, _DXT5};
     const CKDWORD beforePixels[] = {0x80800000, 0x88ff0000, 0x80ff0000};
@@ -514,18 +558,18 @@ static bool CheckCompressedMips(CKSdlGpuBackend &backend)
         readDesc.Format.Width = readDesc.Format.Height = 1;
         readDesc.MipMapCount = 1; readDesc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
         if (backend.CreateTexture(&readDesc, nullptr, &output) != CK_OK) return false;
-        auto capture = [&](unsigned layer, CKBackendReadbackTicket &ticket) {
+        auto capture = [&](unsigned layer, CKSdlGpuReadbackTicket &ticket) {
             CKReadbackDesc read;
             return backend.Blit(output, 0, 0, 0, 0, texture, 2, layer, nullptr) == CK_OK &&
                    backend.ReadTexture(output, 0, &read, &ticket) == CK_OK;
         };
-        CKBackendReadbackTicket before, after, other;
+        CKSdlGpuReadbackTicket before, after, other;
         if (!capture(0, before)) return false;
         CKDWORD green = 0xff00ff00;
         upload = readDesc.Format; upload.BytesPerLine = 4; upload.Image = reinterpret_cast<CKBYTE *>(&green);
         CKRECT patch = {3, 3, 4, 4};
         if (backend.UpdateTexture(texture, 0, 0, &patch, &upload) != CK_OK || !capture(0, after) ||
-            (cube && !capture(5, other)) || backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+            (cube && !capture(5, other)) || backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
         if (!CheckReadback(backend, before, {beforePixels[format]}, 0, "compressed old mip") ||
             !CheckReadback(backend, after, {afterPixels[format]}, 0, "compressed patched mip") ||
             (cube && !CheckReadback(backend, other, {beforePixels[format]}, 0, "compressed untouched face"))) return false;
@@ -535,7 +579,7 @@ static bool CheckCompressedMips(CKSdlGpuBackend &backend)
     return true;
 }
 
-static bool CheckGpuVolumeMips(CKSdlGpuBackend &backend)
+static bool CheckGpuVolumeMips(CKSdlGpuRasterizerContext &backend)
 {
     const unsigned dimensions[][3] = {{4, 4, 4}, {7, 5, 3}, {1, 1, 5}};
     for (const auto &size : dimensions) {
@@ -555,7 +599,7 @@ static bool CheckGpuVolumeMips(CKSdlGpuBackend &backend)
             upload.Image = reinterpret_cast<CKBYTE *>(base.data() + z * width * height);
             if (backend.UpdateTexture(texture, 0, z, nullptr, &upload) != CK_OK) return false;
         }
-        struct Capture { CKBackendReadbackTicket Ticket; std::vector<CKDWORD> Expected; unsigned Tolerance = 1; };
+        struct Capture { CKSdlGpuReadbackTicket Ticket; std::vector<CKDWORD> Expected; unsigned Tolerance = 1; };
         std::vector<Capture> captures;
         // Independent CPU box-filter reference checks every generated texel and
         // every slice, including axes that have already shrunk to one texel.
@@ -611,10 +655,10 @@ static bool CheckGpuVolumeMips(CKSdlGpuBackend &backend)
         if (backend.UpdateTexture(texture, 0, depth - 1, &patch, &upload) != CK_OK) return false;
         base.back() = blue;
         if (!capture()) return false;
-        CKBackendRenderTargetDesc target;
+        CKRenderTargetDesc target;
         target.ColorTexture = texture; target.ColorLayer = 1;
         if (backend.CreateRenderTarget(&target, &framebuffer) != CK_OK) return false;
-        CKBackendPassDesc pass;
+        CKRenderPassDesc pass;
         pass.RenderTarget = framebuffer; pass.Rect = {0, 0, int(width), int(height)};
         pass.ClearFlags = CKRST_CTXCLEAR_COLOR; pass.ClearColor = 0xffff0000;
         if (backend.BeginPass(&pass) != CK_OK) return false;
@@ -639,7 +683,7 @@ static bool CheckGpuVolumeMips(CKSdlGpuBackend &backend)
             captures.push_back(std::move(result));
         }
         backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
-        if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
+        if (backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
         for (const auto &result : captures)
             if (!CheckReadback(backend, result.Ticket, result.Expected, result.Tolerance, "GPU volume mip")) return false;
         backend.DestroyObject(framebuffer, CKRST_OBJ_RENDERTARGET);
@@ -649,7 +693,7 @@ static bool CheckGpuVolumeMips(CKSdlGpuBackend &backend)
     return true;
 }
 
-static bool CheckGeneratedMips(CKSdlGpuBackend &backend)
+static bool CheckGeneratedMips(CKSdlGpuRasterizerContext &backend)
 {
     for (unsigned kind = 0; kind < 3; ++kind) {
         CKTextureDesc desc;
@@ -675,23 +719,23 @@ static bool CheckGeneratedMips(CKSdlGpuBackend &backend)
         readDesc.Format.Width = readDesc.Format.Height = 1;
         readDesc.MipMapCount = 1; readDesc.Depth = 1;
         if (backend.CreateTexture(&readDesc, nullptr, &readTexture) != CK_OK) return false;
-        auto capture = [&](unsigned layer, CKBackendReadbackTicket &ticket) {
+        auto capture = [&](unsigned layer, CKSdlGpuReadbackTicket &ticket) {
             CKReadbackDesc read;
             return backend.Blit(readTexture, 0, 0, 0, 0, texture, 2, layer, nullptr) == CK_OK &&
                 backend.ReadTexture(readTexture, 0, &read, &ticket) == CK_OK;
         };
-        CKBackendReadbackTicket before, after, other;
+        CKSdlGpuReadbackTicket before, after, other;
         if (!capture(0, before)) return false;
         for (unsigned i = 0; i < 4; ++i) pixels[i] = 0xff00ff00;
         upload.Width = upload.Height = 2; upload.BytesPerLine = 8;
         CKRECT region = {0, 0, 2, 2};
         if (backend.UpdateTexture(texture, 0, 0, &region, &upload) != CK_OK || !capture(0, after)) return false;
         if (kind == 1 && !capture(5, other)) return false;
-        if (backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
-        auto check = [&](const CKBackendReadbackTicket &ticket, CKDWORD expected) {
+        if (backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
+        auto check = [&](const CKSdlGpuReadbackTicket &ticket, CKDWORD expected) {
             if (backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY) return false;
             CKDWORD pixel = 0;
-            std::memcpy(&pixel, ticket->Data.data(), 4);
+            std::memcpy(&pixel, backend.GetReadbackData(ticket).Begin(), 4);
             if (pixel != expected)
                 std::fprintf(stderr, "generated mip kind=%u: %08x expected %08x\n", kind, unsigned(pixel), unsigned(expected));
             return pixel == expected;
@@ -706,7 +750,7 @@ static bool CheckGeneratedMips(CKSdlGpuBackend &backend)
     return true;
 }
 
-static bool CheckGpuWrittenMips(CKSdlGpuBackend &backend)
+static bool CheckGpuWrittenMips(CKSdlGpuRasterizerContext &backend)
 {
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
@@ -723,7 +767,7 @@ static bool CheckGpuWrittenMips(CKSdlGpuBackend &backend)
     for (auto &pixel : pixels) pixel = 0xff00ff00;
     if (backend.CreateTexture(&desc, &upload, &source) != CK_OK ||
         backend.Blit(target, 0, 0, 0, 0, source, 0, 0, nullptr) != CK_OK) return false;
-    CKBackendReadbackTicket copied, patched, rendered;
+    CKSdlGpuReadbackTicket copied, patched, rendered;
     CKReadbackDesc read;
     if (backend.ReadTexture(target, 2, &read, &copied) != CK_OK) return false;
     for (auto &pixel : pixels) pixel = 0xff0000ff;
@@ -731,18 +775,18 @@ static bool CheckGpuWrittenMips(CKSdlGpuBackend &backend)
     CKRECT rect = {0, 0, 2, 2};
     if (backend.UpdateTexture(target, 0, 0, &rect, &upload) != CK_OK ||
         backend.ReadTexture(target, 2, &read, &patched) != CK_OK) return false;
-    CKBackendRenderTargetDesc targetDesc;
+    CKRenderTargetDesc targetDesc;
     targetDesc.ColorTexture = target;
     if (backend.CreateRenderTarget(&targetDesc, &framebuffer) != CK_OK) return false;
-    CKBackendPassDesc pass;
+    CKRenderPassDesc pass;
     pass.RenderTarget = framebuffer; pass.Rect = {0, 0, 4, 4};
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR; pass.ClearColor = 0xffff0000;
     if (backend.BeginPass(&pass) != CK_OK || backend.ReadTexture(target, 2, &read, &rendered) != CK_OK ||
-        backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, nullptr) != CK_OK) return false;
-    auto check = [&](const CKBackendReadbackTicket &ticket, CKDWORD expected) {
+        backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
+    auto check = [&](const CKSdlGpuReadbackTicket &ticket, CKDWORD expected) {
         if (backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY) return false;
         CKDWORD pixel = 0;
-        std::memcpy(&pixel, ticket->Data.data(), 4);
+        std::memcpy(&pixel, backend.GetReadbackData(ticket).Begin(), 4);
         if (pixel != expected) std::fprintf(stderr, "GPU-written mip: %08x expected %08x\n", unsigned(pixel), unsigned(expected));
         return pixel == expected;
     };
@@ -757,14 +801,14 @@ static bool CheckGpuWrittenMips(CKSdlGpuBackend &backend)
 static int Run(SDL_Window *window)
 {
     if (!CheckExactCopyMatchesBlit(window)) return 26;
-    CKSdlGpuBackend backend;
-    CKBackendInitDesc init;
+    CKSdlGpuRasterizerContext backend;
+    CKRasterizerInitParameters init;
     init.Window = window; init.Width = 640; init.Height = 480;
     // The owner controls fullscreen; the backend only claims its window.
     const SDL_WindowFlags ownerFlags = SDL_GetWindowFlags(window);
     init.Fullscreen = TRUE;
     if (backend.Init(&init) != CK_OK) return 1;
-    if (backend.Submit({static_cast<CKBackendPresentSync>(99), FALSE}, nullptr) != CKERR_INVALIDPARAMETER ||
+    if (backend.Submit(static_cast<CKPresentSync>(99), FALSE, nullptr) != CKERR_INVALIDPARAMETER ||
         backend.GetDeviceStatus() != CK_OK) return 25;
     SDL_SyncWindow(window);
     if ((SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != (ownerFlags & SDL_WINDOW_FULLSCREEN)) {
@@ -777,10 +821,10 @@ static int Run(SDL_Window *window)
     texture.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
     CKDWORD previous = 0, replacement = 0;
     if (backend.CreateTexture(&texture, nullptr, &previous) != CK_OK) return 13;
-    if (backend.Submit({CKRST_BACKEND_SYNC_IMMEDIATE, FALSE}, nullptr) != CK_OK) return 14;
+    if (backend.Submit(CKRST_PRESENT_IMMEDIATE, FALSE, nullptr) != CK_OK) return 14;
     backend.Shutdown();
     init.Fullscreen = FALSE;
-    if (backend.Init(&init) != CK_OK || backend.IsObjectAlive(previous, CKRST_OBJ_TEXTURE) ||
+    if (backend.Init(&init) != CK_OK || backend.IsNativeObjectAlive(previous, CKRST_OBJ_TEXTURE) ||
         backend.CreateTexture(&texture, nullptr, &replacement) != CK_OK || replacement == previous) return 15;
     if (backend.DestroyObject(replacement, CKRST_OBJ_TEXTURE) != CK_OK) return 16;
     std::puts("SDL_gpu owner window, device reinitialization and stale handle rejection passed");
@@ -789,36 +833,38 @@ static int Run(SDL_Window *window)
     if (!CheckCompressedMips(backend)) return 20;
     if (!CheckGpuVolumeMips(backend)) return 21;
     if (!CheckGenericProgram(backend)) return 22;
-    CKPresentStage present;
-    CKBackendShaderSet shaders;
+    CKSdlGpuPresentStage present;
+    CKFFShaderSet shaders;
     if (!CKSdlGpuShaderSet(backend.GetCaps().ShaderFormat == CKRST_SHADER_FORMAT_DXIL ?
         SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV, shaders)) return 23;
     present.Init(&backend, shaders);
     if (!present.EnsureSceneTarget(640, 480, 0) || !present.EnsureNativeTarget(640, 480) || !present.EnsureResources()) return 2;
-    CKBackendPassDesc pass;
+    CKRenderPassDesc pass;
     pass.Rect = {0, 0, 640, 480}; pass.RenderTarget = present.SceneTarget().FrameBuffer;
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH; pass.ClearColor = 0xff20b060;
     if (backend.BeginPass(&pass) != CK_OK) return 3;
     pass.RenderTarget = present.NativeTarget().FrameBuffer; pass.ClearFlags = 0;
     if (backend.BeginPass(&pass) != CK_OK || present.SubmitResolve(FALSE, 0) != CK_OK) return 4;
-    CKBackendReadbackTicket ticket;
+    CKSdlGpuReadbackTicket ticket;
     CKReadbackDesc read;
     if (backend.ReadTexture(present.NativeTarget().ColorTexture, 0, &read, &ticket) != CK_OK) return 5;
     pass.RenderTarget = 0;
     if (backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
-                               CKRST_BACKEND_SYNC_VSYNC) != CK_OK ||
-        backend.Submit({CKRST_BACKEND_SYNC_VSYNC, TRUE}, nullptr) != CK_OK) return 6;
+                               CKRST_PRESENT_VSYNC) != CK_OK ||
+        backend.Submit(CKRST_PRESENT_VSYNC, TRUE, nullptr) != CK_OK) return 6;
     if (backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY) return 7;
     CKDWORD center = 0;
-    std::memcpy(&center, ticket->Data.data() + 240 * read.RowPitch + 320 * 4, 4);
+    std::memcpy(&center, backend.GetReadbackData(ticket).Begin() +
+                             240 * read.RowPitch + 320 * 4,
+                4);
     if (center != 0xff20b060) { std::fprintf(stderr, "resolve pixel: %08x expected ff20b060\n", unsigned(center)); return 8; }
     // Exercise the production present-mode transition in both directions.
     if (backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
-                               CKRST_BACKEND_SYNC_IMMEDIATE) != CK_OK ||
-        backend.Submit({CKRST_BACKEND_SYNC_IMMEDIATE, TRUE}, nullptr) != CK_OK ||
+                               CKRST_PRESENT_IMMEDIATE) != CK_OK ||
+        backend.Submit(CKRST_PRESENT_IMMEDIATE, TRUE, nullptr) != CK_OK ||
         backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
-                               CKRST_BACKEND_SYNC_VSYNC) != CK_OK ||
-        backend.Submit({CKRST_BACKEND_SYNC_VSYNC, TRUE}, nullptr) != CK_OK) return 24;
+                               CKRST_PRESENT_VSYNC) != CK_OK ||
+        backend.Submit(CKRST_PRESENT_VSYNC, TRUE, nullptr) != CK_OK) return 24;
     std::printf("SDL_gpu native resolve, presentation and fence readback passed; window=%u size=640x480\n", SDL_GetWindowID(window));
     std::fflush(stdout);
     const Uint64 end = SDL_GetTicks() + (SDL_getenv("CKRE_GPU_TEST_HOLD") ? 120000 : 1500);
@@ -826,8 +872,8 @@ static int Run(SDL_Window *window)
         SDL_Event event;
         while (SDL_PollEvent(&event)) if (event.type == SDL_EVENT_QUIT) return 0;
         if (backend.PresentTexture(present.NativeTarget().ColorTexture, 640, 480,
-                                   CKRST_BACKEND_SYNC_VSYNC) != CK_OK ||
-            backend.Submit({CKRST_BACKEND_SYNC_VSYNC, TRUE}, nullptr) != CK_OK) return 9;
+                                   CKRST_PRESENT_VSYNC) != CK_OK ||
+            backend.Submit(CKRST_PRESENT_VSYNC, TRUE, nullptr) != CK_OK) return 9;
         SDL_Delay(10);
     }
     return 0;
