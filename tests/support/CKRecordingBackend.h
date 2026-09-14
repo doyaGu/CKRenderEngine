@@ -9,10 +9,32 @@
 // Submit(), and readbacks deliver a zero image. Shader blobs are nominal;
 // program interfaces follow the same validation rules as native backends.
 
-#include "CKRasterizerBackend.h"
+#include "CKRasterizerContextData.h"
 
+#include <memory>
 #include <unordered_map>
 #include <vector>
+
+struct CKRecordingReadback {
+    XArray<CKBYTE> Data;
+    CKBOOL Complete = FALSE;
+    CKERROR Error = CK_OK;
+    CKDWORD AvailableFrame = 0;
+};
+typedef std::shared_ptr<CKRecordingReadback> CKRecordingReadbackTicket;
+
+struct CKRecordingStats {
+    CKDWORD Frames;
+    CKDWORD Passes;
+    CKDWORD Draws;
+    CKDWORD Blits;
+    CKDWORD TextureUploads;
+    CKDWORD BufferUploads;
+
+    CKRecordingStats()
+        : Frames(0), Passes(0), Draws(0), Blits(0), TextureUploads(0),
+          BufferUploads(0) {}
+};
 
 struct CKRecordingObject {
     CKDWORD Type;                  // CKRST_OBJ_*
@@ -24,8 +46,9 @@ struct CKRecordingObject {
     CK_SHADER_STAGE Stage;         // shaders
     CKDWORD VertexShader, PixelShader;
     CKShaderDesc Shader;
-    CKBackendProgramDesc Program;
-    CKBackendRenderTargetDesc Target;
+    CKFFProgramDesc Program;
+    CKRenderTargetDesc Target;
+    XString Name;
 
     CKRecordingObject()
         : Type(0), Width(0), Height(0), Depth(1), Flags(0), Format(UNKNOWN_PF), Size(0), Stride(0), Layout(0),
@@ -48,8 +71,8 @@ struct CKRecordingDraw {
     CKDWORD VertexCount;
     CKDWORD IndexCount;
     CKDWORD SortKey;
-    CKBackendPipelineState State;
-    CKDWORD Textures[CKBACKEND_MAX_TEXTURE_SLOTS];
+    CKFFPipelineState State;
+    CKDWORD Textures[CKFF_TEXTURE_SLOT_COUNT];
     XString Marker;
 };
 
@@ -57,50 +80,66 @@ struct CKRecordingDraw {
 // CKRecordingBackend
 // ===========================================================================
 
-class CKRecordingBackend : public CKRasterizerBackend {
+class CKRecordingBackend {
 public:
-    explicit CKRecordingBackend(const CKBackendCaps &Conventions = CKBackendCaps());
-    ~CKRecordingBackend() override;
+    explicit CKRecordingBackend(const CKRasterizerDeviceCaps &Conventions = CKRasterizerDeviceCaps());
+    virtual ~CKRecordingBackend();
 
     // --- Device
-    CKERROR Init(const CKBackendInitDesc *Desc) override;
-    void Shutdown() override;
-    CKERROR Resize(int PosX, int PosY, int Width, int Height) override;
-    CKERROR GetDeviceStatus() const override;
-    const CKBackendCaps &GetCaps() const override { return m_Caps; }
-    CKBOOL IsIdle() const override;
-    void SetDebugFlags(CKDWORD Flags) override { m_DebugFlags = Flags; }
+    virtual CKERROR Init(const CKRasterizerInitParameters *Desc);
+    virtual void Shutdown();
+    virtual CKERROR Resize(int PosX, int PosY, int Width, int Height);
+    virtual CKERROR GetDeviceStatus() const;
+    virtual const CKRasterizerDeviceCaps &GetCaps() const { return m_Caps; }
+    virtual CKBOOL IsIdle() const;
+    virtual void SetDebugFlags(CKDWORD Flags) { m_DebugFlags = Flags; }
 
     // --- Resources
-    CKERROR CreateTexture(const CKTextureDesc *Desc, const VxImageDescEx *Data, CKDWORD *Out) override;
-    CKERROR UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face, const CKRECT *Region,
-                          const VxImageDescEx *Data) override;
-    CKERROR CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out) override;
-    CKERROR CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out) override;
-    CKERROR CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out) override;
-    CKERROR UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
-                         CKDWORD Size, const void *Data) override;
-    CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out) override;
-    CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out) override;
-    CKERROR CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out) override;
-    CKBOOL IsObjectAlive(CKDWORD Object, CKDWORD Type) const override;
-    CKERROR DestroyObject(CKDWORD Object, CKDWORD Type) override;
-    void SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name) override;
+    virtual CKERROR CreateTexture(const CKTextureDesc *Desc, const VxImageDescEx *Data, CKDWORD *Out);
+    virtual CKERROR UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face, const CKRECT *Region,
+                                  const VxImageDescEx *Data);
+    virtual CKERROR CreateDepthTexture(const CKDepthTextureDesc *Desc, CKDWORD *Out);
+    virtual CKERROR CreateRenderTarget(const CKRenderTargetDesc *Desc, CKDWORD *Out);
+    virtual CKERROR CreateBuffer(const CKBufferDesc *Desc, CKDWORD *Out);
+    virtual CKERROR UpdateBuffer(const CKBufferUpdateDesc *Desc);
+    virtual CKERROR CreateVertexLayout(const CKVertexLayoutDesc *Desc, CKDWORD *Out);
+    virtual CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out);
+    virtual CKERROR CreateProgram(const CKFFProgramDesc *Desc, CKDWORD *Out);
+    virtual CKBOOL IsObjectAlive(CKDWORD Object, CKDWORD Type) const;
+    virtual CKERROR DestroyObject(CKDWORD Object, CKDWORD Type);
+    virtual CKERROR SetObjectName(CKDWORD Object, CKDWORD Type,
+                                  const char *Name);
 
     // --- Frame
-    CKERROR BeginPass(const CKBackendPassDesc *Desc) override;
-    CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out) override;
-    CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out) override;
-    CKERROR Draw(const CKBackendDraw *Draw) override;
-    CKERROR Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
-                 CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect) override;
-    CKERROR Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber) override;
+    virtual CKERROR BeginPass(const CKRenderPassDesc *Desc);
+    virtual CKBOOL AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKTransientVertexData *Out);
+    virtual CKBOOL AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKTransientIndexData *Out);
+    virtual CKERROR Draw(const CKDrawCommand *Draw);
+    virtual CKERROR Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
+                         CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect);
+    virtual CKERROR PresentTexture(CKDWORD Texture, CKDWORD Width, CKDWORD Height,
+                                   CKPresentSync Sync) {
+        (void)Texture; (void)Width; (void)Height; (void)Sync;
+        return CKERR_NOTIMPLEMENTED;
+    }
+    virtual CKERROR Submit(CKPresentSync Sync, CKBOOL PresentWindow, CKDWORD *FrameNumber);
+    virtual CKQWORD GetLastSubmitId() const { return m_LastSubmitId; }
+    virtual CKQWORD GetCompletedSubmitId() { return m_CompletedSubmitId; }
 
     // --- Readback
-    CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKBackendReadbackTicket *Ticket) override;
+    virtual CKERROR ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback,
+                                CKRecordingReadbackTicket *Ticket);
+    virtual CKReadbackState PollReadback(const CKRecordingReadbackTicket &Ticket,
+                                                CKBOOL Wait) {
+        (void)Wait;
+        if (!Ticket || Ticket->Error != CK_OK)
+            return CKRST_READBACK_FAILED;
+        return Ticket->Complete ? CKRST_READBACK_READY : CKRST_READBACK_NEEDS_SUBMIT;
+    }
 
     // --- Misc
-    const CKBackendStats &GetStats() const override { return m_Stats; }
+    virtual uint64_t GetDrawApproximationMask() const { return 0; }
+    virtual const CKRecordingStats &GetStats() const { return m_Stats; }
 
     // --- Records (this frame; cleared by Present)
     const std::vector<CKRecordingPass> &GetPasses() const { return m_Passes; }
@@ -108,33 +147,34 @@ public:
     CKDWORD GetCurrentPass() const { return m_Passes.empty() ? 0 : (CKDWORD)m_Passes.size() - 1; }
     CKBOOL IsPassOpen() const { return m_PassOpen; }
     CKDWORD GetFrameNumber() const { return m_FrameNumber; }
-    const CKBackendPipelineState &GetPipelineState() const { return m_State; }
-    CKDWORD GetBoundTexture(CKDWORD Slot) const { return Slot < CKBACKEND_MAX_TEXTURE_SLOTS ? m_Textures[Slot] : 0; }
+    const CKFFPipelineState &GetPipelineState() const { return m_State; }
+    CKDWORD GetBoundTexture(CKDWORD Slot) const { return Slot < CKFF_TEXTURE_SLOT_COUNT ? m_Textures[Slot] : 0; }
     const std::vector<CKBYTE> &GetConstants(CKDWORD Slot) const {
         static const std::vector<CKBYTE> empty;
-        return Slot < CKBACKEND_MAX_CONSTANT_SLOTS ? m_Constants[Slot] : empty;
+        return Slot < CKFF_CONSTANT_SLOT_COUNT ? m_Constants[Slot] : empty;
     }
     const CKRecordingObject *FindObject(CKDWORD Handle) const;
     int GetObjectCount(CKDWORD TypeMask) const;
     // Pseudo uniform handles the tests key their expectations on.
-    CKDWORD GetBlockUniformForTests(CKDWORD Slot) const { return Slot < CKBACKEND_MAX_CONSTANT_SLOTS ? 1 + Slot : 0; }
-    CKDWORD GetSamplerUniformForTests(CKDWORD Slot) const { return Slot < CKBACKEND_MAX_TEXTURE_SLOTS ? 100 + Slot : 0; }
+    CKDWORD GetBlockUniformForTests(CKDWORD Slot) const { return Slot < CKFF_CONSTANT_SLOT_COUNT ? 1 + Slot : 0; }
+    CKDWORD GetSamplerUniformForTests(CKDWORD Slot) const { return Slot < CKFF_TEXTURE_SLOT_COUNT ? 100 + Slot : 0; }
 
 protected:
     CKDWORD AllocateHandle(const CKRecordingObject &Object);
     CKRecordingObject *FindObject(CKDWORD Handle);
 
-    CKBackendCaps m_Conventions;
-    struct Readback : CKBackendReadback { CKDWORD AvailableFrame = 0; };
-    std::vector<std::shared_ptr<Readback>> m_Readbacks;
-    CKBackendCaps m_Caps;
-    CKBackendStats m_Stats;
+    CKRasterizerDeviceCaps m_Conventions;
+    std::vector<CKRecordingReadbackTicket> m_Readbacks;
+    CKRasterizerDeviceCaps m_Caps;
+    CKRecordingStats m_Stats;
     CKBOOL m_Initialized;
     CKBOOL m_ShuttingDown;
     CKDWORD m_DebugFlags;
     int m_PosX, m_PosY;
     CKDWORD m_Width, m_Height;
     CKDWORD m_FrameNumber;
+    CKQWORD m_LastSubmitId;
+    CKQWORD m_CompletedSubmitId;
     CKDWORD m_NextHandle;
     std::unordered_map<CKDWORD, CKRecordingObject> m_Objects;
 
@@ -143,10 +183,10 @@ protected:
     std::vector<CKRecordingPass> m_Passes;
     std::vector<CKRecordingDraw> m_Draws;
     CKDWORD m_FrameBlits, m_FrameTextureUploads, m_FrameBufferUploads;
-    CKBackendPipelineState m_State;
-    CKDWORD m_Textures[CKBACKEND_MAX_TEXTURE_SLOTS];
-    CKSamplerDesc m_Samplers[CKBACKEND_MAX_TEXTURE_SLOTS];
-    std::vector<CKBYTE> m_Constants[CKBACKEND_MAX_CONSTANT_SLOTS];
+    CKFFPipelineState m_State;
+    CKDWORD m_Textures[CKFF_TEXTURE_SLOT_COUNT];
+    CKSamplerDesc m_Samplers[CKFF_TEXTURE_SLOT_COUNT];
+    std::vector<CKBYTE> m_Constants[CKFF_CONSTANT_SLOT_COUNT];
     XString m_Marker;
     std::vector<std::vector<CKBYTE> > m_TransientVertices;
     std::vector<std::vector<CKBYTE> > m_TransientIndices;

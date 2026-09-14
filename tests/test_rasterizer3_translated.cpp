@@ -1,11 +1,10 @@
-// CKFFPLib translated context on top of the recording backend from
-// FFPRecordingHarness.h: state/query semantics, resource Lock/Unlock shadows,
-// ordered passes, targets and shutdown.
+// Test-owned recording Context using CKFFPLib: state/query semantics, resource
+// Lock/Unlock uploads, ordered passes, targets and shutdown.
 
 #include <stdio.h>
 #include <string.h>
 
-#include "CKFFRasterizerContextInternal.h"
+#include "FFPRecordingContext.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -15,13 +14,13 @@ struct Fixture {
     // World is declared last so the members above are plain aliases into it.
     CKRasterizer *Rasterizer;
     FFPRecordingDriver *Driver;
-    CKTranslatedContext *Context;
+    FFPRecordingContext *Context;
     FFPRecordingBackend *Backend;
     CKFixedFunctionPipeline *FFP;
 
     Fixture() : Rasterizer(NULL), Driver(NULL), Context(NULL), Backend(NULL), FFP(NULL)
     {
-        TestCheck(World.CreateContext(64, 64), "translated context over the recording backend");
+        TestCheck(World.CreateContext(64, 64), "recording Context creation");
         Rasterizer = World.Rasterizer;
         Driver = World.Driver;
         Context = World.Context;
@@ -30,12 +29,14 @@ struct Fixture {
         TestCheck(Backend != NULL && FFP != NULL, "test accessors");
     }
 
-    FFPTranslatedWorld World;
+    FFPRecordingWorld World;
 };
 
-CKDWORD Diag(CKTranslatedContext *ctx, CKRST_DIAGNOSTIC kind)
+CKDWORD Diag(FFPRecordingContext *ctx, CKRST_DIAGNOSTIC kind)
 {
-    return ctx->GetStats()->Diagnostics[kind];
+    CKRenderStats stats = {};
+    ctx->GetStats(stats);
+    return stats.Diagnostics[kind];
 }
 
 CKDWORD MakeTexture(Fixture &f, int size, CKDWORD extraFlags)
@@ -96,17 +97,26 @@ CKDWORD MakeIndexBuffer(Fixture &f, CKDWORD count)
 void TestLifecycle()
 {
     Fixture f;
-    TestCheck(f.Driver->m_Desc == "Recording backend", "driver description synced from the backend driver");
-    TestCheck(f.Driver->m_3DCaps.MaxNumberTextureStage == 8, "3D caps synced from the backend driver");
     TestCheck(f.Driver != NULL, "recording driver reachable");
-    TestCheck(f.Context->m_Width == 64 && f.Context->m_Height == 64, "context size from the backend");
+    CKRasterizerDriverDesc driverDesc = {};
+    CKRasterizerNativeCapsDesc nativeCaps;
+    TestCheck(f.Driver->GetDesc(&driverDesc) &&
+                  strcmp(driverDesc.Description.CStr(), "Recording backend") == 0,
+              "driver description query");
+    TestCheck(f.Driver->GetNativeCaps(&nativeCaps) &&
+                  nativeCaps.MaxTextureStages == 8,
+              "driver capability query");
+    CKRasterizerContextDesc contextDesc = {};
+    TestCheck(f.Context->GetDesc(&contextDesc) &&
+                  contextDesc.Width == 64 && contextDesc.Height == 64,
+              "context size from the backend");
     TestCheck(f.Context->GetDeviceStatus() == CK_OK, "device status");
     TestCheck(f.Context->IsIdle(), "idle after Create");
     CKRasterizerCapsDesc caps;
     TestCheck(f.Context->GetCaps(&caps), "GetCaps");
     TestCheck(caps.MaxTextureStages >= 1 && caps.MaxTextureStages <= CKRST_MAX_TEXTURE_STAGES, "texture stage cap");
     TestCheck(caps.MaxLights == CKRST_MAX_LIGHTS && caps.MaxUserClipPlanes == CKRST_MAX_USER_CLIP_PLANES, "fixed caps");
-    TestCheck(f.Driver->m_Contexts.Size() == 1, "driver tracks its context");
+    TestCheck(f.Driver->GetContextCount() == 1, "driver tracks its context");
 }
 
 void TestDefaultsReachThePipeline()
@@ -406,10 +416,117 @@ void TestBuffers()
     TestCheck(f.Context->LockIndexBuffer(ib, 0, 7, CKRST_LOCK_DEFAULT) == NULL, "index lock past the end rejected");
     TestCheck(f.Context->LockVertexBuffer(0xDEAD, 0, 1, CKRST_LOCK_DEFAULT) == NULL, "unknown VB rejected");
 
+    CKIndexBufferDesc writeOnlyDesc;
+    writeOnlyDesc.m_Flags = CKRST_VB_WRITEONLY;
+    writeOnlyDesc.m_MaxIndexCount = 8;
+    writeOnlyDesc.m_CurrentICount = 8;
+    CKDWORD writeOnlyIB = 0;
+    TestCheck(f.Context->CreateIndexBuffer(&writeOnlyDesc, NULL,
+                                            &writeOnlyIB),
+              "create write-only IB");
+    CKWORD *writeOnlyIndices = static_cast<CKWORD *>(
+        f.Context->LockIndexBuffer(writeOnlyIB, 3, 2,
+                                   CKRST_LOCK_NOOVERWRITE));
+    TestCheck(writeOnlyIndices != NULL, "lock write-only IB subrange");
+    writeOnlyIndices[0] = 5;
+    writeOnlyIndices[1] = 7;
+    TestCheck(f.Context->UnlockIndexBuffer(writeOnlyIB),
+              "unlock write-only IB subrange");
+    CKWORD uploadedIndices[2] = {};
+    if (f.Backend->LastBufferUpdateData.size() == sizeof(uploadedIndices))
+        memcpy(uploadedIndices, f.Backend->LastBufferUpdateData.data(),
+               sizeof(uploadedIndices));
+    TestCheck(f.Backend->LastBufferUpdateKind == CKRST_BUFFER_INDEX &&
+                  f.Backend->LastUpdatedBuffer == writeOnlyIB &&
+                  f.Backend->LastBufferUpdateMode == CKRST_BUFFER_UPDATE_NOOVERWRITE &&
+                  !f.Backend->LastBufferRenamed &&
+                  f.Backend->LastBufferUpdateOffset == 3 * sizeof(CKWORD) &&
+                  f.Backend->LastBufferUpdateSize == 2 * sizeof(CKWORD),
+              "write-only IB forwards NOOVERWRITE and uploads only the locked range");
+    TestCheck(f.Backend->LastBufferUpdateData.size() == 2 * sizeof(CKWORD) &&
+                  uploadedIndices[0] == 5 && uploadedIndices[1] == 7,
+              "write-only IB upload starts at returned lock memory");
+    TestCheck(f.Context->LockIndexBuffer(
+                  writeOnlyIB, 0, 1, (CKRST_LOCKFLAGS)0x40) == NULL,
+              "invalid lock flag rejected");
+
     TestCheck(f.Context->FlushObjects(CKRST_OBJ_VERTEXBUFFER), "FlushObjects(VB)");
     TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_VERTEXBUFFER) == 0, "VBs flushed");
-    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_INDEXBUFFER) == 1, "IB untouched by the VB flush");
+    TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_INDEXBUFFER) == 2,
+              "IBs untouched by the VB flush");
     TestCheck(f.Context->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete IB");
+    TestCheck(f.Context->DeleteObject(writeOnlyIB, CKRST_OBJ_INDEXBUFFER),
+              "delete write-only IB");
+}
+
+void TestBufferHazards()
+{
+    Fixture f;
+    const CKDWORD vb = MakeVertexBuffer(f, 8);
+    const CKDWORD ib = MakeIndexBuffer(f, 6);
+
+    TestCheck(f.Context->BeginScene(), "begin buffer-hazard scene");
+    const size_t firstDraw = f.Backend->GetDraws().size();
+    TestCheck(f.Context->DrawPrimitiveVBIB(
+                  VX_TRIANGLELIST, vb, ib, 0, 4, 0, 6),
+              "draw initial buffers");
+    TestCheck(f.Backend->GetDraws().size() == firstDraw + 1,
+              "initial draw recorded");
+
+    CKBYTE *tail = static_cast<CKBYTE *>(
+        f.Context->LockVertexBuffer(vb, 4, 1, CKRST_LOCK_NOOVERWRITE));
+    TestCheck(tail != NULL, "lock unused vertex range with NOOVERWRITE");
+    if (tail)
+        memset(tail, 0, CKRSTGetVertexSize(kVertexFormat, NULL));
+    TestCheck(f.Context->UnlockVertexBuffer(vb),
+              "NOOVERWRITE accepts a range outside pending draws");
+    TestCheck(!f.Backend->LastBufferRenamed,
+              "safe NOOVERWRITE updates the current native buffer");
+
+    const CKDWORD updatesBeforeOverlap = f.Backend->UpdatedBufferCount;
+    CKBYTE *overlap = static_cast<CKBYTE *>(
+        f.Context->LockVertexBuffer(vb, 0, 1, CKRST_LOCK_NOOVERWRITE));
+    TestCheck(overlap != NULL, "lock used vertex range with NOOVERWRITE");
+    TestCheck(!f.Context->UnlockVertexBuffer(vb) &&
+                  f.Backend->UpdatedBufferCount == updatesBeforeOverlap,
+              "NOOVERWRITE rejects a range used by a pending draw");
+
+    CKWORD *firstIndex = static_cast<CKWORD *>(
+        f.Context->LockIndexBuffer(ib, 0, 1, CKRST_LOCK_DEFAULT));
+    TestCheck(firstIndex != NULL, "lock used index range for preserve update");
+    if (firstIndex)
+        firstIndex[0] = 0;
+    TestCheck(f.Context->UnlockIndexBuffer(ib) &&
+                  f.Backend->LastBufferUpdateMode == CKRST_BUFFER_UPDATE_PRESERVE &&
+                  f.Backend->LastBufferRenamed,
+              "preserve update keeps the resource used by a pending draw");
+
+    CKBYTE *vertices = static_cast<CKBYTE *>(
+        f.Context->LockVertexBuffer(vb, 0, 8, CKRST_LOCK_DISCARD));
+    TestCheck(vertices != NULL, "discard-lock vertex buffer");
+    if (vertices)
+        memset(vertices, 0, CKRSTGetVertexSize(kVertexFormat, NULL) * 8);
+    TestCheck(f.Context->UnlockVertexBuffer(vb),
+              "discard-unlock vertex buffer");
+    TestCheck(f.Backend->LastBufferUpdateMode == CKRST_BUFFER_UPDATE_DISCARD &&
+                  f.Backend->LastBufferRenamed,
+              "discard replaces a resource used by a pending draw");
+
+    TestCheck(f.Context->DrawPrimitiveVBIB(
+                  VX_TRIANGLELIST, vb, ib, 0, 4, 0, 6),
+              "draw replaced vertex buffer");
+    TestCheck(f.Backend->GetDraws().size() == firstDraw + 2,
+              "draw after replacement recorded");
+    TestCheck(f.Context->EndScene() && f.Context->BackToFront(FALSE),
+              "finish buffer-version frame");
+    CKBYTE *retired = static_cast<CKBYTE *>(
+        f.Context->LockVertexBuffer(vb, 0, 1, CKRST_LOCK_NOOVERWRITE));
+    TestCheck(retired != NULL, "lock a range after its draws retire");
+    if (retired)
+        memset(retired, 0, CKRSTGetVertexSize(kVertexFormat, NULL));
+    TestCheck(f.Context->UnlockVertexBuffer(vb) &&
+                  !f.Backend->LastBufferRenamed,
+              "completed submission releases NOOVERWRITE ranges");
 }
 
 void TestFrameFlowAndDraws()
@@ -454,8 +571,18 @@ void TestFrameFlowAndDraws()
     TestCheck(f.Backend->Log.DrawPasses[drawsBefore + 1] > firstPass, "later draw lands on a later pass");
 
     CKWORD cpuIndices[6] = {0, 1, 2, 2, 1, 3};
+    const size_t liveObjectsBeforeCpuIndices = f.Backend->LiveHandles.size();
+    const CKDWORD transientIndicesBefore = f.Backend->TransientIndexAllocations;
     TestCheck(f.Context->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 4, cpuIndices, 6), "DrawPrimitiveVB with indices");
     TestCheck(f.Backend->Log.DrawCount == drawsBefore + 3, "third backend draw");
+    TestCheck(f.Backend->LiveHandles.size() == liveObjectsBeforeCpuIndices,
+              "CPU indices do not create a persistent index buffer");
+    TestCheck(f.Backend->TransientIndexAllocations == transientIndicesBefore + 1,
+              "CPU indices use the transient index storage");
+    TestCheck(f.Backend->Log.LastIndexBytes.size() == sizeof(cpuIndices) &&
+                  memcmp(f.Backend->Log.LastIndexBytes.data(), cpuIndices,
+                         sizeof(cpuIndices)) == 0,
+              "transient indices preserve the caller data");
 
     float positions[3][3] = {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}};
     CKDWORD colors[3] = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
@@ -482,10 +609,11 @@ void TestFrameFlowAndDraws()
     const CKDWORD frames = f.Backend->FrameSerial;
     TestCheck(f.Context->BackToFront(FALSE), "BackToFront");
     TestCheck(f.Backend->FrameSerial == frames + 1, "backend Present() called once");
-    const CKRenderStats *stats = f.Context->GetStats();
-    TestCheck(stats->FrameNumber == 1, "frame counter");
-    TestCheck(stats->DrawCalls == 4 && stats->Primitives == 2 + 2 + 2 + 1, "draw and primitive counters");
-    TestCheck(stats->Passes == 4 && stats->Clears == 2,
+    CKRenderStats stats = {};
+    f.Context->GetStats(stats);
+    TestCheck(stats.FrameNumber == 1, "frame counter");
+    TestCheck(stats.DrawCalls == 4 && stats.Primitives == 2 + 2 + 2 + 1, "draw and primitive counters");
+    TestCheck(stats.Passes == 4 && stats.Clears == 2,
               "pass and clear counters (clear/scene, stencil clear, scene, present)");
     TestCheck(f.Context->IsIdle(), "idle after present");
 
@@ -617,7 +745,7 @@ void TestShutdown()
     TestCheck(f.Context->GetLiveResourceCountForTests(CKRST_OBJ_ALL) == 0, "resources dropped");
     TestCheck(f.Driver->DestroyContext(f.Context), "DestroyContext");
     f.Context = NULL;
-    TestCheck(f.Driver->m_Contexts.Size() == 0, "context removed from the driver");
+    TestCheck(f.Driver->GetContextCount() == 0, "context removed from the driver");
 }
 
 void TestPresentFailurePropagation()
@@ -643,7 +771,7 @@ void TestPresentFailurePropagation()
 
 void TestDriverOwnsShaderSelectionAndCatalogFailure()
 {
-    FFPTranslatedWorld world;
+    FFPRecordingWorld world;
     FFPRecordingDriver *driver = world.BackendDriver();
     driver->FailShaderCatalog = TRUE;
     TestCheck(!world.CreateContext(64, 64) && !world.Context,
@@ -668,7 +796,7 @@ void TestDestroyContextPreservesFailedShutdown()
     f.Backend->ForceNotIdle = TRUE;
     f.World.BackendDriver()->ForceDestroyBusy = TRUE;
     TestCheck(!f.Driver->DestroyContext(f.Context), "DestroyContext rejects a failed shutdown");
-    TestCheck(f.Driver->m_Contexts.Size() == 1 && f.Context->GetDeviceStatus() == CK_OK,
+    TestCheck(f.Driver->GetContextCount() == 1 && f.Context->GetDeviceStatus() == CK_OK,
               "failed shutdown keeps the context and backend alive");
 
     f.Backend->ForceNotIdle = FALSE;
@@ -694,6 +822,7 @@ int main()
     framework.Run("matrices, lights, clip planes", TestMatricesLightsClipPlanes);
     framework.Run("textures", TestTextures);
     framework.Run("buffers", TestBuffers);
+    framework.Run("buffer hazards", TestBufferHazards);
     framework.Run("frame flow and draws", TestFrameFlowAndDraws);
     framework.Run("render targets", TestRenderTargets);
     framework.Run("overlay phase", TestOverlayPhase);

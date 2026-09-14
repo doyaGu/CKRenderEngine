@@ -1,5 +1,5 @@
-#include "CKBackendProgram.h"
-#include "CKBackendProgramLayout.h"
+#include "CKFFProgramDesc.h"
+#include "CKFFProgramLayout.h"
 #include "CKError.h"
 #include "TestTriangleMultiset.h"
 
@@ -8,7 +8,7 @@
 namespace {
 
 struct Program {
-    CKBackendProgramDesc Desc;
+    CKFFProgramDesc Desc;
     CKShaderDesc Vertex;
     CKShaderDesc Pixel;
 
@@ -27,47 +27,47 @@ struct Program {
         Vertex.Profile = Pixel.Profile = profile;
     }
 
-    CKERROR Validate() const { return CKValidateBackendProgram(Desc, Vertex, Pixel); }
+    CKERROR Validate() const { return CKFFValidateProgram(Desc, Vertex, Pixel); }
 };
 
-CKBackendUniformBufferBinding Buffer(CK_SHADER_STAGE stage, CKDWORD size, CKDWORD slot = 0)
+CKFFUniformBufferBinding Buffer(CK_SHADER_STAGE stage, CKDWORD size, CKDWORD slot = 0)
 {
-    CKBackendUniformBufferBinding result;
+    CKFFUniformBufferBinding result;
     result.Stage = stage;
     result.Size = size;
     result.Slot = slot;
     return result;
 }
 
-CKBackendUniformBinding Uniform(CK_SHADER_STAGE stage, CKDWORD slot, CKDWORD offset,
-                               CKDWORD count = 1, CKBackendUniformType type = CKBACKEND_UNIFORM_VEC4)
+CKFFUniformBinding Uniform(CK_SHADER_STAGE stage, CKDWORD slot, CKDWORD offset,
+                               CKDWORD count = 1, CKFFUniformType type = CKFF_UNIFORM_VEC4)
 {
-    CKBackendUniformBinding result;
+    CKFFUniformBinding result;
     result.Stage = stage;
     result.Slot = slot;
     result.Offset = offset;
     result.Count = count;
     result.Type = type;
-    result.Name = "u_data" + std::to_string(slot);
+    result.Name.Format("u_data%u", (unsigned)slot);
     return result;
 }
 
-CKBackendSamplerBinding Sampler(CK_SHADER_STAGE stage, CKDWORD logicalSlot, CKDWORD nativeSlot = 0)
+CKFFSamplerBinding Sampler(CK_SHADER_STAGE stage, CKDWORD logicalSlot, CKDWORD nativeSlot = 0)
 {
-    CKBackendSamplerBinding result;
+    CKFFSamplerBinding result;
     result.Stage = stage;
     result.Slot = logicalSlot;
     result.NativeSlot = nativeSlot;
-    result.Name = "s_image" + std::to_string(logicalSlot);
+    result.Name.Format("s_image%u", (unsigned)logicalSlot);
     return result;
 }
 
 Program OneSampler()
 {
     Program p;
-    p.Desc.UniformBuffers.push_back(Buffer(CKRST_SHADER_PIXEL, 64));
-    p.Desc.Uniforms.push_back(Uniform(CKRST_SHADER_PIXEL, 31, 0, 2));
-    p.Desc.Samplers.push_back(Sampler(CKRST_SHADER_PIXEL, 23));
+    p.Desc.UniformBuffers.PushBack(Buffer(CKRST_SHADER_PIXEL, 64));
+    p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_PIXEL, 31, 0, 2));
+    p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 23));
     p.Pixel.UniformBufferCount = p.Pixel.SamplerCount = 1;
     return p;
 }
@@ -91,16 +91,16 @@ void TestProgramsHaveNoFixedFunctionRoles()
     Program procedural;
     TestCheck(procedural.Validate() == CK_OK, "a procedural program needs no vertex attributes or resources");
     Program one = OneSampler();
-    CKBackendVertexInput input;
+    CKFFVertexInput input;
     input.Attribute = CKRST_ATTRIB_POSITION;
     input.Location = 6;
-    one.Desc.VertexInputs.push_back(input);
+    one.Desc.VertexInputs.PushBack(input);
     input.Attribute = CKRST_ATTRIB_INDICES;
     input.Location = 2;
     input.Integer = TRUE;
-    one.Desc.VertexInputs.push_back(input);
+    one.Desc.VertexInputs.PushBack(input);
     TestCheck(one.Validate() == CK_OK, "one sampler at an arbitrary logical slot is an ordinary program");
-    one.Desc.VertexInputs.clear();
+    one.Desc.VertexInputs.Clear();
     TestCheck(one.Validate() == CK_OK, "procedural programs can have resources");
     one.Desc.VertexShader = ~0u;
     TestCheck(one.Validate() == CK_OK, "nonzero generation handles are resolved by the backend");
@@ -121,17 +121,17 @@ void TestFixedFunctionShapedProgram()
     for (int stage = 0; stage < 2; ++stage) {
         auto buffer = Buffer(static_cast<CK_SHADER_STAGE>(stage), 768);
         buffer.SharedData = 9;
-        p.Desc.UniformBuffers.push_back(buffer);
-        p.Desc.Uniforms.push_back(Uniform(buffer.Stage, 0, 0, 4, CKBACKEND_UNIFORM_MAT4));
-        p.Desc.Uniforms.push_back(Uniform(buffer.Stage, 1, 256, 8));
+        p.Desc.UniformBuffers.PushBack(buffer);
+        p.Desc.Uniforms.PushBack(Uniform(buffer.Stage, 0, 0, 4, CKFF_UNIFORM_MAT4));
+        p.Desc.Uniforms.PushBack(Uniform(buffer.Stage, 1, 256, 8));
     }
     for (CKDWORD i = 0; i < 12; ++i) {
         auto sampler = Sampler(CKRST_SHADER_PIXEL, i, i);
-        sampler.Dimension = static_cast<CKBackendTextureDimension>(i / 4);
+        sampler.Dimension = static_cast<CKFFTextureDimension>(i / 4);
         sampler.MetadataBufferSlot = 0;
         sampler.BorderColorOffset = 384 + i * 32;
         sampler.SamplerStateOffset = sampler.BorderColorOffset + 16;
-        p.Desc.Samplers.push_back(sampler);
+        p.Desc.Samplers.PushBack(sampler);
     }
     p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = 1;
     p.Pixel.SamplerCount = 12;
@@ -175,34 +175,34 @@ void TestUniformBuffers()
     ExpectInvalid(p, "empty uniform buffer rejected");
     p = OneSampler(); p.Desc.UniformBuffers[0].Size = 65;
     ExpectInvalid(p, "buffer size must be 16-byte aligned");
-    p = OneSampler(); p.Desc.UniformBuffers[0].Size = CKBACKEND_MAX_UNIFORM_BYTES + 16;
+    p = OneSampler(); p.Desc.UniformBuffers[0].Size = CKFF_MAX_CONSTANT_BYTES + 16;
     ExpectInvalid(p, "oversized uniform buffer rejected");
-    p = OneSampler(); p.Desc.UniformBuffers[0].Slot = CKBACKEND_MAX_UNIFORM_BUFFERS;
+    p = OneSampler(); p.Desc.UniformBuffers[0].Slot = CKFF_UNIFORM_BUFFER_COUNT;
     ExpectInvalid(p, "native buffer slot limit enforced");
     p = OneSampler(); p.Desc.UniformBuffers[0].Stage = static_cast<CK_SHADER_STAGE>(-1);
     ExpectInvalid(p, "invalid buffer stage rejected");
-    p = OneSampler(); p.Desc.UniformBuffers.push_back(p.Desc.UniformBuffers[0]);
+    p = OneSampler(); p.Desc.UniformBuffers.PushBack(p.Desc.UniformBuffers[0]);
     ExpectInvalid(p, "duplicate native buffer slot in one stage rejected");
     p = OneSampler(); p.Desc.UniformBuffers[0].Slot = 1; p.Desc.Uniforms[0].BufferSlot = 1;
     ExpectInvalid(p, "native buffer slots start at zero without holes");
-    p = OneSampler(); p.Desc.UniformBuffers[0].Size = CKBACKEND_MAX_UNIFORM_BYTES;
-    p.Desc.Uniforms[0].Count = CKBACKEND_MAX_UNIFORM_BYTES / 16;
+    p = OneSampler(); p.Desc.UniformBuffers[0].Size = CKFF_MAX_CONSTANT_BYTES;
+    p.Desc.Uniforms[0].Count = CKFF_MAX_CONSTANT_BYTES / 16;
     TestCheck(p.Validate() == CK_OK, "the exact uniform buffer capacity is accepted");
 }
 
 void TestUniformRanges()
 {
     Program p = OneSampler();
-    p.Desc.Uniforms[0].Slot = CKBACKEND_MAX_CONSTANT_SLOTS;
+    p.Desc.Uniforms[0].Slot = CKFF_CONSTANT_SLOT_COUNT;
     ExpectInvalid(p, "logical constant slot limit enforced");
-    p = OneSampler(); p.Desc.Uniforms[0].Type = static_cast<CKBackendUniformType>(2);
+    p = OneSampler(); p.Desc.Uniforms[0].Type = static_cast<CKFFUniformType>(2);
     ExpectInvalid(p, "unknown uniform type rejected");
     p = OneSampler(); p.Desc.Uniforms[0].Count = 0;
     ExpectInvalid(p, "empty uniform rejected");
     p = OneSampler(); p.Desc.Uniforms[0].Count = ~0u;
     ExpectInvalid(p, "uniform byte-size overflow rejected before multiplication");
-    p = OneSampler(); p.Desc.Uniforms[0].Type = CKBACKEND_UNIFORM_MAT4;
-    p.Desc.Uniforms[0].Count = CKBACKEND_MAX_UNIFORM_BYTES / 64 + 1;
+    p = OneSampler(); p.Desc.Uniforms[0].Type = CKFF_UNIFORM_MAT4;
+    p.Desc.Uniforms[0].Count = CKFF_MAX_CONSTANT_BYTES / 64 + 1;
     ExpectInvalid(p, "matrix count uses the matrix byte size");
     p = OneSampler(); p.Desc.Uniforms[0].Offset = 1;
     ExpectInvalid(p, "uniform offset must be 16-byte aligned");
@@ -212,13 +212,13 @@ void TestUniformRanges()
     ExpectInvalid(p, "uniform range arithmetic cannot wrap");
     p = OneSampler(); p.Desc.Uniforms[0].BufferSlot = 1;
     ExpectInvalid(p, "uniform must reference a declared buffer");
-    p = OneSampler(); p.Desc.Uniforms[0].BufferSlot = CKBACKEND_MAX_UNIFORM_BUFFERS;
+    p = OneSampler(); p.Desc.Uniforms[0].BufferSlot = CKFF_UNIFORM_BUFFER_COUNT;
     ExpectInvalid(p, "uniform buffer slot is bounded");
     p = OneSampler(); p.Desc.Uniforms[0].Stage = static_cast<CK_SHADER_STAGE>(2);
     ExpectInvalid(p, "uniform stage is bounded");
-    p = OneSampler(); p.Desc.Uniforms.push_back(p.Desc.Uniforms[0]);
+    p = OneSampler(); p.Desc.Uniforms.PushBack(p.Desc.Uniforms[0]);
     ExpectInvalid(p, "duplicate logical uniform in one stage rejected");
-    p = OneSampler(); p.Desc.Uniforms.push_back(Uniform(CKRST_SHADER_PIXEL, 0, 16));
+    p = OneSampler(); p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_PIXEL, 0, 16));
     ExpectInvalid(p, "overlapping uniforms rejected");
     p.Desc.Uniforms[1].Offset = 32;
     TestCheck(p.Validate() == CK_OK, "adjacent ranges are not overlapping");
@@ -227,13 +227,13 @@ void TestUniformRanges()
 void TestUniformsAcrossStages()
 {
     Program p = OneSampler();
-    p.Desc.UniformBuffers.push_back(Buffer(CKRST_SHADER_VERTEX, 64));
-    p.Desc.Uniforms.push_back(Uniform(CKRST_SHADER_VERTEX, 31, 16, 2));
+    p.Desc.UniformBuffers.PushBack(Buffer(CKRST_SHADER_VERTEX, 64));
+    p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 31, 16, 2));
     p.Vertex.UniformBufferCount = 1;
     TestCheck(p.Validate() == CK_OK, "one logical uniform may occupy independent ranges in both stages");
     p.Desc.Uniforms[1].Count = 1;
     ExpectInvalid(p, "cross-stage logical uniform capacity must agree");
-    p.Desc.Uniforms[1].Type = CKBACKEND_UNIFORM_MAT4;
+    p.Desc.Uniforms[1].Type = CKFF_UNIFORM_MAT4;
     p.Desc.Uniforms[1].Offset = 0;
     ExpectInvalid(p, "cross-stage logical uniform type must agree");
 }
@@ -241,22 +241,22 @@ void TestUniformsAcrossStages()
 void TestSamplers()
 {
     Program p = OneSampler();
-    p.Desc.Samplers[0].Slot = CKBACKEND_MAX_TEXTURE_SLOTS;
+    p.Desc.Samplers[0].Slot = CKFF_TEXTURE_SLOT_COUNT;
     ExpectInvalid(p, "logical texture slot limit enforced");
-    p = OneSampler(); p.Desc.Samplers[0].NativeSlot = CKBACKEND_MAX_TEXTURE_SLOTS;
+    p = OneSampler(); p.Desc.Samplers[0].NativeSlot = CKFF_TEXTURE_SLOT_COUNT;
     ExpectInvalid(p, "native sampler slot limit enforced");
     p = OneSampler(); p.Desc.Samplers[0].NativeSlot = 1;
     ExpectInvalid(p, "native sampler slots must be contiguous from zero");
     p = OneSampler(); p.Desc.Samplers[0].Stage = static_cast<CK_SHADER_STAGE>(2);
     ExpectInvalid(p, "sampler stage is bounded");
-    p = OneSampler(); p.Desc.Samplers[0].Dimension = static_cast<CKBackendTextureDimension>(-1);
+    p = OneSampler(); p.Desc.Samplers[0].Dimension = static_cast<CKFFTextureDimension>(-1);
     ExpectInvalid(p, "unknown sampler dimension rejected");
-    p = OneSampler(); p.Desc.Samplers.push_back(Sampler(CKRST_SHADER_PIXEL, 22));
+    p = OneSampler(); p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 22));
     p.Pixel.SamplerCount = 2;
     ExpectInvalid(p, "native sampler slot cannot be reused within one stage");
     p.Desc.Samplers[1] = Sampler(CKRST_SHADER_PIXEL, 23, 1);
     ExpectInvalid(p, "logical sampler slot cannot be reused within one stage");
-    p = OneSampler(); p.Desc.Samplers.push_back(Sampler(CKRST_SHADER_VERTEX, 23));
+    p = OneSampler(); p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_VERTEX, 23));
     p.Vertex.SamplerCount = 1;
     TestCheck(p.Validate() == CK_OK, "one logical texture may be sampled from both stages");
 }
@@ -280,25 +280,33 @@ void TestNativeResourceCounts()
 
 void TestSamplerDimensionsAcrossStages()
 {
-    for (CK_SHADER_FORMAT format : {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_FORMAT_BGFX}) {
+    const CK_SHADER_FORMAT formats[] = {
+        CKRST_SHADER_FORMAT_DXIL,
+        CKRST_SHADER_FORMAT_BGFX,
+    };
+    for (int i = 0; i < (int)(sizeof(formats) / sizeof(formats[0])); ++i) {
+        const CK_SHADER_FORMAT format = formats[i];
         Program p;
         p.SetTarget(format, format == CKRST_SHADER_FORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_DX11);
         p.Vertex.SamplerCount = 1;
         p.Pixel.SamplerCount = 2;
-        p.Desc.Samplers = {Sampler(CKRST_SHADER_VERTEX, 23), Sampler(CKRST_SHADER_PIXEL, 4),
-                           Sampler(CKRST_SHADER_PIXEL, 23, 1)};
+        p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_VERTEX, 23));
+        p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 4));
+        p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 23, 1));
         p.Desc.Samplers[0].DefaultColor = 0xff112233;
         p.Desc.Samplers[2].DefaultColor = 0xff445566;
         p.Desc.Samplers[2].Name = "s_fragmentImage";
         TestCheck(p.Validate() == CK_OK,
                   "one logical texture permits different native slots, names and zero-binding defaults");
-        p.Desc.Samplers[2].Dimension = CKBACKEND_TEXTURE_CUBE;
+        p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_CUBE;
         ExpectInvalid(p, "one logical nonzero binding cannot be both 2D and cube across stages");
-        std::swap(p.Desc.Samplers[0], p.Desc.Samplers[2]);
+        const CKFFSamplerBinding first = p.Desc.Samplers[0];
+        p.Desc.Samplers[0] = p.Desc.Samplers[2];
+        p.Desc.Samplers[2] = first;
         ExpectInvalid(p, "cross-stage dimension conflicts are rejected in either declaration order");
-        p.Desc.Samplers[2].Dimension = CKBACKEND_TEXTURE_CUBE;
+        p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_CUBE;
         TestCheck(p.Validate() == CK_OK, "a shared logical cube remains valid with independent native slots");
-        p.Desc.Samplers[2].Dimension = CKBACKEND_TEXTURE_3D;
+        p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_3D;
         ExpectInvalid(p, "one logical texture cannot be both cube and volume across stages");
     }
 }
@@ -309,7 +317,7 @@ void TestSamplerMetadata()
     TestCheck(p.Validate() == CK_OK, "border and state metadata may follow explicit uniform ranges");
     p.Desc.Samplers[0].MetadataBufferSlot = 1;
     ExpectInvalid(p, "metadata requires a buffer in its own stage");
-    p = WithMetadata(); p.Desc.Samplers[0].MetadataBufferSlot = CKBACKEND_MAX_UNIFORM_BUFFERS;
+    p = WithMetadata(); p.Desc.Samplers[0].MetadataBufferSlot = CKFF_UNIFORM_BUFFER_COUNT;
     ExpectInvalid(p, "metadata buffer slot is bounded");
     p = WithMetadata(); p.Desc.Samplers[0].BorderColorOffset = 33;
     ExpectInvalid(p, "border color metadata is aligned");
@@ -321,7 +329,7 @@ void TestSamplerMetadata()
     ExpectInvalid(p, "metadata cannot overwrite a uniform");
     p = WithMetadata(); p.Desc.Samplers[0].SamplerStateOffset = 32;
     ExpectInvalid(p, "border and state metadata cannot overlap");
-    p = WithMetadata(); p.Desc.Samplers.push_back(p.Desc.Samplers[0]);
+    p = WithMetadata(); p.Desc.Samplers.PushBack(p.Desc.Samplers[0]);
     p.Desc.Samplers[1].Slot = 22; p.Desc.Samplers[1].NativeSlot = 1; p.Pixel.SamplerCount = 2;
     ExpectInvalid(p, "metadata of different samplers cannot overlap");
 }
@@ -332,8 +340,8 @@ void TestSharedUniformPacking()
     p.Desc.UniformBuffers[0].SharedData = 7;
     auto buffer = Buffer(CKRST_SHADER_VERTEX, 64);
     buffer.SharedData = 7;
-    p.Desc.UniformBuffers.push_back(buffer);
-    p.Desc.Uniforms.push_back(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
+    p.Desc.UniformBuffers.PushBack(buffer);
+    p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
     p.Vertex.UniformBufferCount = 1;
     TestCheck(p.Validate() == CK_OK, "identical cross-stage writes share one packed snapshot");
     Program bad = p;
@@ -346,7 +354,7 @@ void TestSharedUniformPacking()
     bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Count = 1;
     ExpectInvalid(bad, "unequal capacities cannot alias in a shared buffer");
     bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Count = 1;
-    bad.Desc.Uniforms[1].Type = CKBACKEND_UNIFORM_MAT4;
+    bad.Desc.Uniforms[1].Type = CKFF_UNIFORM_MAT4;
     ExpectInvalid(bad, "unequal uniform types cannot alias in a shared buffer");
     bad = p; bad.Desc.Uniforms[1].Offset = 32;
     ExpectInvalid(bad, "one stage's uniforms cannot overlap another stage's metadata");
@@ -361,10 +369,10 @@ void TestSharedSamplerMetadata()
     p.Desc.UniformBuffers[0].SharedData = 0;
     auto buffer = Buffer(CKRST_SHADER_VERTEX, 64);
     buffer.SharedData = 0;
-    p.Desc.UniformBuffers.push_back(buffer);
+    p.Desc.UniformBuffers.PushBack(buffer);
     auto sampler = p.Desc.Samplers[0];
     sampler.Stage = CKRST_SHADER_VERTEX;
-    p.Desc.Samplers.push_back(sampler);
+    p.Desc.Samplers.PushBack(sampler);
     p.Vertex.UniformBufferCount = p.Vertex.SamplerCount = 1;
     TestCheck(p.Validate() == CK_OK, "identical sampler metadata can share bytes across stages");
     Program bad = p; bad.Desc.Samplers[1].Slot = 22;
@@ -380,24 +388,24 @@ void TestNamedUniforms()
 {
     Program p = OneSampler();
     p.SetTarget(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11);
-    p.Desc.UniformBuffers.clear();
+    p.Desc.UniformBuffers.Clear();
     p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = p.Pixel.SamplerCount = 0;
     TestCheck(p.Validate() == CK_OK, "named uniforms require no artificial native buffers or reflected counts");
-    p.Desc.Uniforms.push_back(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
+    p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
     TestCheck(p.Validate() == CK_OK, "a compatible named uniform can be shared between stages");
-    Program bad = p; bad.Desc.Uniforms[0].Name.clear();
+    Program bad = p; bad.Desc.Uniforms[0].Name.Clear();
     ExpectInvalid(bad, "named uniform cannot have an empty name");
     bad = p; bad.Desc.Samplers[0].Name = "1sampler";
     ExpectInvalid(bad, "a native uniform name must be an identifier");
-    bad = p; bad.Desc.Uniforms[0].Name = std::string("u_hidden\0suffix", 15);
+    bad = p; bad.Desc.Uniforms[0].Name = XString("u_hidden\0suffix", 15);
     ExpectInvalid(bad, "embedded NUL cannot alias a native name");
     bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Count = 1;
     ExpectInvalid(bad, "different logical slots do not permit inconsistent same-name capacities");
-    bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Type = CKBACKEND_UNIFORM_MAT4;
+    bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Type = CKFF_UNIFORM_MAT4;
     ExpectInvalid(bad, "same-name native uniform types must agree");
     bad = p; bad.Desc.Samplers[0].Name = bad.Desc.Uniforms[0].Name;
     ExpectInvalid(bad, "sampler and data uniform names share one native namespace");
-    bad = p; bad.Desc.UniformBuffers.push_back(Buffer(CKRST_SHADER_PIXEL, 16));
+    bad = p; bad.Desc.UniformBuffers.PushBack(Buffer(CKRST_SHADER_PIXEL, 16));
     ExpectInvalid(bad, "declared native ranges still constrain named-uniform programs");
     bad = p; bad.Desc.Samplers[0].MetadataBufferSlot = 0;
     ExpectInvalid(bad, "named samplers do not bypass explicit metadata buffer validation");
@@ -406,8 +414,8 @@ void TestNamedUniforms()
 void TestVertexInputs()
 {
     Program p;
-    CKBackendVertexInput input;
-    p.Desc.VertexInputs.push_back(input);
+    CKFFVertexInput input;
+    p.Desc.VertexInputs.PushBack(input);
     TestCheck(p.Validate() == CK_OK, "a position-only program is valid");
     p.Desc.VertexInputs[0].Location = 16;
     ExpectInvalid(p, "native attribute locations are bounded");
@@ -416,7 +424,7 @@ void TestVertexInputs()
     ExpectInvalid(p, "logical vertex attributes are bounded");
     p.Desc.VertexInputs[0] = input; p.Desc.VertexInputs[0].Integer = 2;
     ExpectInvalid(p, "integer input flag must be boolean");
-    p.Desc.VertexInputs[0] = input; p.Desc.VertexInputs.push_back(input);
+    p.Desc.VertexInputs[0] = input; p.Desc.VertexInputs.PushBack(input);
     p.Desc.VertexInputs[1].Location = 1;
     ExpectInvalid(p, "one logical attribute cannot occupy two locations");
     p.Desc.VertexInputs[1].Attribute = CKRST_ATTRIB_NORMAL;
@@ -430,89 +438,91 @@ void TestSharedSnapshotPacking()
     p.Desc.UniformBuffers[0].SharedData = 0;
     auto shared = Buffer(CKRST_SHADER_VERTEX, 64);
     shared.SharedData = 0;
-    p.Desc.UniformBuffers.push_back(shared);
-    p.Desc.UniformBuffers.push_back(Buffer(CKRST_SHADER_VERTEX, 16, 1));
-    p.Desc.Uniforms.push_back(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
+    p.Desc.UniformBuffers.PushBack(shared);
+    p.Desc.UniformBuffers.PushBack(Buffer(CKRST_SHADER_VERTEX, 16, 1));
+    p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
     auto independent = Uniform(CKRST_SHADER_VERTEX, 4, 0);
     independent.BufferSlot = 1;
-    p.Desc.Uniforms.push_back(independent);
+    p.Desc.Uniforms.PushBack(independent);
     p.Vertex.UniformBufferCount = 2;
     TestCheck(p.Validate() == CK_OK, "shared and independent buffers can coexist");
 
-    CKBackendProgramLayout layout;
+    CKFFProgramLayout layout;
     layout.Init(p.Desc);
-    TestCheck(layout.Buffers.size() == 3 && layout.Data.size() == 80,
+    TestCheck(layout.Buffers.Size() == 3 && layout.Data.Size() == 80,
               "two shared 64-byte bindings allocate one snapshot plus the independent 16 bytes");
     TestCheck(layout.BufferOffset(CKRST_SHADER_VERTEX, 0) == layout.BufferOffset(CKRST_SHADER_PIXEL, 0) &&
                   layout.BufferOffset(CKRST_SHADER_VERTEX, 1) == 64,
               "stage bindings reference the shared snapshot's physical offset");
-    TestCheck(layout.Buffers[0].Revision == 0 && layout.Buffers[1].Revision == 0 &&
-                  layout.Buffers[2].Revision == 0,
-              "new physical uniform buffers start at revision zero");
+    TestCheck(layout.Buffers[0].Change == 0 && layout.Buffers[1].Change == 0 &&
+                  layout.Buffers[2].Change == 0,
+              "new physical uniform buffers start unchanged");
 
-    CKBackendConstants values;
+    CKFFConstantSet values;
     CKBYTE primary[32], independentBytes[16];
     for (CKDWORD i = 0; i < 32; ++i) primary[i] = static_cast<CKBYTE>(i + 1);
     for (CKDWORD i = 0; i < 16; ++i) independentBytes[i] = static_cast<CKBYTE>(0x80 + i);
     TestCheck(values.Set(31, primary, sizeof(primary)) == CK_OK &&
                   values.Set(4, independentBytes, sizeof(independentBytes)) == CK_OK, "prepare logical data");
     layout.Update(values);
-    TestCheck(memcmp(layout.Data.data(), primary, 32) == 0 &&
-                  memcmp(layout.Data.data() + 64, independentBytes, 16) == 0,
+    TestCheck(memcmp(layout.Data.Begin(), primary, 32) == 0 &&
+                  memcmp(layout.Data.Begin() + 64, independentBytes, 16) == 0,
               "logical slots populate only their declared ranges");
-    const uint64_t sharedRevision = layout.Buffers[0].Revision;
-    const uint64_t independentRevision = layout.Buffers[2].Revision;
-    TestCheck(sharedRevision != 0 && layout.Buffers[1].Revision == sharedRevision &&
-                  independentRevision != 0,
+    const CKQWORD sharedChange = layout.Buffers[0].Change;
+    const CKQWORD independentChange = layout.Buffers[2].Change;
+    TestCheck(sharedChange != 0 && layout.Buffers[1].Change == sharedChange &&
+                  independentChange != 0,
               "logical writes advance every binding of the affected physical buffer");
     for (CKDWORD i = 32; i < 64; ++i)
         TestCheck(layout.Data[i] == 0, "uniform packing leaves metadata bytes untouched");
 
     const auto previous = layout.Data;
-    const uint64_t revision = values[31].Revision;
+    const CKQWORD change = values[31].Change;
     values.Set(31, primary, sizeof(primary));
-    TestCheck(values[31].Revision == revision, "equal bytes preserve the revision");
+    TestCheck(values[31].Change == change, "equal bytes preserve the change marker");
     layout.Update(values);
-    TestCheck(layout.Data == previous && layout.Buffers[0].Revision == sharedRevision &&
-                  layout.Buffers[2].Revision == independentRevision,
-              "unchanged values preserve data and physical buffer revisions");
+    TestCheck(layout.Data.Size() == previous.Size() &&
+                  memcmp(layout.Data.Begin(), previous.Begin(), previous.Size()) == 0 &&
+                  layout.Buffers[0].Change == sharedChange &&
+                  layout.Buffers[2].Change == independentChange,
+              "unchanged values preserve data and physical buffer change markers");
     primary[0] = 0xee;
     values.Set(31, primary, sizeof(primary));
-    TestCheck(values[31].Revision != revision, "changed bytes advance the revision");
+    TestCheck(values[31].Change != change, "changed bytes advance the change marker");
     layout.Update(values);
     TestCheck(layout.Data[0] == 0xee &&
-                  memcmp(layout.Data.data() + 1, previous.data() + 1, previous.size() - 1) == 0 &&
-                  layout.Buffers[0].Revision != sharedRevision &&
-                  layout.Buffers[1].Revision == layout.Buffers[0].Revision &&
-                  layout.Buffers[2].Revision == independentRevision,
+                  memcmp(layout.Data.Begin() + 1, previous.Begin() + 1, previous.Size() - 1) == 0 &&
+                  layout.Buffers[0].Change != sharedChange &&
+                  layout.Buffers[1].Change == layout.Buffers[0].Change &&
+                  layout.Buffers[2].Change == independentChange,
               "changed data refreshes only its declared slot");
 
     const auto fullSnapshot = layout.Data;
     const CKBYTE prefix[] = {0x51, 0x52, 0x53};
     values.Set(31, prefix, sizeof(prefix));
     layout.Update(values);
-    TestCheck(memcmp(layout.Data.data(), prefix, sizeof(prefix)) == 0 &&
-                  memcmp(layout.Data.data() + 3, fullSnapshot.data() + 3, fullSnapshot.size() - 3) == 0,
+    TestCheck(memcmp(layout.Data.Begin(), prefix, sizeof(prefix)) == 0 &&
+                  memcmp(layout.Data.Begin() + 3, fullSnapshot.Begin() + 3, fullSnapshot.Size() - 3) == 0,
               "prefix mutation preserves its producer's tail and other buffers");
 
-    CKBackendConstants other;
+    CKFFConstantSet other;
     const CKBYTE first = 0x91;
-    other.Set(31, &first, 1); // revision 1, as the original producer initially had
+    other.Set(31, &first, 1);
     layout.Update(other);
     TestCheck(layout.Data[0] == first, "switching producers selects the new source");
     for (CKDWORD i = 1; i < 32; ++i)
         TestCheck(layout.Data[i] == 0, "another producer never inherits a previous uniform tail");
     for (CKDWORD i = 64; i < 80; ++i)
         TestCheck(layout.Data[i] == 0, "omitted slots select zero data");
-    CKBackendConstants sameRevision;
+    CKFFConstantSet sameChange;
     const CKBYTE second = 0x71;
-    sameRevision.Set(31, &second, 1);
-    layout.Update(sameRevision);
-    TestCheck(layout.Data[0] == second && other[31].Revision == sameRevision[31].Revision,
-              "equal revisions from distinct producers cannot alias");
+    sameChange.Set(31, &second, 1);
+    layout.Update(sameChange);
+    TestCheck(layout.Data[0] == second && other[31].Change == sameChange[31].Change,
+              "equal change markers from distinct producers cannot alias");
     layout.Update(values);
-    TestCheck(memcmp(layout.Data.data(), prefix, sizeof(prefix)) == 0 &&
-                  memcmp(layout.Data.data() + 3, fullSnapshot.data() + 3, fullSnapshot.size() - 3) == 0,
+    TestCheck(memcmp(layout.Data.Begin(), prefix, sizeof(prefix)) == 0 &&
+                  memcmp(layout.Data.Begin() + 3, fullSnapshot.Begin() + 3, fullSnapshot.Size() - 3) == 0,
               "switching back restores the original producer's complete values");
 }
 

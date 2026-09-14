@@ -17,8 +17,10 @@ static int Fail(const char *what)
 
 static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, int bpp, int refreshRate)
 {
-    for (int i = 0; i < driver->m_DisplayModes.Size(); ++i) {
-        const VxDisplayMode &mode = driver->m_DisplayModes[i];
+    for (int i = 0; i < driver->GetDisplayModeCount(); ++i) {
+        VxDisplayMode mode;
+        if (!driver->GetDisplayMode(i, &mode))
+            return false;
         if (mode.Width == width &&
             mode.Height == height &&
             mode.Bpp == bpp &&
@@ -32,24 +34,24 @@ static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, in
 
 static int TestBackendShaderTargets()
 {
-    const CKBackendShaderTarget targets[] = {
+    const CKFFShaderTarget targets[] = {
         {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11},
         {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12},
         {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV},
     };
     for (const auto &selected : targets) {
-        CKBackendCaps conventions;
+        CKRasterizerDeviceCaps conventions;
         conventions.ShaderFormat = selected.Format;
         conventions.ShaderProfile = selected.Profile;
         CKRecordingBackend backend(conventions);
-        CKBackendInitDesc init;
+        CKRasterizerInitParameters init;
         init.Width = init.Height = 16;
         if (backend.Init(&init) != CK_OK || backend.GetCaps().ShaderFormat != selected.Format ||
             backend.GetCaps().ShaderProfile != selected.Profile)
             return Fail("an empty shader target list accepts the backend's own target");
         backend.Shutdown();
 
-        const CKBackendShaderTarget rejected[] = {
+        const CKFFShaderTarget rejected[] = {
             {selected.Format == CKRST_SHADER_FORMAT_BGFX ? CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_BGFX,
              selected.Profile},
             {selected.Format, selected.Profile == CKRST_SHADER_PROFILE_DX11
@@ -57,7 +59,8 @@ static int TestBackendShaderTargets()
             {CKRST_SHADER_FORMAT_UNKNOWN, CKRST_SHADER_PROFILE_UNKNOWN},
         };
         for (const auto &target : rejected) {
-            init.ShaderTargets.assign(1, target);
+            init.ShaderTargets.Clear();
+            init.ShaderTargets.PushBack(target);
             if (backend.Init(&init) != CKERR_NOTIMPLEMENTED || backend.GetDeviceStatus() == CK_OK ||
                 backend.GetObjectCount(CKRST_OBJ_ALL) != 0)
                 return Fail("shader targets must match both format and profile without partially initializing");
@@ -68,12 +71,13 @@ static int TestBackendShaderTargets()
                 return Fail("shader target rejection leaves resource creation disabled");
         }
 
-        init.ShaderTargets.push_back(selected);
+        init.ShaderTargets.PushBack(selected);
         if (backend.Init(&init) != CK_OK || backend.GetCaps().ShaderFormat != selected.Format ||
             backend.GetCaps().ShaderProfile != selected.Profile)
             return Fail("initialization can retry with a matching entry in a mixed target list");
         backend.Shutdown();
-        init.ShaderTargets.assign(1, selected);
+        init.ShaderTargets.Clear();
+        init.ShaderTargets.PushBack(selected);
         if (backend.Init(&init) != CK_OK)
             return Fail("one exact shader target permits reinitialization");
     }
@@ -83,23 +87,23 @@ static int TestBackendShaderTargets()
 static int TestGenericBackend()
 {
     CKRecordingBackend backend;
-    CKBackendInitDesc init;
+    CKRasterizerInitParameters init;
     init.Width = init.Height = 16;
     if (backend.Init(&init) != CK_OK)
         return Fail("backend construction needs no rasterizer driver");
 
-    CKBackendConstants constants;
+    CKFFConstantSet constants;
     const CKBYTE complete[] = {1, 2, 3, 4, 5, 6, 7, 8};
     const CKBYTE prefix[] = {9, 10, 11};
     if (constants.Set(31, complete, sizeof(complete)) != CK_OK ||
         constants.Set(31, prefix, sizeof(prefix)) != CK_OK)
         return Fail("arbitrary byte prefixes are accepted");
     const auto &bytes = constants[31].Bytes;
-    if (bytes.size() != sizeof(complete) || memcmp(bytes.data(), prefix, sizeof(prefix)) != 0 ||
-        memcmp(bytes.data() + sizeof(prefix), complete + sizeof(prefix), sizeof(complete) - sizeof(prefix)) != 0)
+    if (bytes.Size() != sizeof(complete) || memcmp(bytes.Begin(), prefix, sizeof(prefix)) != 0 ||
+        memcmp(bytes.Begin() + sizeof(prefix), complete + sizeof(prefix), sizeof(complete) - sizeof(prefix)) != 0)
         return Fail("constant prefix update preserves the remaining bytes");
-    if (constants.Set(CKBACKEND_MAX_CONSTANT_SLOTS, complete, sizeof(complete)) != CKERR_INVALIDPARAMETER ||
-        constants.Set(0, complete, CKBACKEND_MAX_UNIFORM_BYTES + 1) != CKERR_INVALIDPARAMETER ||
+    if (constants.Set(CKFF_CONSTANT_SLOT_COUNT, complete, sizeof(complete)) != CKERR_INVALIDPARAMETER ||
+        constants.Set(0, complete, CKFF_MAX_CONSTANT_BYTES + 1) != CKERR_INVALIDPARAMETER ||
         constants.Set(0, NULL, 1) != CKERR_INVALIDPARAMETER ||
         constants.Set(0, complete, 0) != CKERR_INVALIDPARAMETER)
         return Fail("constant byte input bounds");
@@ -110,7 +114,7 @@ static int TestGenericBackend()
     shader.Profile = backend.GetCaps().ShaderProfile;
     shader.Code = token;
     shader.CodeSize = sizeof(token);
-    CKBackendProgramDesc programDesc;
+    CKFFProgramDesc programDesc;
     if (backend.CreateShader(&shader, &programDesc.VertexShader) != CK_OK)
         return Fail("generic vertex shader");
     CKDWORD wrongTarget = 123;
@@ -121,15 +125,15 @@ static int TestGenericBackend()
     shader.Stage = CKRST_SHADER_PIXEL;
     if (backend.CreateShader(&shader, &programDesc.PixelShader) != CK_OK)
         return Fail("generic fragment shader");
-    CKBackendUniformBinding uniform;
+    CKFFUniformBinding uniform;
     uniform.Slot = 31;
     uniform.Name = "u_customData";
     uniform.Stage = CKRST_SHADER_PIXEL;
-    programDesc.Uniforms.push_back(uniform);
-    CKBackendSamplerBinding sampler;
+    programDesc.Uniforms.PushBack(uniform);
+    CKFFSamplerBinding sampler;
     sampler.Slot = 31;
     sampler.Name = "s_customImage";
-    programDesc.Samplers.push_back(sampler);
+    programDesc.Samplers.PushBack(sampler);
     CKDWORD program = 0;
     if (backend.CreateProgram(&programDesc, &program) != CK_OK || !program)
         return Fail("custom one-sampler program at logical slot 31");
@@ -137,10 +141,10 @@ static int TestGenericBackend()
     programDesc.Samplers[0].NativeSlot = 1;
     if (backend.CreateProgram(&programDesc, &rejected) != CKERR_INVALIDPARAMETER || rejected != 0)
         return Fail("recording backend validates program resource declarations");
-    programDesc.Uniforms.clear();
-    programDesc.Samplers.clear();
+    programDesc.Uniforms.Clear();
+    programDesc.Samplers.Clear();
     const CKRecordingObject *record = static_cast<const CKRecordingBackend &>(backend).FindObject(program);
-    if (!record || record->Program.Uniforms.size() != 1 || record->Program.Samplers.size() != 1 ||
+    if (!record || record->Program.Uniforms.Size() != 1 || record->Program.Samplers.Size() != 1 ||
         record->Program.Uniforms[0].Name != "u_customData" || record->Program.Samplers[0].NativeSlot != 0)
         return Fail("program keeps an owned resource declaration");
 
@@ -149,9 +153,9 @@ static int TestGenericBackend()
         return Fail("shader handles may be released after linking");
     if (backend.CreateProgram(&programDesc, &rejected) != CKERR_INVALIDPARAMETER || rejected != 0)
         return Fail("deleted shader handles cannot link another program");
-    CKBackendPassDesc pass;
+    CKRenderPassDesc pass;
     pass.Rect.right = pass.Rect.bottom = 16;
-    CKBackendDraw draw;
+    CKDrawCommand draw;
     draw.Program = program;
     draw.Constants = &constants;
     draw.VertexCount = 3;
@@ -170,22 +174,22 @@ static int TestConfiguredDriver()
     driver.Profile = CKRST_SHADER_PROFILE_SPIRV;
     driver.OriginBottomLeft = TRUE;
     driver.HomogeneousDepth = TRUE;
-    std::vector<CKBackendShaderTarget> targets;
+    XClassArray<CKFFShaderTarget> targets;
     driver.GetShaderTargets(targets);
-    if (targets.size() != 1 || targets[0].Format != driver.Format || targets[0].Profile != driver.Profile)
+    if (targets.Size() != 1 || targets[0].Format != driver.Format || targets[0].Profile != driver.Profile)
         return Fail("rasterizer targets follow configured shader conventions");
-    CKRasterizerBackend *backend = driver.CreateBackend();
+    CKRecordingBackend *backend = driver.CreateBackend();
     if (!backend)
         return Fail("configured backend");
     driver.Format = CKRST_SHADER_FORMAT_BGFX;
     driver.Profile = CKRST_SHADER_PROFILE_DX11;
-    CKBackendInitDesc init;
+    CKRasterizerInitParameters init;
     init.Width = init.Height = 16;
     if (backend->Init(&init) != CK_OK || backend->GetCaps().ShaderFormat != CKRST_SHADER_FORMAT_SPIRV ||
         backend->GetCaps().ShaderProfile != CKRST_SHADER_PROFILE_SPIRV ||
         !backend->GetCaps().OriginBottomLeft || !backend->GetCaps().HomogeneousDepth)
         return Fail("backend stores a value snapshot of conventions");
-    CKBackendShaderSet shaders;
+    CKFFShaderSet shaders;
     if (!driver.GetShaderSet(backend->GetCaps(), shaders) ||
         !shaders.Matches(CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV) ||
         shaders.Shaders[CKRST_SHADER_FF_FRAGMENT].SamplerCount != CKFF_SHADER_SAMPLER_SLOT_COUNT ||
@@ -208,13 +212,20 @@ int main()
 
     CKRecordingRasterizerDriver *driver =
         static_cast<CKRecordingRasterizerDriver *>(rasterizer.GetDriver(0));
-    if (!driver || driver->m_DriverIndex != 0 || rasterizer.GetDriver(1) != NULL)
+    if (!driver || rasterizer.GetDriver(1) != NULL)
         return Fail("driver lookup");
 
-    if (driver->m_Hardware || !driver->m_CapsUpToDate)
-        return Fail("software driver with final caps");
+    CKRasterizerDriverDesc driverDesc = {};
+    if (!driver->GetDesc(&driverDesc) || driverDesc.DriverIndex != 0 ||
+        driverDesc.Hardware || !driverDesc.CapsFinal ||
+        strcmp(driverDesc.Description.CStr(), "Recording Rasterizer") != 0)
+        return Fail("driver description query");
 
-    if (driver->m_DisplayModes.Size() < 4 || driver->m_TextureFormats.Size() != 1)
+    CKTextureDesc textureFormat;
+    if (driver->GetDisplayModeCount() < 4 ||
+        driver->GetTextureFormatCount() != 1 ||
+        !driver->GetTextureFormat(0, &textureFormat) ||
+        driver->GetTextureFormat(1, &textureFormat))
         return Fail("display modes / texture formats");
 
     if (!HasDisplayMode(driver, 640, 480, 32, 60) ||
@@ -223,20 +234,19 @@ int main()
         !HasDisplayMode(driver, 1920, 1080, 32, 60))
         return Fail("legacy display modes");
 
-    if ((driver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED) == 0 ||
-        (driver->m_2DCaps.Caps & CKRST_2DCAPS_3D) == 0)
-        return Fail("2D caps");
-    if ((driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_SOFTWARE) == 0 ||
-        (driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_HARDWARETL) != 0)
-        return Fail("software T&L bits");
+    CKRasterizerNativeCapsDesc nativeCaps;
+    if (!driver->GetNativeCaps(&nativeCaps) ||
+        nativeCaps.MaxTextureSize != 4096 ||
+        nativeCaps.MaxTextureStages != CKRST_MAX_TEXTURE_STAGES)
+        return Fail("native caps query");
 
-    CKRasterizerBackend *backend = driver->CreateBackend();
+    CKRecordingBackend *backend = driver->CreateBackend();
     if (!backend)
         return Fail("CreateBackend");
     if (backend->GetDeviceStatus() == CK_OK)
         return Fail("status before Init");
 
-    CKBackendInitDesc init;
+    CKRasterizerInitParameters init;
     init.PosX = 10;
     init.PosY = 20;
     init.Width = 800;
@@ -249,12 +259,12 @@ int main()
     if (backend->GetDeviceStatus() != CK_OK || !backend->IsIdle())
         return Fail("status after Init");
 
-    const CKBackendCaps &caps = backend->GetCaps();
+    const CKRasterizerDeviceCaps &caps = backend->GetCaps();
     if ((caps.Features & (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER)) !=
             (CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER) ||
         (caps.Features & CKRST_DEVCAPS_TEXTURE_READBACK) == 0 ||
         caps.MaxPasses != CKRST_MAX_PASSES ||
-        caps.MaxTextureBindings != CKBACKEND_MAX_TEXTURE_SLOTS ||
+        caps.MaxTextureBindings != CKFF_TEXTURE_SLOT_COUNT ||
         caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX ||
         caps.ShaderProfile != CKRST_SHADER_PROFILE_DX11 ||
         caps.OriginBottomLeft || caps.HomogeneousDepth)
@@ -284,11 +294,11 @@ int main()
         return Fail("handles are not reused");
 
     // Frame protocol: draws need a pass, passes need Present.
-    CKBackendDraw draw;
+    CKDrawCommand draw;
     draw.Program = 1;
     if (backend->Draw(&draw) != CKERR_INVALIDOPERATION)
         return Fail("draw outside a pass");
-    CKBackendPassDesc pass;
+    CKRenderPassDesc pass;
     pass.Rect.right = 320;
     pass.Rect.bottom = 240;
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR;
@@ -306,20 +316,26 @@ int main()
     if (backend->ReadTexture(replacement, 0, &readback, NULL) != CK_OK || readback.Width != 16 ||
         readback.RequiredSize != 16 * 16 * 4 || readback.Format != _32_ARGB8888)
         return Fail("ReadTexture layout");
-    CKBackendReadbackTicket ticket;
+    CKRecordingReadbackTicket ticket;
     if (backend->ReadTexture(replacement, 0, &readback, &ticket) != CK_OK || !ticket ||
-        ticket->Data.size() != 16 * 16 * 4 || ticket->Data[0] != 0 ||
+        ticket->Data.Size() != 16 * 16 * 4 || ticket->Data[0] != 0 ||
         backend->PollReadback(ticket, FALSE) != CKRST_READBACK_NEEDS_SUBMIT)
         return Fail("ReadTexture owns a pending zero image");
 
     CKDWORD frame = 0;
-    if (backend->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_IMMEDIATE, TRUE), &frame) != CK_OK || frame == 0 || backend->PollReadback(ticket, FALSE) != CKRST_READBACK_READY ||
+    if (backend->Submit(CKRST_PRESENT_IMMEDIATE, TRUE, &frame) != CK_OK ||
+        frame == 0 || backend->GetLastSubmitId() == 0 ||
+        backend->GetCompletedSubmitId() != backend->GetLastSubmitId() ||
+        backend->PollReadback(ticket, FALSE) != CKRST_READBACK_READY ||
         !backend->IsIdle())
         return Fail("Present");
     if (backend->GetStats().Frames != 1 || backend->GetStats().Passes != 1 || backend->GetStats().Draws != 0)
         return Fail("stats");
     CKDWORD next = 0;
-    if (backend->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_UNCHANGED, FALSE), &next) != CK_OK || next != frame + 1)
+    const CKQWORD submitId = backend->GetLastSubmitId();
+    if (backend->Submit(CKRST_PRESENT_UNCHANGED, FALSE, &next) != CK_OK ||
+        next != frame + 1 || backend->GetLastSubmitId() != submitId + 1 ||
+        backend->GetCompletedSubmitId() != backend->GetLastSubmitId())
         return Fail("frame numbers increase");
 
     backend->Shutdown();

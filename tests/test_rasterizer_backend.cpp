@@ -1,8 +1,6 @@
-// CKRasterizerBackend (spec 5.10) exercised on the recording backend (the
-// NULL backend plus a log): the interface a backend has to implement, and
-// the frame semantics the translation core relies on (passes are sequential,
-// draws carry the sticky pipeline state and bound textures, Present closes
-// the frame and reports stats).
+// CPU draw-command behavior exercised through the test-owned recording
+// implementation: passes are sequential, draws carry the sticky pipeline
+// state and bound textures, and Present closes the frame and reports stats.
 
 #include <stdio.h>
 #include <string.h>
@@ -20,7 +18,7 @@ struct Fixture {
     {
         Backend = static_cast<FFPRecordingBackend *>(Driver.CreateBackend());
         TestCheck(Backend != NULL, "recording backend");
-        CKBackendInitDesc init;
+        CKRasterizerInitParameters init;
         init.Width = 64;
         init.Height = 48;
         init.Bpp = 32;
@@ -35,7 +33,7 @@ struct Fixture {
     }
 };
 
-CKDWORD MakeLayout(CKRasterizerBackend *b)
+CKDWORD MakeLayout(CKRecordingBackend *b)
 {
     CKVertexElementDesc elements[1];
     memset(elements, 0, sizeof(elements));
@@ -51,7 +49,7 @@ CKDWORD MakeLayout(CKRasterizerBackend *b)
     return layout;
 }
 
-CKDWORD MakeProgram(CKRasterizerBackend *b)
+CKDWORD MakeProgram(CKRecordingBackend *b)
 {
     static const CKBYTE blob[4] = {1, 2, 3, 4};
     CKShaderDesc shader;
@@ -64,27 +62,40 @@ CKDWORD MakeProgram(CKRasterizerBackend *b)
     TestCheck(b->CreateShader(&shader, &vs) == CK_OK && vs != 0, "vertex shader");
     shader.Stage = CKRST_SHADER_PIXEL;
     TestCheck(b->CreateShader(&shader, &fs) == CK_OK && fs != 0, "pixel shader");
-    CKBackendProgramDesc desc;
+    CKFFProgramDesc desc;
     desc.VertexShader = vs;
     desc.PixelShader = fs;
-    CKBackendUniformBinding uniform;
+    CKFFUniformBinding uniform;
     uniform.Slot = 27;
     uniform.Name = "u_customData";
     uniform.Count = 2;
     uniform.Stage = CKRST_SHADER_PIXEL;
-    desc.Uniforms.push_back(uniform);
-    CKBackendSamplerBinding sampler;
+    desc.Uniforms.PushBack(uniform);
+    CKFFSamplerBinding sampler;
     sampler.Slot = 2;
     sampler.Name = "s_customImage";
-    desc.Samplers.push_back(sampler);
+    desc.Samplers.PushBack(sampler);
     TestCheck(b->CreateProgram(&desc, &program) == CK_OK && program != 0, "program");
     return program;
+}
+
+CKERROR UpdateBuffer(CKRecordingBackend *backend, CKBufferKind kind,
+                     CKDWORD buffer, CKDWORD offset,
+                     CKDWORD size, const void *data)
+{
+    CKBufferUpdateDesc desc;
+    desc.Kind = kind;
+    desc.Buffer = buffer;
+    desc.Offset = offset;
+    desc.Size = size;
+    desc.Data = data;
+    return backend->UpdateBuffer(&desc);
 }
 
 void TestCapsAndTables()
 {
     Fixture f;
-    const CKBackendCaps &caps = f.Backend->GetCaps();
+    const CKRasterizerDeviceCaps &caps = f.Backend->GetCaps();
     TestCheck(caps.ShaderFormat == CKRST_SHADER_FORMAT_BGFX, "caps carry the shader payload format");
     TestCheck(caps.ShaderProfile == CKRST_SHADER_PROFILE_DX11, "caps carry the shader profile");
     TestCheck(caps.MaxTextureSize > 0, "caps carry the texture size limit");
@@ -92,11 +103,9 @@ void TestCapsAndTables()
     TestCheck(f.Backend->GetDeviceStatus() == CK_OK && f.Backend->IsIdle(), "idle after Init");
 
     CKRasterizerTargetDesc targetDefaults;
-    TestCheck(targetDefaults.Size == sizeof(CKRasterizerTargetDesc) &&
-                  targetDefaults.Version == 2 &&
-                  targetDefaults.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN &&
+    TestCheck(targetDefaults.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN &&
                   targetDefaults.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN,
-              "shader target descriptor version covers format and profile");
+              "shader target descriptor defaults are explicit");
 
     CKShaderDesc shaderDefaults;
     TestCheck(shaderDefaults.Format == CKRST_SHADER_FORMAT_UNKNOWN &&
@@ -109,14 +118,14 @@ void TestCapsAndTables()
                   shaderDefaults.UniformBufferCount == 0,
               "shader resource layout defaults to empty");
 
-    TestCheck(caps.MaxTextureBindings == CKBACKEND_MAX_TEXTURE_SLOTS,
+    TestCheck(caps.MaxTextureBindings == CKFF_TEXTURE_SLOT_COUNT,
               "generic logical texture capacity is independent of a shader family");
 }
 
 void TestResources()
 {
     Fixture f;
-    CKRasterizerBackend *b = f.Backend;
+    CKRecordingBackend *b = f.Backend;
     CKTextureDesc tex;
     VxPixelFormat2ImageDesc(_32_ARGB8888, tex.Format);
     tex.Format.Width = 8;
@@ -127,12 +136,12 @@ void TestResources()
     CKDWORD color = 0;
     TestCheck(b->CreateTexture(&tex, NULL, &color) == CK_OK && color != 0, "render target texture");
     TestCheck(b->IsObjectAlive(color, CKRST_OBJ_TEXTURE), "texture alive");
-    CKBackendDepthDesc depthDesc;
+    CKDepthTextureDesc depthDesc;
     depthDesc.Width = 8;
     depthDesc.Height = 8;
     CKDWORD depth = 0;
     TestCheck(b->CreateDepthTexture(&depthDesc, &depth) == CK_OK && depth != 0, "depth texture");
-    CKBackendRenderTargetDesc rtDesc;
+    CKRenderTargetDesc rtDesc;
     rtDesc.ColorTexture = color;
     rtDesc.DepthTexture = depth;
     CKDWORD rt = 0;
@@ -141,8 +150,8 @@ void TestResources()
 
     const CKDWORD layout = MakeLayout(b);
     float vertices[3 * 3] = {0};
-    CKBackendBufferDesc vbDesc;
-    vbDesc.Kind = CKRST_BACKEND_BUFFER_VERTEX;
+    CKBufferDesc vbDesc;
+    vbDesc.Kind = CKRST_BUFFER_VERTEX;
     vbDesc.Size = sizeof(vertices);
     vbDesc.Stride = 12;
     vbDesc.Layout = layout;
@@ -153,19 +162,22 @@ void TestResources()
     CKDWORD bad = 0;
     TestCheck(b->CreateBuffer(&vbDesc, &bad) != CK_OK && bad == 0, "vertex buffer size must be a multiple of the stride");
     CKWORD indices[3] = {0, 1, 2};
-    CKBackendBufferDesc ibDesc;
-    ibDesc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+    CKBufferDesc ibDesc;
+    ibDesc.Kind = CKRST_BUFFER_INDEX;
     ibDesc.Size = sizeof(indices);
     ibDesc.Dynamic = TRUE;
     CKDWORD ib = 0;
     TestCheck(b->CreateBuffer(&ibDesc, &ib) == CK_OK && ib != 0, "index buffer");
-    TestCheck(b->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, ib, 0, sizeof(indices), indices) == CK_OK,
+    TestCheck(UpdateBuffer(b, CKRST_BUFFER_INDEX, ib,
+                           0, sizeof(indices), indices) == CK_OK,
               "index buffer update");
-    TestCheck(b->UpdateBuffer(CKRST_BACKEND_BUFFER_VERTEX, ib, 0, sizeof(indices), indices) != CK_OK,
+    TestCheck(UpdateBuffer(b, CKRST_BUFFER_VERTEX, ib,
+                           0, sizeof(indices), indices) != CK_OK,
               "buffer kind mismatch rejected");
-    TestCheck(b->UpdateBuffer(CKRST_BACKEND_BUFFER_INDEX, 0xDEAD, 0, 4, indices) != CK_OK,
+    TestCheck(UpdateBuffer(b, CKRST_BUFFER_INDEX, 0xDEAD,
+                           0, 4, indices) != CK_OK,
               "unknown buffer update rejected");
-    ibDesc.Kind = (CKBackendBufferKind)99;
+    ibDesc.Kind = (CKBufferKind)99;
     bad = 0;
     TestCheck(b->CreateBuffer(&ibDesc, &bad) == CKERR_INVALIDPARAMETER && bad == 0,
               "unknown buffer kind rejected");
@@ -183,15 +195,15 @@ void TestResources()
 void TestFrame()
 {
     Fixture f;
-    CKRasterizerBackend *b = f.Backend;
+    CKRecordingBackend *b = f.Backend;
     const CKDWORD layout = MakeLayout(b);
     const CKDWORD program = MakeProgram(b);
 
     // Draws outside a pass are refused.
-    CKBackendDraw draw;
+    CKDrawCommand draw;
     draw.Program = program;
     draw.Layout = layout;
-    CKBackendTransientVertices tv;
+    CKTransientVertexData tv;
     TestCheck(b->AllocTransientVertices(3, layout, &tv) && tv.Data && tv.Count == 3 && tv.Stride == 12 && tv.Token != 0,
               "transient vertices");
     draw.TransientVertices = &tv;
@@ -199,7 +211,7 @@ void TestFrame()
     TestCheck(b->Draw(&draw) == CKERR_INVALIDOPERATION, "draw without a pass rejected");
 
     // Pass 1: clear + draw with a sticky state and a bound texture.
-    CKBackendPassDesc pass;
+    CKRenderPassDesc pass;
     pass.Rect.right = 64;
     pass.Rect.bottom = 48;
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH;
@@ -210,7 +222,7 @@ void TestFrame()
                   f.Backend->PassClears.back().Rect.right == 64,
               "the pass clear reaches the backend");
 
-    CKBackendPipelineState state;
+    CKFFPipelineState state;
     state.State.Lo = CKRST_STATE_WRITE_RGBA | CKRST_STATE_DEPTH_TEST | CKRST_STATE_DEPTH_FUNC(VXCMP_LESSEQUAL);
     state.StencilRef = 0x107; // clamped to 8 bits
     state.ScissorEnabled = TRUE;
@@ -232,10 +244,10 @@ void TestFrame()
     CKSamplerDesc sampler;
     memset(&sampler, 0, sizeof(sampler));
     sampler.MinFilter = CKRST_FILTER_LINEAR;
-    CKBackendTextureBindings bindings;
+    CKFFTextureBindings bindings;
     bindings[2].Texture = texture; bindings[2].Sampler = sampler;
     draw.Textures = &bindings;
-    CKBackendConstants constants;
+    CKFFConstantSet constants;
     draw.Constants = &constants;
     float block[8] = {0};
     TestCheck(constants.Set(27, block, sizeof(block)) == CK_OK, "push arbitrary logical byte slot");
@@ -261,7 +273,7 @@ void TestFrame()
     pass.ClearFlags = 0;
     pass.Name = "overlay";
     TestCheck(b->BeginPass(&pass) == CK_OK, "second BeginPass");
-    bindings[2] = CKBackendTextureBinding();
+    bindings[2] = CKFFTextureSlot();
     draw.Marker = nullptr;
     TestCheck(b->Draw(&draw) == CK_OK, "second Draw");
     TestCheck(f.Backend->Log.Draws.size() == 2 && f.Backend->Log.Draws[1].Pass > f.Backend->Log.Draws[0].Pass,
@@ -281,12 +293,16 @@ void TestFrame()
 
     // Present closes the frame and fills the stats.
     CKDWORD frame = 0;
-    TestCheck(b->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_IMMEDIATE, TRUE), &frame) == CK_OK, "Present");
-    TestCheck(f.Backend->Frames.size() == 1 && f.Backend->Frames[0] == CKRST_BACKEND_SYNC_IMMEDIATE, "Present(IMMEDIATE) recorded");
-    const CKBackendStats &stats = b->GetStats();
+    TestCheck(b->Submit(CKRST_PRESENT_IMMEDIATE, TRUE, &frame) == CK_OK &&
+                  b->GetLastSubmitId() != 0 &&
+                  b->GetCompletedSubmitId() == b->GetLastSubmitId(),
+              "Present");
+    TestCheck(f.Backend->Frames.size() == 1 && f.Backend->Frames[0] == CKRST_PRESENT_IMMEDIATE, "Present(IMMEDIATE) recorded");
+    const CKRecordingStats &stats = b->GetStats();
     TestCheck(stats.Frames == 1 && stats.Passes == 2 && stats.Draws == 2 && stats.Blits == 2, "stats of the frame");
     TestCheck(b->IsIdle(), "idle after Present");
-    TestCheck(b->Submit(CKBackendSubmitDesc(CKRST_BACKEND_SYNC_UNCHANGED, FALSE), &frame) == CK_OK && f.Backend->Frames.back() == CKRST_BACKEND_SYNC_UNCHANGED,
+    TestCheck(b->Submit(CKRST_PRESENT_UNCHANGED, FALSE, &frame) == CK_OK &&
+                  f.Backend->Frames.back() == CKRST_PRESENT_UNCHANGED,
               "resource submission retains the presentation sync mode");
     TestCheck(b->GetStats().Passes == 0 && b->GetStats().Draws == 0, "an empty frame has no passes");
 

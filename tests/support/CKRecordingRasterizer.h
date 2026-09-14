@@ -5,8 +5,8 @@
 #include "CKBuiltinShaders.h"
 #include "CKRasterizer.h"
 
-void CKRecordingShaderTargets(std::vector<CKBackendShaderTarget> &out);
-CKBOOL CKRecordingShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out);
+void CKRecordingShaderTargets(XClassArray<CKFFShaderTarget> &out);
+CKBOOL CKRecordingShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out);
 
 class CKRecordingRasterizerDriver : public CKRasterizerDriver {
 public:
@@ -16,11 +16,15 @@ public:
     CKRasterizerContext *CreateContext() override;
     CKBOOL DestroyContext(CKRasterizerContext *context) override;
 
-    virtual CKRasterizerBackend *CreateBackend();
-    virtual CKBOOL DestroyBackend(CKRasterizerBackend *backend);
-    virtual void GetShaderTargets(std::vector<CKBackendShaderTarget> &out) const;
-    virtual CKBOOL GetShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out) const;
-    CKBackendCaps GetBackendConventions() const;
+    virtual CKRecordingBackend *CreateBackend();
+    virtual CKBOOL DestroyBackend(CKRecordingBackend *backend);
+    virtual void GetShaderTargets(XClassArray<CKFFShaderTarget> &out) const;
+    virtual CKBOOL GetShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out) const;
+    CKRasterizerDeviceCaps GetBackendConventions() const;
+    int GetContextCount() const { return m_Contexts.Size(); }
+    void AddTextureFormat(const CKTextureDesc &desc) {
+        m_TextureFormats.PushBack(desc);
+    }
 
     CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
@@ -32,16 +36,13 @@ protected:
     CKBOOL BuildShaderLibrary(CKFFShaderLibrary &shaders) const;
 
 private:
-    XArray<CKRecordingBackend *> m_Backends;
     XArray<CKRecordingBackend *> m_ContextBackends;
+    XArray<CKRecordingBackend *> m_Backends;
 };
 
 class CKRecordingRasterizer : public CKRasterizer {
 public:
-    ~CKRecordingRasterizer() override;
-
     CKBOOL Start(WIN_HANDLE appWindow) override;
-    void Close() override;
 
 protected:
     virtual CKRecordingRasterizerDriver *NewDriver();

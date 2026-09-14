@@ -7,9 +7,10 @@
 // CKRecordingBackend
 // ===========================================================================
 
-CKRecordingBackend::CKRecordingBackend(const CKBackendCaps &Conventions)
+CKRecordingBackend::CKRecordingBackend(const CKRasterizerDeviceCaps &Conventions)
     : m_Conventions(Conventions), m_Initialized(FALSE), m_ShuttingDown(FALSE), m_DebugFlags(0), m_PosX(0), m_PosY(0),
-      m_Width(0), m_Height(0), m_FrameNumber(0), m_NextHandle(1), m_PassOpen(FALSE), m_FrameBlits(0),
+      m_Width(0), m_Height(0), m_FrameNumber(0), m_LastSubmitId(0),
+      m_CompletedSubmitId(0), m_NextHandle(1), m_PassOpen(FALSE), m_FrameBlits(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0)
 {
     memset(m_Textures, 0, sizeof(m_Textures));
@@ -21,7 +22,7 @@ CKRecordingBackend::~CKRecordingBackend()
     Shutdown();
 }
 
-CKERROR CKRecordingBackend::Init(const CKBackendInitDesc *Desc)
+CKERROR CKRecordingBackend::Init(const CKRasterizerInitParameters *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
@@ -34,16 +35,15 @@ CKERROR CKRecordingBackend::Init(const CKBackendInitDesc *Desc)
         ? m_Conventions.ShaderFormat : CKRST_SHADER_FORMAT_BGFX;
     const CK_SHADER_PROFILE shaderProfile = m_Conventions.ShaderProfile != CKRST_SHADER_PROFILE_UNKNOWN
         ? m_Conventions.ShaderProfile : CKRST_SHADER_PROFILE_DX11;
-    bool targetAllowed = Desc->ShaderTargets.empty();
-    for (const auto &target : Desc->ShaderTargets) {
+    bool targetAllowed = Desc->ShaderTargets.Size() == 0;
+    for (int i = 0; i < Desc->ShaderTargets.Size(); ++i) {
+        const CKFFShaderTarget &target = Desc->ShaderTargets[i];
         if (target.Format == shaderFormat && target.Profile == shaderProfile) {
             targetAllowed = true;
             break;
         }
     }
     if (!targetAllowed) {
-        fprintf(stderr, "CKRecordingBackend: shader target format=%u profile=%u is absent from InitDesc.ShaderTargets\n",
-                (unsigned)shaderFormat, (unsigned)shaderProfile);
         return CKERR_NOTIMPLEMENTED;
     }
 
@@ -54,16 +54,16 @@ CKERROR CKRecordingBackend::Init(const CKBackendInitDesc *Desc)
     m_DebugFlags = Desc->DebugFlags;
     m_ShuttingDown = FALSE;
     m_Initialized = TRUE;
-    m_Stats = CKBackendStats();
+    m_Stats = CKRecordingStats();
 
-    m_Caps = CKBackendCaps();
+    m_Caps = CKRasterizerDeviceCaps();
     m_Caps.Features = CKRST_DEVCAPS_VERTEX_SHADER | CKRST_DEVCAPS_PIXEL_SHADER | CKRST_DEVCAPS_PASSES |
                       CKRST_DEVCAPS_FRAMEBUFFER | CKRST_DEVCAPS_TRANSIENT_BUFFERS | CKRST_DEVCAPS_SCISSOR |
                       CKRST_DEVCAPS_BUFFER_UPDATE | CKRST_DEVCAPS_TEXTURE_UPDATE | CKRST_DEVCAPS_DEPTH_TEXTURE |
                       CKRST_DEVCAPS_TEXTURE_CUBE | CKRST_DEVCAPS_TEXTURE_3D | CKRST_DEVCAPS_TEXTURE_READBACK |
                       CKRST_DEVCAPS_BLIT | CKRST_DEVCAPS_BLEND_EQUATION | CKRST_DEVCAPS_INDEX32;
     m_Caps.MaxTextureSize = 4096;
-    m_Caps.MaxTextureBindings = CKBACKEND_MAX_TEXTURE_SLOTS;
+    m_Caps.MaxTextureBindings = CKFF_TEXTURE_SLOT_COUNT;
     m_Caps.MaxPasses = CKRST_MAX_PASSES;
     m_Caps.MaxMSAASamples = 16;
     m_Caps.ShaderFormat = shaderFormat;
@@ -187,7 +187,7 @@ CKERROR CKRecordingBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD 
     return CK_OK;
 }
 
-CKERROR CKRecordingBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateDepthTexture(const CKDepthTextureDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -205,7 +205,7 @@ CKERROR CKRecordingBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, C
     return CK_OK;
 }
 
-CKERROR CKRecordingBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateRenderTarget(const CKRenderTargetDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -229,7 +229,7 @@ CKERROR CKRecordingBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *
     return CK_OK;
 }
 
-CKERROR CKRecordingBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateBuffer(const CKBufferDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -239,13 +239,13 @@ CKERROR CKRecordingBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWOR
     if (!Desc || Desc->Size == 0)
         return CKERR_INVALIDPARAMETER;
     CKRecordingObject object;
-    if (Desc->Kind == CKRST_BACKEND_BUFFER_VERTEX) {
+    if (Desc->Kind == CKRST_BUFFER_VERTEX) {
         if (Desc->Stride == 0 || (Desc->Size % Desc->Stride) != 0)
             return CKERR_INVALIDPARAMETER;
         object.Type = CKRST_OBJ_VERTEXBUFFER;
         object.Stride = Desc->Stride;
         object.Layout = Desc->Layout;
-    } else if (Desc->Kind == CKRST_BACKEND_BUFFER_INDEX) {
+    } else if (Desc->Kind == CKRST_BUFFER_INDEX) {
         const CKDWORD indexSize = Desc->Index32 ? 4 : 2;
         if ((Desc->Size % indexSize) != 0)
             return CKERR_INVALIDPARAMETER;
@@ -262,18 +262,22 @@ CKERROR CKRecordingBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWOR
     return CK_OK;
 }
 
-CKERROR CKRecordingBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
-                                    CKDWORD Size, const void *Data)
+CKERROR CKRecordingBackend::UpdateBuffer(const CKBufferUpdateDesc *Desc)
 {
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
-    if (Kind != CKRST_BACKEND_BUFFER_VERTEX && Kind != CKRST_BACKEND_BUFFER_INDEX)
+    if (!Desc ||
+        (Desc->Kind != CKRST_BUFFER_VERTEX &&
+         Desc->Kind != CKRST_BUFFER_INDEX) ||
+        (unsigned)Desc->Mode > CKRST_BUFFER_UPDATE_NOOVERWRITE ||
+        (Desc->Mode == CKRST_BUFFER_UPDATE_NOOVERWRITE &&
+         Desc->Rename))
         return CKERR_INVALIDPARAMETER;
-    const CKRecordingObject *object = FindObject(Buffer);
-    const CKDWORD expectedType = Kind == CKRST_BACKEND_BUFFER_VERTEX
+    CKRecordingObject *object = FindObject(Desc->Buffer);
+    const CKDWORD expectedType = Desc->Kind == CKRST_BUFFER_VERTEX
         ? CKRST_OBJ_VERTEXBUFFER : CKRST_OBJ_INDEXBUFFER;
-    if (!object || object->Type != expectedType || !Data ||
-        Size == 0 || Offset > object->Size || Size > object->Size - Offset)
+    if (!object || object->Type != expectedType || !Desc->Data || Desc->Size == 0 ||
+        Desc->Offset > object->Size || Desc->Size > object->Size - Desc->Offset)
         return CKERR_INVALIDPARAMETER;
     ++m_FrameBufferUploads;
     return CK_OK;
@@ -315,7 +319,7 @@ CKERROR CKRecordingBackend::CreateShader(const CKShaderDesc *Desc, CKDWORD *Out)
     return CK_OK;
 }
 
-CKERROR CKRecordingBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out)
+CKERROR CKRecordingBackend::CreateProgram(const CKFFProgramDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -327,7 +331,7 @@ CKERROR CKRecordingBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDW
     const CKRecordingObject *vs = FindObject(Desc->VertexShader);
     const CKRecordingObject *ps = FindObject(Desc->PixelShader);
     if (!vs || !ps || vs->Type != CKRST_OBJ_SHADER || ps->Type != CKRST_OBJ_SHADER ||
-        CKValidateBackendProgram(*Desc, vs->Shader, ps->Shader) != CK_OK)
+        CKFFValidateProgram(*Desc, vs->Shader, ps->Shader) != CK_OK)
         return CKERR_INVALIDPARAMETER;
     CKRecordingObject object;
     object.Type = CKRST_OBJ_PROGRAM;
@@ -355,18 +359,26 @@ CKERROR CKRecordingBackend::DestroyObject(CKDWORD Object, CKDWORD Type)
     return CK_OK;
 }
 
-void CKRecordingBackend::SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name)
+CKERROR CKRecordingBackend::SetObjectName(CKDWORD Object, CKDWORD Type,
+                                          const char *Name)
 {
-    (void)Object;
-    (void)Type;
-    (void)Name;
+    if (!m_Initialized)
+        return CKERR_INVALIDOPERATION;
+    if (!Name)
+        return CKERR_INVALIDPARAMETER;
+    std::unordered_map<CKDWORD, CKRecordingObject>::iterator it =
+        m_Objects.find(Object);
+    if (it == m_Objects.end() || (it->second.Type & Type) == 0)
+        return CKERR_INVALIDPARAMETER;
+    it->second.Name = Name;
+    return CK_OK;
 }
 
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
 
-CKERROR CKRecordingBackend::BeginPass(const CKBackendPassDesc *Desc)
+CKERROR CKRecordingBackend::BeginPass(const CKRenderPassDesc *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
@@ -395,11 +407,11 @@ CKERROR CKRecordingBackend::BeginPass(const CKBackendPassDesc *Desc)
     return CK_OK;
 }
 
-CKBOOL CKRecordingBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out)
+CKBOOL CKRecordingBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKTransientVertexData *Out)
 {
     if (!Out || Count == 0 || !m_Initialized)
         return FALSE;
-    *Out = CKBackendTransientVertices();
+    *Out = CKTransientVertexData();
     const CKRecordingObject *layout = FindObject(Layout);
     if (!layout || layout->Type != CKRST_OBJ_VERTEXLAYOUT || layout->Stride == 0)
         return FALSE;
@@ -412,11 +424,11 @@ CKBOOL CKRecordingBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout,
     return TRUE;
 }
 
-CKBOOL CKRecordingBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out)
+CKBOOL CKRecordingBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKTransientIndexData *Out)
 {
     if (!Out || Count == 0 || !m_Initialized)
         return FALSE;
-    *Out = CKBackendTransientIndices();
+    *Out = CKTransientIndexData();
     m_TransientIndices.push_back(std::vector<CKBYTE>((size_t)Count * (Index32 ? 4 : 2), 0));
     Out->Data = m_TransientIndices.back().data();
     Out->Count = Count;
@@ -425,7 +437,7 @@ CKBOOL CKRecordingBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, 
     return TRUE;
 }
 
-CKERROR CKRecordingBackend::Draw(const CKBackendDraw *Draw)
+CKERROR CKRecordingBackend::Draw(const CKDrawCommand *Draw)
 {
     if (!Draw || !Draw->Program)
         return CKERR_INVALIDPARAMETER;
@@ -439,7 +451,7 @@ CKERROR CKRecordingBackend::Draw(const CKBackendDraw *Draw)
     if (Draw->TransientVertices) {
         if (Draw->TransientVertices->Token == 0 || Draw->TransientVertices->Token > m_TransientVertices.size())
             return CKERR_INVALIDPARAMETER;
-    } else if (!Draw->VertexBuffer && !program->Program.VertexInputs.empty()) {
+    } else if (!Draw->VertexBuffer && program->Program.VertexInputs.Size() != 0) {
         return CKERR_INVALIDPARAMETER;
     }
     if (Draw->TransientIndices &&
@@ -447,14 +459,18 @@ CKERROR CKRecordingBackend::Draw(const CKBackendDraw *Draw)
         return CKERR_INVALIDPARAMETER;
     m_State = Draw->Pipeline;
     m_Marker = Draw->Marker ? Draw->Marker : "";
-    for (CKDWORD slot = 0; slot < CKBACKEND_MAX_TEXTURE_SLOTS; ++slot) {
-        const CKBackendTextureBinding binding = Draw->Textures ? (*Draw->Textures)[slot] : CKBackendTextureBinding();
+    for (CKDWORD slot = 0; slot < CKFF_TEXTURE_SLOT_COUNT; ++slot) {
+        const CKFFTextureSlot binding = Draw->Textures ? (*Draw->Textures)[slot] : CKFFTextureSlot();
         m_Textures[slot] = binding.Texture;
         m_Samplers[slot] = binding.Sampler;
     }
-    for (CKDWORD slot = 0; slot < CKBACKEND_MAX_CONSTANT_SLOTS; ++slot) {
-        if (Draw->Constants) m_Constants[slot] = (*Draw->Constants)[slot].Bytes;
-        else m_Constants[slot].clear();
+    for (CKDWORD slot = 0; slot < CKFF_CONSTANT_SLOT_COUNT; ++slot) {
+        if (Draw->Constants) {
+            const XArray<CKBYTE> &bytes = (*Draw->Constants)[slot].Bytes;
+            m_Constants[slot].assign(bytes.Begin(), bytes.End());
+        } else {
+            m_Constants[slot].clear();
+        }
     }
     CKRecordingDraw record;
     record.Pass = GetCurrentPass();
@@ -492,17 +508,21 @@ CKERROR CKRecordingBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD Dst
     return CK_OK;
 }
 
-CKERROR CKRecordingBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber)
+CKERROR CKRecordingBackend::Submit(CKPresentSync Mode, CKBOOL PresentWindow,
+                                   CKDWORD *FrameNumber)
 {
-    const CKBackendPresentSync Mode = Desc.Sync;
+    (void)PresentWindow;
     if (FrameNumber)
         *FrameNumber = 0;
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
-    if (Mode != CKRST_BACKEND_SYNC_IMMEDIATE && Mode != CKRST_BACKEND_SYNC_VSYNC &&
-        Mode != CKRST_BACKEND_SYNC_UNCHANGED)
+    if (Mode != CKRST_PRESENT_IMMEDIATE && Mode != CKRST_PRESENT_VSYNC &&
+        Mode != CKRST_PRESENT_UNCHANGED)
         return CKERR_INVALIDPARAMETER;
+    if (m_LastSubmitId == (CKQWORD)-1)
+        return CKERR_INVALIDOPERATION;
     ++m_FrameNumber;
+    m_CompletedSubmitId = ++m_LastSubmitId;
     for (auto &ticket : m_Readbacks) ticket->Complete = TRUE;
     m_Readbacks.clear();
     if (FrameNumber)
@@ -525,7 +545,7 @@ CKERROR CKRecordingBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *Fra
 
 // Readbacks deliver a zero-filled ARGB image of the texture size, available
 // after the next Present().
-CKERROR CKRecordingBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKBackendReadbackTicket *Ticket)
+CKERROR CKRecordingBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadbackDesc *Readback, CKRecordingReadbackTicket *Ticket)
 {
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
@@ -546,8 +566,9 @@ CKERROR CKRecordingBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip, CKReadback
     Readback->RequiredSize = Readback->RowPitch * height;
     if (!Ticket)
         return CK_OK;
-    auto pending = std::make_shared<CKRecordingBackend::Readback>();
-    pending->Data.resize(Readback->RequiredSize, 0);
+    auto pending = std::make_shared<CKRecordingReadback>();
+    pending->Data.Resize((int)Readback->RequiredSize);
+    memset(pending->Data.Begin(), 0, Readback->RequiredSize);
     pending->AvailableFrame = m_FrameNumber + 1;
     m_Readbacks.push_back(pending);
     *Ticket = pending;

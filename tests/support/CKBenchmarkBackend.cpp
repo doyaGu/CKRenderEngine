@@ -3,7 +3,7 @@
 #include <cstring>
 #include <new>
 
-CKBenchmarkBackend::CKBenchmarkBackend(const CKBackendCaps &conventions)
+CKBenchmarkBackend::CKBenchmarkBackend(const CKRasterizerDeviceCaps &conventions)
     : CKRecordingBackend(conventions)
 {
 }
@@ -37,10 +37,10 @@ void CKBenchmarkBackend::ResetMeasurements()
     m_SubmitCount = 0;
     m_PresentCount = 0;
     m_NextTransientToken = 1;
-    m_LastConstantRevisions.fill(0);
+    m_LastConstantChanges.fill(0);
 }
 
-CKERROR CKBenchmarkBackend::BeginPass(const CKBackendPassDesc *desc)
+CKERROR CKBenchmarkBackend::BeginPass(const CKRenderPassDesc *desc)
 {
     if (!desc)
         return CKERR_INVALIDPARAMETER;
@@ -63,7 +63,7 @@ CKERROR CKBenchmarkBackend::BeginPass(const CKBackendPassDesc *desc)
 }
 
 CKBOOL CKBenchmarkBackend::AllocTransientVertices(
-    CKDWORD count, CKDWORD layout, CKBackendTransientVertices *out)
+    CKDWORD count, CKDWORD layout, CKTransientVertexData *out)
 {
     if (!out || count == 0 || !m_Initialized)
         return FALSE;
@@ -74,7 +74,7 @@ CKBOOL CKBenchmarkBackend::AllocTransientVertices(
     const size_t byteCount = static_cast<size_t>(count) * object->Stride;
     if (byteCount > m_VertexScratch.size())
         return FALSE;
-    *out = CKBackendTransientVertices();
+    *out = CKTransientVertexData();
     out->Data = m_VertexScratch.data();
     out->Count = count;
     out->Stride = object->Stride;
@@ -84,14 +84,14 @@ CKBOOL CKBenchmarkBackend::AllocTransientVertices(
 }
 
 CKBOOL CKBenchmarkBackend::AllocTransientIndices(
-    CKDWORD count, CKBOOL index32, CKBackendTransientIndices *out)
+    CKDWORD count, CKBOOL index32, CKTransientIndexData *out)
 {
     if (!out || count == 0 || !m_Initialized)
         return FALSE;
     const size_t byteCount = static_cast<size_t>(count) * (index32 ? 4u : 2u);
     if (byteCount > m_IndexScratch.size())
         return FALSE;
-    *out = CKBackendTransientIndices();
+    *out = CKTransientIndexData();
     out->Data = m_IndexScratch.data();
     out->Count = count;
     out->Index32 = index32;
@@ -100,7 +100,7 @@ CKBOOL CKBenchmarkBackend::AllocTransientIndices(
 }
 
 uint64_t CKBenchmarkBackend::HashDraw(uint64_t hash,
-                                      const CKBackendDraw &draw)
+                                      const CKDrawCommand &draw)
 {
     hash = Mix(hash, draw.Program);
     hash = Mix(hash, draw.Pipeline.State.Lo);
@@ -126,7 +126,8 @@ uint64_t CKBenchmarkBackend::HashDraw(uint64_t hash,
     hash = Mix(hash, draw.Stream1StartVertex);
 
     if (draw.Textures) {
-        for (const CKBackendTextureBinding &binding : *draw.Textures) {
+        for (CKDWORD slot = 0; slot < CKFF_TEXTURE_SLOT_COUNT; ++slot) {
+            const CKFFTextureSlot &binding = (*draw.Textures)[slot];
             hash = Mix(hash, binding.Texture);
             hash = Mix(hash, binding.Sampler.MinFilter);
             hash = Mix(hash, binding.Sampler.MagFilter);
@@ -140,12 +141,12 @@ uint64_t CKBenchmarkBackend::HashDraw(uint64_t hash,
     }
     if (draw.Constants) {
         hash = Mix(hash, draw.Constants->Identity());
-        for (CKDWORD slot = 0; slot < CKBACKEND_MAX_CONSTANT_SLOTS; ++slot) {
-            const CKBackendConstantValue &value = (*draw.Constants)[slot];
+        for (CKDWORD slot = 0; slot < CKFF_CONSTANT_SLOT_COUNT; ++slot) {
+            const CKFFConstantValue &value = (*draw.Constants)[slot];
             hash = Mix(hash,
-                       value.Revision != m_LastConstantRevisions[slot]);
-            hash = Mix(hash, value.Bytes.size());
-            m_LastConstantRevisions[slot] = value.Revision;
+                       value.Change != m_LastConstantChanges[slot]);
+            hash = Mix(hash, (uint64_t)value.Bytes.Size());
+            m_LastConstantChanges[slot] = value.Change;
         }
     }
     if (draw.TransientVertices && draw.TransientVertices->Data) {
@@ -161,7 +162,7 @@ uint64_t CKBenchmarkBackend::HashDraw(uint64_t hash,
     return hash;
 }
 
-CKERROR CKBenchmarkBackend::Draw(const CKBackendDraw *draw)
+CKERROR CKBenchmarkBackend::Draw(const CKDrawCommand *draw)
 {
     if (!draw || !draw->Program)
         return CKERR_INVALIDPARAMETER;
@@ -180,7 +181,7 @@ CKERROR CKBenchmarkBackend::Draw(const CKBackendDraw *draw)
 
 CKERROR CKBenchmarkBackend::PresentTexture(CKDWORD texture, CKDWORD width,
                                             CKDWORD height,
-                                            CKBackendPresentSync sync)
+                                            CKPresentSync sync)
 {
     if (!m_Initialized || texture == 0 || width == 0 || height == 0)
         return CKERR_INVALIDPARAMETER;
@@ -193,22 +194,27 @@ CKERROR CKBenchmarkBackend::PresentTexture(CKDWORD texture, CKDWORD width,
     return CK_OK;
 }
 
-CKERROR CKBenchmarkBackend::Submit(const CKBackendSubmitDesc &desc,
-                                    CKDWORD *frameNumber)
+CKERROR CKBenchmarkBackend::Submit(CKPresentSync sync, CKBOOL presentWindow,
+                                   CKDWORD *frameNumber)
 {
+    if (frameNumber)
+        *frameNumber = 0;
     if (!m_Initialized)
         return CKERR_INVALIDOPERATION;
-    if (desc.Sync != CKRST_BACKEND_SYNC_IMMEDIATE &&
-        desc.Sync != CKRST_BACKEND_SYNC_VSYNC &&
-        desc.Sync != CKRST_BACKEND_SYNC_UNCHANGED)
+    if (sync != CKRST_PRESENT_IMMEDIATE &&
+        sync != CKRST_PRESENT_VSYNC &&
+        sync != CKRST_PRESENT_UNCHANGED)
         return CKERR_INVALIDPARAMETER;
+    if (m_LastSubmitId == (CKQWORD)-1)
+        return CKERR_INVALIDOPERATION;
     ++m_FrameNumber;
+    m_CompletedSubmitId = ++m_LastSubmitId;
     ++m_SubmitCount;
     m_PassOpen = FALSE;
     if (frameNumber)
         *frameNumber = m_FrameNumber;
-    m_Checksum = Mix(m_Checksum, desc.Sync);
-    m_Checksum = Mix(m_Checksum, desc.PresentWindow);
+    m_Checksum = Mix(m_Checksum, sync);
+    m_Checksum = Mix(m_Checksum, presentWindow);
     return CK_OK;
 }
 

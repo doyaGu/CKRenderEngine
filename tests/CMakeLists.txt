@@ -30,15 +30,12 @@ function(ckre_enable_ckff_internal_access TARGET_NAME)
     )
 endfunction()
 
-# These tests intentionally inspect the translated context implementation.
-# Keep private Context headers unavailable to every other test target.
-function(ckre_enable_translated_context_white_box TARGET_NAME)
+# These tests intentionally inspect the test-owned recording Context.
+# Keep its private header unavailable to every other test target.
+function(ckre_enable_recording_context_white_box TARGET_NAME)
     ckre_enable_ckff_internal_access(${TARGET_NAME})
-    target_include_directories(${TARGET_NAME} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/Context
-    )
     target_compile_definitions(${TARGET_NAME} PRIVATE
-        CKRE_TRANSLATED_CONTEXT_WHITE_BOX=1
+        CKRE_RECORDING_CONTEXT_WHITE_BOX=1
     )
 endfunction()
 
@@ -46,12 +43,21 @@ endfunction()
 # Keeping it in a private test library prevents it from becoming an installed
 # backend or an accidental fallback implementation.
 add_library(ckre_recording_support STATIC
+    support/FFPRecordingContext.cpp
+    support/FFPRecordingFrame.cpp
+    support/FFPRecordingPresentStage.cpp
+    support/FFPRecordingReadback.cpp
+    support/FFPRecordingResources.cpp
+    support/FFPRecordingTargets.cpp
+    support/FFPRecordingTransfer.cpp
     support/CKRecordingBackend.cpp
     support/CKRecordingRasterizer.cpp
 )
 target_include_directories(ckre_recording_support PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/support
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
 )
 target_link_libraries(ckre_recording_support PUBLIC CKFFPLib)
 target_compile_features(ckre_recording_support PRIVATE cxx_std_20)
@@ -82,7 +88,15 @@ endfunction()
 function(ckre_add_recording_white_box_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
-    ckre_enable_translated_context_white_box(${TARGET_NAME})
+    ckre_enable_recording_context_white_box(${TARGET_NAME})
+    target_link_libraries(${TARGET_NAME} PRIVATE ckre_recording_support)
+    ckre_register_test(${TARGET_NAME})
+endfunction()
+
+function(ckre_add_recording_ckff_test TARGET_NAME)
+    add_executable(${TARGET_NAME} ${ARGN})
+    ckre_configure_test_target(${TARGET_NAME})
+    ckre_enable_ckff_internal_access(${TARGET_NAME})
     target_link_libraries(${TARGET_NAME} PRIVATE ckre_recording_support)
     ckre_register_test(${TARGET_NAME})
 endfunction()
@@ -90,7 +104,7 @@ endfunction()
 function(ckre_add_engine_recording_white_box_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
-    ckre_enable_translated_context_white_box(${TARGET_NAME})
+    ckre_enable_recording_context_white_box(${TARGET_NAME})
     target_link_libraries(${TARGET_NAME} PRIVATE
         CK2_3DStatic
         ckre_recording_support
@@ -98,14 +112,14 @@ function(ckre_add_engine_recording_white_box_test TARGET_NAME)
     ckre_register_test(${TARGET_NAME})
 endfunction()
 
-# The backend-neutral program interface can be tested without a GPU device.
-add_executable(test_backend_program test_backend_program.cpp)
-target_link_libraries(test_backend_program PRIVATE CKFFPLib)
-set_target_properties(test_backend_program PROPERTIES
+# CPU program validation and constant packing do not require a GPU device.
+add_executable(test_ff_program test_ff_program.cpp)
+target_link_libraries(test_ff_program PRIVATE CKFFPLib)
+set_target_properties(test_ff_program PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
-ckre_copy_runtime_dependencies(test_backend_program)
-add_test(NAME BackendProgramTests COMMAND $<TARGET_FILE:test_backend_program>)
-set_tests_properties(BackendProgramTests PROPERTIES TIMEOUT 60)
+ckre_copy_runtime_dependencies(test_ff_program)
+add_test(NAME FFProgramTests COMMAND $<TARGET_FILE:test_ff_program>)
+set_tests_properties(FFProgramTests PROPERTIES TIMEOUT 60)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 add_test(NAME BgfxDependencyDisabled
@@ -128,12 +142,12 @@ if (Python3_Interpreter_FOUND)
 endif ()
 
 # White-box conformance tests drive CKRasterizerContext through its public
-# methods, then inspect translated-context state or recording-backend output.
+# methods, then inspect test-owned Context state or recording output.
 # They do not link the render engine.
-function(ckre_add_translated_context_white_box_test TARGET_NAME)
+function(ckre_add_recording_context_white_box_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
-    ckre_enable_translated_context_white_box(${TARGET_NAME})
+    ckre_enable_recording_context_white_box(${TARGET_NAME})
     target_link_libraries(${TARGET_NAME} PRIVATE ckre_recording_support)
     ckre_register_test(${TARGET_NAME})
 endfunction()
@@ -148,19 +162,19 @@ ckre_copy_runtime_dependencies(test_recording_backend)
 add_test(NAME RecordingBackendTests COMMAND $<TARGET_FILE:test_recording_backend>)
 set_tests_properties(RecordingBackendTests PROPERTIES TIMEOUT 60)
 
-ckre_add_translated_context_white_box_test(rasterizer3_interface_tests
+ckre_add_recording_context_white_box_test(rasterizer3_interface_tests
     test_rasterizer3_interface.cpp
 )
 
-# Translation core internals (state forwarding into the fixed-function
-# pipeline, device calls) on the same recording device.
-ckre_add_translated_context_white_box_test(rasterizer3_translated_tests
+# Recording Context internals (state forwarding into the fixed-function
+# pipeline and recording device calls).
+ckre_add_recording_context_white_box_test(rasterizer3_translated_tests
     test_rasterizer3_translated.cpp
 )
 
 # Deterministic CKFFPLib workload coverage.  The benchmark target is
 # intentionally not registered with CTest and is never installed or staged.
-ckre_add_translated_context_white_box_test(ffp_benchmark_workload_tests
+ckre_add_recording_context_white_box_test(ffp_benchmark_workload_tests
     test_ffp_benchmark_workload.cpp
 )
 
@@ -169,7 +183,7 @@ add_executable(ffp_pipeline_benchmark
     support/CKBenchmarkBackend.cpp
 )
 ckre_configure_test_target(ffp_pipeline_benchmark)
-ckre_enable_translated_context_white_box(ffp_pipeline_benchmark)
+ckre_enable_recording_context_white_box(ffp_pipeline_benchmark)
 target_link_libraries(ffp_pipeline_benchmark PRIVATE ckre_recording_support)
 target_compile_definitions(ffp_pipeline_benchmark PRIVATE
     CKRE_BENCHMARK_RELEASE=$<IF:$<CONFIG:Release>,1,0>
@@ -188,11 +202,10 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     target_include_directories(sdl_gpu_pipeline_benchmark PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Native
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/Context
     )
     target_link_libraries(sdl_gpu_pipeline_benchmark PRIVATE
         CKFFPLib CKSdlGpuRasterizerStatic SDL3::SDL3)
@@ -291,12 +304,13 @@ ckre_add_ckff_test(ffp_state_matrix_tests
 # Real-backend pixel gate: fixed-function semantics driven through the public
 # rasterizer interface on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
 if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
-    ckre_add_translated_context_white_box_test(rasterizer3_pixel_tests
+    ckre_add_recording_context_white_box_test(rasterizer3_pixel_tests
         test_rasterizer3_pixels.cpp
     )
     target_include_directories(rasterizer3_pixel_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer/Backend
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer/Native
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer/Rasterizer
     )
     target_link_libraries(rasterizer3_pixel_tests PRIVATE
         CKBgfxRasterizerStatic
@@ -308,7 +322,10 @@ if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
 endif ()
 
 if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
-    ckre_add_translated_context_white_box_test(sdl_gpu_ffp_pixel_tests test_rasterizer3_pixels.cpp)
+    ckre_add_recording_context_white_box_test(sdl_gpu_ffp_pixel_tests test_rasterizer3_pixels.cpp)
+    target_include_directories(sdl_gpu_ffp_pixel_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
+    )
     target_compile_definitions(sdl_gpu_ffp_pixel_tests PRIVATE CKRE_PIXEL_SDL_GPU=1)
     target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
     set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
@@ -317,7 +334,7 @@ if (TARGET rasterizer3_pixel_tests)
     set_tests_properties(rasterizer3_pixel_tests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
 endif ()
 
-ckre_add_recording_white_box_test(rasterizer_backend_tests
+ckre_add_recording_ckff_test(rasterizer_backend_tests
     test_rasterizer_backend.cpp
 )
 
@@ -329,7 +346,7 @@ ckre_add_ckff_test(ff_state_resolver_tests
     test_ff_state_resolver.cpp
 )
 
-ckre_add_recording_white_box_test(ffp_pipeline_tests
+ckre_add_recording_ckff_test(ffp_pipeline_tests
     test_ffp_pipeline.cpp
 )
 

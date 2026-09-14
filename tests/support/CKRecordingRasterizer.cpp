@@ -1,22 +1,16 @@
 #include "CKRecordingRasterizer.h"
-
-#include "CKFFRasterizerContext.h"
-#include "CKRasterizerCapsBaseline.h"
+#include "FFPRecordingContext.h"
 
 #include <new>
 #include <string.h>
 
 CKRecordingRasterizerDriver::CKRecordingRasterizerDriver(
     CKRasterizer *owner, CKDWORD index)
-    : Format(CKRST_SHADER_FORMAT_BGFX), Profile(CKRST_SHADER_PROFILE_DX11),
+    : CKRasterizerDriver(owner, index, "Recording Rasterizer", FALSE),
+      Format(CKRST_SHADER_FORMAT_BGFX), Profile(CKRST_SHADER_PROFILE_DX11),
       OriginBottomLeft(FALSE), HomogeneousDepth(FALSE)
 {
-    m_Owner = owner;
-    m_DriverIndex = index;
-    m_Desc = "Recording Rasterizer";
-    m_Hardware = FALSE;
-    m_CapsUpToDate = TRUE;
-
+    m_CapsFinal = TRUE;
     static const int resolutions[][2] = {
         {640, 480},
         {800, 600},
@@ -47,31 +41,24 @@ CKRecordingRasterizerDriver::CKRecordingRasterizerDriver(
     VxPixelFormat2ImageDesc(_32_ARGB8888, textureDesc.Format);
     m_TextureFormats.PushBack(textureDesc);
 
-    memset(&m_3DCaps, 0, sizeof(m_3DCaps));
-    memset(&m_2DCaps, 0, sizeof(m_2DCaps));
-    if (!CKRSTGetCapsBaseline(&m_3DCaps, &m_2DCaps)) {
-        m_3DCaps.MinTextureWidth = 1;
-        m_3DCaps.MinTextureHeight = 1;
-        m_3DCaps.MaxTextureWidth = 4096;
-        m_3DCaps.MaxTextureHeight = 4096;
-        m_3DCaps.MaxClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
-        m_3DCaps.MaxActiveLights = CKRST_MAX_LIGHTS;
-        m_3DCaps.MaxNumberBlendStage = CKRST_MAX_TEXTURE_STAGES;
-        m_3DCaps.MaxNumberTextureStage = CKRST_MAX_TEXTURE_STAGES;
-        m_2DCaps.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D | CKRST_2DCAPS_GDI;
-    }
-    m_3DCaps.CKRasterizerSpecificCaps &=
-        ~(CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL);
-    m_3DCaps.CKRasterizerSpecificCaps |= CKRST_SPECIFICCAPS_SOFTWARE;
+    m_NativeCaps.MaxTextureSize = 4096;
+    m_NativeCaps.MaxTextureStages = CKRST_MAX_TEXTURE_STAGES;
+    m_NativeCaps.MaxAnisotropy = 1;
+    m_NativeCaps.MaxUserClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
+    m_NativeCaps.MaxVertexBlendMatrices = CKRST_MAX_WORLD_MATRICES;
+    m_NativeCaps.MaxMSAASamples = 1;
+    m_NativeCaps.MaxPointSize = 1.0f;
+    m_NativeCaps.MaxLights = CKRST_MAX_LIGHTS;
 }
 CKRecordingRasterizerDriver::~CKRecordingRasterizerDriver()
 {
     while (m_Contexts.Size() > 0) {
         const int index = m_Contexts.Size() - 1;
-        CKRasterizerContext *context = m_Contexts[index];
+        FFPRecordingContext *context =
+            static_cast<FFPRecordingContext *>(m_Contexts[index]);
         if (!DestroyContext(context)) {
             context->BeginShutdown();
-            CKFFDeleteRasterizerContext(context);
+            delete context;
             m_Contexts.PopBack();
             m_ContextBackends.PopBack();
         }
@@ -89,9 +76,9 @@ CKRecordingBackend *CKRecordingRasterizerDriver::NewBackend()
     return new (std::nothrow) CKRecordingBackend(GetBackendConventions());
 }
 
-CKBackendCaps CKRecordingRasterizerDriver::GetBackendConventions() const
+CKRasterizerDeviceCaps CKRecordingRasterizerDriver::GetBackendConventions() const
 {
-    CKBackendCaps caps;
+    CKRasterizerDeviceCaps caps;
     caps.ShaderFormat = Format;
     caps.ShaderProfile = Profile;
     caps.OriginBottomLeft = OriginBottomLeft;
@@ -100,17 +87,17 @@ CKBackendCaps CKRecordingRasterizerDriver::GetBackendConventions() const
 }
 
 void CKRecordingRasterizerDriver::GetShaderTargets(
-    std::vector<CKBackendShaderTarget> &out) const
+    XClassArray<CKFFShaderTarget> &out) const
 {
-    out.clear();
-    CKBackendShaderTarget target;
+    out.Clear();
+    CKFFShaderTarget target;
     target.Format = Format;
     target.Profile = Profile;
-    out.push_back(target);
+    out.PushBack(target);
 }
 
 CKBOOL CKRecordingRasterizerDriver::GetShaderSet(
-    const CKBackendCaps &caps, CKBackendShaderSet &out) const
+    const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out) const
 {
     return CKRecordingShaderSet(caps, out);
 }
@@ -118,20 +105,20 @@ CKBOOL CKRecordingRasterizerDriver::GetShaderSet(
 CKBOOL CKRecordingRasterizerDriver::BuildShaderLibrary(
     CKFFShaderLibrary &shaders) const
 {
-    std::vector<CKBackendShaderTarget> targets;
+    XClassArray<CKFFShaderTarget> targets;
     GetShaderTargets(targets);
-    for (size_t index = 0; index < targets.size(); ++index) {
-        CKBackendCaps caps;
+    for (int index = 0; index < targets.Size(); ++index) {
+        CKRasterizerDeviceCaps caps;
         caps.ShaderFormat = targets[index].Format;
         caps.ShaderProfile = targets[index].Profile;
-        CKBackendShaderSet shaderSet;
+        CKFFShaderSet shaderSet;
         if (GetShaderSet(caps, shaderSet))
             shaders.Add(shaderSet);
     }
     return shaders.Empty() ? FALSE : TRUE;
 }
 
-CKRasterizerBackend *CKRecordingRasterizerDriver::CreateBackend()
+CKRecordingBackend *CKRecordingRasterizerDriver::CreateBackend()
 {
     CKRecordingBackend *backend = NewBackend();
     if (!backend)
@@ -140,7 +127,7 @@ CKRasterizerBackend *CKRecordingRasterizerDriver::CreateBackend()
     return backend;
 }
 
-CKBOOL CKRecordingRasterizerDriver::DestroyBackend(CKRasterizerBackend *backend)
+CKBOOL CKRecordingRasterizerDriver::DestroyBackend(CKRecordingBackend *backend)
 {
     if (!backend)
         return FALSE;
@@ -165,22 +152,21 @@ CKRasterizerContext *CKRecordingRasterizerDriver::CreateContext()
     if (!BuildShaderLibrary(shaders))
         return NULL;
 
-    CKRecordingBackend *backend =
-        static_cast<CKRecordingBackend *>(CreateBackend());
+    CKRecordingBackend *backend = CreateBackend();
     if (!backend)
         return NULL;
 
-    CKFFRasterizerContextDesc desc;
+    FFPRecordingContextDesc desc;
     desc.Driver = this;
     desc.Backend = backend;
     desc.Shaders = &shaders;
-    CKRasterizerContext *context = CKFFCreateRasterizerContext(desc);
+    FFPRecordingContext *context = new (std::nothrow) FFPRecordingContext(desc);
     if (!context) {
         DestroyBackend(backend);
         return NULL;
     }
 
-    m_Contexts.PushBack(context);
+    AddContext(context);
     m_ContextBackends.PushBack(backend);
     return context;
 }
@@ -198,17 +184,12 @@ CKBOOL CKRecordingRasterizerDriver::DestroyContext(CKRasterizerContext *context)
         if (!context->BeginShutdown() || !DestroyBackend(backend))
             return FALSE;
 
-        CKFFDeleteRasterizerContext(context);
+        delete static_cast<FFPRecordingContext *>(context);
         m_Contexts.RemoveAt(index);
         m_ContextBackends.RemoveAt(index);
         return TRUE;
     }
     return FALSE;
-}
-
-CKRecordingRasterizer::~CKRecordingRasterizer()
-{
-    Close();
 }
 
 CKRecordingRasterizerDriver *CKRecordingRasterizer::NewDriver()
@@ -218,41 +199,32 @@ CKRecordingRasterizerDriver *CKRecordingRasterizer::NewDriver()
 
 CKBOOL CKRecordingRasterizer::Start(WIN_HANDLE appWindow)
 {
-    if (m_Drivers.Size() > 0)
+    if (GetDriverCount() != 0)
         return TRUE;
 
-    m_MainWindow = appWindow;
+    CKRasterizer::Start(appWindow);
     CKRecordingRasterizerDriver *driver = NewDriver();
     if (!driver)
         return FALSE;
 
-    driver->m_Owner = this;
-    driver->m_DriverIndex = 0;
-    m_Drivers.PushBack(driver);
+    AddDriver(driver);
     return TRUE;
 }
 
-void CKRecordingRasterizer::Close()
+void CKRecordingShaderTargets(XClassArray<CKFFShaderTarget> &out)
 {
-    for (int index = 0; index < m_Drivers.Size(); ++index)
-        delete m_Drivers[index];
-    m_Drivers.Clear();
-}
-
-void CKRecordingShaderTargets(std::vector<CKBackendShaderTarget> &out)
-{
-    out.clear();
-    CKBackendShaderTarget target;
+    out.Clear();
+    CKFFShaderTarget target;
     target.Format = CKRST_SHADER_FORMAT_BGFX;
     target.Profile = CKRST_SHADER_PROFILE_DX11;
-    out.push_back(target);
+    out.PushBack(target);
 }
 
-CKBOOL CKRecordingShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out)
+CKBOOL CKRecordingShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out)
 {
     static const CKBYTE token[CKRST_BUILTIN_SHADER_COUNT][4] = {
         {'N', 0}, {'N', 1}, {'N', 2}, {'N', 3}, {'N', 4}, {'N', 5}, {'N', 6}};
-    out = CKBackendShaderSet();
+    out = CKFFShaderSet();
     if (caps.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN ||
         caps.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN)
         return FALSE;
