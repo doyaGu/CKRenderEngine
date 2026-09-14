@@ -1,4 +1,4 @@
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxConfig.h"
 #include "VxWindowFunctions.h"
@@ -97,8 +97,7 @@ static bool WriteBmp32(const char *path, uint32_t width, uint32_t height,
 void CKBgfxCallback::fatal(const char *filePath, uint16_t line, bgfx::Fatal::Enum code, const char *str)
 {
     if (m_Context) {
-        m_Context->m_DebugFatalCount.fetch_add(1, std::memory_order_relaxed);
-        m_Context->LatchFatalError(CKERR_INVALIDRENDERCONTEXT);
+        m_Context->RecordFatalError(CKERR_INVALIDRENDERCONTEXT);
     }
     CKBgfxLogf("Fatal", "code=%d at %s:%u: %s",
                (int)code, filePath ? filePath : "?", (unsigned)line, str ? str : "");

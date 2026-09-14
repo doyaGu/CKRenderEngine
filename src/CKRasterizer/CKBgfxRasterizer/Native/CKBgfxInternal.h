@@ -2,8 +2,8 @@
 #define CK_BGFX_INTERNAL_H
 
 #include "CKError.h"
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
+#include "CKRasterizerContextEnums.h"
+#include "CKRasterizerContextTypes.h"
 
 #include <bgfx/bgfx.h>
 

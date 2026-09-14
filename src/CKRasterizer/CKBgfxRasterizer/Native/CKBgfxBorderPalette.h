@@ -10,7 +10,7 @@ public:
     struct Entry { CKDWORD Index; bool Added; bool Approximated; };
     void Reset() { m_Count = 0; }
     Entry Resolve(CKDWORD argb) {
-        CKDWORD nearest = 0, distance = ~0u;
+        CKDWORD nearest = 0, distance = UINT32_MAX;
         for (CKDWORD i = 0; i < m_Count; ++i) {
             if (m_Colors[i] == argb) return {i, false, false};
             CKDWORD d = 0;

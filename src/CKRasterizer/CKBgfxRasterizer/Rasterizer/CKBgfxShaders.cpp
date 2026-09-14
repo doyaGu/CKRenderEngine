@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizer.h"
+#include "CKRasterizerContextData.h"
 #include "shaders/generated/CKFFShaderABI.generated.h"
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_3d_clip.bin.h"
@@ -43,9 +44,9 @@
 #include "shaders/generated/metal/vs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_postprocess.bin.h"
 
-CKBOOL CKBgfxRasterizerShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out)
+CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out)
 {
-    out = CKBackendShaderSet();
+    out = CKFFShaderSet();
     if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX) return FALSE;
     out.ABIVersion = g_CKFFGeneratedShaderABIVersion;
     out.InterfaceHash = g_CKFFGeneratedShaderInterfaceHash;

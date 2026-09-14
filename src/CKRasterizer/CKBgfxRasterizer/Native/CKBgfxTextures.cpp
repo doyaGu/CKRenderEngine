@@ -1,6 +1,6 @@
-// CKBgfxBackend texture creation, update and resource lifetime.
+// CKBgfxRasterizerContext texture creation, update and resource lifetime.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 
@@ -245,7 +245,7 @@ static bool CKBgfxRecreateTexture2D(CKBgfxTextureRecord *rec, bool hasMips)
     return true;
 }
 
-CKBOOL CKBgfxBackend::UpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
+CKBOOL CKBgfxRasterizerContext::UpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
                                              const VxImageDescEx *data)
 {
     if (!rec || rec->MipCount <= 1)
@@ -285,7 +285,7 @@ CKBOOL CKBgfxBackend::UpdateGeneratedMipMaps(CKBgfxTextureRecord *rec,
     return complete;
 }
 
-CKERROR CKBgfxBackend::CreateTexture(const CKTextureDesc *Desc,
+CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
                                                 const VxImageDescEx *Data,
                                                 CKDWORD *OutTexture)
 {
@@ -574,19 +574,19 @@ CKERROR CKBgfxBackend::CreateTexture(const CKTextureDesc *Desc,
 
     *OutTexture = texture;
     if (Data && Data->Image)
-        ++m_FrameTextureUploads;
+        ++m_BgfxFrameTextureUploads;
     return CK_OK;
 }
-CKBOOL CKBgfxBackend::IsObjectAlive(CKDWORD Object, CKDWORD Type) const
+CKBOOL CKBgfxRasterizerContext::IsNativeObjectAlive(CKDWORD Object, CKDWORD Type) const
 {
-    if (!m_BgfxInitialized || !m_Created || Object == 0)
+    if (!m_BgfxInitialized || !m_BgfxCreated || Object == 0)
         return FALSE;
     return m_Resources->IsAlive(Object, Type);
 }
 
 // bgfx defers the destruction to the end of the frame, so objects may go
 // away in the middle of a pass.
-CKERROR CKBgfxBackend::DestroyObject(CKDWORD Object, CKDWORD Type)
+CKERROR CKBgfxRasterizerContext::DestroyObject(CKDWORD Object, CKDWORD Type)
 {
     if (!IsReady())
         return CKERR_INVALIDOPERATION;
@@ -651,32 +651,38 @@ CKERROR CKBgfxBackend::DestroyObject(CKDWORD Object, CKDWORD Type)
     }
 }
 
-void CKBgfxBackend::SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name)
+CKERROR CKBgfxRasterizerContext::SetObjectName(CKDWORD Object, CKDWORD Type, const char *Name)
 {
     if (!IsReady() || !Name)
-        return;
+        return CKERR_INVALIDOPERATION;
     const int32_t len = (int32_t)strlen(Name);
     switch (Type)
     {
     case CKRST_OBJ_SHADER:
-        if (CKBgfxShaderRecord *r = GetShader(Object))
+        if (CKBgfxShaderRecord *r = GetShader(Object)) {
             bgfx::setName(r->Handle, Name, len);
-        break;
+            return CK_OK;
+        }
+        return CKERR_INVALIDPARAMETER;
     case CKRST_OBJ_TEXTURE:
-        if (CKBgfxTextureRecord *r = GetTexture(Object))
+        if (CKBgfxTextureRecord *r = GetTexture(Object)) {
             bgfx::setName(r->Handle, Name, len);
-        break;
+            return CK_OK;
+        }
+        return CKERR_INVALIDPARAMETER;
     case CKRST_OBJ_FRAMEBUFFER:
-        if (CKBgfxFrameBufferRecord *r = GetFrameBuffer(Object))
+        if (CKBgfxFrameBufferRecord *r = GetFrameBuffer(Object)) {
             bgfx::setName(r->Handle, Name, len);
-        break;
+            return CK_OK;
+        }
+        return CKERR_INVALIDPARAMETER;
     default:
-        break;
+        return CKERR_INVALIDPARAMETER;
     }
 }
 
 
-CKERROR CKBgfxBackend::UploadTextureOrdered(bgfx::TextureHandle texture, bgfx::TextureFormat::Enum format,
+CKERROR CKBgfxRasterizerContext::UploadTextureOrdered(bgfx::TextureHandle texture, bgfx::TextureFormat::Enum format,
     CKDWORD mip, CKDWORD x, CKDWORD y, CKDWORD layer, CKDWORD width, CKDWORD height,
     const bgfx::Memory *data, CKBOOL cube, CKBOOL volume)
 {
@@ -723,7 +729,7 @@ CKERROR CKBgfxBackend::UploadTextureOrdered(bgfx::TextureHandle texture, bgfx::T
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
+CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                                                 CKDWORD Face, const CKRECT *Region,
                                                 const VxImageDescEx *Data)
 {
@@ -905,7 +911,7 @@ CKERROR CKBgfxBackend::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
         }
     }
 
-    ++m_FrameTextureUploads;
+    ++m_BgfxFrameTextureUploads;
     const CKERROR upload = UploadTextureOrdered(rec->Handle, rec->Format, Mip, x, y, Face, w, h, mem, isCube, isVolume);
 
     if (Face == 0 && !isCube && !isVolume)

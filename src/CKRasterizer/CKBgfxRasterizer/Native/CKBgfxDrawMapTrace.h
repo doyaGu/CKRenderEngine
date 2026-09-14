@@ -1,7 +1,7 @@
 #ifndef CKBGFX_DRAWMAP_TRACE_H
 #define CKBGFX_DRAWMAP_TRACE_H
 
-#include "CKRasterizerBackendTypes.h"
+#include "CKRasterizerContextTypes.h"
 
 #define CKBGFX_DRAWMAP_SCHEMA 2
 

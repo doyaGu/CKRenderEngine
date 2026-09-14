@@ -1,21 +1,18 @@
 #ifndef CKBGFXRASTERIZER_H
 #define CKBGFXRASTERIZER_H
 
-#include "CKBgfxBackend.h"
-
 #include "CKBuiltinShaders.h"
 #include "CKRasterizer.h"
 
 class CKBgfxRasterizerDriver;
+class CKBgfxRasterizerContext;
+struct CKRasterizerDeviceCaps;
 
-CKBOOL CKBgfxRasterizerShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &out);
+CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out);
 
 class CKBgfxRasterizer final : public CKRasterizer {
 public:
-    ~CKBgfxRasterizer() override;
-
     CKBOOL Start(WIN_HANDLE appWindow) override;
-    void Close() override;
 };
 
 class CKBgfxRasterizerDriver final : public CKRasterizerDriver {
@@ -24,19 +21,16 @@ public:
     ~CKBgfxRasterizerDriver() override;
 
     CKRasterizerContext *CreateContext() override;
-    CKBOOL DestroyContext(CKRasterizerContext *context) override;
 
-    void GetShaderTargets(std::vector<CKBackendShaderTarget> &targets) const;
-    CKBOOL GetShaderSet(const CKBackendCaps &caps, CKBackendShaderSet &shaderSet) const;
-    int GetBackendCount() const { return m_Backends.Size(); }
+    void GetShaderTargets(XClassArray<CKFFShaderTarget> &targets) const;
+    CKBOOL GetShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &shaderSet) const;
+    int GetContextCount() const { return m_Contexts.Size(); }
+    void RefreshCaps(CKBgfxRasterizerContext &context);
 
 private:
-    static void OnBackendReady(void *user, CKRasterizerBackend *backend);
     void BuildShaderLibrary();
-    void RefreshCaps(CKBgfxBackend &backend);
 
     CKFFShaderLibrary m_Shaders;
-    XArray<CKBgfxBackend *> m_Backends;
 };
 
 #endif

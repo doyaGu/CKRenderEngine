@@ -1,6 +1,6 @@
-// CKBgfxBackend ordered texture readback.
+// CKBgfxRasterizerContext ordered texture readback.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 
 #include <memory>
@@ -33,14 +33,14 @@ static bool CKBgfxGetReadbackLayout(const CKBgfxTextureRecord *Record,
     RequiredSize = (CKDWORD)size;
     return true;
 }
-CKERROR CKBgfxBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip,
+CKERROR CKBgfxRasterizerContext::ReadTexture(CKDWORD Texture, CKDWORD Mip,
                                               CKReadbackDesc *Readback,
-                                              CKBackendReadbackTicket *Ticket)
+                                              NativeReadbackTicket *Ticket)
 {
-    if (!m_BgfxInitialized || !m_Created ||
+    if (!m_BgfxInitialized || !m_BgfxCreated ||
         VxThread::GetCurrentVxThreadId() != m_ApiThreadId)
         return CKERR_INVALIDOPERATION;
-    if (!Readback || Readback->Size < sizeof(CKReadbackDesc))
+    if (!Readback)
         return CKERR_INVALIDPARAMETER;
     CKBgfxTextureRecord *rec = GetTexture(Texture);
     if (!rec)
@@ -88,8 +88,8 @@ CKERROR CKBgfxBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip,
         return CK_OK;
     if (!(m_Caps.Features & CKRST_DEVCAPS_BLIT)) return CKERR_NOTIMPLEMENTED;
     if (m_NextView >= m_CapsDesc.MaxRenderViews) return CKERR_OUTOFMEMORY;
-    auto pending = std::make_shared<CKBgfxBackend::Readback>();
-    pending->Data.resize(requiredSize);
+    auto pending = std::make_shared<CKBgfxRasterizerContext::NativeReadback>();
+    pending->Data.Resize((int)requiredSize);
     // bgfx reads textures at the end of a submission. Preserve this call's
     // contents in a unique texture so later blits cannot change the snapshot.
     pending->Snapshot = bgfx::createTexture2D((uint16_t)width, (uint16_t)height, false, 1,
@@ -104,8 +104,8 @@ CKERROR CKBgfxBackend::ReadTexture(CKDWORD Texture, CKDWORD Mip,
     m_DrawPassNeedsResume = m_PassOpen != FALSE;
     m_FrameInProgress = TRUE;
     ++m_FrameBlits;
-    pending->AvailableFrame = bgfx::readTexture(pending->Snapshot, pending->Data.data());
-    m_Readbacks.push_back(pending);
+    pending->AvailableFrame = bgfx::readTexture(pending->Snapshot, pending->Data.Begin());
+    m_BgfxReadbacks.PushBack(pending);
     *Ticket = pending;
     return CK_OK;
 }

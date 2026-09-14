@@ -1,14 +1,15 @@
-// CKBgfxBackend frame submission and draw-marker diagnostics.
+// CKBgfxRasterizerContext frame submission and draw-marker diagnostics.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxInternal.h"
 #include "CKRasterizerDrawMarker.h"
 
 #include <stdint.h>
 
-CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNumber)
+CKERROR CKBgfxRasterizerContext::Submit(CKPresentSync Mode, CKBOOL PresentWindow,
+                                        CKDWORD *FrameNumber)
 {
-    const CKBackendPresentSync Mode = Desc.Sync;
+    (void)PresentWindow;
     if (FrameNumber)
         *FrameNumber = 0;
     if (!IsReady())
@@ -16,17 +17,19 @@ CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
     const CKERROR fatalError = GetDeviceStatus();
     if (fatalError != CK_OK)
         return fatalError;
-    if (Mode != CKRST_BACKEND_SYNC_IMMEDIATE && Mode != CKRST_BACKEND_SYNC_VSYNC &&
-        Mode != CKRST_BACKEND_SYNC_UNCHANGED)
+    if (Mode != CKRST_PRESENT_IMMEDIATE && Mode != CKRST_PRESENT_VSYNC &&
+        Mode != CKRST_PRESENT_UNCHANGED)
         return CKERR_INVALIDPARAMETER;
+    if (m_LastSubmitId == (CKQWORD)-1)
+        return CKERR_INVALIDOPERATION;
 
     // A present-sync change needs bgfx::reset. Applying it to the frame being
     // submitted loses that frame's rendering (the reset recreates the swap
     // chain and the frame buffers while the frame renders), so the frame is
     // rendered with the old sync mode and the reset gets an empty frame of its
     // own right after it.
-    const CKBOOL updatePresentSync = Mode != CKRST_BACKEND_SYNC_UNCHANGED;
-    const CKBOOL vsync = Mode == CKRST_BACKEND_SYNC_VSYNC;
+    const CKBOOL updatePresentSync = Mode != CKRST_PRESENT_UNCHANGED;
+    const CKBOOL vsync = Mode == CKRST_PRESENT_VSYNC;
     const CKBOOL resetAfterFrame = updatePresentSync && vsync != m_VSync;
 
     static int s_PresentSyncLogCount = 0;
@@ -45,7 +48,7 @@ CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
         CKBgfxLogf("FrameMap",
                    "End frame=%u passes=%u submits=%u parsed=%u missingAnnotations=%u rawPrimitive=%u markerOverwrite=%u markerStale=%u invalidSubmit=%u",
                    m_DebugFrameId,
-                   m_FramePasses,
+                   m_BgfxFramePasses,
                    m_DebugSubmitSerial.load(std::memory_order_relaxed),
                    m_DebugParsedAnnotationCount.load(std::memory_order_relaxed),
                    m_DebugMissingAnnotationCount.load(std::memory_order_relaxed),
@@ -91,16 +94,29 @@ CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
         bgfx::reset((uint32_t)m_DrawableWidth, (uint32_t)m_DrawableHeight, m_ResetFlags);
         submittedFrame = bgfx::frame();
     }
-    for (auto it = m_Readbacks.begin(); it != m_Readbacks.end();) {
-        if ((int32_t)(submittedFrame - (*it)->AvailableFrame) >= 0) {
-            (*it)->Complete = TRUE;
-            bgfx::destroy((*it)->Snapshot);
-            (*it)->Snapshot = BGFX_INVALID_HANDLE;
-            it = m_Readbacks.erase(it);
-        } else ++it;
+    for (int i = 0; i < m_BgfxReadbacks.Size();) {
+        std::shared_ptr<NativeReadback> &ticket = m_BgfxReadbacks[i];
+        if ((int32_t)(submittedFrame - ticket->AvailableFrame) >= 0) {
+            ticket->Complete = TRUE;
+            bgfx::destroy(ticket->Snapshot);
+            ticket->Snapshot = BGFX_INVALID_HANDLE;
+            m_BgfxReadbacks.RemoveAt(i);
+        } else {
+            ++i;
+        }
     }
     if (FrameNumber)
         *FrameNumber = submittedFrame;
+
+    ++m_LastSubmitId;
+    m_SubmittedFrames.PushBack(
+        CKBgfxSubmittedFrame(submittedFrame, m_LastSubmitId));
+    while (m_SubmittedFrames.Size() != 0 &&
+           (int32_t)(submittedFrame - m_SubmittedFrames[0].FrameNumber) >
+               (int32_t)CKBGFX_MAX_FRAME_LATENCY) {
+        m_CompletedSubmitId = m_SubmittedFrames[0].SubmitId;
+        m_SubmittedFrames.RemoveAt(0);
+    }
 
     // Views the previous frame used and this one did not keep their
     // configuration in bgfx; reset them so a later frame starts clean.
@@ -124,20 +140,14 @@ CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
     m_TransientIBCount = 0;
     m_DrawErrorLogCount = 0;
 
-    ++m_Stats.Frames;
-    m_Stats.Passes = m_FramePasses;
-    m_Stats.Draws = m_FrameDraws;
-    m_Stats.Blits = m_FrameBlits;
-    m_Stats.TextureUploads = m_FrameTextureUploads;
-    m_Stats.BufferUploads = m_FrameBufferUploads;
-    m_FramePasses = m_FrameDraws = m_FrameBlits = m_FrameTextureUploads = m_FrameBufferUploads = 0;
+    m_BgfxFramePasses = m_FrameDraws = m_FrameBlits = m_BgfxFrameTextureUploads = m_BgfxFrameBufferUploads = 0;
     if (const bgfx::Stats *s = bgfx::getStats()) {
-        m_Stats.CpuTimeFrame = s->cpuTimeFrame;
-        m_Stats.CpuTimerFreq = s->cpuTimerFreq;
-        m_Stats.GpuTimeFrame = s->gpuTimeEnd - s->gpuTimeBegin;
-        m_Stats.GpuTimerFreq = s->gpuTimerFreq;
-        m_Stats.GpuMemoryMax = (CKDWORD)(s->gpuMemoryMax >> 10);
-        m_Stats.GpuMemoryUsed = (CKDWORD)(s->gpuMemoryUsed >> 10);
+        m_BgfxCpuTimeFrame = s->cpuTimeFrame;
+        m_BgfxCpuTimerFreq = s->cpuTimerFreq;
+        m_BgfxGpuTimeFrame = s->gpuTimeEnd - s->gpuTimeBegin;
+        m_BgfxGpuTimerFreq = s->gpuTimerFreq;
+        m_BgfxGpuMemoryMax = (CKDWORD)(s->gpuMemoryMax >> 10);
+        m_BgfxGpuMemoryUsed = (CKDWORD)(s->gpuMemoryUsed >> 10);
     }
 
     ++m_DebugFrameId;
@@ -159,3 +169,7 @@ CKERROR CKBgfxBackend::Submit(const CKBackendSubmitDesc &Desc, CKDWORD *FrameNum
     return CK_OK;
 }
 
+CKQWORD CKBgfxRasterizerContext::GetCompletedSubmitId()
+{
+    return m_CompletedSubmitId;
+}

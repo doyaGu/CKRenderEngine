@@ -609,7 +609,7 @@ CKDWORD CKBgfxImageRowBytes(CKDWORD width, CKDWORD bitsPerPixel)
     if (bitsPerPixel == 0 || (bitsPerPixel % 8) != 0)
         return 0;
     uint64_t rowBytes = (uint64_t)width * (uint64_t)bitsPerPixel / 8;
-    return rowBytes > 0xffffffffu ? 0 : (CKDWORD)rowBytes;
+    return rowBytes > UINT32_MAX ? 0 : (CKDWORD)rowBytes;
 }
 
 CKDWORD CKBgfxResolveImagePitch(CKDWORD width, CKDWORD height,

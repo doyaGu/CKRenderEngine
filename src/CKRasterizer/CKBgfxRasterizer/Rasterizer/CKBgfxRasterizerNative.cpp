@@ -1,4 +1,4 @@
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKRasterizerDrawMarker.h"
@@ -10,7 +10,7 @@
 static_assert(BGFX_API_VERSION == 153, "Review CKBgfxRasterizer mappings before updating bgfx");
 
 static VxMutex g_BgfxContextMutex;
-static CKBgfxBackend *g_BgfxActiveContext = NULL;
+static CKBgfxRasterizerContext *g_BgfxActiveContext = NULL;
 
 static int CKBgfxScaleWindowCoordinate(int value, CKDWORD drawable,
                                        CKDWORD logical, bool upper)
@@ -21,7 +21,7 @@ static int CKBgfxScaleWindowCoordinate(int value, CKDWORD drawable,
     return static_cast<int>(XMin(pixels, static_cast<int64_t>(UINT16_MAX) + 1));
 }
 
-static bool CKBgfxClaimActiveContext(CKBgfxBackend *Context)
+static bool CKBgfxClaimActiveContext(CKBgfxRasterizerContext *Context)
 {
     VxMutexLock lock(g_BgfxContextMutex);
     if (g_BgfxActiveContext && g_BgfxActiveContext != Context)
@@ -30,7 +30,7 @@ static bool CKBgfxClaimActiveContext(CKBgfxBackend *Context)
     return true;
 }
 
-static void CKBgfxReleaseActiveContext(CKBgfxBackend *Context)
+static void CKBgfxReleaseActiveContext(CKBgfxRasterizerContext *Context)
 {
     VxMutexLock lock(g_BgfxContextMutex);
     if (g_BgfxActiveContext == Context)
@@ -114,18 +114,25 @@ static CKBgfxTextureOrientation CKBgfxMergeOrientation(
     return CKBGFX_ORIENTATION_MIXED;
 }
 // ===========================================================================
-// CKBgfxBackend
+// CKBgfxRasterizerContext
 // ===========================================================================
 
-CKBgfxBackend::CKBgfxBackend()
-    : m_BgfxInitialized(FALSE), m_Created(FALSE), m_Window(NULL), m_PosX(0), m_PosY(0),
-      m_Width(0), m_Height(0), m_DrawableWidth(0), m_DrawableHeight(0),
-      m_Fullscreen(FALSE), m_RendererName("Unknown"),
+CKBgfxRasterizerContext::CKBgfxRasterizerContext()
+    : CKRasterizerContext(), m_PassTarget(0), m_LastDeviceFrame(0),
+      m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0),
+      m_CopyWidth(0), m_CopyHeight(0), m_FrameDrawCalls(0),
+      m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
+      m_FrameTextureUploads(0), m_FrameBufferUploads(0),
+      m_LayoutMismatchLogged(FALSE),
+      m_BgfxInitialized(FALSE), m_BgfxCreated(FALSE), m_BgfxWindow(NULL), m_BgfxPosX(0), m_BgfxPosY(0),
+      m_BgfxWidth(0), m_BgfxHeight(0), m_DrawableWidth(0), m_DrawableHeight(0),
+      m_BgfxFullscreen(FALSE), m_RendererName("Unknown"),
       m_RendererType(bgfx::RendererType::Count), m_NativeSupported(0),
       m_VSync(FALSE), m_ResetFlags(BGFX_RESET_NONE), m_ApiThreadId(0),
-      m_ShuttingDown{FALSE}, m_FatalError{CK_OK},
+      m_BgfxShuttingDown{FALSE}, m_FatalError{CK_OK},
       m_FrameInProgress(FALSE), m_PassOpen(FALSE), m_CurrentView(0), m_NextView(0), m_LastFrameViewCount(0),
-      m_FramePasses(0), m_FrameDraws(0), m_FrameBlits(0), m_FrameTextureUploads(0), m_FrameBufferUploads(0),
+      m_BgfxFramePasses(0), m_FrameDraws(0), m_FrameBlits(0), m_BgfxFrameTextureUploads(0), m_BgfxFrameBufferUploads(0),
+      m_LastSubmitId(0), m_CompletedSubmitId(0),
       m_CachedDrawState(), m_CachedBgfxState(0), m_PointSize(0), m_CurrentLayout(0),
       m_DebugVertexBindingMask(0), m_DebugTextureBindingMask(0),
       m_DebugIndexBuffer(0), m_DebugIndexStart(0), m_DebugIndexCount(0), m_DebugIndexHandle(0),
@@ -142,6 +149,7 @@ CKBgfxBackend::CKBgfxBackend()
       m_Resources(new CKBgfxResources()),
       m_TransientVBCount(0), m_TransientIBCount(0)
 {
+    memset(&m_Stats, 0, sizeof(m_Stats));
     memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
     memset(m_DebugVertexBindings, 0, sizeof(m_DebugVertexBindings));
     memset(m_DebugTextureBindings, 0, sizeof(m_DebugTextureBindings));
@@ -162,14 +170,7 @@ CKBgfxBackend::CKBgfxBackend()
         m_DebugSourceSubmitCount[i].store(0, std::memory_order_relaxed);
 }
 
-CKBgfxBackend::~CKBgfxBackend()
-{
-    Shutdown();
-    delete m_Resources;
-    m_Resources = NULL;
-}
-
-void CKBgfxBackend::RecordTextureWrite(
+void CKBgfxRasterizerContext::RecordTextureWrite(
     CKBgfxTextureRecord *Texture, CKDWORD Mip,
     CKBgfxTextureOrientation Orientation, CKBOOL FullOverwrite)
 {
@@ -181,7 +182,7 @@ void CKBgfxBackend::RecordTextureWrite(
     Texture->ReadbackOrientation[Mip] = (CKBYTE)CKBgfxMergeOrientation(
         current, Orientation, FullOverwrite);
 }
-void CKBgfxBackend::RecordTextureBlit(
+void CKBgfxRasterizerContext::RecordTextureBlit(
     CKBgfxTextureRecord *Destination, CKDWORD DestinationMip,
     const CKBgfxTextureRecord *Source, CKDWORD SourceMip,
     CKBOOL FullOverwrite)
@@ -199,7 +200,23 @@ void CKBgfxBackend::RecordTextureBlit(
         (CKBYTE)CKBgfxMergeOrientation(current, source, FullOverwrite);
 }
 
-void CKBgfxBackend::RecordViewColorWrite(bgfx::ViewId View, CKBOOL HasDraw)
+CKBOOL CKBgfxRasterizerContext::GetTextureBottomLeft(CKDWORD Texture,
+                                                      CKBOOL &BottomLeft)
+{
+    CKBgfxTextureRecord *record = GetTexture(Texture);
+    if (!record)
+        return FALSE;
+    VxMutexLock lock(m_ResourceStateMutex);
+    const CKBgfxTextureOrientation orientation =
+        (CKBgfxTextureOrientation)record->ReadbackOrientation[0];
+    if (orientation != CKBGFX_ORIENTATION_TOP_LEFT &&
+        orientation != CKBGFX_ORIENTATION_BOTTOM_LEFT)
+        return FALSE;
+    BottomLeft = orientation == CKBGFX_ORIENTATION_BOTTOM_LEFT ? TRUE : FALSE;
+    return TRUE;
+}
+
+void CKBgfxRasterizerContext::RecordViewColorWrite(bgfx::ViewId View, CKBOOL HasDraw)
 {
     if (View >= CKRST_MAX_PASSES)
         return;
@@ -244,25 +261,27 @@ void CKBgfxBackend::RecordViewColorWrite(bgfx::ViewId View, CKBOOL HasDraw)
 // Device
 // ---------------------------------------------------------------------------
 
-static bool CKBgfxAllowsShaderTarget(const CKBackendInitDesc &Desc, CK_SHADER_PROFILE Profile)
+static bool CKBgfxAllowsShaderTarget(const CKRasterizerInitParameters &Desc, CK_SHADER_PROFILE Profile)
 {
     if (Profile == CKRST_SHADER_PROFILE_UNKNOWN)
         return false;
-    if (Desc.ShaderTargets.empty())
+    if (Desc.ShaderTargets.Size() == 0)
         return true;
-    for (const auto &target : Desc.ShaderTargets)
+    for (int i = 0; i < Desc.ShaderTargets.Size(); ++i) {
+        const CKFFShaderTarget &target = Desc.ShaderTargets[i];
         if (target.Format == CKRST_SHADER_FORMAT_BGFX && target.Profile == Profile)
             return true;
+    }
     return false;
 }
 
-CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
+CKERROR CKBgfxRasterizerContext::Init(const CKRasterizerInitParameters *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
-    if (m_BgfxInitialized || m_Created)
+    if (m_BgfxInitialized || m_BgfxCreated)
         return CKERR_INVALIDOPERATION;
-    bool targetAllowed = Desc->ShaderTargets.empty();
+    bool targetAllowed = Desc->ShaderTargets.Size() == 0;
     for (int renderer = 0; !targetAllowed && renderer < (int)bgfx::RendererType::Count; ++renderer)
         targetAllowed = CKBgfxAllowsShaderTarget(*Desc, CKBgfxShaderProfile((bgfx::RendererType::Enum)renderer));
     if (!targetAllowed) {
@@ -270,19 +289,19 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         return CKERR_NOTIMPLEMENTED;
     }
     m_FatalError.store(CK_OK, std::memory_order_release);
-    m_ShuttingDown.store(FALSE, std::memory_order_release);
+    m_BgfxShuttingDown.store(FALSE, std::memory_order_release);
     if (!CKBgfxClaimActiveContext(this)) {
-        CKBgfxLogf("Init", "another CKBgfxBackend is already active");
+        CKBgfxLogf("Init", "another CKBgfxRasterizerContext is already active");
         return CKERR_INVALIDOPERATION;
     }
 
     WIN_HANDLE Window = Desc->Window;
     int Width = Desc->Width;
     int Height = Desc->Height;
-    m_Window = Window;
-    m_PosX = Desc->PosX;
-    m_PosY = Desc->PosY;
-    m_Fullscreen = Desc->Fullscreen;
+    m_BgfxWindow = Window;
+    m_BgfxPosX = Desc->PosX;
+    m_BgfxPosY = Desc->PosY;
+    m_BgfxFullscreen = Desc->Fullscreen;
     m_DebugFlags = Desc->DebugFlags;
 
     if (Width <= 0 || Height <= 0)
@@ -306,8 +325,8 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         return CKERR_INVALIDPARAMETER;
     }
 
-    m_Width = (CKDWORD)Width;
-    m_Height = (CKDWORD)Height;
+    m_BgfxWidth = (CKDWORD)Width;
+    m_BgfxHeight = (CKDWORD)Height;
     CKBgfxResolveDrawableSize(Window, Width, Height);
     m_DrawableWidth = (CKDWORD)Width;
     m_DrawableHeight = (CKDWORD)Height;
@@ -340,6 +359,7 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
     init.resolution.width = Width;
     init.resolution.height = Height;
     init.resolution.reset = m_ResetFlags;
+    init.resolution.maxFrameLatency = CKBGFX_MAX_FRAME_LATENCY;
     init.callback = &m_BgfxCallback;
 
     if (!bgfx::init(init)) {
@@ -373,12 +393,12 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
         return CKERR_NOTIMPLEMENTED;
     }
     const bgfx::Caps *caps = bgfx::getCaps();
-    m_Caps = CKBackendCaps();
+    m_Caps = CKRasterizerDeviceCaps();
     m_Caps.ShaderFormat = CKRST_SHADER_FORMAT_BGFX;
     m_Caps.ShaderProfile = shaderProfile;
     m_Caps.HomogeneousDepth = caps && caps->homogeneousDepth ? TRUE : FALSE;
     m_Caps.OriginBottomLeft = caps && caps->originBottomLeft ? TRUE : FALSE;
-    m_CapsDesc = CKBackendDeviceLimits();
+    m_CapsDesc = CKBgfxDeviceLimits();
     memset(m_NativeFormatCaps, 0, sizeof(m_NativeFormatCaps));
     if (caps) {
         m_NativeSupported = caps->supported;
@@ -521,38 +541,43 @@ CKERROR CKBgfxBackend::Init(const CKBackendInitDesc *Desc)
     bgfx::frame();
     ConfigureDebug();
 
-    m_Created = TRUE;
+    m_BgfxCreated = TRUE;
 
     return CK_OK;
 }
 
 // Releases every bgfx object and shuts bgfx down.
-void CKBgfxBackend::ReleaseBgfx()
+void CKBgfxRasterizerContext::ReleaseBgfx()
 {
     if (!m_BgfxInitialized)
         return;
-    for (auto &constants : m_ConstantData) constants.clear();
+    for (CKDWORD i = 0; i < CKFF_CONSTANT_SLOT_COUNT; ++i)
+        m_ConstantData[i].Clear();
     m_Resources->DestroyAll();
-    m_DefaultTextures.clear();
+    m_DefaultTextures.Clear();
     ReleaseRectClear();
-    for (auto &ticket : m_Readbacks) {
+    for (int i = 0; i < m_BgfxReadbacks.Size(); ++i) {
+        std::shared_ptr<NativeReadback> &ticket = m_BgfxReadbacks[i];
         if (bgfx::isValid(ticket->Snapshot)) bgfx::destroy(ticket->Snapshot);
         ticket->Snapshot = BGFX_INVALID_HANDLE;
     }
     bgfx::shutdown();
-    for (auto &ticket : m_Readbacks) ticket->Error = CKERR_INVALIDOPERATION;
-    m_Readbacks.clear();
+    m_CompletedSubmitId = m_LastSubmitId;
+    m_SubmittedFrames.Clear();
+    for (int i = 0; i < m_BgfxReadbacks.Size(); ++i)
+        m_BgfxReadbacks[i]->Error = CKERR_INVALIDOPERATION;
+    m_BgfxReadbacks.Clear();
     m_BgfxInitialized = FALSE;
-    m_Created = FALSE;
+    m_BgfxCreated = FALSE;
     m_RendererType = bgfx::RendererType::Count;
     CKBgfxReleaseActiveContext(this);
 }
 
-void CKBgfxBackend::Shutdown()
+void CKBgfxRasterizerContext::Shutdown()
 {
     if (!m_BgfxInitialized)
         return;
-    m_ShuttingDown.store(TRUE, std::memory_order_release);
+    m_BgfxShuttingDown.store(TRUE, std::memory_order_release);
     m_FrameInProgress = FALSE;
     m_PassOpen = FALSE;
     m_NextView = 0;
@@ -563,7 +588,7 @@ void CKBgfxBackend::Shutdown()
     CKBgfxCloseLogFile();
 }
 
-CKERROR CKBgfxBackend::Resize(int PosX, int PosY, int Width, int Height)
+CKERROR CKBgfxRasterizerContext::Resize(int PosX, int PosY, int Width, int Height)
 {
     if (!IsReady())
         return CKERR_INVALIDOPERATION;
@@ -571,11 +596,11 @@ CKERROR CKBgfxBackend::Resize(int PosX, int PosY, int Width, int Height)
         return CKERR_INVALIDPARAMETER;
     if (m_FrameInProgress)
         return CKERR_INVALIDOPERATION;
-    m_PosX = PosX;
-    m_PosY = PosY;
-    m_Width = (CKDWORD)Width;
-    m_Height = (CKDWORD)Height;
-    CKBgfxResolveDrawableSize(m_Window, Width, Height);
+    m_BgfxPosX = PosX;
+    m_BgfxPosY = PosY;
+    m_BgfxWidth = (CKDWORD)Width;
+    m_BgfxHeight = (CKDWORD)Height;
+    CKBgfxResolveDrawableSize(m_BgfxWindow, Width, Height);
     m_DrawableWidth = (CKDWORD)Width;
     m_DrawableHeight = (CKDWORD)Height;
 
@@ -585,37 +610,37 @@ CKERROR CKBgfxBackend::Resize(int PosX, int PosY, int Width, int Height)
     return CK_OK;
 }
 
-CKBOOL CKBgfxBackend::IsIdle() const
+CKBOOL CKBgfxRasterizerContext::IsIdle() const
 {
-    return !m_FrameInProgress ? TRUE : FALSE;
+    return !m_Frame.Open && !m_FrameInProgress && !m_PassOpen ? TRUE : FALSE;
 }
 
-CKRECT CKBgfxBackend::WindowPixelRect(const CKRECT &rect) const
+CKRECT CKBgfxRasterizerContext::WindowPixelRect(const CKRECT &rect) const
 {
     // FFP and readbacks stay in logical pixels. Only window attachments use
     // drawable pixels, including high-DPI windows and scaled client targets.
     CKRECT pixels;
     pixels.left = CKBgfxScaleWindowCoordinate(
-        rect.left, m_DrawableWidth, m_Width, false);
+        rect.left, m_DrawableWidth, m_BgfxWidth, false);
     pixels.top = CKBgfxScaleWindowCoordinate(
-        rect.top, m_DrawableHeight, m_Height, false);
+        rect.top, m_DrawableHeight, m_BgfxHeight, false);
     pixels.right = CKBgfxScaleWindowCoordinate(
-        rect.right, m_DrawableWidth, m_Width, true);
+        rect.right, m_DrawableWidth, m_BgfxWidth, true);
     pixels.bottom = CKBgfxScaleWindowCoordinate(
-        rect.bottom, m_DrawableHeight, m_Height, true);
+        rect.bottom, m_DrawableHeight, m_BgfxHeight, true);
     return pixels;
 }
 
-CKERROR CKBgfxBackend::GetDeviceStatus() const
+CKERROR CKBgfxRasterizerContext::GetDeviceStatus() const
 {
-    if (!m_BgfxInitialized || !m_Created)
+    if (!m_BgfxInitialized || !m_BgfxCreated)
         return CKERR_INVALIDRENDERCONTEXT;
-    if (m_ShuttingDown.load(std::memory_order_acquire))
+    if (m_BgfxShuttingDown.load(std::memory_order_acquire))
         return CKERR_INVALIDOPERATION;
     return m_FatalError.load(std::memory_order_acquire);
 }
 
-void CKBgfxBackend::LatchFatalError(CKERROR Error)
+void CKBgfxRasterizerContext::LatchFatalError(CKERROR Error)
 {
     if (Error == CK_OK)
         return;
@@ -625,17 +650,39 @@ void CKBgfxBackend::LatchFatalError(CKERROR Error)
         std::memory_order_relaxed);
 }
 
-CKERROR CKBgfxBackend::GetTextureFormatCaps(VX_PIXELFORMAT Format,
-                                                       CKTextureFormatCaps *Caps) const
+void CKBgfxRasterizerContext::RecordFatalError(CKERROR Error)
 {
-    if (!Caps || Caps->Size < sizeof(CKTextureFormatCaps))
+    m_DebugFatalCount.fetch_add(1, std::memory_order_relaxed);
+    LatchFatalError(Error);
+}
+
+CKRECT CKBgfxRasterizerContext::GetWindowViewRectForTests() const
+{
+    CKRECT rect = {};
+    for (CKDWORD view = 0; view < m_LastFrameViewCount; ++view)
+        if (!m_ViewFrameBuffer[view])
+            rect = m_ViewRect[view];
+    return rect;
+}
+
+CKDWORD CKBgfxRasterizerContext::ExchangeNextViewForTests(CKDWORD Next)
+{
+    const CKDWORD previous = m_NextView;
+    m_NextView = Next == UINT32_MAX ? m_CapsDesc.MaxRenderViews : Next;
+    return previous;
+}
+
+CKERROR CKBgfxRasterizerContext::GetTextureFormatCaps(VX_PIXELFORMAT Format,
+                                                       CKBgfxTextureFormatCaps *Caps) const
+{
+    if (!Caps)
         return CKERR_INVALIDPARAMETER;
-    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+    if (!m_BgfxInitialized || !m_BgfxCreated || !IsApiThread())
         return CKERR_INVALIDOPERATION;
     bgfx::TextureFormat::Enum nativeFormat;
     if (!CKBgfxTryTextureStorageFormat(Format, nativeFormat))
         return CKERR_INVALIDPARAMETER;
-    *Caps = CKTextureFormatCaps();
+    *Caps = CKBgfxTextureFormatCaps();
     Caps->Format = Format;
     const CKBOOL allowReadback =
         (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_READBACK) != 0 &&
@@ -651,31 +698,31 @@ CKERROR CKBgfxBackend::GetTextureFormatCaps(VX_PIXELFORMAT Format,
 // Accessor helpers
 // ---------------------------------------------------------------------------
 
-CKBgfxShaderRecord *CKBgfxBackend::GetShader(CKDWORD Handle)
+CKBgfxShaderRecord *CKBgfxRasterizerContext::GetShader(CKDWORD Handle)
 {
     return m_Resources->Shaders.Get(Handle);
 }
-CKBgfxProgramRecord *CKBgfxBackend::GetProgram(CKDWORD Handle)
+CKBgfxProgramRecord *CKBgfxRasterizerContext::GetProgram(CKDWORD Handle)
 {
     return m_Resources->Programs.Get(Handle);
 }
-CKBgfxVertexLayoutRecord *CKBgfxBackend::GetVertexLayout(CKDWORD Handle)
+CKBgfxVertexLayoutRecord *CKBgfxRasterizerContext::GetVertexLayout(CKDWORD Handle)
 {
     return m_Resources->VertexLayouts.Get(Handle);
 }
-CKBgfxVertexBufferRecord *CKBgfxBackend::GetVertexBuffer(CKDWORD Handle)
+CKBgfxVertexBufferRecord *CKBgfxRasterizerContext::GetVertexBuffer(CKDWORD Handle)
 {
     return m_Resources->VertexBuffers.Get(Handle);
 }
-CKBgfxIndexBufferRecord *CKBgfxBackend::GetIndexBuffer(CKDWORD Handle)
+CKBgfxIndexBufferRecord *CKBgfxRasterizerContext::GetIndexBuffer(CKDWORD Handle)
 {
     return m_Resources->IndexBuffers.Get(Handle);
 }
-CKBgfxTextureRecord *CKBgfxBackend::GetTexture(CKDWORD Handle)
+CKBgfxTextureRecord *CKBgfxRasterizerContext::GetTexture(CKDWORD Handle)
 {
     return m_Resources->Textures.Get(Handle);
 }
-CKBgfxFrameBufferRecord *CKBgfxBackend::GetFrameBuffer(CKDWORD Handle)
+CKBgfxFrameBufferRecord *CKBgfxRasterizerContext::GetFrameBuffer(CKDWORD Handle)
 {
     return m_Resources->FrameBuffers.Get(Handle);
 }

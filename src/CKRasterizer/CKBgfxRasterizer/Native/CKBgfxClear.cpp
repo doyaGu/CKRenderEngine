@@ -1,8 +1,8 @@
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "shaders/native/vs_rect_clear.h"
 #include "shaders/native/fs_rect_clear.h"
 
-CKERROR CKBgfxBackend::PrepareRectClear()
+CKERROR CKBgfxRasterizerContext::PrepareRectClear()
 {
     if (bgfx::isValid(m_RectClearProgram)) return CK_OK;
     const bgfx::ShaderHandle vertex = bgfx::createShader(bgfx::makeRef(ck_vs_rect_clear_dx11, sizeof(ck_vs_rect_clear_dx11)));
@@ -27,7 +27,7 @@ CKERROR CKBgfxBackend::PrepareRectClear()
     return CK_OK;
 }
 
-void CKBgfxBackend::EncodeRectClear(bgfx::ViewId View, const CKBackendPassDesc &Desc)
+void CKBgfxRasterizerContext::EncodeRectClear(bgfx::ViewId View, const CKRenderPassDesc &Desc)
 {
     bgfx::discard(BGFX_DISCARD_ALL);
     const float color[] = {float((Desc.ClearColor >> 16) & 255) / 255.0f,
@@ -51,7 +51,7 @@ void CKBgfxBackend::EncodeRectClear(bgfx::ViewId View, const CKBackendPassDesc &
     bgfx::submit(View, m_RectClearProgram, 0, BGFX_DISCARD_ALL);
 }
 
-void CKBgfxBackend::ReleaseRectClear()
+void CKBgfxRasterizerContext::ReleaseRectClear()
 {
     if (bgfx::isValid(m_RectClearProgram)) bgfx::destroy(m_RectClearProgram);
     if (bgfx::isValid(m_RectClearVertices)) bgfx::destroy(m_RectClearVertices);

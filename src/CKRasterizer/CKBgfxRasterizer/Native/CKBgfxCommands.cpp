@@ -1,6 +1,6 @@
-// CKBgfxBackend pass, draw, blit and command encoding.
+// CKBgfxRasterizerContext pass, draw, blit and command encoding.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 
@@ -31,7 +31,7 @@ static void CKBgfxDestroyDefaultTexture(bgfx::TextureHandle *handle)
 // Frame
 // ---------------------------------------------------------------------------
 
-CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
+CKERROR CKBgfxRasterizerContext::BeginPass(const CKRenderPassDesc *Desc)
 {
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
@@ -119,15 +119,15 @@ CKERROR CKBgfxBackend::BeginPass(const CKBackendPassDesc *Desc)
 
     m_CurrentView = view;
     m_PassOpen = TRUE;
-    ++m_FramePasses;
+    ++m_BgfxFramePasses;
     return CK_OK;
 }
 
-CKBOOL CKBgfxBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBackendTransientVertices *Out)
+CKBOOL CKBgfxRasterizerContext::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKTransientVertexData *Out)
 {
-    if (!Out || Count == 0 || !m_BgfxInitialized || !m_Created)
+    if (!Out || Count == 0 || !m_BgfxInitialized || !m_BgfxCreated)
         return FALSE;
-    *Out = CKBackendTransientVertices();
+    *Out = CKTransientVertexData();
     CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Layout);
     if (!layoutRec)
         return FALSE;
@@ -156,12 +156,12 @@ CKBOOL CKBgfxBackend::AllocTransientVertices(CKDWORD Count, CKDWORD Layout, CKBa
     return TRUE;
 }
 
-CKBOOL CKBgfxBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBackendTransientIndices *Out)
+CKBOOL CKBgfxRasterizerContext::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKTransientIndexData *Out)
 {
-    if (!Out || Count == 0 || !m_BgfxInitialized || !m_Created ||
+    if (!Out || Count == 0 || !m_BgfxInitialized || !m_BgfxCreated ||
         (Index32 && (m_CapsDesc.Features & CKRST_DEVCAPS_INDEX32) == 0))
         return FALSE;
-    *Out = CKBackendTransientIndices();
+    *Out = CKTransientIndexData();
 
     const CKDWORD available = bgfx::getAvailTransientIndexBuffer(Count, Index32 ? true : false);
     if (available < Count) {
@@ -188,7 +188,7 @@ CKBOOL CKBgfxBackend::AllocTransientIndices(CKDWORD Count, CKBOOL Index32, CKBac
 
 // A draw that cannot be submitted: the pending bgfx state is dropped so the
 // next draw starts clean.
-CKERROR CKBgfxBackend::DrawFailed(CKERROR Error, const char *Operation)
+CKERROR CKBgfxRasterizerContext::DrawFailed(CKERROR Error, const char *Operation)
 {
     bgfx::discard(BGFX_DISCARD_ALL);
     ResetDebugBindings();
@@ -209,7 +209,7 @@ static void ApplyStencil(CKDrawState state, CKDWORD ref, CKDWORD readMask, CKDWO
     bgfx::setStencil(fstencil, bstencil);
 }
 
-CKERROR CKBgfxBackend::ApplyPipelineState(const CKBackendPipelineState &state)
+CKERROR CKBgfxRasterizerContext::ApplyPipelineState(const CKFFPipelineState &state)
 {
     uint64_t bgfxState = 0;
     const CKERROR stateError = CKBgfxTryState(state.State, bgfxState);
@@ -252,11 +252,11 @@ CKERROR CKBgfxBackend::ApplyPipelineState(const CKBackendPipelineState &state)
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
+CKERROR CKBgfxRasterizerContext::BindGeometry(const CKDrawCommand *Draw)
 {
     // Stream 0
     if (Draw->TransientVertices) {
-        const CKBackendTransientVertices *tv = Draw->TransientVertices;
+        const CKTransientVertexData *tv = Draw->TransientVertices;
         if (tv->Token == 0 || tv->Token > m_TransientVBCount || tv->Count == 0)
             return CKERR_INVALIDPARAMETER;
         bgfx::TransientVertexBuffer *tvb = &m_TransientVBPool[tv->Token - 1];
@@ -276,7 +276,8 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
     } else if (Draw->VertexBuffer) {
         CKBgfxVertexBufferRecord *rec = GetVertexBuffer(Draw->VertexBuffer);
         CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Draw->Layout);
-        if (!rec || !layoutRec || Draw->VertexCount == 0 || Draw->StartVertex > rec->VertexCount ||
+        if (!rec || !layoutRec ||
+            Draw->VertexCount == 0 || Draw->StartVertex > rec->VertexCount ||
             Draw->VertexCount > rec->VertexCount - Draw->StartVertex)
             return CKERR_INVALIDPARAMETER;
         bgfx::setVertexBuffer(0, rec->Handle, Draw->StartVertex, Draw->VertexCount, layoutRec->Handle);
@@ -295,7 +296,7 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
 
     // Stream 1 (vertex tweening)
     if (Draw->Stream1Transient) {
-        const CKBackendTransientVertices *tv = Draw->Stream1Transient;
+        const CKTransientVertexData *tv = Draw->Stream1Transient;
         if (tv->Token == 0 || tv->Token > m_TransientVBCount || tv->Count == 0 || m_CapsDesc.MaxVertexStreams < 2)
             return CKERR_INVALIDPARAMETER;
         bgfx::TransientVertexBuffer *tvb = &m_TransientVBPool[tv->Token - 1];
@@ -305,7 +306,8 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
     } else if (Draw->Stream1VertexBuffer) {
         CKBgfxVertexBufferRecord *rec = GetVertexBuffer(Draw->Stream1VertexBuffer);
         CKBgfxVertexLayoutRecord *layoutRec = GetVertexLayout(Draw->Stream1Layout);
-        if (!rec || !layoutRec || m_CapsDesc.MaxVertexStreams < 2 || Draw->Stream1StartVertex > rec->VertexCount ||
+        if (!rec || !layoutRec ||
+            m_CapsDesc.MaxVertexStreams < 2 || Draw->Stream1StartVertex > rec->VertexCount ||
             Draw->VertexCount > rec->VertexCount - Draw->Stream1StartVertex)
             return CKERR_INVALIDPARAMETER;
         bgfx::setVertexBuffer(1, rec->Handle, Draw->Stream1StartVertex, Draw->VertexCount, layoutRec->Handle);
@@ -313,7 +315,7 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
 
     // Indices
     if (Draw->TransientIndices) {
-        const CKBackendTransientIndices *ti = Draw->TransientIndices;
+        const CKTransientIndexData *ti = Draw->TransientIndices;
         if (ti->Token == 0 || ti->Token > m_TransientIBCount || ti->Count == 0)
             return CKERR_INVALIDPARAMETER;
         bgfx::TransientIndexBuffer *tib = &m_TransientIBPool[ti->Token - 1];
@@ -329,7 +331,8 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
         }
     } else if (Draw->IndexBuffer) {
         CKBgfxIndexBufferRecord *rec = GetIndexBuffer(Draw->IndexBuffer);
-        if (!rec || Draw->IndexCount == 0 || Draw->StartIndex > rec->IndexCount ||
+        if (!rec ||
+            Draw->IndexCount == 0 || Draw->StartIndex > rec->IndexCount ||
             Draw->IndexCount > rec->IndexCount - Draw->StartIndex)
             return CKERR_INVALIDPARAMETER;
         bgfx::setIndexBuffer(rec->Handle, Draw->StartIndex, Draw->IndexCount);
@@ -343,18 +346,20 @@ CKERROR CKBgfxBackend::BindGeometry(const CKBackendDraw *Draw)
     return CK_OK;
 }
 
-std::shared_ptr<bgfx::TextureHandle> CKBgfxBackend::GetDefaultTexture(const CKBackendSamplerBinding &Binding)
+std::shared_ptr<bgfx::TextureHandle> CKBgfxRasterizerContext::GetDefaultTexture(const CKFFSamplerBinding &Binding)
 {
     const uint64_t key = (uint64_t(Binding.Dimension) << 32) | Binding.DefaultColor;
-    const auto found = m_DefaultTextures.find(key);
-    if (found != m_DefaultTextures.end()) {
-        const auto texture = found->second.lock();
+    const std::weak_ptr<bgfx::TextureHandle> *cached =
+        m_DefaultTextures.FindPtr(key);
+    if (cached) {
+        const std::shared_ptr<bgfx::TextureHandle> texture = cached->lock();
         if (texture) return texture;
     }
     // Programs own these leases. Reap expired keys only on a creation miss,
     // keeping arbitrary historical default colors out of the device cache.
-    for (auto it = m_DefaultTextures.begin(); it != m_DefaultTextures.end();) {
-        if (it->second.expired()) it = m_DefaultTextures.erase(it);
+    for (DefaultTextureTable::Iterator it = m_DefaultTextures.Begin();
+         it != m_DefaultTextures.End();) {
+        if ((*it).expired()) it = m_DefaultTextures.Remove(it);
         else ++it;
     }
     auto texture = std::shared_ptr<bgfx::TextureHandle>(
@@ -362,24 +367,25 @@ std::shared_ptr<bgfx::TextureHandle> CKBgfxBackend::GetDefaultTexture(const CKBa
         CKBgfxDestroyDefaultTexture);
     const uint32_t pixels[6] = {Binding.DefaultColor, Binding.DefaultColor, Binding.DefaultColor,
                                Binding.DefaultColor, Binding.DefaultColor, Binding.DefaultColor};
-    const auto *data = bgfx::copy(pixels, Binding.Dimension == CKBACKEND_TEXTURE_CUBE ? sizeof(pixels) : sizeof(pixels[0]));
+    const auto *data = bgfx::copy(pixels, Binding.Dimension == CKFF_TEXTURE_CUBE ? sizeof(pixels) : sizeof(pixels[0]));
     switch (Binding.Dimension) {
-    case CKBACKEND_TEXTURE_2D:
+    case CKFF_TEXTURE_2D:
         *texture = bgfx::createTexture2D(1, 1, false, 1, bgfx::TextureFormat::BGRA8, 0, data);
         break;
-    case CKBACKEND_TEXTURE_CUBE:
+    case CKFF_TEXTURE_CUBE:
         *texture = bgfx::createTextureCube(1, false, 1, bgfx::TextureFormat::BGRA8, 0, data);
         break;
-    case CKBACKEND_TEXTURE_3D:
+    case CKFF_TEXTURE_3D:
         *texture = bgfx::createTexture3D(1, 1, 1, false, bgfx::TextureFormat::BGRA8, 0, data);
         break;
     }
     if (!bgfx::isValid(*texture)) return {};
-    m_DefaultTextures.emplace(key, texture);
+    m_DefaultTextures.Insert(
+        key, std::weak_ptr<bgfx::TextureHandle>(texture), TRUE);
     return texture;
 }
 
-CKERROR CKBgfxBackend::BindTextureSlot(const CKBackendSamplerBinding &Binding, bgfx::UniformHandle Uniform,
+CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Binding, bgfx::UniformHandle Uniform,
                                       bgfx::TextureHandle DefaultTexture, CKDWORD Texture, const CKSamplerDesc *Sampler)
 {
     static int s_SetTextureLogCount = 0;
@@ -392,8 +398,8 @@ CKERROR CKBgfxBackend::BindTextureSlot(const CKBackendSamplerBinding &Binding, b
     if (texRec && (texRec->Flags & CKRST_TEXTURE_READBACK) != 0)
         return CKERR_NOTIMPLEMENTED;
     if (texRec) {
-        const auto dimension = (texRec->Flags & CKRST_TEXTURE_CUBEMAP) ? CKBACKEND_TEXTURE_CUBE :
-            ((texRec->Flags & CKRST_TEXTURE_VOLUMEMAP) && texRec->Depth > 1 ? CKBACKEND_TEXTURE_3D : CKBACKEND_TEXTURE_2D);
+        const auto dimension = (texRec->Flags & CKRST_TEXTURE_CUBEMAP) ? CKFF_TEXTURE_CUBE :
+            ((texRec->Flags & CKRST_TEXTURE_VOLUMEMAP) && texRec->Depth > 1 ? CKFF_TEXTURE_3D : CKFF_TEXTURE_2D);
         if (dimension != Binding.Dimension) return CKERR_INVALIDPARAMETER;
     }
     CKSamplerDesc nativeSampler;
@@ -445,7 +451,7 @@ CKERROR CKBgfxBackend::BindTextureSlot(const CKBackendSamplerBinding &Binding, b
         return CKERR_INVALIDPARAMETER;
     bgfx::setTexture((uint8_t)Stage, Uniform, textureHandle, flags);
 
-    if (m_DrawMapSubmitActive && Slot < CKBACKEND_MAX_TEXTURE_SLOTS) {
+    if (m_DrawMapSubmitActive && Slot < CKFF_TEXTURE_SLOT_COUNT) {
         m_DebugTextureBindings[Slot].Texture = Texture;
         m_DebugTextureBindings[Slot].Uniform = Slot;
         m_DebugTextureBindings[Slot].BgfxHandle = textureHandle.idx;
@@ -455,11 +461,11 @@ CKERROR CKBgfxBackend::BindTextureSlot(const CKBackendSamplerBinding &Binding, b
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
+CKERROR CKBgfxRasterizerContext::Draw(const CKDrawCommand *Draw)
 {
     m_DrawApproximations = 0;
     if (m_DrawPassNeedsResume) {
-        CKBackendPassDesc resume = m_LogicalPass;
+        CKRenderPassDesc resume = m_LogicalPass;
         resume.ClearFlags = 0;
         resume.Name = "resume";
         const CKERROR status = BeginPass(&resume);
@@ -482,7 +488,7 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
     CKERROR err = ApplyPipelineState(Draw->Pipeline);
     if (err != CK_OK)
         return DrawFailed(err, "Draw.state");
-    if (rec->Interface.VertexInputs.empty()) {
+    if (rec->Interface.VertexInputs.Size() == 0) {
         if (!Draw->VertexCount || Draw->StartVertex || Draw->IndexCount || Draw->IndexBuffer || Draw->TransientIndices)
             return DrawFailed(CKERR_INVALIDPARAMETER, "Draw.procedural");
         bgfx::setVertexCount(Draw->VertexCount);
@@ -492,8 +498,9 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
     if (err != CK_OK)
         return DrawFailed(err, "Draw.geometry");
 
-    for (const auto &sampler : rec->Samplers) {
-        const CKBackendTextureBinding binding = Draw->Textures ? (*Draw->Textures)[sampler.Desc.Slot] : CKBackendTextureBinding();
+    for (int i = 0; i < rec->Samplers.Size(); ++i) {
+        const CKBgfxProgramRecord::SamplerBinding &sampler = rec->Samplers[i];
+        const CKFFTextureSlot binding = Draw->Textures ? (*Draw->Textures)[sampler.Desc.Slot] : CKFFTextureSlot();
         err = BindTextureSlot(sampler.Desc, sampler.Handle, *sampler.DefaultTexture,
             binding.Texture, &binding.Sampler);
         if (err != CK_OK)
@@ -502,14 +509,17 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
 
     // Program creation compiles names, counts and slot mappings. Keep the
     // per-draw path allocation-free while restoring bgfx encoder state.
-    for (const auto &uniform : rec->Uniforms) {
+    for (int i = 0; i < rec->Uniforms.Size(); ++i) {
+        const CKBgfxProgramRecord::UniformBinding &uniform = rec->Uniforms[i];
         const auto *source = Draw->Constants ? &(*Draw->Constants)[uniform.Slot].Bytes : nullptr;
         auto &scratch = m_ConstantData[uniform.Slot]; // declaration-sized, allocated at program creation
-        const void *bytes = source && source->size() >= scratch.size() ? source->data() : nullptr;
+        const void *bytes = source && source->Size() >= scratch.Size()
+            ? source->Begin() : nullptr;
         if (!bytes) {
-            std::fill(scratch.begin(), scratch.end(), CKBYTE(0));
-            if (source && !source->empty()) std::memcpy(scratch.data(), source->data(), source->size());
-            bytes = scratch.data();
+            memset(scratch.Begin(), 0, scratch.Size());
+            if (source && !source->IsEmpty())
+                memcpy(scratch.Begin(), source->Begin(), source->Size());
+            bytes = scratch.Begin();
         }
         bgfx::setUniform(uniform.Handle, bytes, (uint16_t)uniform.Count);
     }
@@ -531,7 +541,7 @@ CKERROR CKBgfxBackend::Draw(const CKBackendDraw *Draw)
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
+CKERROR CKBgfxRasterizerContext::Blit(CKDWORD DstTexture, CKDWORD DstMip, CKDWORD DstLayer, CKDWORD DstX, CKDWORD DstY,
                             CKDWORD SrcTexture, CKDWORD SrcMip, CKDWORD SrcLayer, const CKRECT *SrcRect)
 {
     if (!IsReady())

@@ -1,17 +1,15 @@
-// CKBgfxBackend shader, vertex-layout and program creation.
+// CKBgfxRasterizerContext shader, vertex-layout and program creation.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKRasterizerValidation.h"
 
-#include <map>
 #include <stdint.h>
-#include <string>
 
 static bool CKBgfxSamplerBindingsEqual(
-    const CKBackendSamplerBinding &left,
-    const CKBackendSamplerBinding &right)
+    const CKFFSamplerBinding &left,
+    const CKFFSamplerBinding &right)
 {
     return left.Name == right.Name &&
         left.NativeSlot == right.NativeSlot &&
@@ -20,13 +18,13 @@ static bool CKBgfxSamplerBindingsEqual(
         left.DefaultColor == right.DefaultColor;
 }
 
-CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
+CKERROR CKBgfxRasterizerContext::CreateShader(const CKShaderDesc *Desc,
                                                CKDWORD *OutShader)
 {
     if (!OutShader)
         return CKERR_INVALIDPARAMETER;
     *OutShader = 0;
-    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+    if (!m_BgfxInitialized || !m_BgfxCreated || !IsApiThread())
         return CKERR_INVALIDOPERATION;
     if (!Desc)
         return CKERR_INVALIDPARAMETER;
@@ -84,13 +82,13 @@ CKERROR CKBgfxBackend::CreateShader(const CKShaderDesc *Desc,
 
     return CK_OK;
 }
-CKERROR CKBgfxBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
+CKERROR CKBgfxRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
                                                      CKDWORD *OutLayout)
 {
     if (!OutLayout)
         return CKERR_INVALIDPARAMETER;
     *OutLayout = 0;
-    if (!m_BgfxInitialized || !m_Created || !IsApiThread())
+    if (!m_BgfxInitialized || !m_BgfxCreated || !IsApiThread())
         return CKERR_INVALIDOPERATION;
     if (CKRasterizerValidateVertexLayout(Desc) != CK_OK ||
         m_RendererType == bgfx::RendererType::Count)
@@ -201,7 +199,7 @@ CKERROR CKBgfxBackend::CreateVertexLayout(const CKVertexLayoutDesc *Desc,
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *Out)
+CKERROR CKBgfxRasterizerContext::CreateProgram(const CKFFProgramDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -221,30 +219,46 @@ CKERROR CKBgfxBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *
         return CKERR_INVALIDPARAMETER;
     }
 
-    const CKERROR validation = CKValidateBackendProgram(*Desc, vs->Desc, ps->Desc);
+    const CKERROR validation = CKFFValidateProgram(*Desc, vs->Desc, ps->Desc);
     if (validation != CK_OK) return validation;
     // bgfx names and texture units are shared between stages. Compile their
     // declarations once; a draw never reflects or searches resource names.
-    std::map<std::string, const CKBackendUniformBinding *> uniforms;
-    std::map<std::string, const CKBackendSamplerBinding *> samplers;
-    std::map<CKDWORD, const CKBackendSamplerBinding *> textureUnits;
-    for (const auto &binding : Desc->Uniforms) {
-        if (binding.Name.empty()) return CKERR_INVALIDPARAMETER;
-        const auto entry = uniforms.emplace(binding.Name, &binding);
-        if (!entry.second && (entry.first->second->Slot != binding.Slot ||
-            entry.first->second->Type != binding.Type || entry.first->second->Count != binding.Count))
-            return CKERR_INVALIDPARAMETER;
+    typedef XSHashTable<const CKFFUniformBinding *, XString> UniformTable;
+    typedef XSHashTable<const CKFFSamplerBinding *, XString> SamplerTable;
+    typedef XSHashTable<const CKFFSamplerBinding *, CKDWORD> TextureUnitTable;
+    UniformTable uniforms;
+    SamplerTable samplers;
+    TextureUnitTable textureUnits;
+    for (int i = 0; i < Desc->Uniforms.Size(); ++i) {
+        const CKFFUniformBinding &binding = Desc->Uniforms[i];
+        if (binding.Name.IsEmpty()) return CKERR_INVALIDPARAMETER;
+        const CKFFUniformBinding *const *existing =
+            uniforms.FindPtr(binding.Name);
+        if (existing) {
+            if ((*existing)->Slot != binding.Slot ||
+                (*existing)->Type != binding.Type ||
+                (*existing)->Count != binding.Count)
+                return CKERR_INVALIDPARAMETER;
+        } else if (!uniforms.Insert(binding.Name, &binding, FALSE)) {
+            return CKERR_OUTOFMEMORY;
+        }
     }
-    for (const auto &binding : Desc->Samplers) {
-        if (binding.Name.empty() || uniforms.count(binding.Name) ||
+    for (int i = 0; i < Desc->Samplers.Size(); ++i) {
+        const CKFFSamplerBinding &binding = Desc->Samplers[i];
+        if (binding.Name.IsEmpty() || uniforms.IsHere(binding.Name) ||
             binding.NativeSlot >= m_CapsDesc.MaxTextureBindings) return CKERR_INVALIDPARAMETER;
-        const auto named = samplers.emplace(binding.Name, &binding);
-        const auto unit = textureUnits.emplace(binding.NativeSlot, &binding);
-        if ((!named.second &&
-             !CKBgfxSamplerBindingsEqual(*named.first->second, binding)) ||
-            (!unit.second &&
-             !CKBgfxSamplerBindingsEqual(*unit.first->second, binding)))
+        const CKFFSamplerBinding *const *named =
+            samplers.FindPtr(binding.Name);
+        const CKFFSamplerBinding *const *unit =
+            textureUnits.FindPtr(binding.NativeSlot);
+        if ((named && !CKBgfxSamplerBindingsEqual(**named, binding)) ||
+            (unit && !CKBgfxSamplerBindingsEqual(**unit, binding)))
             return CKERR_INVALIDPARAMETER;
+        if (!named && !samplers.Insert(binding.Name, &binding, FALSE))
+            return CKERR_OUTOFMEMORY;
+        if (!unit && !textureUnits.Insert(
+                         binding.NativeSlot, &binding, FALSE))
+            return CKERR_OUTOFMEMORY;
     }
 
     bgfx::ProgramHandle handle = bgfx::createProgram(vs->Handle, ps->Handle, false);
@@ -259,25 +273,35 @@ CKERROR CKBgfxBackend::CreateProgram(const CKBackendProgramDesc *Desc, CKDWORD *
     rec->VertexShader = VertexShader;
     rec->PixelShader = PixelShader;
     rec->Interface = *Desc;
-    rec->Uniforms.reserve(uniforms.size());
-    rec->Samplers.reserve(samplers.size());
-    for (const auto &entry : uniforms) {
-        const auto &binding = *entry.second;
-        auto uniform = bgfx::createUniform(binding.Name.c_str(),
-            binding.Type == CKBACKEND_UNIFORM_MAT4 ? bgfx::UniformType::Mat4 : bgfx::UniformType::Vec4,
+    rec->Uniforms.Reserve(uniforms.Size());
+    rec->Samplers.Reserve(samplers.Size());
+    for (UniformTable::Iterator entry = uniforms.Begin();
+         entry != uniforms.End(); ++entry) {
+        const CKFFUniformBinding &binding = **entry;
+        auto uniform = bgfx::createUniform(binding.Name.CStr(),
+            binding.Type == CKFF_UNIFORM_MAT4 ? bgfx::UniformType::Mat4 : bgfx::UniformType::Vec4,
             (uint16_t)binding.Count);
         if (!bgfx::isValid(uniform)) { CKBgfxDestroyRecord(rec); return CKERR_OUTOFMEMORY; }
-        rec->Uniforms.push_back({binding.Slot, binding.Count, uniform});
+        CKBgfxProgramRecord::UniformBinding nativeBinding;
+        nativeBinding.Slot = binding.Slot;
+        nativeBinding.Count = binding.Count;
+        nativeBinding.Handle = uniform;
+        rec->Uniforms.PushBack(nativeBinding);
         auto &constants = m_ConstantData[binding.Slot];
-        if (constants.size() < binding.Size()) constants.resize(binding.Size());
+        if ((CKDWORD)constants.Size() < binding.Size()) constants.Resize((int)binding.Size());
     }
-    for (const auto &entry : samplers) {
-        const auto &binding = *entry.second;
+    for (SamplerTable::Iterator entry = samplers.Begin();
+         entry != samplers.End(); ++entry) {
+        const CKFFSamplerBinding &binding = **entry;
         const auto texture = GetDefaultTexture(binding);
         if (!texture) { CKBgfxDestroyRecord(rec); return CKERR_OUTOFMEMORY; }
-        const auto uniform = bgfx::createUniform(binding.Name.c_str(), bgfx::UniformType::Sampler);
+        const auto uniform = bgfx::createUniform(binding.Name.CStr(), bgfx::UniformType::Sampler);
         if (!bgfx::isValid(uniform)) { CKBgfxDestroyRecord(rec); return CKERR_OUTOFMEMORY; }
-        rec->Samplers.push_back({binding, uniform, texture});
+        CKBgfxProgramRecord::SamplerBinding nativeBinding;
+        nativeBinding.Desc = binding;
+        nativeBinding.Handle = uniform;
+        nativeBinding.DefaultTexture = texture;
+        rec->Samplers.PushBack(nativeBinding);
     }
 
     const CKDWORD program = m_Resources->Programs.Insert(

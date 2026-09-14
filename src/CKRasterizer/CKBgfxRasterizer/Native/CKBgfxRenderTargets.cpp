@@ -1,12 +1,12 @@
-// CKBgfxBackend render-target and depth-texture creation.
+// CKBgfxRasterizerContext render-target and depth-texture creation.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 
 #include <stdint.h>
 
-CKERROR CKBgfxBackend::BuildFrameBufferAttachments(const CKBackendRenderTargetDesc *Desc,
+CKERROR CKBgfxRasterizerContext::BuildFrameBufferAttachments(const CKRenderTargetDesc *Desc,
                                                    bgfx::Attachment *Attachments,
                                                    CKDWORD Capacity,
                                                    CKDWORD &AttachmentCount)
@@ -49,7 +49,7 @@ CKERROR CKBgfxBackend::BuildFrameBufferAttachments(const CKBackendRenderTargetDe
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc, CKDWORD *Out)
+CKERROR CKBgfxRasterizerContext::CreateRenderTarget(const CKRenderTargetDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -90,7 +90,7 @@ CKERROR CKBgfxBackend::CreateRenderTarget(const CKBackendRenderTargetDesc *Desc,
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::CreateDepthTexture(const CKBackendDepthDesc *Desc, CKDWORD *Out)
+CKERROR CKBgfxRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;

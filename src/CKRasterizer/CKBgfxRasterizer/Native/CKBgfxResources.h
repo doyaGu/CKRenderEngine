@@ -1,12 +1,14 @@
 #ifndef CKBGFXRESOURCES_H
 #define CKBGFXRESOURCES_H
 
-#include "CKRasterizerBackend.h"
+#include "CKRasterizerContextData.h"
 
 #include "VxMutex.h"
 #include "XArray.h"
+#include "XClassArray.h"
 
 #include <bgfx/bgfx.h>
+#include <memory>
 #include <string.h>
 
 struct CKBgfxShaderRecord {
@@ -22,21 +24,23 @@ struct CKBgfxProgramRecord {
         bgfx::UniformHandle Handle;
     };
     struct SamplerBinding {
-        CKBackendSamplerBinding Desc;
+        CKFFSamplerBinding Desc;
         bgfx::UniformHandle Handle;
         std::shared_ptr<bgfx::TextureHandle> DefaultTexture;
     };
     bgfx::ProgramHandle Handle = BGFX_INVALID_HANDLE;
     CKDWORD VertexShader = 0;
     CKDWORD PixelShader = 0;
-    CKBackendProgramDesc Interface;
-    std::vector<UniformBinding> Uniforms;
-    std::vector<SamplerBinding> Samplers;
+    CKFFProgramDesc Interface;
+    XClassArray<UniformBinding> Uniforms;
+    XClassArray<SamplerBinding> Samplers;
 
     ~CKBgfxProgramRecord()
     {
-        for (const auto &uniform : Uniforms) if (bgfx::isValid(uniform.Handle)) bgfx::destroy(uniform.Handle);
-        for (const auto &sampler : Samplers) if (bgfx::isValid(sampler.Handle)) bgfx::destroy(sampler.Handle);
+        for (int i = 0; i < Uniforms.Size(); ++i)
+            if (bgfx::isValid(Uniforms[i].Handle)) bgfx::destroy(Uniforms[i].Handle);
+        for (int i = 0; i < Samplers.Size(); ++i)
+            if (bgfx::isValid(Samplers[i].Handle)) bgfx::destroy(Samplers[i].Handle);
     }
 };
 
@@ -49,7 +53,7 @@ struct CKBgfxVertexBufferRecord {
     bgfx::DynamicVertexBufferHandle Handle;
     CKDWORD Layout;
     bgfx::VertexLayout NativeLayout;
-    std::vector<CKBYTE> Shadow;
+    XArray<CKBYTE> Shadow;
     CKDWORD VertexSize;
     CKDWORD VertexCount;
     CKDWORD Size;
@@ -57,7 +61,7 @@ struct CKBgfxVertexBufferRecord {
 
 struct CKBgfxIndexBufferRecord {
     bgfx::DynamicIndexBufferHandle Handle;
-    std::vector<CKBYTE> Shadow;
+    XArray<CKBYTE> Shadow;
     CKBOOL Index32;
     CKDWORD IndexCount;
     CKDWORD Size;
@@ -115,7 +119,7 @@ struct CKBgfxTextureRecord {
 
 struct CKBgfxFrameBufferRecord {
     bgfx::FrameBufferHandle Handle;
-    CKBackendRenderTargetDesc Desc;
+    CKRenderTargetDesc Desc;
 };
 
 template <typename RecordT>

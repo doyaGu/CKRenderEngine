@@ -1,6 +1,6 @@
-// CKBgfxBackend runtime diagnostics and draw-marker tracing.
+// CKBgfxRasterizerContext runtime diagnostics and draw-marker tracing.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
@@ -57,7 +57,7 @@ static CKDWORD CKBgfxHashProgram(const CKBgfxProgramRecord *Record)
     return hash;
 }
 
-void CKBgfxBackend::ConfigureDebug()
+void CKBgfxRasterizerContext::ConfigureDebug()
 {
     const CKBgfxDebugConfig &debug = CKBgfxDebugSettings();
     m_DebugOverlay = debug.Overlay ? TRUE : FALSE;
@@ -74,7 +74,7 @@ void CKBgfxBackend::ConfigureDebug()
                  m_DebugBgfxFlags, m_DebugOverlay ? 1 : 0);
     }
 }
-void CKBgfxBackend::DrawDebugOverlay()
+void CKBgfxRasterizerContext::DrawDebugOverlay()
 {
     if (!m_DebugOverlay)
         return;
@@ -83,7 +83,7 @@ void CKBgfxBackend::DrawDebugOverlay()
     bgfx::dbgTextClear(0, false);
     bgfx::dbgTextPrintf(0, 0, 0x4f, "CKBgfx frame=%u renderer=%s size=%ux%u",
                         m_DebugFrameId, m_RendererName,
-                        (unsigned)m_Width, (unsigned)m_Height);
+                        (unsigned)m_BgfxWidth, (unsigned)m_BgfxHeight);
     if (s) {
         bgfx::dbgTextPrintf(0, 1, 0x2f, "bgfx gpuFrame=%u draws=%u blits=%u computes=%u views=%u",
                             s->gpuFrameNum, s->numDraw, s->numBlit, s->numCompute, s->numViews);
@@ -94,7 +94,7 @@ void CKBgfxBackend::DrawDebugOverlay()
     bgfx::dbgTextPrintf(0, 3, 0x1f, "%s", CKBgfxDebugViewLine0());
     bgfx::dbgTextPrintf(0, 4, 0x1f, "%s", CKBgfxDebugViewLine1());
 }
-void CKBgfxBackend::SetDebugFlags(CKDWORD Flags)
+void CKBgfxRasterizerContext::SetDebugFlags(CKDWORD Flags)
 {
     const CKBgfxDebugConfig &debug = CKBgfxDebugSettings();
     uint32_t bgfxFlags = debug.BgfxFlags;
@@ -119,7 +119,7 @@ void CKBgfxBackend::SetDebugFlags(CKDWORD Flags)
         bgfx::setDebug(bgfxFlags);
 }
 
-void CKBgfxBackend::TraceTextureMap(CKSTRING Event, CKDWORD Texture,
+void CKBgfxRasterizerContext::TraceTextureMap(CKSTRING Event, CKDWORD Texture,
                                               const CKBgfxTextureRecord *Record)
 {
     if (!m_DrawMapActive ||
@@ -144,7 +144,7 @@ void CKBgfxBackend::TraceTextureMap(CKSTRING Event, CKDWORD Texture,
     trace.BitsPerPixel = Record ? Record->BitsPerPixel : 0u;
     CKBgfxDrawMapTraceTexture(&trace);
 }
-void CKBgfxBackend::TraceProgramMap(CKSTRING Event, CKDWORD Program,
+void CKBgfxRasterizerContext::TraceProgramMap(CKSTRING Event, CKDWORD Program,
                                               const CKBgfxProgramRecord *Record)
 {
     char spec[160];
@@ -166,7 +166,7 @@ void CKBgfxBackend::TraceProgramMap(CKSTRING Event, CKDWORD Program,
     trace.Spec = spec;
     CKBgfxDrawMapTraceProgram(&trace);
 }
-void CKBgfxBackend::TraceBufferMap(CKSTRING Event, CKSTRING Kind,
+void CKBgfxRasterizerContext::TraceBufferMap(CKSTRING Event, CKSTRING Kind,
                                              CKDWORD Buffer,
                                              CKDWORD BgfxHandle,
                                              CKDWORD Layout,
@@ -191,7 +191,7 @@ void CKBgfxBackend::TraceBufferMap(CKSTRING Event, CKSTRING Kind,
     trace.Flags = Flags;
     CKBgfxDrawMapTraceBuffer(&trace);
 }
-void CKBgfxBackend::RecordInvalidSubmit(CKSTRING Kind, bgfx::ViewId View,
+void CKBgfxRasterizerContext::RecordInvalidSubmit(CKSTRING Kind, bgfx::ViewId View,
                                                   CKDWORD Program, CKSTRING Reason)
 {
     m_DebugInvalidSubmitCount.fetch_add(1, std::memory_order_relaxed);
@@ -205,7 +205,7 @@ void CKBgfxBackend::RecordInvalidSubmit(CKSTRING Kind, bgfx::ViewId View,
                                       NULL);
     }
 }
-void CKBgfxBackend::RecordTransientAllocMiss(const char *Kind,
+void CKBgfxRasterizerContext::RecordTransientAllocMiss(const char *Kind,
                                                        CKDWORD Requested,
                                                        CKDWORD Available)
 {
@@ -218,7 +218,7 @@ void CKBgfxBackend::RecordTransientAllocMiss(const char *Kind,
                    (unsigned)Available);
     }
 }
-void CKBgfxBackend::ResetDebugBindings()
+void CKBgfxRasterizerContext::ResetDebugBindings()
 {
     if (!m_DrawMapSubmitActive)
         return;
@@ -232,7 +232,7 @@ void CKBgfxBackend::ResetDebugBindings()
     m_DebugTextureBindingMask = 0;
 }
 
-void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth, const CKBackendPipelineState &state)
+void CKBgfxRasterizerContext::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle, CKDWORD Depth, const CKFFPipelineState &state)
 {
     if (!m_DrawMapSubmitActive)
         return;
@@ -247,7 +247,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
     CKDWORD stencilHash = CKBgfxHashStencil(state.StencilRef, state.StencilReadMask, state.StencilWriteMask);
     CKDWORD programHash = CKBgfxHashProgram(programRecord);
     uint64_t finalState = m_CachedBgfxState;
-    char texFields[CKBACKEND_MAX_TEXTURE_SLOTS * 64];
+    char texFields[CKFF_TEXTURE_SLOT_COUNT * 64];
     CKDWORD texOffset = 0;
     char vbFields[256];
     CKDWORD vbOffset = 0;
@@ -255,7 +255,7 @@ void CKBgfxBackend::TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHand
         finalState |= BGFX_STATE_POINT_SIZE(m_PointSize);
 
     texFields[0] = '\0';
-    for (CKDWORD i = 0; i < CKBACKEND_MAX_TEXTURE_SLOTS; ++i) {
+    for (CKDWORD i = 0; i < CKFF_TEXTURE_SLOT_COUNT; ++i) {
         if ((m_DebugTextureBindingMask & (1u << i)) == 0)
             continue;
         if (!CKBgfxDrawMapAppendTextureBinding(texFields, sizeof(texFields),

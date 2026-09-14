@@ -1,6 +1,6 @@
-// CKBgfxBackend vertex and index buffer storage.
+// CKBgfxRasterizerContext vertex and index buffer storage.
 
-#include "CKBgfxBackend.h"
+#include "CKBgfxRasterizerContext.h"
 #include "CKBgfxResources.h"
 
 #include <stdint.h>
@@ -10,13 +10,13 @@
 // Buffers
 // ---------------------------------------------------------------------------
 
-CKERROR CKBgfxBackend::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD VertexCount, CKDWORD Layout,
+CKERROR CKBgfxRasterizerContext::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD VertexCount, CKDWORD Layout,
                                                 const void *Data, CKDWORD *OutBuffer)
 {
     if (VertexSize == 0 || VertexSize > UINT16_MAX || VertexCount == 0)
         return CKERR_INVALIDPARAMETER;
     uint64_t totalSize64 = (uint64_t)VertexCount * VertexSize;
-    if (totalSize64 > UINT32_MAX)
+    if (totalSize64 > 0x7fffffffu)
         return CKERR_OUTOFMEMORY;
     CKDWORD totalSize = (CKDWORD)totalSize64;
 
@@ -52,8 +52,11 @@ CKERROR CKBgfxBackend::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD Vert
     rec->Handle = handle;
     rec->Layout = Layout;
     rec->NativeLayout = layout;
-    rec->Shadow.resize(totalSize);
-    if (Data) memcpy(rec->Shadow.data(), Data, totalSize);
+    rec->Shadow.Resize((int)totalSize);
+    if (Data)
+        memcpy(rec->Shadow.Begin(), Data, totalSize);
+    else
+        memset(rec->Shadow.Begin(), 0, totalSize);
     rec->VertexSize = VertexSize;
     rec->VertexCount = VertexCount;
     rec->Size = totalSize;
@@ -70,7 +73,7 @@ CKERROR CKBgfxBackend::CreateVertexBufferRecord(CKDWORD VertexSize, CKDWORD Vert
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index32, const void *Data,
+CKERROR CKBgfxRasterizerContext::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index32, const void *Data,
                                                CKDWORD *OutBuffer)
 {
     if (IndexCount == 0)
@@ -80,7 +83,7 @@ CKERROR CKBgfxBackend::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index3
 
     CKDWORD indexSize = Index32 ? 4 : 2;
     uint64_t totalSize64 = (uint64_t)IndexCount * indexSize;
-    if (totalSize64 > UINT32_MAX)
+    if (totalSize64 > 0x7fffffffu)
         return CKERR_OUTOFMEMORY;
     CKDWORD totalSize = (CKDWORD)totalSize64;
 
@@ -104,8 +107,11 @@ CKERROR CKBgfxBackend::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index3
     auto *rec = new CKBgfxIndexBufferRecord();
     rec->Handle = handle;
     rec->Index32 = Index32;
-    rec->Shadow.resize(totalSize);
-    if (Data) memcpy(rec->Shadow.data(), Data, totalSize);
+    rec->Shadow.Resize((int)totalSize);
+    if (Data)
+        memcpy(rec->Shadow.Begin(), Data, totalSize);
+    else
+        memset(rec->Shadow.Begin(), 0, totalSize);
     rec->IndexCount = IndexCount;
     rec->Size = totalSize;
 
@@ -121,7 +127,7 @@ CKERROR CKBgfxBackend::CreateIndexBufferRecord(CKDWORD IndexCount, CKBOOL Index3
     return CK_OK;
 }
 
-CKERROR CKBgfxBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Out)
+CKERROR CKBgfxRasterizerContext::CreateBuffer(const CKBufferDesc *Desc, CKDWORD *Out)
 {
     if (!Out)
         return CKERR_INVALIDPARAMETER;
@@ -131,11 +137,11 @@ CKERROR CKBgfxBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
     if (!Desc || Desc->Size == 0)
         return CKERR_INVALIDPARAMETER;
     CKERROR err;
-    if (Desc->Kind == CKRST_BACKEND_BUFFER_VERTEX) {
+    if (Desc->Kind == CKRST_BUFFER_VERTEX) {
         if (Desc->Stride == 0 || (Desc->Size % Desc->Stride) != 0)
             return CKERR_INVALIDPARAMETER;
         err = CreateVertexBufferRecord(Desc->Stride, Desc->Size / Desc->Stride, Desc->Layout, Desc->InitialData, Out);
-    } else if (Desc->Kind == CKRST_BACKEND_BUFFER_INDEX) {
+    } else if (Desc->Kind == CKRST_BUFFER_INDEX) {
         const CKDWORD indexSize = Desc->Index32 ? 4 : 2;
         if ((Desc->Size % indexSize) != 0)
             return CKERR_INVALIDPARAMETER;
@@ -144,82 +150,126 @@ CKERROR CKBgfxBackend::CreateBuffer(const CKBackendBufferDesc *Desc, CKDWORD *Ou
         return CKERR_INVALIDPARAMETER;
     }
     if (err == CK_OK && Desc->InitialData)
-        ++m_FrameBufferUploads;
+        ++m_BgfxFrameBufferUploads;
     return err;
 }
 
-CKERROR CKBgfxBackend::UpdateBuffer(CKBackendBufferKind Kind, CKDWORD Buffer, CKDWORD Offset,
-                                    CKDWORD Size, const void *Data)
+CKERROR CKBgfxRasterizerContext::UpdateBuffer(const CKBufferUpdateDesc *Desc)
 {
     if (!IsReady())
         return CKERR_INVALIDOPERATION;
+    if (!Desc ||
+        (unsigned)Desc->Mode > CKRST_BUFFER_UPDATE_NOOVERWRITE ||
+        (Desc->Mode == CKRST_BUFFER_UPDATE_NOOVERWRITE &&
+         Desc->Rename))
+        return CKERR_INVALIDPARAMETER;
     CKERROR err;
-    if (Kind == CKRST_BACKEND_BUFFER_VERTEX)
-        err = UpdateVertexBufferRecord(Buffer, Offset, Size, Data);
-    else if (Kind == CKRST_BACKEND_BUFFER_INDEX)
-        err = UpdateIndexBufferRecord(Buffer, Offset, Size, Data);
+    if (Desc->Kind == CKRST_BUFFER_VERTEX)
+        err = UpdateVertexBufferRecord(*Desc);
+    else if (Desc->Kind == CKRST_BUFFER_INDEX)
+        err = UpdateIndexBufferRecord(*Desc);
     else
         return CKERR_INVALIDPARAMETER;
     if (err == CK_OK)
-        ++m_FrameBufferUploads;
+        ++m_BgfxFrameBufferUploads;
     return err;
 }
 
-CKERROR CKBgfxBackend::UpdateVertexBufferRecord(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data)
+CKERROR CKBgfxRasterizerContext::UpdateVertexBufferRecord(const CKBufferUpdateDesc &Desc)
 {
     if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
-    if (!Data || Buffer == 0 || Size == 0)
+    if (!Desc.Data || Desc.Buffer == 0 || Desc.Size == 0)
         return CKERR_INVALIDPARAMETER;
 
-    CKBgfxVertexBufferRecord *rec = GetVertexBuffer(Buffer);
+    CKBgfxVertexBufferRecord *rec = GetVertexBuffer(Desc.Buffer);
     if (!rec)
         return CKERR_INVALIDPARAMETER;
 
     if (rec->VertexSize == 0)
         return CKERR_INVALIDPARAMETER;
-    if (Offset % rec->VertexSize != 0 || Size % rec->VertexSize != 0 ||
-        Offset > rec->Size || Size > rec->Size - Offset)
+    if (Desc.Offset % rec->VertexSize != 0 || Desc.Size % rec->VertexSize != 0 ||
+        Desc.Offset > rec->Size || Desc.Size > rec->Size - Desc.Offset)
         return CKERR_INVALIDPARAMETER;
-    memcpy(rec->Shadow.data() + Offset, Data, Size);
-    if (m_FrameInProgress) {
-        const auto replacement = bgfx::createDynamicVertexBuffer(
-            bgfx::copy(rec->Shadow.data(), rec->Size), rec->NativeLayout, BGFX_BUFFER_ALLOW_RESIZE);
-        if (!bgfx::isValid(replacement)) return CKERR_OUTOFMEMORY;
-        // bgfx retains the old native resource until encoded draws have finished.
+
+    const CKBOOL rename = Desc.Mode == CKRST_BUFFER_UPDATE_DISCARD ||
+                          Desc.Rename;
+    if (rename) {
+        bgfx::DynamicVertexBufferHandle replacement;
+        if (Desc.Mode == CKRST_BUFFER_UPDATE_DISCARD) {
+            replacement = bgfx::createDynamicVertexBuffer(
+                rec->VertexCount, rec->NativeLayout, BGFX_BUFFER_ALLOW_RESIZE);
+        } else {
+            XArray<CKBYTE> contents(rec->Size);
+            contents.Resize((int)rec->Size);
+            memcpy(contents.Begin(), rec->Shadow.Begin(), rec->Size);
+            memcpy(contents.Begin() + Desc.Offset, Desc.Data, Desc.Size);
+            replacement = bgfx::createDynamicVertexBuffer(
+                bgfx::copy(contents.Begin(), rec->Size),
+                rec->NativeLayout, BGFX_BUFFER_ALLOW_RESIZE);
+        }
+        if (!bgfx::isValid(replacement))
+            return CKERR_OUTOFMEMORY;
+        if (Desc.Mode == CKRST_BUFFER_UPDATE_DISCARD) {
+            bgfx::update(replacement, Desc.Offset / rec->VertexSize,
+                         bgfx::copy(Desc.Data, Desc.Size));
+        }
         bgfx::destroy(rec->Handle);
         rec->Handle = replacement;
     } else {
-        bgfx::update(rec->Handle, Offset / rec->VertexSize, bgfx::copy(Data, Size));
+        bgfx::update(rec->Handle, Desc.Offset / rec->VertexSize,
+                     bgfx::copy(Desc.Data, Desc.Size));
     }
+    memcpy(rec->Shadow.Begin() + Desc.Offset, Desc.Data, Desc.Size);
 
     return CK_OK;
 }
-CKERROR CKBgfxBackend::UpdateIndexBufferRecord(CKDWORD Buffer, CKDWORD Offset, CKDWORD Size, const void *Data)
+CKERROR CKBgfxRasterizerContext::UpdateIndexBufferRecord(const CKBufferUpdateDesc &Desc)
 {
     if (!m_BgfxInitialized || !IsApiThread())
         return CKERR_INVALIDOPERATION;
-    if (!Data || Buffer == 0 || Size == 0)
+    if (!Desc.Data || Desc.Buffer == 0 || Desc.Size == 0)
         return CKERR_INVALIDPARAMETER;
 
-    CKBgfxIndexBufferRecord *rec = GetIndexBuffer(Buffer);
+    CKBgfxIndexBufferRecord *rec = GetIndexBuffer(Desc.Buffer);
     if (!rec)
         return CKERR_INVALIDPARAMETER;
 
     CKDWORD indexSize = rec->Index32 ? 4 : 2;
-    if (Offset % indexSize != 0 || Size % indexSize != 0 ||
-        Offset > rec->Size || Size > rec->Size - Offset)
+    if (Desc.Offset % indexSize != 0 || Desc.Size % indexSize != 0 ||
+        Desc.Offset > rec->Size || Desc.Size > rec->Size - Desc.Offset)
         return CKERR_INVALIDPARAMETER;
-    memcpy(rec->Shadow.data() + Offset, Data, Size);
-    if (m_FrameInProgress) {
-        const auto replacement = bgfx::createDynamicIndexBuffer(bgfx::copy(rec->Shadow.data(), rec->Size),
-            BGFX_BUFFER_ALLOW_RESIZE | (rec->Index32 ? BGFX_BUFFER_INDEX32 : 0));
-        if (!bgfx::isValid(replacement)) return CKERR_OUTOFMEMORY;
+
+    const CKBOOL rename = Desc.Mode == CKRST_BUFFER_UPDATE_DISCARD ||
+                          Desc.Rename;
+    const uint16_t flags = BGFX_BUFFER_ALLOW_RESIZE |
+        (rec->Index32 ? BGFX_BUFFER_INDEX32 : 0);
+    if (rename) {
+        bgfx::DynamicIndexBufferHandle replacement;
+        if (Desc.Mode == CKRST_BUFFER_UPDATE_DISCARD) {
+            replacement = bgfx::createDynamicIndexBuffer(
+                rec->IndexCount, flags);
+        } else {
+            XArray<CKBYTE> contents(rec->Size);
+            contents.Resize((int)rec->Size);
+            memcpy(contents.Begin(), rec->Shadow.Begin(), rec->Size);
+            memcpy(contents.Begin() + Desc.Offset, Desc.Data, Desc.Size);
+            replacement = bgfx::createDynamicIndexBuffer(
+                bgfx::copy(contents.Begin(), rec->Size), flags);
+        }
+        if (!bgfx::isValid(replacement))
+            return CKERR_OUTOFMEMORY;
+        if (Desc.Mode == CKRST_BUFFER_UPDATE_DISCARD) {
+            bgfx::update(replacement, Desc.Offset / indexSize,
+                         bgfx::copy(Desc.Data, Desc.Size));
+        }
         bgfx::destroy(rec->Handle);
         rec->Handle = replacement;
     } else {
-        bgfx::update(rec->Handle, Offset / indexSize, bgfx::copy(Data, Size));
+        bgfx::update(rec->Handle, Desc.Offset / indexSize,
+                     bgfx::copy(Desc.Data, Desc.Size));
     }
+    memcpy(rec->Shadow.Begin() + Desc.Offset, Desc.Data, Desc.Size);
 
     return CK_OK;
 }
