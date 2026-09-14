@@ -1,8 +1,7 @@
 #include "CKSdlGpuTextureData.h"
 #include <cstdint>
-#include <limits>
 
-bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, std::vector<unsigned char> &pixels)
+bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, XArray<unsigned char> &pixels)
 {
     const auto format = VxImageDesc2PixelFormat(image);
     if (!image.Image || image.Width <= 0 || image.Height <= 0 ||
@@ -10,9 +9,9 @@ bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, std::vector<unsigned char> &p
     const unsigned width = image.Width, height = image.Height, blockBytes = format == _DXT1 ? 8 : 16;
     const uint64_t blocksX = (uint64_t(width) + 3) / 4, blocksY = (uint64_t(height) + 3) / 4;
     const uint64_t sourceSize = blocksX * blocksY * blockBytes, size = uint64_t(width) * height * 4;
-    if (size > (std::numeric_limits<size_t>::max)() || sourceSize > UINT32_MAX ||
+    if (size > 0x7fffffffu || sourceSize > UINT32_MAX ||
         (image.TotalImageSize > 0 && uint64_t(image.TotalImageSize) < sourceSize)) return false;
-    pixels.resize(size_t(size));
+    pixels.Resize((int)size);
     const auto word = [](const unsigned char *p) { return unsigned(p[0]) | (unsigned(p[1]) << 8); };
     for (unsigned by = 0; by < blocksY; ++by) for (unsigned bx = 0; bx < blocksX; ++bx) {
         const auto *block = image.Image + (size_t(by) * size_t(blocksX) + bx) * blockBytes;
@@ -47,7 +46,8 @@ bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, std::vector<unsigned char> &p
             for (unsigned x = 0; x < 4 && bx * 4 + x < width; ++x) {
                 const unsigned index = y * 4 + x;
                 const auto *color = palette[(colors[4 + y] >> (x * 2)) & 3];
-                auto *dest = pixels.data() + (size_t(by * 4 + y) * width + bx * 4 + x) * 4;
+                unsigned char *dest = pixels.Begin() +
+                    (size_t(by * 4 + y) * width + bx * 4 + x) * 4;
                 for (unsigned c = 0; c < 4; ++c) dest[c] = color[c];
                 if (format == _DXT3) dest[3] = ((block[index / 2] >> ((index & 1) * 4)) & 15) * 17;
                 if (format == _DXT5) dest[3] = (unsigned char)alpha[(alphaIndices >> (index * 3)) & 7];

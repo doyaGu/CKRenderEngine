@@ -1,6 +1,6 @@
-#include "CKSdlGpuInternal.h"
+#include "CKSdlGpuRasterizerContext.h"
 
-CKERROR CKSdlGpuDevice::CopyVolumeSlice(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
+CKERROR CKSdlGpuRasterizerContext::CopyVolumeSlice(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
                                       SDL_GPUTexture *slice, bool toVolume)
 {
     auto *copy = SDL_BeginGPUCopyPass(Commands);
@@ -14,7 +14,7 @@ CKERROR CKSdlGpuDevice::CopyVolumeSlice(CKSdlGpuTexture &texture, unsigned mip, 
     return CK_OK;
 }
 
-CKERROR CKSdlGpuDevice::GenerateVolumeMips(CKSdlGpuTexture &texture)
+CKERROR CKSdlGpuRasterizerContext::GenerateVolumeMips(CKSdlGpuTexture &texture)
 {
     if (texture.Info.num_levels <= 1) return CK_OK;
     if (!EnsureCommands()) return Error;
@@ -74,7 +74,7 @@ CKERROR CKSdlGpuDevice::GenerateVolumeMips(CKSdlGpuTexture &texture)
             SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
             SDL_EndGPURenderPass(pass);
             if (CopyVolumeSlice(texture, mip, z, output.get(), true) != CK_OK) return Error;
-            texture.Defined[mip * texture.Info.layer_count_or_depth + z] = true;
+            texture.Defined.Set((int)(mip * texture.Info.layer_count_or_depth + z));
         }
         // SDL defers destruction while the encoded commands reference input.
     }

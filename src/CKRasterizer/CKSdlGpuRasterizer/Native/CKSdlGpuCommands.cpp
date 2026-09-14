@@ -1,5 +1,5 @@
 #include "CKRenderProfile.h"
-#include "CKSdlGpuInternal.h"
+#include "CKSdlGpuRasterizerContext.h"
 
 namespace {
 
@@ -22,33 +22,34 @@ bool CKSdlGpuValidateVertexGeometry(
     const CKSdlGpuLayout *layout,
     const CKSdlGpuBuffer *buffer,
     CKDWORD layoutHandle,
-    const CKBackendTransientVertices *transient,
+    const CKTransientVertexData *transient,
     CKDWORD start,
     CKDWORD count,
-    const std::vector<CKSdlGpuTransientVertexInfo> &allocations,
-    const std::vector<std::vector<CKBYTE>> &storage,
+    const XArray<CKSdlGpuTransientVertexInfo> &allocations,
+    const CKSdlGpuTransientStorage &storage,
     CKSdlGpuByteRange &snapshot)
 {
     if (buffer)
-        return uint64_t(start) + count <= buffer->Shadow.size() / layout->Stride;
+        return uint64_t(start) + count <= buffer->Desc.Size / layout->Stride;
     if (!transient || !transient->Token)
         return false;
     const auto allocation = std::lower_bound(
-        allocations.begin(), allocations.end(), transient->Token,
+        allocations.Begin(), allocations.End(), transient->Token,
         CKSdlGpuVertexTokenBefore);
-    if (allocation == allocations.end() || allocation->Token != transient->Token)
+    if (allocation == allocations.End() || allocation->Token != transient->Token)
         return false;
-    const size_t index = size_t(allocation - allocations.begin());
-    if (index >= storage.size())
+    const int index = (int)(allocation - allocations.Begin());
+    const XArray<CKBYTE> *bytes = storage.Get(index);
+    if (!bytes)
         return false;
-    const auto &bytes = storage[index];
     if (allocation->Layout != layoutHandle || transient->Layout != allocation->Layout ||
         transient->Stride != allocation->Stride || transient->Stride != layout->Stride ||
-        transient->Data != bytes.data() ||
-        uint64_t(transient->Count) * transient->Stride != bytes.size() ||
+        transient->Data != bytes->Begin() ||
+        uint64_t(transient->Count) * transient->Stride !=
+            (uint64_t)bytes->Size() ||
         start > transient->Count || count > transient->Count - start)
         return false;
-    snapshot.Data = bytes.data() + size_t(start) * layout->Stride;
+    snapshot.Data = bytes->Begin() + size_t(start) * layout->Stride;
     snapshot.Size = size_t(count) * layout->Stride;
     return true;
 }
@@ -77,18 +78,24 @@ uint64_t CKSdlGpuAlignedEnd(uint64_t offset, size_t size, unsigned alignment)
     return offset + size;
 }
 
-void CKSdlGpuAppendBytes(std::vector<CKBYTE> &destination,
+void CKSdlGpuAppendBytes(XArray<CKBYTE> &destination,
                          const CKSdlGpuByteRange &source,
                          unsigned alignment,
                          unsigned &offset)
 {
     if (!source.Size)
         return;
-    const size_t remainder = destination.size() % alignment;
-    if (remainder)
-        destination.resize(destination.size() + alignment - remainder);
-    offset = unsigned(destination.size());
-    destination.insert(destination.end(), source.Data, source.Data + source.Size);
+    const int oldSize = destination.Size();
+    const int remainder = oldSize % (int)alignment;
+    const int alignedSize = remainder
+        ? oldSize + (int)alignment - remainder : oldSize;
+    destination.Resize(alignedSize + (int)source.Size);
+    if (alignedSize > oldSize)
+        std::memset(destination.Begin() + oldSize, 0,
+                    (size_t)(alignedSize - oldSize));
+    offset = (unsigned)alignedSize;
+    std::memcpy(destination.Begin() + alignedSize,
+                source.Data, source.Size);
 }
 
 struct CKSdlGpuVertexBindingState {
@@ -111,71 +118,61 @@ void CKSdlGpuBindVertexBuffer(SDL_GPURenderPass *pass,
     bound.Valid = true;
 }
 
-void CKSdlGpuTrimTransientAllocations(std::vector<std::vector<CKBYTE>> &allocations,
-                                      uint64_t &retained)
-{
-    static constexpr uint64_t kRetentionLimit = 16u * 1024u * 1024u;
-    size_t keep = 0;
-    while (keep < allocations.size() &&
-           retained + allocations[keep].capacity() <= kRetentionLimit) {
-        retained += allocations[keep].capacity();
-        ++keep;
-    }
-    allocations.resize(keep);
-}
-
 } // namespace
 
-CKERROR CKSdlGpuBackend::BeginPass(const CKBackendPassDesc *desc)
+CKERROR CKSdlGpuRasterizerContext::BeginPass(const CKRenderPassDesc *desc)
 {
-    if (!m->Ready()) return CKERR_INVALIDOPERATION;
+    if (!Ready()) return CKERR_INVALIDOPERATION;
     if (!desc || desc->Rect.left < 0 || desc->Rect.top < 0 || desc->Rect.right <= desc->Rect.left ||
         desc->Rect.bottom <= desc->Rect.top) return CKERR_INVALIDPARAMETER;
-    auto target = m->Targets.Get(desc->RenderTarget);
+    auto target = Targets.Get(desc->RenderTarget);
     if (desc->RenderTarget && !target) return CKERR_INVALIDPARAMETER;
-    const CKERROR error = m->Flush();
+    const CKERROR error = Flush();
     if (error != CK_OK) return error;
-    m->Pass = *desc; m->Pass.Name = nullptr; m->Target = std::move(target); m->PassOpen = true;
-    ++m->FrameStats.Passes;
+    Pass = *desc; Pass.Name = nullptr; Target = std::move(target); PassOpen = true;
+    ++FrameStats.Passes;
     return CK_OK;
 }
 
-CKBOOL CKSdlGpuBackend::AllocTransientVertices(CKDWORD count, CKDWORD handle, CKBackendTransientVertices *out)
+CKBOOL CKSdlGpuRasterizerContext::AllocTransientVertices(CKDWORD count, CKDWORD handle, CKTransientVertexData *out)
 {
-    if (out) *out = CKBackendTransientVertices();
-    if (!m->Ready() || !out || !count || !m->NextTransientToken) return FALSE;
-    auto layout = m->Layouts.Get(handle);
+    if (out) *out = CKTransientVertexData();
+    if (!Ready() || !out || !count || !NextTransientToken) return FALSE;
+    auto layout = Layouts.Get(handle);
     if (!layout || uint64_t(count) * layout->Stride > 64u * 1024u * 1024u) return FALSE;
-    const size_t index = m->TransientVertexInfo.size();
-    if (index == m->TransientVertices.size()) m->TransientVertices.emplace_back();
-    auto &storage = m->TransientVertices[index];
-    storage.resize(size_t(count) * layout->Stride);
-    std::fill(storage.begin(), storage.end(), CKBYTE(0));
-    m->TransientVertexInfo.push_back({m->NextTransientToken++, handle, layout->Stride});
-    out->Data = storage.data(); out->Count = count; out->Stride = layout->Stride;
-    out->Layout = handle; out->Token = m->TransientVertexInfo.back().Token;
+    const int index = TransientVertexInfo.Size();
+    XArray<CKBYTE> *storage = TransientVertices.Acquire(index);
+    if (!storage) return FALSE;
+    storage->Resize((int)(count * layout->Stride));
+    std::memset(storage->Begin(), 0, (size_t)storage->Size());
+    TransientVertexInfo.PushBack(
+        {NextTransientToken++, handle, layout->Stride});
+    out->Data = storage->Begin(); out->Count = count; out->Stride = layout->Stride;
+    out->Layout = handle; out->Token = TransientVertexInfo.Back().Token;
     return TRUE;
 }
 
-CKBOOL CKSdlGpuBackend::AllocTransientIndices(CKDWORD count, CKBOOL index32, CKBackendTransientIndices *out)
+CKBOOL CKSdlGpuRasterizerContext::AllocTransientIndices(CKDWORD count, CKBOOL index32, CKTransientIndexData *out)
 {
-    if (out) *out = CKBackendTransientIndices();
-    if (!m->Ready() || !out || !count || !m->NextTransientToken || count > 16u * 1024u * 1024u) return FALSE;
-    const size_t index = m->TransientIndexInfo.size();
-    if (index == m->TransientIndices.size()) m->TransientIndices.emplace_back();
-    auto &storage = m->TransientIndices[index];
-    storage.resize(size_t(count) * (index32 ? 4 : 2));
-    std::fill(storage.begin(), storage.end(), CKBYTE(0));
-    m->TransientIndexInfo.push_back({m->NextTransientToken++, index32 ? TRUE : FALSE});
-    out->Data = storage.data(); out->Count = count;
-    out->Index32 = m->TransientIndexInfo.back().Index32; out->Token = m->TransientIndexInfo.back().Token;
+    if (out) *out = CKTransientIndexData();
+    if (!Ready() || !out || !count || !NextTransientToken || count > 16u * 1024u * 1024u) return FALSE;
+    const int index = TransientIndexInfo.Size();
+    XArray<CKBYTE> *storage = TransientIndices.Acquire(index);
+    if (!storage) return FALSE;
+    storage->Resize((int)(count * (index32 ? 4 : 2)));
+    std::memset(storage->Begin(), 0, (size_t)storage->Size());
+    TransientIndexInfo.PushBack(
+        {NextTransientToken++, index32 ? TRUE : FALSE});
+    out->Data = storage->Begin(); out->Count = count;
+    out->Index32 = TransientIndexInfo.Back().Index32;
+    out->Token = TransientIndexInfo.Back().Token;
     return TRUE;
 }
 
-CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
+CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
 {
     CKRE_PROFILE_SCOPE("CKRE.SDL.RecordDraw");
-    if (!m->Ready() || !m->PassOpen) return CKERR_INVALIDOPERATION;
+    if (!Ready() || !PassOpen) return CKERR_INVALIDOPERATION;
     if (!desc || !desc->VertexCount) return CKERR_INVALIDPARAMETER;
     CKSdlGpuDraw draw;
     draw.State = desc->Pipeline;
@@ -185,52 +182,54 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
     draw.IndexCount = desc->IndexCount;
 #if (defined(CKRE_ENABLE_PROFILING) && CKRE_ENABLE_PROFILING) || \
     (defined(CKRE_ENABLE_FFP_DIAGNOSTICS) && CKRE_ENABLE_FFP_DIAGNOSTICS)
-    draw.Marker = std::make_unique<std::string>(desc->Marker ? desc->Marker : "");
+    draw.Marker = desc->Marker ? desc->Marker : "";
 #else
-    if (m->DebugFlags)
-        draw.Marker = std::make_unique<std::string>(desc->Marker ? desc->Marker : "");
+    if (DebugFlags)
+        draw.Marker = desc->Marker ? desc->Marker : "";
 #endif
-    const auto &programOwner = m->Programs.Borrow(desc->Program);
-    const auto &layoutOwner = m->Layouts.Borrow(desc->Layout);
-    const auto &layout1Owner = m->Layouts.Borrow(desc->Stream1Layout);
-    const auto &vbOwner = m->VertexBuffers.Borrow(desc->VertexBuffer);
-    const auto &vb1Owner = m->VertexBuffers.Borrow(desc->Stream1VertexBuffer);
-    const auto &ibOwner = m->IndexBuffers.Borrow(desc->IndexBuffer);
+    const auto &programOwner = Programs.Borrow(desc->Program);
+    const auto &layoutOwner = Layouts.Borrow(desc->Layout);
+    const auto &layout1Owner = Layouts.Borrow(desc->Stream1Layout);
+    const auto &vbOwner = VertexBuffers.Borrow(desc->VertexBuffer);
+    const auto &vb1Owner = VertexBuffers.Borrow(desc->Stream1VertexBuffer);
+    const auto &ibOwner = IndexBuffers.Borrow(desc->IndexBuffer);
     draw.Program = programOwner.get(); draw.Layout = layoutOwner.get(); draw.Layout1 = layout1Owner.get();
     draw.VB = vbOwner.get(); draw.VB1 = vb1Owner.get(); draw.IB = ibOwner.get();
     if (!draw.Program || (desc->Stream1Layout && !draw.Layout1)) return CKERR_INVALIDPARAMETER;
-    const bool procedural = draw.Program->Interface.VertexInputs.empty();
+    const bool procedural = draw.Program->Interface.VertexInputs.Size() == 0;
     if (procedural ? (desc->IndexCount || desc->StartVertex) : !draw.Layout) return CKERR_INVALIDPARAMETER;
     CKSdlGpuByteRange vertices, vertices1, indices;
     if (!procedural && !CKSdlGpuValidateVertexGeometry(
             draw.Layout, draw.VB, desc->Layout, desc->TransientVertices,
-            desc->StartVertex, desc->VertexCount, m->TransientVertexInfo,
-            m->TransientVertices, vertices))
+            desc->StartVertex, desc->VertexCount, TransientVertexInfo,
+            TransientVertices, vertices))
         return CKERR_INVALIDPARAMETER;
     if (!procedural && draw.Layout1 && !CKSdlGpuValidateVertexGeometry(
             draw.Layout1, draw.VB1, desc->Stream1Layout, desc->Stream1Transient,
-            desc->Stream1StartVertex, desc->VertexCount, m->TransientVertexInfo,
-            m->TransientVertices, vertices1))
+            desc->Stream1StartVertex, desc->VertexCount, TransientVertexInfo,
+            TransientVertices, vertices1))
         return CKERR_INVALIDPARAMETER;
     if (desc->IndexCount) {
         const CKBYTE *bytes = nullptr;
         unsigned available = 0;
         if (draw.IB) {
             draw.Index32 = draw.IB->Desc.Index32 != FALSE;
-            bytes = draw.IB->Shadow.data(); available = unsigned(draw.IB->Shadow.size()) / (draw.Index32 ? 4 : 2);
+            bytes = draw.IB->IndexData.Begin();
+            available = unsigned(draw.IB->IndexData.Size()) / (draw.Index32 ? 4 : 2);
         } else if (desc->TransientIndices && desc->TransientIndices->Token) {
             const auto &transient = *desc->TransientIndices;
             const auto allocation = std::lower_bound(
-                m->TransientIndexInfo.begin(), m->TransientIndexInfo.end(),
+                TransientIndexInfo.Begin(), TransientIndexInfo.End(),
                 transient.Token, CKSdlGpuIndexTokenBefore);
-            if (allocation == m->TransientIndexInfo.end() || allocation->Token != transient.Token) return CKERR_INVALIDPARAMETER;
-            const size_t index = size_t(allocation - m->TransientIndexInfo.begin());
-            if (index >= m->TransientIndices.size()) return CKERR_INVALIDPARAMETER;
-            const auto &storage = m->TransientIndices[index];
-            if (transient.Index32 != allocation->Index32 || transient.Data != storage.data() ||
-                uint64_t(transient.Count) * (transient.Index32 ? 4 : 2) != storage.size()) return CKERR_INVALIDPARAMETER;
+            if (allocation == TransientIndexInfo.End() || allocation->Token != transient.Token) return CKERR_INVALIDPARAMETER;
+            const int index = (int)(allocation - TransientIndexInfo.Begin());
+            const XArray<CKBYTE> *storage = TransientIndices.Get(index);
+            if (!storage) return CKERR_INVALIDPARAMETER;
+            if (transient.Index32 != allocation->Index32 || transient.Data != storage->Begin() ||
+                uint64_t(transient.Count) * (transient.Index32 ? 4 : 2) !=
+                    (uint64_t)storage->Size()) return CKERR_INVALIDPARAMETER;
             draw.Index32 = transient.Index32 != FALSE;
-            bytes = storage.data(); available = transient.Count;
+            bytes = storage->Begin(); available = transient.Count;
         }
         if (!bytes || desc->StartIndex > available || desc->IndexCount > available - desc->StartIndex) return CKERR_INVALIDPARAMETER;
         const unsigned size = draw.Index32 ? 4 : 2;
@@ -253,33 +252,29 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
         }
     }
     auto &uniforms = draw.Program->UniformLayout;
-    static const CKBackendConstants emptyConstants;
+    static const CKFFConstantSet emptyConstants;
     uniforms.Update(desc->Constants ? *desc->Constants : emptyConstants);
     CKSdlGpuBindingBatch::Inputs bindingInputs;
     bindingInputs.Hash = draw.Program->Identity;
-    for (unsigned slot = 0; slot < draw.Program->Interface.Samplers.size(); ++slot) {
+    for (unsigned slot = 0; slot < (unsigned)draw.Program->Interface.Samplers.Size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
-        static const CKBackendTextureBinding emptyBinding;
+        static const CKFFTextureSlot emptyBinding;
         const auto &binding = desc->Textures ? (*desc->Textures)[decl.Slot] : emptyBinding;
-        auto &cached = m->SamplerBindings[decl.Slot];
+        auto &cached = SamplerBindings[decl.Slot];
         if (std::memcmp(&cached.Sampler, &binding.Sampler, sizeof(binding.Sampler)) != 0) {
             cached.Sampler = binding.Sampler;
             cached.NativeSampler.reset();
         }
-        if (decl.MetadataBufferSlot == ~0u && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
+        if (decl.MetadataBufferSlot == UINT32_MAX && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
             return CKERR_NOTIMPLEMENTED;
-        const auto &texture = binding.Texture ? m->Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
+        const auto &texture = binding.Texture ? Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
         if (!texture || texture->Depth ||
             texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
-            (m->Target && texture == m->Target->Color)) {
-            fprintf(stderr, "SDL_gpu draw rejected: sampler=%u texture=0x%x feedback=%d marker=%s\n",
-                    slot, binding.Texture, m->Target && texture == m->Target->Color,
-                    draw.Marker ? draw.Marker->c_str() : "");
+            (Target && texture == Target->Color))
             return CKERR_INVALIDPARAMETER;
-        }
-        if (!cached.NativeSampler) cached.NativeSampler = m->Sampler(binding.Sampler);
-        if (!cached.NativeSampler) return m->Error;
+        if (!cached.NativeSampler) cached.NativeSampler = Sampler(binding.Sampler);
+        if (!cached.NativeSampler) return Error;
         bindingInputs.Textures[slot] = texture.get();
         bindingInputs.Samplers[slot] = cached.NativeSampler.get();
         bindingInputs.TextureOwners[slot] = &texture;
@@ -289,7 +284,7 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
         bindingInputs.Hash = (bindingInputs.Hash * 16777619u) ^
             (reinterpret_cast<uintptr_t>(cached.NativeSampler.get()) >> 4);
         const CKDWORD metadata = draw.Program->SamplerMetadataOffsets[slot];
-        if (metadata == ~0u) continue;
+        if (metadata == UINT32_MAX) continue;
         const CKDWORD metadataBit = 1u << slot;
         if ((draw.Program->SamplerMetadataValidMask & metadataBit) != 0 &&
             std::memcmp(&draw.Program->SamplerMetadata[slot], &binding.Sampler,
@@ -308,59 +303,64 @@ CKERROR CKSdlGpuBackend::Draw(const CKBackendDraw *desc)
                                (unsigned(binding.Sampler.AddressW) << 8));
         samplerInfo[1] = float(binding.Sampler.MinFilter); samplerInfo[2] = float(binding.Sampler.MagFilter);
         samplerInfo[3] = float(binding.Sampler.MipFilter);
-        std::memcpy(uniforms.Data.data() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
-        std::memcpy(uniforms.Data.data() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));
+        std::memcpy(uniforms.Data.Begin() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
+        std::memcpy(uniforms.Data.Begin() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));
         const CKDWORD first = (std::min)(decl.BorderColorOffset, decl.SamplerStateOffset);
         const CKDWORD last = (std::max)(decl.BorderColorOffset, decl.SamplerStateOffset) + sizeof(rgba);
         if (!uniforms.MarkDataChanged(metadata + first, last - first)) return CKERR_INVALIDPARAMETER;
     }
     // Snapshot directly into the batch only after validating the entire draw.
     // Offsets survive arena growth; caller-owned transient data may change as
-    // soon as Draw returns. Check aligned sizes before narrowing to GPU offsets.
+    // soon as Draw returns. XArray and native GPU offsets are both bounded here
+    // before CKSdlGpuAppendBytes narrows sizes to int and unsigned.
+    static const uint64_t kArraySizeLimit = 0x7fffffffu;
     if (CKSdlGpuAlignedEnd(
-            CKSdlGpuAlignedEnd(m->BatchVertices.size(), vertices.Size, 4u),
-            vertices1.Size, 4u) > UINT32_MAX ||
-        CKSdlGpuAlignedEnd(m->BatchIndices.size(), indices.Size, 4u) > UINT32_MAX ||
-        uint64_t(m->Uniforms.Data.size()) + uniforms.Data.size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
-    CKSdlGpuAppendBytes(m->BatchVertices, vertices, 4u, draw.VertexOffset);
-    CKSdlGpuAppendBytes(m->BatchVertices, vertices1, 4u, draw.VertexOffset1);
-    CKSdlGpuAppendBytes(m->BatchIndices, indices, 4u, draw.IndexOffset);
-    m->Uniforms.Snapshot(uniforms, draw.Program->UniformCursor, draw.UniformOffsets);
-    draw.Bindings = m->Bindings.Intern(*draw.Program, bindingInputs);
-    m->DrawResources.Retain(programOwner);
-    m->DrawResources.Retain(layoutOwner); m->DrawResources.Retain(layout1Owner);
-    m->DrawResources.Retain(vbOwner); m->DrawResources.Retain(vb1Owner); m->DrawResources.Retain(ibOwner);
-    m->DrawApproximations = 0;
-    m->Draws.push_back(std::move(draw));
-    ++m->FrameStats.Draws;
+            CKSdlGpuAlignedEnd((uint64_t)BatchVertices.Size(), vertices.Size, 4u),
+            vertices1.Size, 4u) > kArraySizeLimit ||
+        CKSdlGpuAlignedEnd((uint64_t)BatchIndices.Size(), indices.Size, 4u) > kArraySizeLimit ||
+        uint64_t(Uniforms.Data.Size()) + uniforms.Data.Size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
+    CKSdlGpuAppendBytes(BatchVertices, vertices, 4u, draw.VertexOffset);
+    CKSdlGpuAppendBytes(BatchVertices, vertices1, 4u, draw.VertexOffset1);
+    CKSdlGpuAppendBytes(BatchIndices, indices, 4u, draw.IndexOffset);
+    Uniforms.Snapshot(uniforms, draw.Program->UniformCursor, draw.UniformOffsets);
+    draw.Bindings = Bindings.Intern(*draw.Program, bindingInputs);
+    DrawResources.Retain(programOwner);
+    DrawResources.Retain(layoutOwner); DrawResources.Retain(layout1Owner);
+    DrawResources.Retain(vbOwner); DrawResources.Retain(vb1Owner); DrawResources.Retain(ibOwner);
+    if (draw.VB) draw.NativeVB = DrawResources.Retain(draw.VB->Buffer);
+    if (draw.VB1) draw.NativeVB1 = DrawResources.Retain(draw.VB1->Buffer);
+    if (draw.IB) draw.NativeIB = DrawResources.Retain(draw.IB->Buffer);
+    DrawApproximations = 0;
+    Draws.PushBack(draw);
+    ++FrameStats.Draws;
     // Bound packet retention independently of the number of engine draws.
-    return m->Draws.size() >= 256 ? m->Flush() : CK_OK;
+    return Draws.Size() >= 256 ? Flush() : CK_OK;
 }
 
-CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
+CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
 {
     CKRE_PROFILE_SCOPE("CKRE.SDL.Encode");
-    if (Draws.empty() && (!PassOpen || !Pass.ClearFlags)) return CK_OK;
+    if (Draws.Size() == 0 && (!PassOpen || !Pass.ClearFlags)) return CK_OK;
     if (!EnsureCommands()) return Error;
     if (!Target) {
         if (!presentWindow) {
-            Draws.clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
-            BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
+            Draws.Clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
+            BatchVertices.Clear(); BatchIndices.Clear(); Pass.ClearFlags = 0;
             return CK_OK;
         }
         const CKERROR acquired = AcquireSwapchain();
         if (acquired != CK_OK) return acquired;
         // A minimized window has no swapchain image. Resource work still submits.
         if (!Swapchain) {
-            Draws.clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
-            BatchVertices.clear(); BatchIndices.clear(); Pass.ClearFlags = 0;
+            Draws.Clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
+            BatchVertices.Clear(); BatchIndices.Clear(); Pass.ClearFlags = 0;
             return CK_OK;
         }
     }
-    CKRE_PROFILE_VALUE("CKRE.Batch.Draws", Draws.size());
-    CKRE_PROFILE_VALUE("CKRE.Batch.VertexBytes", BatchVertices.size());
-    CKRE_PROFILE_VALUE("CKRE.Batch.IndexBytes", BatchIndices.size());
-    CKRE_PROFILE_VALUE("CKRE.Batch.UniformSnapshotBytes", Uniforms.Data.size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.Draws", Draws.Size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.VertexBytes", BatchVertices.Size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.IndexBytes", BatchIndices.Size());
+    CKRE_PROFILE_VALUE("CKRE.Batch.UniformSnapshotBytes", Uniforms.Data.Size());
     CKRE_PROFILE_VALUE("CKRE.Batch.BindingGroups", Bindings.Size());
     const auto batch = UploadGeometry(BatchVertices, BatchIndices);
     if (Error != CK_OK) return Error;
@@ -377,7 +377,8 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
     color.store_op = SDL_GPU_STOREOP_STORE;
     if (Target && Target->VolumeSlice) {
         if (color.load_op == SDL_GPU_LOADOP_LOAD) {
-            if (Target->Color->Defined[Target->Desc.ColorMip * Target->Color->Info.layer_count_or_depth + Target->Desc.ColorLayer]) {
+            if (Target->Color->Defined.IsSet((int)(Target->Desc.ColorMip *
+                Target->Color->Info.layer_count_or_depth + Target->Desc.ColorLayer))) {
                 if (CopyVolumeSlice(*Target->Color, Target->Desc.ColorMip, Target->Desc.ColorLayer,
                                      Target->VolumeSlice.get(), false) != CK_OK) return Error;
             } else color.load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -414,7 +415,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         SDL_EndGPURenderPass(pass); return Error;
     }
     SDL_GPUGraphicsPipeline *boundPipeline = nullptr;
-    unsigned boundBindings = ~0u;
+    unsigned boundBindings = UINT32_MAX;
     CKSdlGpuUniformBindings boundUniforms;
     SDL_Rect boundScissor = passRect;
     bool scissorBound = true;
@@ -432,7 +433,7 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         if (boundPipeline != pipeline) {
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             boundPipeline = pipeline;
-            boundBindings = ~0u;
+            boundBindings = UINT32_MAX;
             boundUniforms.Invalidate();
             CKRE_PROFILE_VALUE("CKRE.Batch.PipelineBinds", 1);
         }
@@ -456,12 +457,12 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             stencilReferenceBound = true;
         }
         if (!scissor.w || !scissor.h) continue;
-        if (!draw.Program->Interface.VertexInputs.empty()) {
-            SDL_GPUBufferBinding vb = {draw.VB ? draw.VB->Buffer.get() : batch.Buffer.get(),
+        if (draw.Program->Interface.VertexInputs.Size() != 0) {
+            SDL_GPUBufferBinding vb = {draw.VB ? draw.NativeVB : batch.Buffer.get(),
                 draw.VB ? draw.StartVertex * draw.Layout->Stride : draw.VertexOffset};
             CKSdlGpuBindVertexBuffer(pass, boundVertexBuffers, 0, vb);
             if (draw.Layout1) {
-                SDL_GPUBufferBinding vb1 = {draw.VB1 ? draw.VB1->Buffer.get() : batch.Buffer.get(),
+                SDL_GPUBufferBinding vb1 = {draw.VB1 ? draw.NativeVB1 : batch.Buffer.get(),
                     draw.VB1 ? draw.Stream1StartVertex * draw.Layout1->Stride : draw.VertexOffset1};
                 CKSdlGpuBindVertexBuffer(pass, boundVertexBuffers, 1, vb1);
             }
@@ -472,25 +473,25 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
         if (boundBindings != draw.Bindings) {
             const auto &bindings = Bindings[draw.Bindings];
             if (draw.Program->Vertex->Desc.SamplerCount)
-                SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex.data(), draw.Program->Vertex->Desc.SamplerCount);
+                SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex, draw.Program->Vertex->Desc.SamplerCount);
             if (draw.Program->Fragment->Desc.SamplerCount)
-                SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment.data(), draw.Program->Fragment->Desc.SamplerCount);
+                SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment, draw.Program->Fragment->Desc.SamplerCount);
             boundBindings = draw.Bindings;
         }
-        for (size_t i = 0; i < draw.Program->UniformLayout.Buffers.size(); ++i) {
+        for (int i = 0; i < draw.Program->UniformLayout.Buffers.Size(); ++i) {
             const auto &buffer = draw.Program->UniformLayout.Buffers[i];
             const unsigned offset = draw.UniformOffsets[i];
             if (!boundUniforms.NeedsPush(buffer, offset, Uniforms.Data)) continue;
-            const void *data = Uniforms.Data.data() + offset;
+            const void *data = Uniforms.Data.Begin() + offset;
             if (buffer.Stage == CKRST_SHADER_VERTEX) SDL_PushGPUVertexUniformData(Commands, buffer.Slot, data, buffer.Size);
             else SDL_PushGPUFragmentUniformData(Commands, buffer.Slot, data, buffer.Size);
             CKRE_PROFILE_VALUE("CKRE.Batch.UniformPushBytes", buffer.Size);
             CKRE_PROFILE_VALUE("CKRE.Batch.UniformPushes", 1);
         }
-        if (draw.Marker && !draw.Marker->empty()) SDL_InsertGPUDebugLabel(Commands, draw.Marker->c_str());
+        if (!draw.Marker.IsEmpty()) SDL_InsertGPUDebugLabel(Commands, draw.Marker.Str());
         if (draw.IndexCount) {
             const Uint32 indexSizeBytes = draw.Index32 ? 4u : 2u;
-            SDL_GPUBufferBinding ib = {draw.IB ? draw.IB->Buffer.get() : batch.Buffer.get(),
+            SDL_GPUBufferBinding ib = {draw.IB ? draw.NativeIB : batch.Buffer.get(),
                 draw.IB ? 0u : batch.IndexOffset};
             const Uint32 firstIndex = draw.IB ? draw.StartIndex
                                               : draw.IndexOffset / indexSizeBytes;
@@ -513,7 +514,8 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
     if (Target) {
         if (Target->VolumeSlice && CopyVolumeSlice(*Target->Color, Target->Desc.ColorMip,
             Target->Desc.ColorLayer, Target->VolumeSlice.get(), true) != CK_OK) return Error;
-        Target->Color->Defined[Target->Desc.ColorMip * Target->Color->Info.layer_count_or_depth + Target->Desc.ColorLayer] = true;
+        Target->Color->Defined.Set((int)(Target->Desc.ColorMip *
+            Target->Color->Info.layer_count_or_depth + Target->Desc.ColorLayer));
         Target->Color->Referenced = true;
         Target->Color->AttachmentInitialized = true;
         if (Target->Color->AutoMips && Target->Desc.ColorMip == 0) {
@@ -521,12 +523,12 @@ CKERROR CKSdlGpuDevice::Flush(bool presentWindow)
             if (error != CK_OK) return error;
         }
     }
-    Pass.ClearFlags = 0; Draws.clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
-    BatchVertices.clear(); BatchIndices.clear();
+    Pass.ClearFlags = 0; Draws.Clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
+    BatchVertices.Clear(); BatchIndices.Clear();
     return CK_OK;
 }
 
-CKERROR CKSdlGpuDevice::AcquireSwapchain()
+CKERROR CKSdlGpuRasterizerContext::AcquireSwapchain()
 {
     if (Swapchain) return CK_OK;
     const unsigned previousWidth = SwapWidth, previousHeight = SwapHeight;
@@ -539,11 +541,11 @@ CKERROR CKSdlGpuDevice::AcquireSwapchain()
     return CK_OK;
 }
 
-CKERROR CKSdlGpuBackend::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD height,
-                                        CKBackendPresentSync sync)
+CKERROR CKSdlGpuRasterizerContext::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD height,
+                                        CKPresentSync sync)
 {
-    if (!m->Ready()) return CKERR_INVALIDOPERATION;
-    auto source = m->Textures.Get(handle);
+    if (!Ready()) return CKERR_INVALIDOPERATION;
+    auto source = Textures.Get(handle);
     if (!source || source->Depth || source->Multisample ||
         source->Info.type != SDL_GPU_TEXTURETYPE_2D ||
         !width || !height || width > source->Info.width || height > source->Info.height)
@@ -553,65 +555,65 @@ CKERROR CKSdlGpuBackend::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD h
 
     // Finish the native-target scene pass, then let SDL encode its dedicated
     // blit straight to the acquired swapchain image. This keeps the portable
-    // texture backbuffer/readback semantics while avoiding another translated
-    // draw packet, geometry upload and backend render-pass setup.
-    CKERROR error = m->Flush();
+    // texture backbuffer/readback semantics while avoiding another fullscreen
+    // draw packet, geometry upload and native render-pass setup.
+    CKERROR error = Flush();
     if (error != CK_OK) return error;
-    if (sync != CKRST_BACKEND_SYNC_UNCHANGED) {
-        const auto mode = sync == CKRST_BACKEND_SYNC_VSYNC
+    if (sync != CKRST_PRESENT_UNCHANGED) {
+        const auto mode = sync == CKRST_PRESENT_VSYNC
             ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
-        if (mode != m->PresentMode) {
-            if (m->Swapchain) return CKERR_INVALIDOPERATION;
-            if (!SDL_SetGPUSwapchainParameters(m->Device, m->Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
-                return m->Fail("SetGPUSwapchainParameters");
-            m->PresentMode = mode;
+        if (mode != PresentMode) {
+            if (Swapchain) return CKERR_INVALIDOPERATION;
+            if (!SDL_SetGPUSwapchainParameters(Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
+                return Fail("SetGPUSwapchainParameters");
+            PresentMode = mode;
         }
     }
-    if (!m->EnsureCommands()) return m->Error;
-    error = m->AcquireSwapchain();
+    if (!EnsureCommands()) return Error;
+    error = AcquireSwapchain();
     if (error != CK_OK) return error;
 
-    ++m->FrameStats.Passes;
-    ++m->FrameStats.Blits;
-    if (m->Swapchain) {
-        const SDL_GPUTextureFormat swapchainFormat = SDL_GetGPUSwapchainTextureFormat(m->Device, m->Window);
-        if (m->PresentCopySupported && CKSdlGpuCanCopyPresent(source->Info.format, swapchainFormat,
-                                   width, height, m->SwapWidth, m->SwapHeight)) {
-            if (!m->PresentCopyLogged) {
+    if (Swapchain) {
+        const SDL_GPUTextureFormat swapchainFormat = SDL_GetGPUSwapchainTextureFormat(Device, Window);
+        if (PresentCopySupported && CKSdlGpuCanCopyPresent(source->Info.format, swapchainFormat,
+                                   width, height, SwapWidth, SwapHeight)) {
+            if (!PresentCopyLogged) {
                 SDL_Log("SDL_gpu present path: exact texture copy format=%u size=%ux%u",
                         unsigned(swapchainFormat), width, height);
-                m->PresentCopyLogged = true;
+                PresentCopyLogged = true;
             }
-            auto *copy = SDL_BeginGPUCopyPass(m->Commands);
-            if (!copy) return m->Fail("BeginGPUCopyPass.present");
+            auto *copy = SDL_BeginGPUCopyPass(Commands);
+            if (!copy) return Fail("BeginGPUCopyPass.present");
             SDL_GPUTextureLocation sourceLocation = {}, destinationLocation = {};
             sourceLocation.texture = source->Image.get();
-            destinationLocation.texture = m->Swapchain;
+            destinationLocation.texture = Swapchain;
             SDL_CopyGPUTextureToTexture(copy, &sourceLocation, &destinationLocation,
                                         width, height, 1, false);
             SDL_EndGPUCopyPass(copy);
         } else {
             SDL_GPUBlitInfo blit = {};
             blit.source = {source->Image.get(), 0, 0, 0, 0, width, height};
-            blit.destination = {m->Swapchain, 0, 0, 0, 0, m->SwapWidth, m->SwapHeight};
+            blit.destination = {Swapchain, 0, 0, 0, 0, SwapWidth, SwapHeight};
             blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
             blit.flip_mode = SDL_FLIP_NONE;
             blit.filter = SDL_GPU_FILTER_LINEAR;
-            SDL_BlitGPUTexture(m->Commands, &blit);
+            SDL_BlitGPUTexture(Commands, &blit);
         }
         source->Referenced = true;
     }
-    m->PassOpen = false;
-    m->Target.reset();
-    m->Pass = CKBackendPassDesc();
+    PassOpen = false;
+    Target.reset();
+    Pass = CKRenderPassDesc();
+    ++FrameStats.Passes;
+    ++FrameStats.Blits;
     return CK_OK;
 }
 
-CKERROR CKSdlGpuBackend::Blit(CKDWORD dstHandle, CKDWORD dstMip, CKDWORD dstLayer, CKDWORD dx, CKDWORD dy,
+CKERROR CKSdlGpuRasterizerContext::Blit(CKDWORD dstHandle, CKDWORD dstMip, CKDWORD dstLayer, CKDWORD dx, CKDWORD dy,
     CKDWORD srcHandle, CKDWORD srcMip, CKDWORD srcLayer, const CKRECT *rect)
 {
-    if (!m->Ready()) return CKERR_INVALIDOPERATION;
-    auto src = m->Textures.Get(srcHandle), dst = m->Textures.Get(dstHandle);
+    if (!Ready()) return CKERR_INVALIDOPERATION;
+    auto src = Textures.Get(srcHandle), dst = Textures.Get(dstHandle);
     if (!src || !dst || src->Depth || dst->Depth || dst->Multisample || src == dst ||
         src->Info.format != dst->Info.format || srcMip >= src->Info.num_levels || dstMip >= dst->Info.num_levels ||
         srcLayer >= CKSdlGpuTextureLayers(*src, srcMip) || dstLayer >= CKSdlGpuTextureLayers(*dst, dstMip)) return CKERR_INVALIDPARAMETER;
@@ -623,30 +625,31 @@ CKERROR CKSdlGpuBackend::Blit(CKDWORD dstHandle, CKDWORD dstMip, CKDWORD dstLaye
         return CKERR_INVALIDPARAMETER;
     if (dst->AutoMips && dst->Info.type != SDL_GPU_TEXTURETYPE_3D &&
         !(dst->Info.usage & SDL_GPU_TEXTUREUSAGE_COLOR_TARGET)) return CKERR_NOTIMPLEMENTED;
-    CKERROR error = m->Flush();
+    CKERROR error = Flush();
     if (error != CK_OK) return error;
-    error = m->PreserveTexture(*dst);
+    error = PreserveTexture(*dst);
     if (error != CK_OK) return error;
-    if (!m->EnsureCommands()) return m->Error;
+    if (!EnsureCommands()) return Error;
     SDL_GPUTextureLocation source = {}, destination = {};
     source.texture = src->Image.get(); source.mip_level = srcMip; source.x = sx; source.y = sy;
     if (src->Info.type == SDL_GPU_TEXTURETYPE_3D) source.z = srcLayer; else source.layer = srcLayer;
     destination.texture = dst->Image.get(); destination.mip_level = dstMip; destination.x = dx; destination.y = dy;
     if (dst->Info.type == SDL_GPU_TEXTURETYPE_3D) destination.z = dstLayer; else destination.layer = dstLayer;
-    auto *copy = SDL_BeginGPUCopyPass(m->Commands);
-    if (!copy) return m->Fail("BeginGPUCopyPass.blit");
+    auto *copy = SDL_BeginGPUCopyPass(Commands);
+    if (!copy) return Fail("BeginGPUCopyPass.blit");
     SDL_CopyGPUTextureToTexture(copy, &source, &destination, w, h, 1, false);
     SDL_EndGPUCopyPass(copy);
-    src->Referenced = true; dst->Defined[dstMip * dst->Info.layer_count_or_depth + dstLayer] = true;
-    ++m->FrameStats.Blits;
-    return dst->AutoMips && dstMip == 0 ? m->GenerateGpuMips(*dst, dstLayer) : CK_OK;
+    src->Referenced = true;
+    dst->Defined.Set((int)(dstMip * dst->Info.layer_count_or_depth + dstLayer));
+    ++FrameStats.Blits;
+    return dst->AutoMips && dstMip == 0 ? GenerateGpuMips(*dst, dstLayer) : CK_OK;
 }
 
-CKERROR CKSdlGpuBackend::ReadTexture(CKDWORD handle, CKDWORD mip, CKReadbackDesc *desc, CKBackendReadbackTicket *out)
+CKERROR CKSdlGpuRasterizerContext::ReadTexture(CKDWORD handle, CKDWORD mip, CKReadbackDesc *desc, CKSdlGpuReadbackTicket *out)
 {
     if (out) out->reset();
-    if (!m->Ready()) return CKERR_INVALIDOPERATION;
-    auto texture = m->Textures.Get(handle);
+    if (!Ready()) return CKERR_INVALIDOPERATION;
+    auto texture = Textures.Get(handle);
     if (!desc || !texture || texture->Depth || mip >= texture->Info.num_levels ||
         texture->Info.type != SDL_GPU_TEXTURETYPE_2D) return CKERR_INVALIDPARAMETER;
     const auto format = texture->Info.format;
@@ -657,68 +660,91 @@ CKERROR CKSdlGpuBackend::ReadTexture(CKDWORD handle, CKDWORD mip, CKReadbackDesc
     desc->Format = format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ? _32_ARGB8888 : _32_ABGR8888;
     desc->YFlip = FALSE;
     if (!out) return CK_OK;
-    const CKERROR error = m->Flush();
+    const CKERROR error = Flush();
     if (error != CK_OK) return error;
-    if (!m->EnsureCommands()) return m->Error;
+    if (!EnsureCommands()) return Error;
     auto ticket = std::make_shared<CKSdlGpuReadback>();
-    ticket->Data.resize(desc->RequiredSize);
+    ticket->Data.Resize((int)desc->RequiredSize);
     SDL_GPUTransferBufferCreateInfo info = {SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, desc->RequiredSize, 0};
-    ticket->Transfer = CKSdlGpuOwn(m->Device, SDL_CreateGPUTransferBuffer(m->Device, &info), SDL_ReleaseGPUTransferBuffer);
-    if (!ticket->Transfer) return m->Fail("CreateGPUTransferBuffer.readback");
+    ticket->Transfer = CKSdlGpuOwn(Device, SDL_CreateGPUTransferBuffer(Device, &info), SDL_ReleaseGPUTransferBuffer);
+    if (!ticket->Transfer) return Fail("CreateGPUTransferBuffer.readback");
     SDL_GPUTextureRegion source = {};
     source.texture = texture->Image.get(); source.mip_level = mip; source.w = desc->Width; source.h = desc->Height; source.d = 1;
     SDL_GPUTextureTransferInfo destination = {ticket->Transfer.get(), 0, 0, 0};
-    auto *copy = SDL_BeginGPUCopyPass(m->Commands);
-    if (!copy) return m->Fail("BeginGPUCopyPass.readback");
+    auto *copy = SDL_BeginGPUCopyPass(Commands);
+    if (!copy) return Fail("BeginGPUCopyPass.readback");
     SDL_DownloadFromGPUTexture(copy, &source, &destination);
     SDL_EndGPUCopyPass(copy);
     texture->Referenced = true;
-    m->Readbacks.push_back(ticket); *out = std::move(ticket);
+    Readbacks.PushBack(ticket); *out = std::move(ticket);
     return CK_OK;
 }
 
-CKERROR CKSdlGpuBackend::Submit(const CKBackendSubmitDesc &desc, CKDWORD *number)
+CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWindow,
+                                          CKDWORD *number)
 {
     CKRE_PROFILE_SCOPE("CKRE.SDL.Submit");
-    if (!m->Ready()) return CKERR_INVALIDOPERATION;
-    if (!CKSdlGpuValidPresentSync(desc.Sync)) return CKERR_INVALIDPARAMETER;
-    if (desc.Sync != CKRST_BACKEND_SYNC_UNCHANGED) {
-        const auto mode = desc.Sync == CKRST_BACKEND_SYNC_VSYNC ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
-        if (mode != m->PresentMode) {
-            if (m->Swapchain) return CKERR_INVALIDOPERATION;
-            if (!SDL_SetGPUSwapchainParameters(m->Device, m->Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
-                return m->Fail("SetGPUSwapchainParameters");
-            m->PresentMode = mode;
+    if (number) *number = 0;
+    if (!Ready()) return CKERR_INVALIDOPERATION;
+    if (!CKSdlGpuValidPresentSync(sync)) return CKERR_INVALIDPARAMETER;
+    if (LastSubmitId == (CKQWORD)-1)
+        return CKERR_INVALIDOPERATION;
+    if (sync != CKRST_PRESENT_UNCHANGED) {
+        const auto mode = sync == CKRST_PRESENT_VSYNC ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
+        if (mode != PresentMode) {
+            if (Swapchain) return CKERR_INVALIDOPERATION;
+            if (!SDL_SetGPUSwapchainParameters(Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
+                return Fail("SetGPUSwapchainParameters");
+            PresentMode = mode;
         }
     }
-    const CKERROR error = m->Flush(desc.PresentWindow != FALSE);
+    const CKERROR error = Flush(presentWindow != FALSE);
     if (error != CK_OK) return error;
-    if (m->Commands) {
-        auto fence = CKRE_PROFILE_CALL("CKRE.SDL.NativeSubmit",
-            CKSdlGpuOwn(m->Device, SDL_SubmitGPUCommandBufferAndAcquireFence(m->Commands), SDL_ReleaseGPUFence));
-        m->Commands = nullptr; m->Swapchain = nullptr;
-        if (!fence) return m->Fail("SubmitGPUCommandBufferAndAcquireFence");
-        for (auto &ticket : m->Readbacks) if (!ticket->Fence) ticket->Fence = fence;
-        m->Submissions.push_back({std::move(fence), std::move(m->PendingGeometry)});
-        m->PendingGeometry.clear();
+    std::shared_ptr<SDL_GPUFence> fence;
+    if (Commands) {
+        fence = CKRE_PROFILE_CALL("CKRE.SDL.NativeSubmit",
+            CKSdlGpuOwn(Device, SDL_SubmitGPUCommandBufferAndAcquireFence(Commands), SDL_ReleaseGPUFence));
+        Commands = nullptr; Swapchain = nullptr;
+        if (!fence) return Fail("SubmitGPUCommandBufferAndAcquireFence");
+        for (auto &ticket : Readbacks) if (!ticket->Fence) ticket->Fence = fence;
     }
-    m->PassOpen = false; m->Target.reset(); m->Pass = CKBackendPassDesc();
-    m->TransientVertexInfo.clear(); m->TransientIndexInfo.clear();
+    ++LastSubmitId;
+    Submissions.PushBack(CKSdlGpuSubmission());
+    CKSdlGpuSubmission &submission = Submissions.Back();
+    submission.Fence.swap(fence);
+    submission.Geometry.Swap(PendingGeometry);
+    submission.BufferUploads.Swap(PendingBufferUploads);
+    submission.SubmitId = LastSubmitId;
+    PassOpen = false; Target.reset(); Pass = CKRenderPassDesc();
+    TransientVertexInfo.Clear(); TransientIndexInfo.Clear();
     // Keep common CPU allocations warm, with a shared 16 MiB retention budget.
     // GPU uploads already own their snapshots; trimming cannot affect a fence.
     uint64_t retained = 0;
-    CKSdlGpuTrimTransientAllocations(m->TransientVertices, retained);
-    CKSdlGpuTrimTransientAllocations(m->TransientIndices, retained);
-    m->FrameStats.Frames = ++m->Submission;
-    m->Stats = m->FrameStats; m->FrameStats = CKBackendStats();
-    if (number) *number = m->Submission;
-    m->Collect();
-    CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", m->Submissions.size());
-    if (m->Submissions.size() > 3) {
+    TransientVertices.Trim(retained);
+    TransientIndices.Trim(retained);
+    FrameStats.Frames = ++Submission;
+    Stats = FrameStats;
+    FrameStats = CKSdlGpuSubmissionStats();
+    if (number) *number = Submission;
+    Collect();
+    CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", Submissions.Size());
+    if (Submissions.Size() > 3) {
         CKRE_PROFILE_SCOPE("CKRE.SDL.WaitInflight");
-        SDL_GPUFence *oldest = m->Submissions.front().Fence.get();
-        if (!SDL_WaitForGPUFences(m->Device, true, &oldest, 1)) return m->Fail("WaitForGPUFences.inflight");
-        m->Collect();
+        SDL_GPUFence *oldest = Submissions[0].Fence.get();
+        if (!SDL_WaitForGPUFences(Device, true, &oldest, 1)) return Fail("WaitForGPUFences.inflight");
+        Collect();
     }
     return CK_OK;
+}
+
+CKQWORD CKSdlGpuRasterizerContext::GetLastSubmitId() const
+{
+    return LastSubmitId;
+}
+
+CKQWORD CKSdlGpuRasterizerContext::GetCompletedSubmitId()
+{
+    if (Ready())
+        Collect();
+    return CompletedSubmitId;
 }

@@ -37,23 +37,29 @@ CKBOOL CKSdlGpuNativeVolumeShaders(SDL_GPUShaderFormat format, CKShaderDesc &ver
     return TRUE;
 }
 
-CKBackendProgramDesc CKSdlGpuNativeProgram(CKDWORD vertex, CKDWORD fragment, bool volume)
+CKFFProgramDesc CKSdlGpuNativeProgram(CKDWORD vertex, CKDWORD fragment, bool volume)
 {
-    CKBackendProgramDesc program;
+    CKFFProgramDesc program;
     program.VertexShader = vertex; program.PixelShader = fragment;
-    program.UniformBuffers = {{CKRST_SHADER_VERTEX, 0, 16}, {CKRST_SHADER_PIXEL, 0, volume ? 32u : 16u}};
-    CKBackendUniformBinding uniform;
+    CKFFUniformBufferBinding buffer;
+    buffer.Stage = CKRST_SHADER_VERTEX;
+    buffer.Size = 16;
+    program.UniformBuffers.PushBack(buffer);
+    buffer.Stage = CKRST_SHADER_PIXEL;
+    buffer.Size = volume ? 32u : 16u;
+    program.UniformBuffers.PushBack(buffer);
+    CKFFUniformBinding uniform;
     uniform.Name = "ckClear";
-    program.Uniforms.push_back(uniform);
+    program.Uniforms.PushBack(uniform);
     uniform.Slot = 1; uniform.Stage = CKRST_SHADER_PIXEL;
     uniform.Name = volume ? "ckVolumeParams" : "ckClear";
     uniform.Count = volume ? 2 : 1;
-    program.Uniforms.push_back(uniform);
+    program.Uniforms.PushBack(uniform);
     if (volume) {
-        CKBackendSamplerBinding sampler;
-        sampler.Dimension = CKBACKEND_TEXTURE_3D;
+        CKFFSamplerBinding sampler;
+        sampler.Dimension = CKFF_TEXTURE_3D;
         sampler.Name = "ck_source";
-        program.Samplers.push_back(sampler);
+        program.Samplers.PushBack(sampler);
     }
     return program;
 }

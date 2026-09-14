@@ -1,10 +1,17 @@
 #ifndef CKSDLGPU_INTERNAL_H
 #define CKSDLGPU_INTERNAL_H
 
-#include "CKSdlGpuBackend.h"
+#include "CKRasterizer.h"
+#include "CKRasterizerContextData.h"
 #include "CKSdlGpuNativeShaders.h"
-#include "CKBackendProgramLayout.h"
+#include "CKFFDrawTypes.h"
+#include "CKFFProgramLayout.h"
 #include "CKSdlGpuUniformBatch.h"
+#include "XArray.h"
+#include "XBitArray.h"
+#include "XClassArray.h"
+#include "XSHashTable.h"
+
 #include <SDL3/SDL.h>
 #ifdef min
 #undef min
@@ -13,35 +20,67 @@
 #undef max
 #endif
 #include <algorithm>
-#include <array>
 #include <cstring>
-#include <deque>
-#include <limits>
-#include <map>
-#include <string>
+#include <memory>
+
+template<int Count>
+struct CKSdlGpuFixedKey {
+    CKDWORD Values[Count] = {};
+
+    bool operator==(const CKSdlGpuFixedKey &other) const {
+        return std::memcmp(Values, other.Values, sizeof(Values)) == 0;
+    }
+};
+
+template<int Count>
+struct CKSdlGpuFixedKeyHash {
+    int operator()(const CKSdlGpuFixedKey<Count> &key) const {
+        return (int)CKFFHashBytes(key.Values, sizeof(key.Values), 2166136261u);
+    }
+};
+
+struct CKSdlGpuQwordHash {
+    int operator()(const uint64_t &key) const {
+        return (int)((uint32_t)key ^ (uint32_t)(key >> 32));
+    }
+};
+
+typedef CKSdlGpuFixedKey<10> CKSdlGpuPipelineKey;
+typedef CKSdlGpuFixedKey<7> CKSdlGpuSamplerKey;
+typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
+typedef XSHashTable<std::shared_ptr<SDL_GPUGraphicsPipeline>,
+                    CKSdlGpuPipelineKey,
+                    CKSdlGpuFixedKeyHash<10>> CKSdlGpuPipelineTable;
+typedef XSHashTable<std::weak_ptr<SDL_GPUBuffer>,
+                    CKSdlGpuDefaultVertexKey,
+                    CKSdlGpuFixedKeyHash<64>> CKSdlGpuDefaultVertexTable;
+typedef XSHashTable<std::shared_ptr<SDL_GPUSampler>,
+                    CKSdlGpuSamplerKey,
+                    CKSdlGpuFixedKeyHash<7>> CKSdlGpuSamplerTable;
 
 // Public handles identify logical resources, never SDL pointers. Generations
 // do not wrap: exhausted slots are retired for the life of the device.
 template<class T> class CKSdlGpuTable {
     struct Slot { std::shared_ptr<T> Value; uint16_t Generation = 1; };
-    std::vector<Slot> Slots;
+    XClassArray<Slot> Slots;
 public:
     CKDWORD Add(std::shared_ptr<T> value) {
-        for (size_t i = 0; i < Slots.size(); ++i)
+        for (int i = 0; i < Slots.Size(); ++i)
             if (!Slots[i].Value && Slots[i].Generation) {
                 Slots[i].Value = std::move(value);
                 return (CKDWORD(Slots[i].Generation) << 16) | CKDWORD(i + 1);
             }
-        if (Slots.size() == 65535) return 0;
-        Slots.push_back({std::move(value), 1});
-        return 0x10000u | CKDWORD(Slots.size());
+        if (Slots.Size() == 65535) return 0;
+        Slots.PushBack(Slot{std::move(value), 1});
+        return 0x10000u | CKDWORD(Slots.Size());
     }
     // Borrow only until the next mutation of this table. Queued work must own
     // a copy (through Get or a batch resource group) before returning to callers.
     const std::shared_ptr<T> &Borrow(CKDWORD handle) const {
         static const std::shared_ptr<T> empty;
         const unsigned index = (handle & 65535u) - 1;
-        if (index >= Slots.size() || Slots[index].Generation != (handle >> 16)) return empty;
+        if (index >= (unsigned)Slots.Size() ||
+            Slots[index].Generation != (handle >> 16)) return empty;
         return Slots[index].Value;
     }
     std::shared_ptr<T> Get(CKDWORD handle) const { return Borrow(handle); }
@@ -70,10 +109,12 @@ struct CKSdlGpuTexture {
     bool AutoMips = false;
     bool Referenced = false;
     bool AttachmentInitialized = false;
-    std::vector<bool> Defined;
-    std::vector<std::vector<CKBYTE>> BasePixels;
-    std::vector<bool> GpuMipBase;
+    XBitArray Defined;
+    XClassArray<XArray<CKBYTE>> BasePixels;
+    XBitArray GpuMipBase;
 };
+typedef XSHashTable<std::weak_ptr<CKSdlGpuTexture>, uint64_t,
+                    CKSdlGpuQwordHash> CKSdlGpuDefaultTextureTable;
 struct CKSdlGpuBuffer {
     struct IndexRange {
         unsigned Start = 0, Count = 0, MaxIndex = 0;
@@ -82,9 +123,9 @@ struct CKSdlGpuBuffer {
         bool Valid = false;
     };
     std::shared_ptr<SDL_GPUBuffer> Buffer;
-    CKBackendBufferDesc Desc;
-    std::vector<CKBYTE> Shadow;
-    std::array<IndexRange, 8> IndexRanges = {};
+    CKBufferDesc Desc;
+    XArray<CKBYTE> IndexData;
+    IndexRange IndexRanges[8] = {};
     uint64_t IndexRangeClock = 0;
 
     bool FindMaxIndex(unsigned start, unsigned count, bool index32, unsigned &maximum);
@@ -94,7 +135,7 @@ struct CKSdlGpuBuffer {
     }
 };
 struct CKSdlGpuLayout {
-    std::vector<CKVertexElementDesc> Elements;
+    XArray<CKVertexElementDesc> Elements;
     unsigned Stride = 0;
 };
 struct CKSdlGpuShader {
@@ -103,22 +144,22 @@ struct CKSdlGpuShader {
 };
 struct CKSdlGpuProgram {
     std::shared_ptr<CKSdlGpuShader> Vertex, Fragment;
-    CKBackendProgramDesc Interface;
-    CKBackendProgramLayout UniformLayout;
+    CKFFProgramDesc Interface;
+    CKFFProgramLayout UniformLayout;
     CKSdlGpuUniformCursor UniformCursor;
     CKDWORD Identity = 0;
-    std::array<int, CKRST_ATTRIB_COUNT> AttributeLocations;
+    int AttributeLocations[CKRST_ATTRIB_COUNT];
     std::shared_ptr<SDL_GPUBuffer> DefaultVertices;
-    std::vector<std::shared_ptr<CKSdlGpuTexture>> DefaultTextures;
-    std::vector<CKDWORD> SamplerMetadataOffsets;
-    std::array<CKSamplerDesc, CKBACKEND_MAX_TEXTURE_SLOTS> SamplerMetadata = {};
+    XClassArray<std::shared_ptr<CKSdlGpuTexture>> DefaultTextures;
+    XArray<CKDWORD> SamplerMetadataOffsets;
+    CKSamplerDesc SamplerMetadata[CKFF_TEXTURE_SLOT_COUNT] = {};
     CKDWORD SamplerMetadataValidMask = 0;
     // A queued draw retains its program; private image helpers do too after
     // their public handle is removed. Pipelines follow those exact lifetimes.
-    std::map<std::array<unsigned, 10>, std::shared_ptr<SDL_GPUGraphicsPipeline>> Pipelines;
+    CKSdlGpuPipelineTable Pipelines;
 };
 struct CKSdlGpuTarget {
-    CKBackendRenderTargetDesc Desc;
+    CKRenderTargetDesc Desc;
     std::shared_ptr<CKSdlGpuTexture> Color, Depth;
     std::shared_ptr<SDL_GPUTexture> VolumeSlice;
 };
@@ -132,14 +173,14 @@ struct CKSdlGpuBinding {
 // pointers only while this owner is alive, avoiding shared_ptr atomics per draw.
 class CKSdlGpuDrawResourceBatch {
 public:
-    template<class T> static T *RetainUnique(std::vector<std::shared_ptr<T>> &resources,
+    template<class T> static T *RetainUnique(XClassArray<std::shared_ptr<T>> &resources,
                                              const std::shared_ptr<T> &resource) {
         if (!resource) return nullptr;
         for (const auto &entry : resources) {
             if (entry.get() == resource.get())
                 return resource.get();
         }
-        resources.push_back(resource);
+        resources.PushBack(resource);
         return resource.get();
     }
     CKSdlGpuProgram *Retain(const std::shared_ptr<CKSdlGpuProgram> &resource) {
@@ -171,19 +212,23 @@ public:
         m_RecentBuffers[0] = retained;
         return retained;
     }
+    SDL_GPUBuffer *Retain(const std::shared_ptr<SDL_GPUBuffer> &resource) {
+        return RetainUnique(NativeBuffers, resource);
+    }
     void Clear() {
         m_LastProgram = nullptr;
-        m_RecentLayouts.fill(nullptr);
-        m_RecentBuffers.fill(nullptr);
-        Programs.clear(); Layouts.clear(); Buffers.clear();
+        for (int i = 0; i < 2; ++i) m_RecentLayouts[i] = nullptr;
+        for (int i = 0; i < 3; ++i) m_RecentBuffers[i] = nullptr;
+        Programs.Clear(); Layouts.Clear(); Buffers.Clear(); NativeBuffers.Clear();
     }
 private:
-    std::vector<std::shared_ptr<CKSdlGpuProgram>> Programs;
-    std::vector<std::shared_ptr<CKSdlGpuLayout>> Layouts;
-    std::vector<std::shared_ptr<CKSdlGpuBuffer>> Buffers;
+    XClassArray<std::shared_ptr<CKSdlGpuProgram>> Programs;
+    XClassArray<std::shared_ptr<CKSdlGpuLayout>> Layouts;
+    XClassArray<std::shared_ptr<CKSdlGpuBuffer>> Buffers;
+    XClassArray<std::shared_ptr<SDL_GPUBuffer>> NativeBuffers;
     CKSdlGpuProgram *m_LastProgram = nullptr;
-    std::array<CKSdlGpuLayout *, 2> m_RecentLayouts = {};
-    std::array<CKSdlGpuBuffer *, 3> m_RecentBuffers = {};
+    CKSdlGpuLayout *m_RecentLayouts[2] = {};
+    CKSdlGpuBuffer *m_RecentBuffers[3] = {};
 };
 
 // Native binding arrays expire at every render/copy boundary, before image
@@ -191,80 +236,83 @@ private:
 class CKSdlGpuBindingBatch {
 public:
     struct Inputs {
-        // Draw fills exactly Interface.Samplers.size() entries. Intern never
+        // Draw fills exactly Interface.Samplers.Size() entries. Intern never
         // reads the unused tail, so avoid clearing 1 KiB on every draw.
-        std::array<CKSdlGpuTexture *, 32> Textures;
-        std::array<SDL_GPUSampler *, 32> Samplers;
-        std::array<const std::shared_ptr<CKSdlGpuTexture> *, 32> TextureOwners;
-        std::array<const std::shared_ptr<SDL_GPUSampler> *, 32> SamplerOwners;
+        CKSdlGpuTexture *Textures[32];
+        SDL_GPUSampler *Samplers[32];
+        const std::shared_ptr<CKSdlGpuTexture> *TextureOwners[32];
+        const std::shared_ptr<SDL_GPUSampler> *SamplerOwners[32];
         size_t Hash = 0;
     };
     struct Group {
         CKDWORD Program = 0;
         int Next = -1;
-        std::array<CKSdlGpuTexture *, 32> Textures = {};
-        std::array<SDL_GPUSampler *, 32> Samplers = {};
-        std::array<SDL_GPUTextureSamplerBinding, 16> Vertex = {}, Fragment = {};
+        CKSdlGpuTexture *Textures[32] = {};
+        SDL_GPUSampler *Samplers[32] = {};
+        SDL_GPUTextureSamplerBinding Vertex[16] = {}, Fragment[16] = {};
     };
-    CKSdlGpuBindingBatch() { Buckets.fill(-1); }
+    CKSdlGpuBindingBatch() { ResetBuckets(); }
     unsigned Intern(const CKSdlGpuProgram &program, const Inputs &inputs) {
-        const size_t count = program.Interface.Samplers.size();
-        const size_t bucket = inputs.Hash % Buckets.size();
+        const size_t count = program.Interface.Samplers.Size();
+        const size_t bucket = inputs.Hash % 512;
         for (int index = Buckets[bucket]; index >= 0; index = Groups[index].Next) {
             const auto &group = Groups[index];
             if (group.Program != program.Identity) continue;
-            if (std::memcmp(group.Textures.data(), inputs.Textures.data(),
+            if (std::memcmp(group.Textures, inputs.Textures,
                             count * sizeof(inputs.Textures[0])) == 0 &&
-                std::memcmp(group.Samplers.data(), inputs.Samplers.data(),
+                std::memcmp(group.Samplers, inputs.Samplers,
                             count * sizeof(inputs.Samplers[0])) == 0)
                 return unsigned(index);
         }
-        const unsigned index = unsigned(Groups.size());
-        Groups.emplace_back();
-        auto &group = Groups.back();
+        const unsigned index = unsigned(Groups.Size());
+        Groups.PushBack(Group());
+        Group &group = Groups.Back();
         group.Program = program.Identity; group.Next = Buckets[bucket]; Buckets[bucket] = int(index);
         for (size_t i = 0; i < count; ++i) {
             const auto &decl = program.Interface.Samplers[i];
             group.Textures[i] = CKSdlGpuDrawResourceBatch::RetainUnique(RetainedTextures, *inputs.TextureOwners[i]);
             group.Samplers[i] = CKSdlGpuDrawResourceBatch::RetainUnique(RetainedSamplers, *inputs.SamplerOwners[i]);
-            auto &bindings = decl.Stage == CKRST_SHADER_VERTEX ? group.Vertex : group.Fragment;
+            SDL_GPUTextureSamplerBinding *bindings =
+                decl.Stage == CKRST_SHADER_VERTEX ? group.Vertex : group.Fragment;
             bindings[decl.NativeSlot] = {group.Textures[i]->Image.get(), group.Samplers[i]};
         }
         return index;
     }
     const Group &operator[](unsigned index) const { return Groups[index]; }
-    size_t Size() const { return Groups.size(); }
+    size_t Size() const { return (size_t)Groups.Size(); }
     void MarkReferenced() {
         for (auto &texture : RetainedTextures) texture->Referenced = true;
     }
     void Clear() {
-        Groups.clear();
-        RetainedTextures.clear();
-        RetainedSamplers.clear();
-        Buckets.fill(-1);
+        Groups.Clear();
+        RetainedTextures.Clear();
+        RetainedSamplers.Clear();
+        ResetBuckets();
     }
 private:
-    std::array<int, 512> Buckets;
-    std::vector<Group> Groups;
-    std::vector<std::shared_ptr<CKSdlGpuTexture>> RetainedTextures;
-    std::vector<std::shared_ptr<SDL_GPUSampler>> RetainedSamplers;
+    void ResetBuckets() { for (int i = 0; i < 512; ++i) Buckets[i] = -1; }
+    int Buckets[512];
+    XClassArray<Group> Groups;
+    XClassArray<std::shared_ptr<CKSdlGpuTexture>> RetainedTextures;
+    XClassArray<std::shared_ptr<SDL_GPUSampler>> RetainedSamplers;
 };
 
 struct CKSdlGpuDraw {
-    CKBackendPipelineState State;
+    CKFFPipelineState State;
     CKSdlGpuProgram *Program = nullptr;
     CKSdlGpuLayout *Layout = nullptr, *Layout1 = nullptr;
     CKSdlGpuBuffer *VB = nullptr, *VB1 = nullptr, *IB = nullptr;
+    SDL_GPUBuffer *NativeVB = nullptr, *NativeVB1 = nullptr, *NativeIB = nullptr;
     CKDWORD LayoutHandle = 0, Layout1Handle = 0;
     CKDWORD StartVertex = 0, Stream1StartVertex = 0, VertexCount = 0;
     CKDWORD StartIndex = 0, IndexCount = 0;
     unsigned Bindings = 0;
-    std::array<unsigned, 2 * CKBACKEND_MAX_UNIFORM_BUFFERS> UniformOffsets = {};
+    unsigned UniformOffsets[2 * CKFF_UNIFORM_BUFFER_COUNT] = {};
     unsigned VertexOffset = 0, VertexOffset1 = 0, IndexOffset = 0;
     bool Index32 = false;
-    // Labels are owned only when diagnostics, profiling or runtime GPU debug
-    // is enabled. Ordinary Release draws carry one null pointer.
-    std::unique_ptr<std::string> Marker;
+    // Ordinary Release draws keep this empty; diagnostics and profiling copy
+    // the caller's label into the queued packet.
+    XString Marker;
 };
 // A batch owns both sides of its upload until the submission fence completes.
 // Reuse never cycles or overwrites storage referenced by an earlier batch.
@@ -278,14 +326,33 @@ struct CKSdlGpuGeometryUpload {
     std::shared_ptr<SDL_GPUBuffer> Buffer;
     unsigned IndexOffset = 0;
 };
+struct CKSdlGpuBufferUploadPage {
+    std::shared_ptr<SDL_GPUTransferBuffer> Transfer;
+    unsigned Capacity = 0;
+    unsigned Used = 0;
+};
 struct CKSdlGpuSubmission {
     std::shared_ptr<SDL_GPUFence> Fence;
-    std::vector<std::shared_ptr<CKSdlGpuGeometryBuffer>> Geometry;
+    XClassArray<std::shared_ptr<CKSdlGpuGeometryBuffer>> Geometry;
+    XClassArray<std::shared_ptr<CKSdlGpuBufferUploadPage>> BufferUploads;
+    CKQWORD SubmitId = 0;
 };
 
-struct CKSdlGpuReadback : CKBackendReadback {
+struct CKSdlGpuReadback {
+    XArray<CKBYTE> Data;
+    CKBOOL Complete = FALSE;
+    CKERROR Error = CK_OK;
     std::shared_ptr<SDL_GPUTransferBuffer> Transfer;
     std::shared_ptr<SDL_GPUFence> Fence;
+};
+
+struct CKSdlGpuSubmissionStats {
+    CKDWORD Frames = 0;
+    CKDWORD Passes = 0;
+    CKDWORD Draws = 0;
+    CKDWORD Blits = 0;
+    CKDWORD TextureUploads = 0;
+    CKDWORD BufferUploads = 0;
 };
 
 constexpr bool CKSdlGpuCanCopyPresent(SDL_GPUTextureFormat sourceFormat,
@@ -304,10 +371,10 @@ inline bool CKSdlGpuSupportsSwapchainCopy(const char *driver)
     return driver && SDL_strcmp(driver, "direct3d12") == 0;
 }
 
-constexpr bool CKSdlGpuValidPresentSync(CKBackendPresentSync sync)
+constexpr bool CKSdlGpuValidPresentSync(CKPresentSync sync)
 {
-    return sync == CKRST_BACKEND_SYNC_UNCHANGED || sync == CKRST_BACKEND_SYNC_VSYNC ||
-           sync == CKRST_BACKEND_SYNC_IMMEDIATE;
+    return sync == CKRST_PRESENT_UNCHANGED || sync == CKRST_PRESENT_VSYNC ||
+           sync == CKRST_PRESENT_IMMEDIATE;
 }
 
 struct CKSdlGpuTransientVertexInfo {
@@ -318,93 +385,57 @@ struct CKSdlGpuTransientIndexInfo {
     CKBOOL Index32 = FALSE;
 };
 
-struct CKSdlGpuDevice {
-    SDL_GPUDevice *Device = nullptr;
-    SDL_Window *Window = nullptr; // borrowed from Player
-    bool WindowClaimed = false;
-    SDL_ThreadID Thread = 0;
-    SDL_GPUShaderFormat ShaderFormat = 0;
-    CKBackendCaps Caps;
-    CKBackendStats Stats = {}, FrameStats = {};
-    CKERROR Error = CK_OK;
-    CKDWORD DebugFlags = 0, Submission = 0;
-    uint64_t DrawApproximations = 0;
-    unsigned Width = 0, Height = 0;
-    SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
-    SDL_GPUCommandBuffer *Commands = nullptr;
-    SDL_GPUTexture *Swapchain = nullptr;
-    unsigned SwapWidth = 0, SwapHeight = 0;
-    bool PresentCopySupported = false;
-    bool PresentCopyLogged = false;
-    bool PassOpen = false;
-    CKBackendPassDesc Pass;
-    std::shared_ptr<CKSdlGpuTarget> Target;
-    std::vector<CKSdlGpuDraw> Draws;
-    CKSdlGpuDrawResourceBatch DrawResources;
-    std::array<CKSdlGpuBinding, CKBACKEND_MAX_TEXTURE_SLOTS> SamplerBindings;
-    CKSdlGpuUniformBatch Uniforms;
-    CKSdlGpuBindingBatch Bindings;
-    // Info arrays describe this submission's live allocations; storage is reused
-    // by allocation ordinal only after Submit invalidates every token.
-    std::vector<std::vector<CKBYTE>> TransientVertices, TransientIndices;
-    CKDWORD NextTransientToken = 1; // never reset or reused across submissions/device reinitialization
-    std::vector<CKSdlGpuTransientVertexInfo> TransientVertexInfo;
-    std::vector<CKSdlGpuTransientIndexInfo> TransientIndexInfo;
-    // Sharing does not extend the lifetime of a program's defaults. Expired
-    // keys are pruned on program creation/destruction, never by a draw lookup.
-    std::map<std::vector<CKDWORD>, std::weak_ptr<SDL_GPUBuffer>> DefaultVertexBuffers;
-    std::shared_ptr<CKSdlGpuProgram> ClearProgram;
-    std::shared_ptr<CKSdlGpuProgram> VolumeMipProgram;
-    std::map<std::pair<unsigned, CKDWORD>, std::weak_ptr<CKSdlGpuTexture>> DefaultTextures;
-    std::vector<std::shared_ptr<CKSdlGpuReadback>> Readbacks;
-    std::deque<CKSdlGpuSubmission> Submissions;
-    std::vector<std::shared_ptr<CKSdlGpuGeometryBuffer>> PendingGeometry, FreeGeometry;
-    size_t FreeGeometryBytes = 0;
-    std::vector<CKBYTE> BatchVertices, BatchIndices;
-    std::map<std::array<unsigned, 7>, std::shared_ptr<SDL_GPUSampler>> Samplers;
-    CKSdlGpuTable<CKSdlGpuTexture> Textures;
-    CKSdlGpuTable<CKSdlGpuBuffer> VertexBuffers, IndexBuffers;
-    CKSdlGpuTable<CKSdlGpuLayout> Layouts;
-    CKSdlGpuTable<CKSdlGpuShader> ShaderObjects;
-    CKSdlGpuTable<CKSdlGpuProgram> Programs;
-    CKSdlGpuTable<CKSdlGpuTarget> Targets;
+// Returned transient pointers must remain valid while callers allocate more
+// streams for the same draw. Keep each byte array at a stable address even
+// when the outer pointer table grows.
+class CKSdlGpuTransientStorage {
+public:
+    CKSdlGpuTransientStorage() {}
+    ~CKSdlGpuTransientStorage() { Clear(); }
 
-    bool Ready() const { return Device && SDL_GetCurrentThreadID() == Thread && Error == CK_OK; }
-    CKERROR Fail(const char *operation);
-    bool EnsureCommands();
-    CKERROR AcquireSwapchain();
-    CKERROR Flush(bool presentWindow = true);
-    CKSdlGpuGeometryUpload UploadGeometry(const std::vector<CKBYTE> &vertices,
-                                          const std::vector<CKBYTE> &indices);
-    CKERROR UploadBuffer(SDL_GPUBuffer *buffer, const void *data, unsigned size, bool cycle);
-    CKERROR UploadTexture(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
-                          const CKRECT *region, const VxImageDescEx &data);
-    CKERROR UploadTexturePixels(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
-                                unsigned x, unsigned y, unsigned width, unsigned height,
-                                const std::vector<CKBYTE> &pixels);
-    CKERROR GenerateUploadMips(CKSdlGpuTexture &texture, unsigned layer);
-    CKERROR GenerateGpuMips(CKSdlGpuTexture &texture, unsigned layer);
-    CKERROR GenerateVolumeMips(CKSdlGpuTexture &texture);
-    CKERROR CopyVolumeSlice(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
-                            SDL_GPUTexture *slice, bool toVolume);
-    CKERROR PreserveTexture(CKSdlGpuTexture &texture);
-    CKERROR ClearRect(SDL_GPURenderPass *pass, const CKBackendPassDesc &desc,
-                      SDL_GPUTextureFormat colorFormat, SDL_GPUTextureFormat depthFormat,
-                      SDL_GPUSampleCount samples);
-    SDL_GPUGraphicsPipeline *Pipeline(const CKSdlGpuDraw &draw,
-        SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples);
-    std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &desc);
-    void PruneProgramCaches() {
-        for (auto it = DefaultVertexBuffers.begin(); it != DefaultVertexBuffers.end();) {
-            if (it->second.expired()) it = DefaultVertexBuffers.erase(it);
-            else ++it;
-        }
-        for (auto it = DefaultTextures.begin(); it != DefaultTextures.end();) {
-            if (it->second.expired()) it = DefaultTextures.erase(it);
-            else ++it;
-        }
+    XArray<CKBYTE> *Acquire(int Index)
+    {
+        if (Index < 0 || Index > m_Blocks.Size())
+            return NULL;
+        if (Index == m_Blocks.Size())
+            m_Blocks.PushBack(new XArray<CKBYTE>());
+        return m_Blocks[Index];
     }
-    void Collect();
+
+    const XArray<CKBYTE> *Get(int Index) const
+    {
+        return Index >= 0 && Index < m_Blocks.Size()
+            ? m_Blocks[Index] : NULL;
+    }
+
+    void Trim(uint64_t &Retained)
+    {
+        static const uint64_t kRetentionLimit = 16u * 1024u * 1024u;
+        int keep = 0;
+        while (keep < m_Blocks.Size() &&
+               Retained + m_Blocks[keep]->Allocated() <= kRetentionLimit) {
+            Retained += m_Blocks[keep]->Allocated();
+            ++keep;
+        }
+        for (int index = keep; index < m_Blocks.Size(); ++index)
+            delete m_Blocks[index];
+        m_Blocks.Resize(keep);
+    }
+
+    void Clear()
+    {
+        for (int index = 0; index < m_Blocks.Size(); ++index)
+            delete m_Blocks[index];
+        m_Blocks.Clear();
+    }
+
+private:
+    CKSdlGpuTransientStorage(
+        const CKSdlGpuTransientStorage &) = delete;
+    CKSdlGpuTransientStorage &operator=(
+        const CKSdlGpuTransientStorage &) = delete;
+
+    XArray<XArray<CKBYTE> *> m_Blocks;
 };
 
 SDL_GPUSampleCount CKSdlGpuSampleCount(unsigned samples);

@@ -1,4 +1,4 @@
-#include "CKSdlGpuInternal.h"
+#include "CKSdlGpuRasterizerContext.h"
 
 SDL_GPUVertexElementFormat CKSdlGpuVertexFormat(const CKVertexElementDesc &e)
 {
@@ -40,12 +40,12 @@ static void AddVertexStream(
     const CKSdlGpuProgram &program,
     const CKSdlGpuLayout *layout,
     unsigned slot,
-    std::array<SDL_GPUVertexAttribute, 16> &locations,
-    std::vector<SDL_GPUVertexBufferDescription> &streams)
+    SDL_GPUVertexAttribute (&locations)[16],
+    XArray<SDL_GPUVertexBufferDescription> &streams)
 {
     if (!layout)
         return;
-    streams.push_back({slot, layout->Stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0});
+    streams.PushBack({slot, layout->Stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0});
     for (const CKVertexElementDesc &element : layout->Elements) {
         const int location = program.AttributeLocations[element.Attrib];
         if (location < 0)
@@ -66,39 +66,43 @@ static SDL_GPUStencilOpState StencilState(unsigned function, unsigned fail,
     return state;
 }
 
-SDL_GPUGraphicsPipeline *CKSdlGpuDevice::Pipeline(const CKSdlGpuDraw &draw,
+SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw &draw,
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     const auto &state = draw.State.State;
-    const std::array<unsigned, 10> key = {draw.LayoutHandle, draw.Layout1Handle,
+    const CKDWORD keyValues[10] = {draw.LayoutHandle, draw.Layout1Handle,
         unsigned(color), unsigned(depth), unsigned(samples), state.Lo, state.Mid, state.Hi,
         draw.State.StencilReadMask, draw.State.StencilWriteMask};
+    CKSdlGpuPipelineKey key;
+    std::memcpy(key.Values, keyValues, sizeof(keyValues));
     auto &pipelines = draw.Program->Pipelines;
-    auto found = pipelines.find(key);
-    if (found != pipelines.end()) return found->second.get();
+    std::shared_ptr<SDL_GPUGraphicsPipeline> *found = pipelines.FindPtr(key);
+    if (found) return found->get();
     SDL_GPUGraphicsPipelineCreateInfo info = {};
     info.vertex_shader = draw.Program->Vertex->Shader.get();
     info.fragment_shader = draw.Program->Fragment->Shader.get();
-    std::vector<SDL_GPUVertexAttribute> attributes;
-    std::vector<SDL_GPUVertexBufferDescription> streams;
+    XArray<SDL_GPUVertexAttribute> attributes;
+    XArray<SDL_GPUVertexBufferDescription> streams;
     const auto &inputs = draw.Program->Interface.VertexInputs;
-    if (!inputs.empty()) {
+    if (inputs.Size() != 0) {
         const unsigned defaultSlot = draw.Layout1 ? 2 : 1;
-        std::array<SDL_GPUVertexAttribute, 16> locations = {};
-        for (const auto &input : inputs) {
+        SDL_GPUVertexAttribute locations[16] = {};
+        for (int i = 0; i < inputs.Size(); ++i) {
+            const CKFFVertexInput &input = inputs[i];
             locations[input.Location] = {input.Location, defaultSlot,
                 input.Integer ? SDL_GPU_VERTEXELEMENTFORMAT_UINT4 : SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
                 input.Location * 16};
         }
         AddVertexStream(*draw.Program, draw.Layout, 0, locations, streams);
         AddVertexStream(*draw.Program, draw.Layout1, 1, locations, streams);
-        streams.push_back({defaultSlot, 256, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0});
-        attributes.reserve(inputs.size());
-        for (const auto &input : inputs) attributes.push_back(locations[input.Location]);
-        info.vertex_input_state.vertex_attributes = attributes.data();
-        info.vertex_input_state.num_vertex_attributes = unsigned(attributes.size());
-        info.vertex_input_state.vertex_buffer_descriptions = streams.data();
-        info.vertex_input_state.num_vertex_buffers = unsigned(streams.size());
+        streams.PushBack({defaultSlot, 256, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0});
+        attributes.Reserve(inputs.Size());
+        for (int i = 0; i < inputs.Size(); ++i)
+            attributes.PushBack(locations[inputs[i].Location]);
+        info.vertex_input_state.vertex_attributes = attributes.Begin();
+        info.vertex_input_state.num_vertex_attributes = unsigned(attributes.Size());
+        info.vertex_input_state.vertex_buffer_descriptions = streams.Begin();
+        info.vertex_input_state.num_vertex_buffers = unsigned(streams.Size());
     }
     switch ((state.Mid >> 6) & 7) {
     case VX_POINTLIST: info.primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST; break;
@@ -141,7 +145,7 @@ SDL_GPUGraphicsPipeline *CKSdlGpuDevice::Pipeline(const CKSdlGpuDraw &draw,
     info.target_info.depth_stencil_format = depth;
     auto pipeline = CKSdlGpuOwn(Device, SDL_CreateGPUGraphicsPipeline(Device, &info), SDL_ReleaseGPUGraphicsPipeline);
     if (!pipeline) { Fail("CreateGPUGraphicsPipeline"); return nullptr; }
-    pipelines.emplace(std::move(key), pipeline);
+    pipelines.Insert(key, pipeline, FALSE);
     return pipeline.get();
 }
 
@@ -153,12 +157,14 @@ static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
     return SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 }
 
-std::shared_ptr<SDL_GPUSampler> CKSdlGpuDevice::Sampler(const CKSamplerDesc &desc)
+std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSamplerDesc &desc)
 {
-    const std::array<unsigned, 7> key = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
+    const CKDWORD keyValues[7] = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
         unsigned(desc.AddressU), unsigned(desc.AddressV), unsigned(desc.AddressW), unsigned(desc.CompareFunc)};
-    auto found = Samplers.find(key);
-    if (found != Samplers.end()) return found->second;
+    CKSdlGpuSamplerKey key;
+    std::memcpy(key.Values, keyValues, sizeof(keyValues));
+    std::shared_ptr<SDL_GPUSampler> *found = Samplers.FindPtr(key);
+    if (found) return *found;
     SDL_GPUSamplerCreateInfo info = {};
     info.min_filter = desc.MinFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
     info.mag_filter = desc.MagFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
@@ -174,11 +180,11 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuDevice::Sampler(const CKSamplerDesc &des
     info.compare_op = compare[unsigned(desc.CompareFunc) <= 8 ? unsigned(desc.CompareFunc) : 0];
     auto sampler = CKSdlGpuOwn(Device, SDL_CreateGPUSampler(Device, &info), SDL_ReleaseGPUSampler);
     if (!sampler) { Fail("CreateGPUSampler"); return {}; }
-    Samplers.emplace(std::move(key), sampler);
+    Samplers.Insert(key, sampler, FALSE);
     return sampler;
 }
 
-CKERROR CKSdlGpuDevice::ClearRect(SDL_GPURenderPass *pass, const CKBackendPassDesc &desc,
+CKERROR CKSdlGpuRasterizerContext::ClearRect(SDL_GPURenderPass *pass, const CKRenderPassDesc &desc,
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     CKSdlGpuDraw draw;

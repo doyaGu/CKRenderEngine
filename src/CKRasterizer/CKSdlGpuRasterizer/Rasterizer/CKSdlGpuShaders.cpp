@@ -15,9 +15,9 @@
 #include "shaders/generated/spirv_vs_postprocess.h"
 #include "shaders/generated/spirv_fs_postprocess.h"
 
-CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKBackendShaderSet &out)
+CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
 {
-    out = CKBackendShaderSet();
+    out = CKFFShaderSet();
     out.ABIVersion = CKSDL_SHADER_ABI_VERSION;
     out.InterfaceHash = CKSDL_SHADER_INTERFACE_HASH;
     switch (format) {
