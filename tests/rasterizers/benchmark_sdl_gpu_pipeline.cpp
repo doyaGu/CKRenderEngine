@@ -1,9 +1,10 @@
-#include "CKSdlGpuBackend.h"
+#include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuInternal.h"
 #include "CKSdlGpuShaders.h"
-#include "CKPresentStage.h"
+#include "CKSdlGpuPresentStage.h"
 #include "CKTransientGeometry.h"
 #include "CKVertexLayoutCache.h"
+#include "support/CKFFTestPipeline.h"
 #include "FFPBenchmarkWorkload.h"
 
 #include <SDL3/SDL.h>
@@ -27,28 +28,6 @@
 #endif
 #include <Windows.h>
 #endif
-
-struct CKSdlGpuBenchmarkAccess {
-    static CKERROR Flush(CKSdlGpuBackend &backend)
-    {
-        return backend.m->Flush(false);
-    }
-
-    static CKERROR AcquireSwapchain(CKSdlGpuBackend &backend)
-    {
-        if (!backend.m->EnsureCommands())
-            return backend.m->Error;
-        const CKERROR result = backend.m->AcquireSwapchain();
-        if (result != CK_OK)
-            return result;
-        return backend.m->Swapchain ? CK_OK : CKERR_INVALIDOPERATION;
-    }
-
-    static void Collect(CKSdlGpuBackend &backend)
-    {
-        backend.m->Collect();
-    }
-};
 
 namespace {
 
@@ -317,7 +296,7 @@ public:
 
     bool Init(std::string &error)
     {
-        CKBackendInitDesc init;
+        CKRasterizerInitParameters init;
         init.Window = m_Window;
         init.Width = kWidth;
         init.Height = kHeight;
@@ -357,7 +336,7 @@ public:
         // Establish IMMEDIATE before any swapchain image is acquired. This
         // mode transition and shader/pipeline creation are outside timing.
         CKDWORD number = 0;
-        if (m_Backend.Submit({CKRST_BACKEND_SYNC_IMMEDIATE, FALSE}, &number) != CK_OK) {
+        if (m_Backend.Submit(CKRST_PRESENT_IMMEDIATE, FALSE, &number) != CK_OK) {
             error = "failed to select IMMEDIATE presentation";
             return false;
         }
@@ -453,7 +432,7 @@ private:
 
     bool CreateVertexBuffers()
     {
-        m_FormatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
+        m_FormatFlags = CKFFVertexLayout::DPFlagsToFormatFlags(
             CKFFBenchmark::VertexFormat, true, true);
         m_VertexLayout = m_Pipeline.ResolveVertexLayout(m_FormatFlags);
         if (!m_FormatFlags || !m_VertexLayout)
@@ -469,8 +448,8 @@ private:
             CKFFBenchmark::VerticesPerDraw, m_FormatFlags, &data,
             texcoordCounts);
 
-        CKBackendBufferDesc vertexDesc;
-        vertexDesc.Kind = CKRST_BACKEND_BUFFER_VERTEX;
+        CKBufferDesc vertexDesc;
+        vertexDesc.Kind = CKRST_BUFFER_VERTEX;
         vertexDesc.Size = static_cast<CKDWORD>(vertices.size());
         vertexDesc.Stride = CKFFBenchmark::PackedVertexStride;
         vertexDesc.Layout = m_VertexLayout;
@@ -478,8 +457,8 @@ private:
         if (m_Backend.CreateBuffer(&vertexDesc, &m_VertexBuffer) != CK_OK)
             return false;
 
-        CKBackendBufferDesc indexDesc;
-        indexDesc.Kind = CKRST_BACKEND_BUFFER_INDEX;
+        CKBufferDesc indexDesc;
+        indexDesc.Kind = CKRST_BUFFER_INDEX;
         indexDesc.Size = static_cast<CKDWORD>(
             m_Workload.Indices.size() * sizeof(CKWORD));
         indexDesc.Index32 = FALSE;
@@ -489,7 +468,7 @@ private:
 
     bool BeginBenchmarkPass()
     {
-        CKBackendPassDesc pass;
+        CKRenderPassDesc pass;
         pass.RenderTarget = m_Present.NativeTarget().FrameBuffer;
         pass.Rect = {0, 0, int(kWidth), int(kHeight)};
         pass.ClearFlags = CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH;
@@ -519,11 +498,11 @@ private:
     {
         if (!BeginBenchmarkPass() ||
             !RecordDraws(kind) ||
-            CKSdlGpuBenchmarkAccess::Flush(m_Backend) != CK_OK) {
+            m_Backend.FlushPendingCommandsForTests() != CK_OK) {
             error = "validation draw or encode failed";
             return false;
         }
-        const CKPresentTarget &target = m_Present.NativeTarget();
+        const CKSdlGpuPresentTarget &target = m_Present.NativeTarget();
         const CKDWORD readbackTexture =
             m_Present.AcquireReadbackTexture(kWidth, kHeight);
         if (!readbackTexture ||
@@ -533,20 +512,21 @@ private:
             return false;
         }
         CKReadbackDesc desc;
-        CKBackendReadbackTicket ticket;
+        CKSdlGpuReadbackTicket ticket;
         if (m_Backend.ReadTexture(readbackTexture, 0, &desc, &ticket) != CK_OK) {
             error = "validation readback encoding failed";
             return false;
         }
         CKDWORD number = 0;
-        if (m_Backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, FALSE}, &number) != CK_OK ||
+        if (m_Backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, &number) != CK_OK ||
             number != m_LastSubmission + 1 ||
             m_Backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY) {
             error = "validation readback submission failed";
             return false;
         }
         m_LastSubmission = number;
-        output = ticket->Data;
+        const XArray<CKBYTE> &data = m_Backend.GetReadbackData(ticket);
+        output.assign(data.Begin(), data.End());
         return true;
     }
 
@@ -556,19 +536,19 @@ private:
         const uint64_t afterBegin = start;
         const uint64_t afterRecord = afterBegin;
         const uint64_t afterEncode = afterRecord;
-        if (CKSdlGpuBenchmarkAccess::AcquireSwapchain(m_Backend) != CK_OK) {
+        if (m_Backend.AcquireSwapchainForTests() != CK_OK) {
             error = "present-only swapchain acquisition failed";
             return false;
         }
         const uint64_t afterAcquire = Counter();
         const uint64_t afterPresentEncode = afterAcquire;
         CKDWORD number = 0;
-        if (m_Backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, TRUE}, &number) != CK_OK) {
+        if (m_Backend.Submit(CKRST_PRESENT_UNCHANGED, TRUE, &number) != CK_OK) {
             error = "present-only submission failed";
             return false;
         }
         const uint64_t afterSubmit = Counter();
-        CKSdlGpuBenchmarkAccess::Collect(m_Backend);
+        m_Backend.CollectForTests();
         const uint64_t afterCollect = Counter();
         if (!ValidateFrame(number, 0, 0, 0, error))
             return false;
@@ -592,30 +572,30 @@ private:
             return false;
         }
         const uint64_t afterRecord = Counter();
-        if (CKSdlGpuBenchmarkAccess::Flush(m_Backend) != CK_OK) {
+        if (m_Backend.FlushPendingCommandsForTests() != CK_OK) {
             error = "44-draw command encoding failed";
             return false;
         }
         const uint64_t afterEncode = Counter();
-        if (CKSdlGpuBenchmarkAccess::AcquireSwapchain(m_Backend) != CK_OK) {
+        if (m_Backend.AcquireSwapchainForTests() != CK_OK) {
             error = "44-draw swapchain acquisition failed";
             return false;
         }
         const uint64_t afterAcquire = Counter();
-        const CKPresentTarget &target = m_Present.NativeTarget();
+        const CKSdlGpuPresentTarget &target = m_Present.NativeTarget();
         if (m_Backend.PresentTexture(target.ColorTexture, kWidth, kHeight,
-                                     CKRST_BACKEND_SYNC_UNCHANGED) != CK_OK) {
+                                     CKRST_PRESENT_UNCHANGED) != CK_OK) {
             error = "44-draw present-copy encoding failed";
             return false;
         }
         const uint64_t afterPresentEncode = Counter();
         CKDWORD number = 0;
-        if (m_Backend.Submit({CKRST_BACKEND_SYNC_UNCHANGED, TRUE}, &number) != CK_OK) {
+        if (m_Backend.Submit(CKRST_PRESENT_UNCHANGED, TRUE, &number) != CK_OK) {
             error = "44-draw submission failed";
             return false;
         }
         const uint64_t afterSubmit = Counter();
-        CKSdlGpuBenchmarkAccess::Collect(m_Backend);
+        m_Backend.CollectForTests();
         const uint64_t afterCollect = Counter();
         if (!ValidateFrame(number, CKFFBenchmark::DrawsPerFrame, 2, 1, error))
             return false;
@@ -628,7 +608,7 @@ private:
     bool ValidateFrame(CKDWORD number, CKDWORD draws, CKDWORD passes,
                        CKDWORD blits, std::string &error)
     {
-        const CKBackendStats &stats = m_Backend.GetStats();
+        const CKSdlGpuSubmissionStats &stats = m_Backend.GetSubmissionStats();
         if (number != m_LastSubmission + 1 || stats.Frames != number ||
             stats.Draws != draws || stats.Passes != passes ||
             stats.Blits != blits || m_Backend.GetDeviceStatus() != CK_OK) {
@@ -692,10 +672,10 @@ private:
     }
 
     SDL_Window *m_Window = nullptr;
-    CKSdlGpuBackend m_Backend;
-    CKFixedFunctionPipeline m_Pipeline;
-    CKPresentStage m_Present;
-    CKBackendShaderSet m_Shaders;
+    CKSdlGpuRasterizerContext m_Backend;
+    CKFFTestPipelineT<CKSdlGpuRasterizerContext> m_Pipeline;
+    CKSdlGpuPresentStage m_Present;
+    CKFFShaderSet m_Shaders;
     CKFFBenchmark::Workload m_Workload;
     std::array<CKDWORD, 4> m_Textures{};
     CKDWORD m_FormatFlags = 0;

@@ -16,6 +16,8 @@ constexpr CKDWORD PackedVertexStride = 48;
 constexpr CKDWORD TransientBytesPerDraw =
     VerticesPerDraw * PackedVertexStride + IndicesPerDraw * sizeof(CKWORD);
 constexpr CKDWORD TransientBytesPerFrame = DrawsPerFrame * TransientBytesPerDraw;
+constexpr CKDWORD CpuIndexBytesPerFrame =
+    DrawsPerFrame * IndicesPerDraw * sizeof(CKWORD);
 constexpr CKDWORD VertexFormat =
     CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_DIFFUSE |
     CKRST_DP_SPECULAR | CKRST_DP_STAGES0;
@@ -163,8 +165,8 @@ public:
         ApplyPublicTextureState(context, profile);
     }
 
-    template <typename Observer = NoopObserver>
-    bool RunCoreVertexBufferFrame(CKFixedFunctionPipeline &pipeline,
+    template <typename Pipeline, typename Observer = NoopObserver>
+    bool RunCoreVertexBufferFrame(Pipeline &pipeline,
                                   const std::array<CKDWORD, 4> &textures,
                                   CKDWORD vertexBuffer,
                                   CKDWORD indexBuffer,
@@ -187,8 +189,28 @@ public:
         return true;
     }
 
-    template <typename Observer = NoopObserver>
-    bool RunCoreTransientFrame(CKFixedFunctionPipeline &pipeline,
+    template <typename Pipeline>
+    bool RunCoreCpuIndexFrame(Pipeline &pipeline,
+                              const std::array<CKDWORD, 4> &textures,
+                              CKDWORD vertexBuffer,
+                              CKDWORD vertexLayout,
+                              CKDWORD formatFlags) const
+    {
+        for (CKDWORD draw = 0; draw < DrawsPerFrame; ++draw) {
+            ApplyCoreProfile(pipeline, textures, draw);
+            pipeline.SetTransform(VXMATRIX_WORLD, Worlds[draw]);
+            if (!pipeline.DrawVertexBuffer(
+                    VX_TRIANGLELIST, vertexBuffer, 0, 0,
+                    VerticesPerDraw, 0, IndicesPerDraw,
+                    VertexFormat, formatFlags, vertexLayout,
+                    Indices.data()))
+                return false;
+        }
+        return true;
+    }
+
+    template <typename Pipeline, typename Observer = NoopObserver>
+    bool RunCoreTransientFrame(Pipeline &pipeline,
                                bool general,
                                Observer observer = Observer()) const
     {
@@ -204,8 +226,8 @@ public:
         return true;
     }
 
-    template <typename Observer = NoopObserver>
-    bool RunCoreTransientMaterialFrame(CKFixedFunctionPipeline &pipeline,
+    template <typename Pipeline, typename Observer = NoopObserver>
+    bool RunCoreTransientMaterialFrame(Pipeline &pipeline,
                                        bool general,
                                        const std::array<CKDWORD, 4> &textures,
                                        Observer observer = Observer()) const

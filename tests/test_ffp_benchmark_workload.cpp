@@ -1,5 +1,6 @@
 #include "FFPBenchmarkWorkload.h"
 #include "FFPRecordingHarness.h"
+#include "CKFFTestPipeline.h"
 #include "TestTriangleMultiset.h"
 
 #include <array>
@@ -52,7 +53,7 @@ CKSamplerDesc ExpectedSampler(const CKFFBenchmark::MaterialProfile &profile)
 }
 
 using DrawFingerprint =
-    std::array<uint64_t, 12 + CKBACKEND_MAX_CONSTANT_SLOTS>;
+    std::array<uint64_t, 12 + CKFF_CONSTANT_SLOT_COUNT>;
 
 DrawFingerprint NormalizedDrawFingerprint(
     const FFPRecordingBackend &backend,
@@ -76,7 +77,7 @@ DrawFingerprint NormalizedDrawFingerprint(
                                &log.LastTextureSampler,
                                sizeof(log.LastTextureSampler));
     fingerprint[11] = log.LastProgram != 0;
-    for (CKDWORD block = 0; block < CKBACKEND_MAX_CONSTANT_SLOTS; ++block) {
+    for (CKDWORD block = 0; block < CKFF_CONSTANT_SLOT_COUNT; ++block) {
         const CKDWORD uniform = backend.GetBlockUniformForTests(block);
         const auto found = log.FloatUniforms.find(uniform);
         if (found == log.FloatUniforms.end()) {
@@ -93,7 +94,7 @@ DrawFingerprint NormalizedDrawFingerprint(
 struct RecordingCoreFixture {
     FFPRecordingDriver Driver;
     FFPRecordingBackend Backend;
-    CKFixedFunctionPipeline Pipeline;
+    CKFFTestPipeline Pipeline;
     std::array<CKDWORD, 4> Textures{{101, 102, 103, 104}};
     CKDWORD FormatFlags = 0;
     CKDWORD VertexLayout = 0;
@@ -102,7 +103,7 @@ struct RecordingCoreFixture {
     {
         TestCheck(Pipeline.Init(Backend.StartedBackend(), Backend.ShaderSet()),
                   "benchmark workload FFP initialization");
-        FormatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
+        FormatFlags = CKFFVertexLayout::DPFlagsToFormatFlags(
             CKFFBenchmark::VertexFormat, true, true);
         VertexLayout = Pipeline.ResolveVertexLayout(FormatFlags);
         TestCheck(FormatFlags != 0 && VertexLayout != 0,
@@ -222,12 +223,12 @@ void DirectAndTranslatedMaterialFramesAreEquivalent()
                   direct.VertexLayout, direct.FormatFlags, true, recordDirect),
               "direct material frame must complete");
 
-    FFPTranslatedWorld world;
+    FFPRecordingWorld world;
     TestCheck(world.CreateContext(640, 480),
-              "translated benchmark workload context");
+              "recording benchmark workload Context");
     CKFFBenchmark::PublicResources resources;
     TestCheck(workload.CreatePublicResources(*world.Context, resources),
-              "translated benchmark workload resources");
+              "recording benchmark workload resources");
     workload.ConfigurePublic(*world.Context, resources);
     std::vector<DrawFingerprint> translatedDigests;
     translatedDigests.reserve(CKFFBenchmark::DrawsPerFrame);
@@ -235,7 +236,7 @@ void DirectAndTranslatedMaterialFramesAreEquivalent()
         *world.Backend, resources.Textures, translatedDigests};
     TestCheck(workload.RunTranslatedVertexBufferFrame(
                   *world.Context, resources, recordTranslated),
-              "translated material frame must complete");
+              "recording material frame must complete");
 
     if (directDigests.size() == translatedDigests.size()) {
         for (size_t draw = 0; draw < directDigests.size(); ++draw) {
@@ -245,7 +246,7 @@ void DirectAndTranslatedMaterialFramesAreEquivalent()
                     std::cout << "draw " << draw << ", normalized field "
                               << field << ": direct="
                               << directDigests[draw][field]
-                              << ", translated="
+                              << ", recording="
                               << translatedDigests[draw][field] << '\n';
                 }
             }
@@ -254,7 +255,7 @@ void DirectAndTranslatedMaterialFramesAreEquivalent()
     TestCheck(directDigests.size() == CKFFBenchmark::DrawsPerFrame &&
                   translatedDigests.size() == CKFFBenchmark::DrawsPerFrame &&
                   directDigests == translatedDigests,
-              "direct and public translated paths must emit equivalent normalized draws");
+              "direct and public recording paths must emit equivalent normalized draws");
     // FFPRecordingBackend has no native PresentTexture implementation, so
     // BackToFront records one shader presentation draw after the 44 scene
     // draws.  The benchmark backend implements PresentTexture as a fixed
@@ -264,7 +265,7 @@ void DirectAndTranslatedMaterialFramesAreEquivalent()
         world.Backend->Log.VertexBufferSetCount != CKFFBenchmark::DrawsPerFrame ||
         world.Backend->Log.IndexBufferSetCount != CKFFBenchmark::DrawsPerFrame ||
         world.Backend->GetFrameNumber() != 1) {
-        std::cout << "translated counters: draws=" << world.Backend->Log.DrawCount
+        std::cout << "recording counters: draws=" << world.Backend->Log.DrawCount
                   << ", discarded=" << world.Backend->Log.DiscardCount
                   << ", vb=" << world.Backend->Log.VertexBufferSetCount
                   << ", ib=" << world.Backend->Log.IndexBufferSetCount
@@ -277,7 +278,7 @@ void DirectAndTranslatedMaterialFramesAreEquivalent()
                   world.Backend->Log.IndexBufferSetCount ==
                       CKFFBenchmark::DrawsPerFrame &&
                   world.Backend->GetFrameNumber() == 1,
-              "translated frame must submit once without discarded draws");
+              "recording frame must submit once without discarded draws");
 }
 
 } // namespace
@@ -289,7 +290,7 @@ int main()
               &CoreVertexBufferWorkloadsSubmitExactly44Draws);
     tests.Run("44-draw transient workload shape",
               &TransientWorkloadsKeepTheirShapeAndPacking);
-    tests.Run("direct and translated benchmark workload equivalence",
+    tests.Run("direct and recording benchmark workload equivalence",
               &DirectAndTranslatedMaterialFramesAreEquivalent);
     return tests.ExitCode();
 }

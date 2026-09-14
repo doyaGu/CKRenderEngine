@@ -5,7 +5,8 @@
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
 #include "CKRecordingRasterizer.h"
-#include "CKFFRasterizerContextInternal.h"
+#include "FFPRecordingContext.h"
+#include "CKFFTestPipeline.h"
 
 #include <algorithm>
 #include <array>
@@ -27,26 +28,6 @@
 #endif
 #include <Windows.h>
 #endif
-
-struct CKFFUniformEmitterTestAccess {
-    static CKBOOL UploadObject(CKFFUniformEmitter &emitter,
-                               CKBackendConstants *constants,
-                               const CKFFProgramContext *programContext,
-                               CKDWORD activeTextureCount)
-    {
-        return emitter.UploadObjectUniforms(constants, programContext,
-                                             activeTextureCount);
-    }
-
-    static CKBOOL UploadStatic(CKFFUniformEmitter &emitter,
-                               CKBackendConstants *constants,
-                               const CKFFProgramContext *programContext,
-                               CKDWORD activeTextureCount)
-    {
-        return emitter.UploadStaticUniforms(constants, programContext,
-                                             activeTextureCount);
-    }
-};
 
 namespace {
 
@@ -260,7 +241,7 @@ bool MeasureCase(const BenchmarkCase &test, int sampleCount,
 
 bool InitBackend(CKBenchmarkBackend &backend)
 {
-    CKBackendInitDesc desc;
+    CKRasterizerInitParameters desc;
     desc.Width = 640;
     desc.Height = 480;
     desc.Bpp = 32;
@@ -268,7 +249,7 @@ bool InitBackend(CKBenchmarkBackend &backend)
     desc.StencilBpp = 8;
     if (backend.Init(&desc) != CK_OK)
         return false;
-    CKBackendPassDesc pass;
+    CKRenderPassDesc pass;
     pass.Rect.right = 640;
     pass.Rect.bottom = 480;
     return backend.BeginPass(&pass) == CK_OK;
@@ -277,7 +258,7 @@ bool InitBackend(CKBenchmarkBackend &backend)
 struct CoreFixture {
     const CKFFBenchmark::Workload &Workload;
     CKBenchmarkBackend Backend;
-    CKFixedFunctionPipeline Pipeline;
+    CKFFTestPipeline Pipeline;
     std::array<CKDWORD, 4> Textures{{101, 102, 103, 104}};
     CKDWORD FormatFlags = 0;
     CKDWORD VertexLayout = 0;
@@ -286,13 +267,13 @@ struct CoreFixture {
     explicit CoreFixture(const CKFFBenchmark::Workload &workload)
         : Workload(workload)
     {
-        CKBackendShaderSet shaders;
+        CKFFShaderSet shaders;
         Valid = InitBackend(Backend) &&
                 CKRecordingShaderSet(Backend.GetCaps(), shaders) &&
                 Pipeline.Init(&Backend, shaders);
         if (!Valid)
             return;
-        FormatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
+        FormatFlags = CKFFVertexLayout::DPFlagsToFormatFlags(
             CKFFBenchmark::VertexFormat, true, true);
         VertexLayout = Pipeline.ResolveVertexLayout(FormatFlags);
         Valid = FormatFlags != 0 && VertexLayout != 0;
@@ -307,9 +288,9 @@ struct CoreFixture {
     }
 };
 
-class BenchmarkTranslatedWorld {
+class BenchmarkRecordingWorld {
 public:
-    explicit BenchmarkTranslatedWorld(const CKFFBenchmark::Workload &workload)
+    explicit BenchmarkRecordingWorld(const CKFFBenchmark::Workload &workload)
     {
         CKBenchmarkRasterizer *rasterizer = new CKBenchmarkRasterizer();
         Rasterizer = rasterizer;
@@ -322,7 +303,7 @@ public:
             return;
         Driver = static_cast<CKBenchmarkRasterizerDriver *>(Rasterizer->GetDriver(0));
         Context = Driver
-            ? static_cast<CKTranslatedContext *>(Driver->CreateContext())
+            ? static_cast<FFPRecordingContext *>(Driver->CreateContext())
             : nullptr;
         if (!Context || !Context->Create(nullptr, 0, 0, 640, 480, 32,
                                          FALSE, 60, 24, 8))
@@ -333,7 +314,7 @@ public:
             workload.ConfigurePublic(*Context, Resources);
     }
 
-    ~BenchmarkTranslatedWorld()
+    ~BenchmarkRecordingWorld()
     {
         if (Rasterizer)
             delete Rasterizer;
@@ -341,7 +322,7 @@ public:
 
     CKRasterizer *Rasterizer = nullptr;
     CKBenchmarkRasterizerDriver *Driver = nullptr;
-    CKTranslatedContext *Context = nullptr;
+    FFPRecordingContext *Context = nullptr;
     CKBenchmarkBackend *Backend = nullptr;
     CKFFBenchmark::PublicResources Resources;
     bool Valid = false;
@@ -422,15 +403,16 @@ void ConfigureState(CKFFStateStore &state,
 struct ComponentFixture {
     const CKFFBenchmark::Workload &Workload;
     CKBenchmarkBackend Backend;
-    CKFFShaderCache ShaderCache;
+    CKFFTestShaderCache ShaderCache;
     CKFFDrawProbes Probes;
     std::array<CKFFStateStore, 8> States;
     std::array<CKFFShaderKey, 8> Keys;
     std::array<CKFFProgramContext, 8> Contexts;
     CKFFStateStore UniformState;
-    CKBackendConstants ObjectConstants;
-    CKBackendConstants StaticConstants;
-    CKBackendConstants FullConstants;
+    CKFFConstantSet ObjectConstants;
+    CKFFConstantSet StaticConstants;
+    CKFFConstantSet FullConstants;
+    CKDWORD ShaderTargetFlags = 0;
     std::unique_ptr<CKFFUniformEmitter> UniformEmitter;
     CKFFStateStore OneTextureState;
     CKFFStateStore FourTextureState;
@@ -441,43 +423,44 @@ struct ComponentFixture {
     explicit ComponentFixture(const CKFFBenchmark::Workload &workload)
         : Workload(workload)
     {
-        CKBackendShaderSet shaders;
+        CKFFShaderSet shaders;
         Valid = InitBackend(Backend) &&
                 CKRecordingShaderSet(Backend.GetCaps(), shaders) &&
-                ShaderCache.Init(&Backend, shaders);
+                ShaderCache.Init(Backend.GetCaps(), shaders);
         if (!Valid)
             return;
+        ShaderTargetFlags = ShaderCache.GetTargetFlags();
         for (CKDWORD i = 0; i < States.size(); ++i) {
             ConfigureState(States[i], Workload, i, 1);
             CKFFPreparedState prepared;
             CKFFStateResolver::BuildPreparedState(
                 States[i], States[i].DrawState, &prepared,
                 CKFFBenchmark::VertexFormat, 1,
-                CKVertexLayoutCache::DPFlagsToFormatFlags(
+                CKFFVertexLayout::DPFlagsToFormatFlags(
                     CKFFBenchmark::VertexFormat, true, true),
                 States[i].TexcoordComponentCounts, FALSE);
             Keys[i] = CKFFBuildShaderKeyFromPreparedState(&prepared);
-            const CKFFProgramBinding binding = ShaderCache.GetProgram(Keys[i]);
+            const CKFFProgramBinding binding = ShaderCache.GetProgram(&Backend, Keys[i]);
             if (!binding.Program) {
                 Valid = false;
                 return;
             }
-            CKFFInitProgramContext(&Contexts[i], Keys[i], binding);
+            CKFFInitProgramContext(&Contexts[i], Keys[i], binding.Specialization);
         }
         ConfigureState(UniformState, Workload, 0, 1);
         UniformEmitter = std::make_unique<CKFFUniformEmitter>(
-            UniformState, UniformState.DrawState, ShaderCache, Probes);
+            UniformState, UniformState.DrawState, ShaderTargetFlags, Probes);
         ConfigureState(OneTextureState, Workload, 0, 1);
         ConfigureState(FourTextureState, Workload, 0, 4);
         OneTextureBinder = std::make_unique<CKFFTextureBinder>(
-            OneTextureState, ShaderCache, Probes);
+            OneTextureState, Probes);
         FourTextureBinder = std::make_unique<CKFFTextureBinder>(
-            FourTextureState, ShaderCache, Probes);
+            FourTextureState, Probes);
     }
 
     ~ComponentFixture()
     {
-        ShaderCache.Shutdown();
+        ShaderCache.Shutdown(&Backend);
         Backend.Shutdown();
     }
 
@@ -501,12 +484,12 @@ struct ComponentFixture {
     }
 };
 
-uint64_t ConstantsChecksum(const CKBackendConstants &constants)
+uint64_t ConstantsChecksum(const CKFFConstantSet &constants)
 {
     uint64_t hash = 1469598103934665603ull;
-    for (CKDWORD slot = 0; slot < CKBACKEND_MAX_CONSTANT_SLOTS; ++slot) {
+    for (CKDWORD slot = 0; slot < CKFF_CONSTANT_SLOT_COUNT; ++slot) {
         const auto &bytes = constants[slot].Bytes;
-        hash = MixBytes(hash, bytes.data(), bytes.size());
+        hash = MixBytes(hash, bytes.Begin(), bytes.Size());
     }
     return hash;
 }
@@ -514,6 +497,7 @@ uint64_t ConstantsChecksum(const CKBackendConstants &constants)
 enum class CoreCaseKind {
     VertexBufferSteady,
     VertexBufferMaterial8,
+    VertexBufferCpuIndices,
     TransientCommon,
     TransientGeneral
 };
@@ -544,6 +528,11 @@ public:
                 ok = m_Fixture.Workload.RunCoreVertexBufferFrame(
                     m_Fixture.Pipeline, m_Fixture.Textures, 202, 302,
                     m_Fixture.VertexLayout, m_Fixture.FormatFlags, true);
+                break;
+            case CoreCaseKind::VertexBufferCpuIndices:
+                ok = m_Fixture.Workload.RunCoreCpuIndexFrame(
+                    m_Fixture.Pipeline, m_Fixture.Textures, 203,
+                    m_Fixture.VertexLayout, m_Fixture.FormatFlags);
                 break;
             case CoreCaseKind::TransientCommon:
                 ok = m_Fixture.Workload.RunCoreTransientFrame(
@@ -590,7 +579,7 @@ public:
 
 private:
     const CKFFBenchmark::Workload &m_Workload;
-    BenchmarkTranslatedWorld m_World;
+    BenchmarkRecordingWorld m_World;
 };
 
 enum class ComponentCaseKind {
@@ -664,7 +653,8 @@ private:
         for (uint64_t i = 0; i < count; ++i) {
             const size_t profile = rotateMaterials ? size_t(i & 7u) : 0u;
             const CKFFProgramBinding binding =
-                m_Fixture->ShaderCache.GetProgram(m_Fixture->Keys[profile]);
+                m_Fixture->ShaderCache.GetProgram(
+                    &m_Fixture->Backend, m_Fixture->Keys[profile]);
             hash = Mix(hash, binding.Program);
             hash = Mix(hash, binding.Specialization.Lanes()[0]);
         }
@@ -679,9 +669,8 @@ private:
         for (uint64_t i = 0; ok && i < count; ++i) {
             m_Fixture->UniformState.World = m_Fixture->Workload.Worlds[
                 static_cast<size_t>(i % CKFFBenchmark::DrawsPerFrame)];
-            ok = CKFFUniformEmitterTestAccess::UploadObject(
-                     *m_Fixture->UniformEmitter, &m_Fixture->ObjectConstants,
-                     &m_Fixture->Contexts[0], 1) != FALSE;
+            ok = m_Fixture->UniformEmitter->UploadObjectUniforms(
+                     &m_Fixture->ObjectConstants, &m_Fixture->Contexts[0], 1) != FALSE;
             hash = Mix(hash, ConstantsChecksum(m_Fixture->ObjectConstants));
         }
         return {ok, count, 0, hash};
@@ -695,9 +684,8 @@ private:
         for (uint64_t i = 0; ok && i < count; ++i) {
             const CKDWORD profile = static_cast<CKDWORD>(i & 7u);
             m_Fixture->SetUniformProfile(profile);
-            ok = CKFFUniformEmitterTestAccess::UploadStatic(
-                     *m_Fixture->UniformEmitter, &m_Fixture->StaticConstants,
-                     &m_Fixture->Contexts[profile], 1) != FALSE;
+            ok = m_Fixture->UniformEmitter->UploadStaticUniforms(
+                     &m_Fixture->StaticConstants, &m_Fixture->Contexts[profile], 1) != FALSE;
             hash = Mix(hash, ConstantsChecksum(m_Fixture->StaticConstants));
         }
         return {ok, count, 0, hash};
@@ -729,10 +717,8 @@ private:
         const CKDWORD mask = textureCount == 1 ? 0x1u : 0xFu;
         for (uint64_t i = 0; i < count; ++i) {
             binder.BuildBindingSet(&set, textureCount, mask);
-            const CKBackendTextureBindings &bindings =
-                binder.BuildDrawBindings(&set);
             hash = Mix(hash, set.Hash);
-            hash = Mix(hash, bindings[textureCount - 1].Texture);
+            hash = Mix(hash, set.Bindings[textureCount - 1].Texture);
         }
         return {true, count, 0, hash};
     }
@@ -813,7 +799,7 @@ public:
     Observation Run(uint64_t frames) override
     {
         m_Backend.ResetMeasurements();
-        CKBackendDraw draw;
+        CKDrawCommand draw;
         draw.Program = 1;
         draw.Layout = 1;
         draw.VertexBuffer = 201;
@@ -832,8 +818,8 @@ public:
 
 private:
     CKBenchmarkBackend m_Backend;
-    CKBackendConstants m_Constants;
-    CKBackendTextureBindings m_Textures;
+    CKFFConstantSet m_Constants;
+    CKFFTextureBindings m_Textures;
     bool m_Valid = false;
 };
 
@@ -848,6 +834,11 @@ std::vector<BenchmarkCase> BuildCases(const CKFFBenchmark::Workload &workload)
         std::make_shared<CoreBenchmarkTask>(
             workload, CoreCaseKind::VertexBufferMaterial8),
         CKFFBenchmark::DrawsPerFrame, 0, 1});
+    cases.push_back({"core_vb_cpu_indices_44",
+        std::make_shared<CoreBenchmarkTask>(
+            workload, CoreCaseKind::VertexBufferCpuIndices),
+        CKFFBenchmark::DrawsPerFrame,
+        CKFFBenchmark::CpuIndexBytesPerFrame, 1});
     cases.push_back({"core_transient_common_44",
         std::make_shared<CoreBenchmarkTask>(
             workload, CoreCaseKind::TransientCommon),
@@ -862,7 +853,7 @@ std::vector<BenchmarkCase> BuildCases(const CKFFBenchmark::Workload &workload)
         std::make_shared<TranslatedBenchmarkTask>(workload),
         CKFFBenchmark::DrawsPerFrame, 0, 1});
 
-    const CKDWORD formatFlags = CKVertexLayoutCache::DPFlagsToFormatFlags(
+    const CKDWORD formatFlags = CKFFVertexLayout::DPFlagsToFormatFlags(
         CKFFBenchmark::VertexFormat, true, true);
     auto components = std::make_shared<ComponentFixture>(workload);
     cases.push_back({"prepared_state_steady",
