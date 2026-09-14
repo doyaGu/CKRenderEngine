@@ -87,7 +87,7 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
 
     const CKFFDebugConfig &config = CKFFDebugConfig::Get();
     if (config.Real3DLogLimit > 0 && m_Real3DDrawLogCount < config.Real3DLogLimit) {
-        CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
+        CKDWORD stride = CKFFVertexLayout::ComputeStride(info.FormatFlags);
         CK_LOG_FMT("FFPipeline",
                    "Real3D DrawPrimitive #%d: serial=%d type=%d(%s) verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u lightingRS=%u activeLights=%d program=%u",
                    m_Real3DDrawLogCount, info.DrawSerial, (int)info.Type, PrimitiveName(info.Type),
@@ -112,7 +112,7 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
     }
 
     if (config.Draw3DLogLimit > 0 && m_3DDrawLogCount < config.Draw3DLogLimit) {
-        CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
+        CKDWORD stride = CKFFVertexLayout::ComputeStride(info.FormatFlags);
         const CKDWORD vertexBlend = info.DrawState->GetRenderState(VXRENDERSTATE_VERTEXBLEND);
         CK_LOG_FMT("FFPipeline",
                    "3D draw #%d: serial=%d path=DrawPrimitive type=%d(%s) verts=%d indices=%d flags=0x%X dpFlags=0x%X fmt=0x%X stride=%u positionStride=%u hasNormal=%u vertexBlend=%s(%u) stateLighting=%d texCount=%d stage0C=%u/%u/%u stage0A=%u/%u/%u tex0=%u alpha=%u/%u/%u blend=%u/%u/%u z=%u/%u/%u cull=%u",
@@ -141,7 +141,7 @@ void CKFFDebugState::LogDrawPrimitiveDetails(const CKFFDrawDebugInfo &info) {
 
     if ((info.FormatFlags & CKFF_VF_POSITIONT) &&
         config.PositionTLogLimit > 0 && m_PositionTDrawLogCount < config.PositionTLogLimit) {
-        CKDWORD stride = CKVertexLayoutCache::ComputeStride(info.FormatFlags);
+        CKDWORD stride = CKFFVertexLayout::ComputeStride(info.FormatFlags);
         CK_LOG_FMT("FFPipeline",
                    "PositionT DrawPrimitive #%d: type=%d verts=%d indices=%d flags=0x%X fmt=0x%X stride=%u tex0=%u program=%u stage0=%u/%u/%u",
                    m_PositionTDrawLogCount, (int)info.Type,

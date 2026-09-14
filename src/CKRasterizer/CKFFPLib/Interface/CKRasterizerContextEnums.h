@@ -1,15 +1,13 @@
-#ifndef CKRASTERIZERBACKENDENUMS_H
-#define CKRASTERIZERBACKENDENUMS_H
+#ifndef CKRASTERIZERCONTEXTENUMS_H
+#define CKRASTERIZERCONTEXTENUMS_H
 
 #include <stdint.h>
 
 #include "VxDefines.h"
 
-// Enumerations of the backend interface (CKRasterizerBackend.h) and the
-// fixed-function translation core. Everything shared with the public rasterizer interface -
-// object kinds, clear flags, cube faces, texture / buffer / lock flags, debug
-// flags - comes from the public header; this file
-// only adds what the backends need on top of it.
+// Internal rasterizer enumerations used by CKFFPLib and both Concrete
+// Rasterizer Contexts. Object kinds, clear flags, cube faces, texture / buffer /
+// lock flags and debug flags shared with callers come from the public header.
 #include "CKRasterizerEnums.h"
 
 // ===========================================================================
@@ -21,7 +19,7 @@
 
 
 // ===========================================================================
-// Object Kinds (backend-internal objects; public kinds are in CKRasterizerEnums.h)
+// Object Kinds (internal objects; public kinds are in CKRasterizerEnums.h)
 // ===========================================================================
 
 #define CKRST_OBJ_SHADER          0x00000010
@@ -146,7 +144,7 @@ typedef enum CK_COMPARE_MODE {
 } CK_COMPARE_MODE;
 
 // ---------------------------------------------------------------------------
-// Backend texture flags (extend the public CKRST_TEXTUREFLAGS)
+// Internal texture flags (extend the public CKRST_TEXTUREFLAGS)
 // ---------------------------------------------------------------------------
 
 #define CKRST_TEXTURE_MSAA_X2         0x00800000
@@ -182,8 +180,8 @@ inline CKDWORD CKRSTTextureMSAASamples(CKDWORD flags)
     return 0;
 }
 
-// Backend capabilities (CKRST_DEVCAPS_*). Reported by the backend and
-// must not alias or expose a native backend capability mask.
+// Context capabilities consumed by CKFFPLib. These values must not alias or
+// expose a native graphics API capability mask.
 typedef uint64_t CKRST_DEVCAPS;
 
 #define CKRST_DEVCAPS_VERTEX_SHADER       UINT64_C(0x0000000000000001)
@@ -309,7 +307,7 @@ struct CKDrawState {
     (CKRST_STATE_PT(VX_TRIANGLELIST))
 
 // ---------------------------------------------------------------------------
-// Debug Flags (backend-only bits; the shared ones are in CKRasterizerEnums.h)
+// Debug Flags (internal bits; caller-visible bits are in CKRasterizerEnums.h)
 // ---------------------------------------------------------------------------
 
 #define CKRST_DEBUG_TEXT       0x00000008
@@ -321,7 +319,7 @@ struct CKDrawState {
 
 // VX enum values are reused only as compact numeric encodings of resolved
 // pipeline state. The rasterizer resolves fixed-function combinations (for
-// example BOTH source-alpha modes) before constructing backend draw state.
+// example BOTH source-alpha modes) before constructing the draw state.
 class CKDrawStateBuilder {
 public:
     CKDrawStateBuilder()
@@ -462,4 +460,4 @@ private:
     CKDrawState m_State;
 };
 
-#endif // CKRASTERIZERBACKENDENUMS_H
+#endif // CKRASTERIZERCONTEXTENUMS_H

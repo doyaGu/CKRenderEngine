@@ -2,10 +2,10 @@
 #define CKBUILTINSHADERS_H
 
 #include "CKBuiltinShaderIdentity.h"
-#include "CKRasterizerBackendTypes.h"
-#include <vector>
+#include "CKRasterizerContextTypes.h"
+#include "XClassArray.h"
 
-struct CKBackendShaderTarget {
+struct CKFFShaderTarget {
     CK_SHADER_FORMAT Format = CKRST_SHADER_FORMAT_UNKNOWN;
     CK_SHADER_PROFILE Profile = CKRST_SHADER_PROFILE_UNKNOWN;
 };
@@ -24,7 +24,7 @@ enum CKBuiltinShader {
     CKRST_BUILTIN_SHADER_COUNT
 };
 
-struct CKBackendShaderSet {
+struct CKFFShaderSet {
     CKDWORD ABIVersion = 0;
     CKDWORD InterfaceHash = 0;
     CKShaderDesc Shaders[CKRST_BUILTIN_SHADER_COUNT];
@@ -51,53 +51,53 @@ struct CKBackendShaderSet {
 // objects to discover shaders.
 class CKFFShaderLibrary {
 public:
-    CKBOOL Add(const CKBackendShaderSet &shaderSet)
+    CKBOOL Add(const CKFFShaderSet &shaderSet)
     {
         const CKShaderDesc &identity = shaderSet.Shaders[0];
         if (!shaderSet.Matches(identity.Format, identity.Profile))
             return FALSE;
-        for (size_t i = 0; i < m_ShaderSets.size(); ++i) {
+        for (int i = 0; i < m_ShaderSets.Size(); ++i) {
             const CKShaderDesc &existing = m_ShaderSets[i].Shaders[0];
             if (existing.Format == identity.Format && existing.Profile == identity.Profile) {
                 m_ShaderSets[i] = shaderSet;
                 return TRUE;
             }
         }
-        m_ShaderSets.push_back(shaderSet);
+        m_ShaderSets.PushBack(shaderSet);
         return TRUE;
     }
 
-    void Clear() { m_ShaderSets.clear(); }
-    CKBOOL Empty() const { return m_ShaderSets.empty() ? TRUE : FALSE; }
+    void Clear() { m_ShaderSets.Clear(); }
+    CKBOOL Empty() const { return m_ShaderSets.Size() == 0 ? TRUE : FALSE; }
 
-    void GetTargets(std::vector<CKBackendShaderTarget> &targets) const
+    void GetTargets(XClassArray<CKFFShaderTarget> &targets) const
     {
-        targets.clear();
-        targets.reserve(m_ShaderSets.size());
-        for (size_t i = 0; i < m_ShaderSets.size(); ++i) {
+        targets.Clear();
+        targets.Reserve(m_ShaderSets.Size());
+        for (int i = 0; i < m_ShaderSets.Size(); ++i) {
             const CKShaderDesc &identity = m_ShaderSets[i].Shaders[0];
-            CKBackendShaderTarget target;
+            CKFFShaderTarget target;
             target.Format = identity.Format;
             target.Profile = identity.Profile;
-            targets.push_back(target);
+            targets.PushBack(target);
         }
     }
 
     CKBOOL Find(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile,
-                CKBackendShaderSet &shaderSet) const
+                CKFFShaderSet &shaderSet) const
     {
-        for (size_t i = 0; i < m_ShaderSets.size(); ++i) {
+        for (int i = 0; i < m_ShaderSets.Size(); ++i) {
             if (m_ShaderSets[i].Matches(format, profile)) {
                 shaderSet = m_ShaderSets[i];
                 return TRUE;
             }
         }
-        shaderSet = CKBackendShaderSet();
+        shaderSet = CKFFShaderSet();
         return FALSE;
     }
 
 private:
-    std::vector<CKBackendShaderSet> m_ShaderSets;
+    XClassArray<CKFFShaderSet> m_ShaderSets;
 };
 
 #endif

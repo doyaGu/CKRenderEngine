@@ -2,11 +2,9 @@
 #define CKVERTEXLAYOUTCACHE_H
 
 #include "VxDefines.h"
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
-#include "XHashTable.h"
-
-class CKRasterizerBackend;
+#include "CKError.h"
+#include "CKRasterizerContextEnums.h"
+#include "CKRasterizerContextTypes.h"
 
 // Vertex layout flags (used as cache key)
 #define CKFF_VF_POSITION   0x0001
@@ -29,19 +27,10 @@ class CKRasterizerBackend;
 
 #define CKFF_VF_TEXCOORD(stage) (CKFF_VF_TEXCOORD0 << (stage))
 
-class CKVertexLayoutCache {
+class CKFFVertexLayout {
 public:
-    CKVertexLayoutCache();
-    ~CKVertexLayoutCache();
-
-    void Init(CKRasterizerBackend *backend);
-    void Shutdown();
-
-    // Get or create a layout handle for the given vertex format flags.
-    // Returns the layout handle and outputs the stride.
-    CKDWORD GetLayout(CKDWORD formatFlags, CKDWORD *outStride = nullptr);
-
-    // Compute format flags from VxDrawPrimitiveData CKRST_DP_* flags
+    // Pure CPU rules shared by concrete contexts. Native layout caching and
+    // object lifetime belong to each concrete rasterizer context.
     static CKDWORD DrawPrimitiveDataToFormatFlags(const VxDrawPrimitiveData *data);
     static CKDWORD DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV);
     static CKDWORD DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride);
@@ -51,10 +40,10 @@ public:
 
     // Get the stride for a given format flags combination
     static CKDWORD ComputeStride(CKDWORD formatFlags);
-
-private:
-    CKRasterizerBackend *m_Backend;
-    XHashTable<CKDWORD, CKDWORD> m_Cache; // formatFlags -> layout handle
+    static CKBOOL BuildLayout(CKDWORD formatFlags,
+                              CKVertexElementDesc *elements,
+                              CKDWORD capacity,
+                              CKVertexLayoutDesc &desc);
 };
 
 #endif // CKVERTEXLAYOUTCACHE_H

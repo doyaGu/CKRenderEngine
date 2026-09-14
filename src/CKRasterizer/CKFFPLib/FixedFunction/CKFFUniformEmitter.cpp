@@ -5,14 +5,13 @@
 #include "CKFFStageState.h"
 #include "CKFFStateResolver.h"
 #include "CKFFUniformState.h"
-#include "CKRasterizerBackend.h"
 
 #include <string.h>
 
 CKBOOL CKFFUniformEmitter::RenderTargetOriginFlip() const
 {
     return m_State.RenderTargetActive &&
-           (m_ShaderCache.GetTargetFlags() & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
+           (m_ShaderTargetFlags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
 }
 
 static CKDWORD CKFFShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs)
@@ -56,7 +55,7 @@ static bool CKFFProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
 }
 
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
-                                CKBackendConstants *constants,
+                                CKFFConstantSet *constants,
                                 CKBOOL emitStatic,
                                 CKBOOL emitObject)
 {
@@ -90,11 +89,11 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
 
 CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
                                        const CKDrawStateCache &drawState,
-                                       CKFFShaderCache &shaderCache,
+                                       const CKDWORD &shaderTargetFlags,
                                        CKFFDrawProbes &probes)
     : m_State(state),
       m_DrawState(drawState),
-      m_ShaderCache(shaderCache),
+      m_ShaderTargetFlags(shaderTargetFlags),
       m_Probes(probes),
       m_StaticUniformCacheValid(FALSE),
       m_LastStaticConstantsIdentity(0),
@@ -176,7 +175,7 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
     }
     if (RenderTargetOriginFlip()) {
         // Render upside down into the target so its memory matches the D3D
-        // layout on bottom-left-origin backends (spec 5.9, RTT origin).
+        // layout on bottom-left-origin rasterizers.
         VxMatrix flip;
         Vx3DMatrixIdentity(flip);
         flip[1][1] = -1.0f;
@@ -342,7 +341,7 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
     EmitClipPlaneUniforms(&context);
 }
 
-CKBOOL CKFFUniformEmitter::UploadUniforms(CKBackendConstants *constants,
+CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
                                           const CKFFProgramContext *programContext,
                                           CKDWORD activeTextureCount,
                                           uint64_t staticUniformRevision)
@@ -370,7 +369,7 @@ CKBOOL CKFFUniformEmitter::UploadUniforms(CKBackendConstants *constants,
     return TRUE;
 }
 
-CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKBackendConstants *constants,
+CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKFFConstantSet *constants,
                                                 const CKFFProgramContext *programContext,
                                                 CKDWORD activeTextureCount)
 {
@@ -382,7 +381,7 @@ CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKBackendConstants *constants,
     return sink.Failed ? FALSE : TRUE;
 }
 
-CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKBackendConstants *constants,
+CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKFFConstantSet *constants,
                                                 const CKFFProgramContext *programContext,
                                                 CKDWORD activeTextureCount)
 {
@@ -394,7 +393,7 @@ CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKBackendConstants *constants,
     return sink.Failed ? FALSE : TRUE;
 }
 
-CKBOOL CKFFUniformEmitter::UploadUniform(CKBackendConstants *constants, CKFFConstantBlock block,
+CKBOOL CKFFUniformEmitter::UploadUniform(CKFFConstantSet *constants, CKFFConstantBlock block,
                                          const void *data, CKDWORD vec4Count)
 {
     if (!constants)

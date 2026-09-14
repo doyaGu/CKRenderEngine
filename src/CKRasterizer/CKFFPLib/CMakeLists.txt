@@ -1,14 +1,20 @@
-# Reusable fixed-function implementation and modern graphics backend Interface
-# used by SDL_gpu and bgfx rasterizers.
+# Reusable CPU fixed-function implementation shared by the concrete
+# SDL_gpu and bgfx rasterizer contexts.
 set(CKFFP_LIB_SOURCES
-    Backend/CKBackendProgram.cpp
-    Backend/CKBackendProgramLayout.cpp
+    Core/CKFFProgram.cpp
+    Core/CKFFProgramLayout.cpp
     FixedFunction/CKDrawStateCache.cpp
+    FixedFunction/CKFFBufferUseTracker.cpp
+    FixedFunction/CKFFBufferData.cpp
+    FixedFunction/CKFFContextState.cpp
     FixedFunction/CKFFDebug.cpp
     FixedFunction/CKFFDrawProbes.cpp
     FixedFunction/CKFFDrawTypes.cpp
+    FixedFunction/CKFFImage.cpp
+    FixedFunction/CKFFResourceStore.cpp
     FixedFunction/CKFFPipelineGuards.cpp
     FixedFunction/CKFFPipelineState.cpp
+    FixedFunction/CKFFPresentDraw.cpp
     FixedFunction/CKFFShaderCache.cpp
     ShaderModel/CKFFShaderInterface.cpp
     ShaderModel/CKFFShaderKey.cpp
@@ -22,32 +28,33 @@ set(CKFFP_LIB_SOURCES
     FixedFunction/CKFixedFunctionPipeline.cpp
     FixedFunction/CKTransientGeometry.cpp
     FixedFunction/CKVertexLayoutCache.cpp
-    Context/CKPresentStage.cpp
-    Context/CKTranslatedContext.cpp
-    Context/CKTranslatedFrame.cpp
-    Context/CKTranslatedReadback.cpp
-    Context/CKTranslatedResources.cpp
-    Context/CKTranslatedTargets.cpp
-    Context/CKTranslatedTransfer.cpp
 )
 
 set(CKFFP_LIB_HEADERS
-    Interface/CKBackendDrawData.h
-    Interface/CKBackendProgram.h
-    Interface/CKBackendProgramLayout.h
+    Interface/CKFFConstantSet.h
+    Interface/CKFFPipelineState.h
+    Interface/CKFFTextureBindings.h
+    Interface/CKFFProgramDesc.h
+    Interface/CKFFProgramLayout.h
     Interface/CKBuiltinShaderIdentity.h
     Interface/CKBuiltinShaders.h
-    Interface/CKFFRasterizerContext.h
     Interface/CKFFNativeLayout.def
-    Interface/CKRasterizerBackend.h
-    Interface/CKRasterizerBackendEnums.h
-    Interface/CKRasterizerBackendTypes.h
+    Interface/CKRasterizerContextData.h
+    Interface/CKRasterizerContextEnums.h
+    Interface/CKRasterizerContextTypes.h
     Interface/CKRasterizerValidation.h
     FixedFunction/CKDrawStateCache.h
+    FixedFunction/CKFFBufferUseTracker.h
+    FixedFunction/CKFFBufferData.h
+    FixedFunction/CKFFContextState.h
     FixedFunction/CKFFConstants.h
     FixedFunction/CKFFDebug.h
     FixedFunction/CKFFDrawProbes.h
     FixedFunction/CKFFDrawTypes.h
+    FixedFunction/CKFFImage.h
+    FixedFunction/CKFFPresentDraw.h
+    FixedFunction/CKFFProgram.h
+    FixedFunction/CKFFResourceStore.h
     FixedFunction/CKFFShaderCache.h
     FixedFunction/CKFFStageState.h
     FixedFunction/CKFFStateDesc.h
@@ -65,8 +72,6 @@ set(CKFFP_LIB_HEADERS
     ShaderModel/CKFFSpecializationInfo.h
     ShaderModel/CKFFSpecLayout.def
     ShaderModel/CKFFSpecLayout.h
-    Context/CKPresentStage.h
-    Context/CKFFRasterizerContextInternal.h
 )
 
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
@@ -76,10 +81,8 @@ target_include_directories(CKFFPLib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Interface>
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/Backend
         ${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction
         ${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel
-        ${CMAKE_CURRENT_SOURCE_DIR}/Context
 )
 target_link_libraries(CKFFPLib
     PUBLIC CKRasterizerLib

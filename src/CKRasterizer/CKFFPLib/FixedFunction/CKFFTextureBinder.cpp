@@ -2,7 +2,6 @@
 
 #include "CKFFShaderABI.h"
 #include "CKFFStageState.h"
-#include "CKRasterizerBackend.h"
 
 static CKDWORD CKFFSamplerTypeFromTextureFlags(CKDWORD textureFlags)
 {
@@ -61,21 +60,20 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
 }
 
 CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
-                                     CKFFShaderCache &shaderCache,
                                      CKFFDrawProbes &probes)
     : m_State(state),
-      m_ShaderCache(shaderCache),
       m_Probes(probes),
-      m_SamplerOverrides(),
-      m_BoundSlotMask(0)
+      m_SamplerOverrides()
 {
 }
 
-void CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso)
+CKBOOL CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso)
 {
     const CKFFSamplerOverrides overrides(disableFilter, disableMipmaps, forceAniso);
-    if (m_SamplerOverrides != overrides)
-        m_SamplerOverrides = overrides;
+    if (m_SamplerOverrides == overrides)
+        return FALSE;
+    m_SamplerOverrides = overrides;
+    return TRUE;
 }
 
 void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
@@ -93,31 +91,6 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
     }
     CKFFBuildTextureBindingSet(out, activeCount, sampledTextureMask,
                                m_State.TextureHandles, m_State.TextureFlags, samplers);
-}
-
-const CKBackendTextureBindings &CKFFTextureBinder::BuildDrawBindings(const CKFFTextureBindingSet *set)
-{
-    CKDWORD boundMask = 0;
-    CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
-    for (CKDWORD i = 0; i < set->ActiveTextureCount; ++i) {
-        const auto &source = set->Bindings[i];
-        desiredTextures[i] = source.Texture;
-        if (!source.Texture) continue;
-        m_Bindings[source.Stage].Texture = source.Texture;
-        m_Bindings[source.Stage].Sampler = source.Sampler;
-        boundMask |= 1u << source.Stage;
-        CKFF_PROBE(m_Probes, OnTextureBind());
-    }
-    CKFF_PROBE(m_Probes, OnTextureSet(set->ActiveTextureCount, desiredTextures));
-    CKDWORD stale = m_BoundSlotMask & ~boundMask;
-    for (CKDWORD slot = 0; stale; ++slot) {
-        if (stale & (1u << slot)) {
-            m_Bindings[slot] = CKBackendTextureBinding();
-            stale &= ~(1u << slot);
-        }
-    }
-    m_BoundSlotMask = boundMask;
-    return m_Bindings;
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const

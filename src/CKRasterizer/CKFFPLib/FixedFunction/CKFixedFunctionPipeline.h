@@ -4,28 +4,24 @@
 #include "VxMath.h"
 #include "CKRenderEngineTypes.h"
 #include "CKRenderEngineEnums.h"
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
-#include "CKRasterizerBackend.h"
+#include "CKRasterizerContextEnums.h"
+#include "CKRasterizerContextTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFShaderKey.h"
 #include "CKFFDebug.h"
 #include "CKFFDrawProbes.h"
 #include "CKFFStageState.h"
 #include "CKFFConstants.h"
+#include "CKFFConstantSet.h"
 #include "CKFFDrawTypes.h"
 #include "CKRasterizerEnums.h"
 #include "CKFFStateStore.h"
 #include "CKFFTextureBinder.h"
 #include "CKFFUniformEmitter.h"
-#include "CKFFShaderCache.h"
 #include "CKDrawStateCache.h"
-#include "CKVertexLayoutCache.h"
 #include "CKTransientGeometry.h"
 
 struct CKLightData;
-
-struct CKFFPipelineTestAccess;
 
 // Reasons a draw returns FALSE. Every fixed-function state the backend cannot
 // express is approximated instead (see RecordDrawApproximation); only invalid
@@ -47,13 +43,14 @@ const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason);
 const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code);
 
 class CKFixedFunctionPipeline {
-    friend class CKFFStateGuard;
 public:
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
 
-    bool Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders);
-    CKERROR PrepareShutdown();
+    // Initializes only the fixed-function translator. Native program and
+    // vertex-layout objects belong to the concrete rasterizer context.
+    bool Init(uint64_t features, CKDWORD maxTextureBindings,
+              CKDWORD shaderTargetFlags);
     CKERROR Shutdown();
     void SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
                           CKBOOL ForceAnisotropicFiltering = FALSE);
@@ -99,21 +96,21 @@ public:
     CKDWORD GetTexture(int stage) const;
     void SetViewport(const CKViewportData &viewport);
     const CKViewportData &GetViewport() const { return m_State.ViewportData; }
-    // Extents of the current target (spec 4.4): the logical size the engine's
+    // Extents of the current target: the logical size the engine's
     // viewport and PositionT coordinates refer to (window pixels or texture
     // size) and the physical size of the texture actually rendered into
     // (window x RenderScale for the scene target). 0 = unknown, no mapping.
     void SetTargetExtents(CKDWORD logicalWidth, CKDWORD logicalHeight, CKDWORD physicalWidth, CKDWORD physicalHeight);
     const float *GetViewportRemap() const { return m_State.ViewportRemap; }
     CKBOOL GetViewportScissor(CKRECT *rect) const;
-    // Render-target binding (spec 5.9 RTT origin): on bottom-left-origin
+    // Render-target binding: on bottom-left-origin
     // backends draws into a texture flip the projection and the winding so
     // the texture memory ends up in the D3D (top-down) layout.
     void SetRenderTargetActive(CKBOOL active);
     CKBOOL IsRenderTargetActive() const { return m_State.RenderTargetActive; }
     CKBOOL RenderTargetOriginFlip() const;
     void UpdateViewportMapping();
-    // The frame renders into a multisampled scene target (spec 4.4).
+    // The frame renders into a multisampled scene target.
     void SetMultisampledTarget(CKBOOL multisampled) { m_State.DrawState.SetMultisampledTarget(multisampled); }
     CKBOOL IsMultisampledTarget() const { return m_State.DrawState.GetMultisampledTarget(); }
     void SetUserClipPlane(int index, const VxPlane &plane);
@@ -127,23 +124,25 @@ public:
     void ResetTexcoordComponentCounts();
     void BeginDebugFrame();
     CKBOOL HadRejectedDrawsThisFrame() const { return m_FrameDrawRejected; }
-    // Frame counter published by the frame flow (the translated context);
+    // Frame counter published by the concrete Context frame flow;
     // per-frame state such as the border colour palette resets on it.
     void SetFrameNumber(CKDWORD frameNumber) { m_FrameNumber = frameNumber; }
     CKDWORD GetFrameNumber() const { return m_FrameNumber; }
 
     // === Drawing ===
-    // Draws go to the backend's current pass (the frame flow opened it).
-    // Draw using VxDrawPrimitiveData (software vertex path)
-    CKBOOL DrawPrimitive(VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
-                         VxDrawPrimitiveData *data);
+    // Prepare one complete draw. The concrete rasterizer consumes GetDraw()
+    // immediately; CKFFPLib never queues or owns device commands.
+    CKBOOL PreparePrimitive(VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
+                            VxDrawPrimitiveData *data);
+    CKBOOL PrepareVertexBuffer(VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
+                               CKDWORD baseVertex, CKDWORD vertexCount,
+                               CKDWORD startIndex, CKDWORD indexCount,
+                               CKDWORD dpFlags, CKDWORD formatFlags,
+                               CKDWORD vertexLayout,
+                               const CKWORD *indices = NULL);
+    const CKFFDraw &GetDraw() const { return m_Draw; }
+    CKBOOL FinishDraw(CKERROR error, uint64_t approximationMask);
 
-    // Draw using persistent vertex/index buffer handles
-    CKBOOL DrawVertexBuffer(VXPRIMITIVETYPE type, CKDWORD vb, CKDWORD ib,
-                            CKDWORD baseVertex, CKDWORD vertexCount,
-                            CKDWORD startIndex, CKDWORD indexCount,
-                            CKDWORD dpFlags, CKDWORD formatFlags,
-                            CKDWORD vertexLayout);
     CKFFDrawRejectReason GetLastDrawRejectReason() const { return m_LastDrawRejectReason; }
     CKDWORD GetRejectedDrawCount(CKFFDrawRejectReason reason) const {
         return reason > CKFF_DRAW_REJECT_NONE && reason < CKFF_DRAW_REJECT_COUNT
@@ -157,51 +156,55 @@ public:
         return (CKDWORD)code < CKRST_DIAG_COUNT ? m_DrawApproximationCounts[code] : 0;
     }
 
-    // Resolves a backend vertex layout without exposing the cache itself.
-    CKDWORD ResolveVertexLayout(CKDWORD formatFlags) { return m_VertexLayoutCache.GetLayout(formatFlags); }
-
     // === Matrix access ===
     const VxMatrix &GetWorldMatrix() const { return m_State.World; }
     const VxMatrix &GetViewMatrix() const { return m_State.View; }
     const VxMatrix &GetProjectionMatrix() const { return m_State.Projection; }
     CKSamplerDesc BuildSamplerDesc(int stage) const;
     const CKFFFrameStats &GetFrameStats() const { return m_Probes.Stats; }
+    CKFFStateStore CaptureState() const { return m_State; }
+    void RestoreState(const CKFFStateStore &state);
+    uint64_t GetConstantRevision(CKDWORD block) const;
+    uint64_t GetStaticUniformRevision() const { return m_StaticUniformRevision; }
+    CKBOOL IsVertexBufferProgramCacheValid() const { return m_VertexBufferProgramCacheValid; }
+    CKBOOL IsDrawValidationCacheValid() const { return m_DrawValidationCacheValid; }
 
 private:
-    friend struct CKFFPipelineTestAccess;
-
     enum CKFFStateChange {
         CKFF_CHANGE_OBJECT_UNIFORM = 0x1,
         CKFF_CHANGE_STATIC_UNIFORM = 0x2,
         CKFF_CHANGE_PROGRAM = 0x4,
         CKFF_CHANGE_DRAW_VALIDATION = 0x8
     };
-    enum CKFFSubmitSource { CKFF_SUBMIT_PRIMITIVE, CKFF_SUBMIT_VERTEX_BUFFER };
-
     struct CKFFDrawSubmission {
         VXPRIMITIVETYPE DrawStateType;
         const CKFFProgramContext *ProgramContext;
         const CKFFTextureBindingSet *Textures;
         CKDWORD VertexBuffer;
         CKDWORD IndexBuffer;
+        const CKBYTE *Indices;
+        CKBOOL Index32;
         CKDWORD BaseVertex;
         CKDWORD VertexCount;
         CKDWORD StartIndex;
         CKDWORD IndexCount;
         CKDWORD VertexLayout;
-        CKFFSubmitSource Source;
+        CKDWORD VertexFormat;
+        CKFFDrawSource Source;
     };
 
-    CKRasterizerBackend *m_Backend;
+    uint64_t m_Features;
+    CKDWORD m_MaxTextureBindings;
     // Subsystems
-    CKFFShaderCache m_ShaderCache;
-    CKVertexLayoutCache m_VertexLayoutCache;
     CKTransientGeometry m_TransientGeometry;
     CKDWORD m_FrameNumber;
     CKFFDebugState m_DebugState;
     CKFFStateStore m_State;
-    CKBackendConstants m_Constants;
+    CKFFConstantSet m_Constants;
+    CKFFDraw m_Draw;
+    XArray<CKWORD> m_ImmediateIndices;
     const char *m_DrawMarker = nullptr;
+    CKDWORD m_ShaderTargetFlags;
 
     CKFFDrawProbes m_Probes;
     CKFFTextureBinder m_TextureBinder;
@@ -254,24 +257,25 @@ private:
     void RecordDrawApproximation(CKRST_DIAGNOSTIC code);
     void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }
     CKBOOL ResolveStencilWrite(CKBOOL *forceKeepOps, CKDWORD *effectiveWriteMask) const;
-    CKBOOL SubmitPrepared(const CKFFDrawSubmission &submission);
+    CKBOOL PrepareDraw(const CKFFDrawSubmission &submission);
     void LogAndResetFrameStats();
 
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey);
     float ComputeDepthKey() const;
-    CKBOOL SubmitVertexBufferImmediate(const CKFFProgramPreparation &preparation,
-                                       VXPRIMITIVETYPE type,
-                                       CKDWORD vb,
-                                       CKDWORD ib,
-                                       CKDWORD baseVertex,
-                                       CKDWORD vertexCount,
-                                       CKDWORD startIndex,
-                                       CKDWORD indexCount,
-                                       CKDWORD dpFlags,
-                                       CKDWORD formatFlags,
-                                       CKDWORD vertexLayout);
+    CKBOOL PrepareVertexBufferImmediate(const CKFFProgramPreparation &preparation,
+                                        VXPRIMITIVETYPE type,
+                                        CKDWORD vb,
+                                        CKDWORD ib,
+                                        CKDWORD baseVertex,
+                                        CKDWORD vertexCount,
+                                        CKDWORD startIndex,
+                                        CKDWORD indexCount,
+                                        CKDWORD dpFlags,
+                                        CKDWORD formatFlags,
+                                        CKDWORD vertexLayout,
+                                        const CKWORD *indices);
 
 };
 

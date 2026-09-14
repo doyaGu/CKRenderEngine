@@ -1,6 +1,5 @@
 #include "CKVertexLayoutCache.h"
 #include "CKRasterizer.h"
-#include "CKRasterizerBackend.h"
 #include "CKFFConstants.h"
 
 static int ActiveTextureCountFromDPFlags(CKDWORD dpFlags) {
@@ -17,29 +16,7 @@ static CK_VERTEX_ATTRIB TexCoordAttrib(int stage) {
     return (CK_VERTEX_ATTRIB)(CKRST_ATTRIB_TEXCOORD0 + stage);
 }
 
-CKVertexLayoutCache::CKVertexLayoutCache()
-    : m_Backend(nullptr) {}
-
-CKVertexLayoutCache::~CKVertexLayoutCache() {
-    Shutdown();
-}
-
-void CKVertexLayoutCache::Init(CKRasterizerBackend *backend) {
-    m_Backend = backend;
-    m_Cache.Clear();
-}
-
-void CKVertexLayoutCache::Shutdown() {
-    if (m_Backend) {
-        for (XHashTable<CKDWORD, CKDWORD>::Iterator it = m_Cache.Begin(); it != m_Cache.End(); ++it) {
-            m_Backend->DestroyObject(*it, CKRST_OBJ_VERTEXLAYOUT);
-        }
-    }
-    m_Cache.Clear();
-    m_Backend = nullptr;
-}
-
-CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
+CKDWORD CKFFVertexLayout::ComputeStride(CKDWORD formatFlags) {
     CKDWORD stride = 0;
     if (formatFlags & CKFF_VF_POSITION)  stride += 12; // float3
     if (formatFlags & CKFF_VF_POSITIONT) stride += 16; // float4 XYZRHW
@@ -57,11 +34,11 @@ CKDWORD CKVertexLayoutCache::ComputeStride(CKDWORD formatFlags) {
     return stride;
 }
 
-CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV) {
+CKDWORD CKFFVertexLayout::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV) {
     return DPFlagsToFormatFlags(dpFlags, hasNormal, hasUV, 0);
 }
 
-CKDWORD CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(
+CKDWORD CKFFVertexLayout::DrawPrimitiveDataToFormatFlags(
     const VxDrawPrimitiveData *data) {
     if (!data)
         return 0;
@@ -78,7 +55,7 @@ CKDWORD CKVertexLayoutCache::DrawPrimitiveDataToFormatFlags(
     return flags;
 }
 
-CKDWORD CKVertexLayoutCache::DPFlagsToBlendWeightCount(CKDWORD dpFlags) {
+CKDWORD CKFFVertexLayout::DPFlagsToBlendWeightCount(CKDWORD dpFlags) {
     CKDWORD weightCount = 0;
     const CKDWORD weightFlags = dpFlags & CKRST_DP_WEIGHTMASK;
     if (weightFlags & CKRST_DP_WEIGHTS1) weightCount = 1;
@@ -89,15 +66,15 @@ CKDWORD CKVertexLayoutCache::DPFlagsToBlendWeightCount(CKDWORD dpFlags) {
     return weightCount > 3 ? 3 : weightCount;
 }
 
-CKDWORD CKVertexLayoutCache::DPFlagsToBlendIndexOffset(CKDWORD dpFlags) {
+CKDWORD CKFFVertexLayout::DPFlagsToBlendIndexOffset(CKDWORD dpFlags) {
     return 12 + DPFlagsToBlendWeightCount(dpFlags) * 4;
 }
 
-CKDWORD CKVertexLayoutCache::DPFlagsToBlendRecordSize(CKDWORD dpFlags) {
+CKDWORD CKFFVertexLayout::DPFlagsToBlendRecordSize(CKDWORD dpFlags) {
     return CKRSTGetBlendVertexSize(dpFlags);
 }
 
-CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride) {
+CKDWORD CKFFVertexLayout::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNormal, bool hasUV, CKDWORD positionStride) {
     CKDWORD flags = 0;
     const bool transformed = (dpFlags & CKRST_DP_TRANSFORM) != 0;
 
@@ -133,15 +110,11 @@ CKDWORD CKVertexLayoutCache::DPFlagsToFormatFlags(CKDWORD dpFlags, bool hasNorma
     return flags;
 }
 
-CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) {
-    CKDWORD layout = 0;
-    if (m_Cache.LookUp(formatFlags, layout)) {
-        if (outStride) *outStride = ComputeStride(formatFlags);
-        return layout;
-    }
-
-    // Build element array
-    CKVertexElementDesc elements[16];
+CKBOOL CKFFVertexLayout::BuildLayout(
+    CKDWORD formatFlags, CKVertexElementDesc *elements,
+    CKDWORD capacity, CKVertexLayoutDesc &desc) {
+    if (!elements || capacity < 20)
+        return FALSE;
     CKDWORD count = 0;
     CKWORD offset = 0;
 
@@ -248,16 +221,8 @@ CKDWORD CKVertexLayoutCache::GetLayout(CKDWORD formatFlags, CKDWORD *outStride) 
         offset += 4;
     }
 
-    CKVertexLayoutDesc desc;
     desc.Elements = elements;
     desc.ElementCount = count;
     desc.Stride = offset;
-
-    CKDWORD handle = 0;
-    if (!m_Backend || m_Backend->CreateVertexLayout(&desc, &handle) != CK_OK)
-        return 0;
-    m_Cache.Insert(formatFlags, handle);
-
-    if (outStride) *outStride = offset;
-    return handle;
+    return TRUE;
 }

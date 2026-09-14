@@ -2,8 +2,8 @@
 #define CKRASTERIZERVALIDATION_H
 
 #include "CKError.h"
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
+#include "CKRasterizerContextEnums.h"
+#include "CKRasterizerContextTypes.h"
 
 inline CKDWORD CKRasterizerKnownObjectMask()
 {

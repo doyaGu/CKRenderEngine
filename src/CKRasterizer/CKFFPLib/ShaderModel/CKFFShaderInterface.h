@@ -1,8 +1,8 @@
 #ifndef CKFFSHADERINTERFACE_H
 #define CKFFSHADERINTERFACE_H
 
-#include "CKRasterizerBackend.h"
-#include "CKBackendProgram.h"
+#include "CKRasterizerContextData.h"
+#include "CKFFProgramDesc.h"
 #include "CKFFShaderABI.h"
 
 // Logical fixed-function data belongs to the rasterizer. A backend only sees
@@ -39,11 +39,11 @@ const char *CKFFSamplerSlotName(CKDWORD slot);
 
 // Called only when a cached program is first created. The resulting owned
 // descriptor is compiled by the backend; draw submission does not rebuild it.
-CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
+CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
                                               CK_SHADER_FORMAT format, CKBOOL present = FALSE,
                                               CKBOOL positionT = FALSE);
 
-inline CKERROR CKFFSetConstants(CKBackendConstants *constants, CKFFConstantBlock block,
+inline CKERROR CKFFSetConstants(CKFFConstantSet *constants, CKFFConstantBlock block,
                                 const void *data, CKDWORD vec4Count)
 {
     return constants->Set(static_cast<CKDWORD>(block), data, vec4Count * 16u);

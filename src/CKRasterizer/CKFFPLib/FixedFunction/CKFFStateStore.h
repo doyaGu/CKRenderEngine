@@ -2,7 +2,7 @@
 #define CKFFSTATESTORE_H
 
 #include "VxMath.h"
-#include "CKRasterizerBackendTypes.h"
+#include "CKRasterizerContextTypes.h"
 #include "CKRasterizerTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
@@ -19,7 +19,7 @@ struct CKFFStateStore {
     CKBOOL VertexBlendPaletteOverflow;
     // A render-target texture is bound. On bottom-left-origin backends the
     // pipeline then renders upside down so the texture memory matches the
-    // D3D layout (spec 5.9, RTT origin) and sampling needs no flip.
+    // D3D layout; sampling needs no flip.
     CKBOOL RenderTargetActive;
 
     CKMaterialData Material;
@@ -42,7 +42,7 @@ struct CKFFStateStore {
     CKBYTE TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 
     float Viewport[4];               // POSITIONT screen -> viewport-relative clip mapping
-    // D3D viewport emulation (spec 4.4): the engine's viewport is a sub
+    // D3D viewport emulation: the engine's viewport is a sub
     // rectangle of the logical target (window pixels or texture size); every
     // draw remaps viewport-relative clip space into the target and clips with
     // a scissor scaled to the physical target (window x RenderScale).

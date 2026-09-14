@@ -1,78 +1,45 @@
 #include "CKFFShaderCache.h"
 #include "CKFFShaderABI.h"
 #include "CKFFShaderInterface.h"
-#include "CKRasterizerBackend.h"
 #include "CKDebugLogger.h"
 
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
-void CKFFInitProgramContext(CKFFProgramContext *context,
-                            const CKFFShaderKey &key,
-                            const CKFFProgramBinding &binding)
-{
-    if (!context)
-        return;
-    context->ShaderKey = key;
-    context->Binding = binding;
-    context->Program = binding.Program;
-    context->Specialization = binding.Specialization;
-}
-
 CKFFShaderCache::CKFFShaderCache()
-    : m_Backend(nullptr), m_Target(), m_Shaders(), m_PixelShader(0), m_SamplerLayout() {
-    memset(m_Programs, 0, sizeof(m_Programs));
-    memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
+    : m_Target(), m_Shaders(), m_SamplerLayout() {
 }
 
 CKFFShaderCache::~CKFFShaderCache() {
-    Shutdown();
 }
 
-bool CKFFShaderCache::Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders) {
-    Shutdown();
-    m_Backend = backend;
+bool CKFFShaderCache::Init(const CKRasterizerTargetDesc &target, const CKFFShaderSet &shaders) {
+    Reset();
     m_Shaders = shaders;
-    if (!ResolveShaderTarget()) {
-        Shutdown();
+    if (!ResolveShaderTarget(target)) {
+        Reset();
         return false;
     }
     BuildSamplerLayout();
     return true;
 }
 
-void CKFFShaderCache::Shutdown() {
-    if (m_Backend) {
-        for (CKDWORD i = 0; i < CKFF_PROGRAM_VARIANT_COUNT; ++i) {
-            if (m_Programs[i])
-                m_Backend->DestroyObject(m_Programs[i], CKRST_OBJ_PROGRAM);
-            if (m_VertexShaders[i])
-                m_Backend->DestroyObject(m_VertexShaders[i], CKRST_OBJ_SHADER);
-        }
-        if (m_PixelShader)
-            m_Backend->DestroyObject(m_PixelShader, CKRST_OBJ_SHADER);
-    }
-    memset(m_Programs, 0, sizeof(m_Programs));
-    memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
-    m_PixelShader = 0;
+void CKFFShaderCache::Reset() {
     for (auto &cache : m_Specializations)
         cache = SpecializationCache();
     m_SamplerLayout = CKFFProgramSamplerLayout();
-    m_Backend = nullptr;
-    m_Shaders = CKBackendShaderSet();
+    m_Shaders = CKFFShaderSet();
+}
+
+void CKFFShaderCache::Shutdown()
+{
+    Reset();
 }
 
 
-bool CKFFShaderCache::ResolveShaderTarget() {
-    if (!m_Backend) return false;
-
-    const CKBackendCaps &caps = m_Backend->GetCaps();
-    m_Target = CKRasterizerTargetDesc();
-    m_Target.ShaderFormat = caps.ShaderFormat;
-    m_Target.ShaderProfile = caps.ShaderProfile;
-    m_Target.HomogeneousDepth = caps.HomogeneousDepth;
-    m_Target.OriginBottomLeft = caps.OriginBottomLeft;
+bool CKFFShaderCache::ResolveShaderTarget(const CKRasterizerTargetDesc &target) {
+    m_Target = target;
     if (m_Target.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN ||
         m_Target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN) {
         CK_LOG_FMT("ShaderCache", "backend reports no shader target");
@@ -107,52 +74,14 @@ CKFFProgramVariant CKFFShaderCache::ProgramVariantForKey(const CKFFShaderKey &ke
     return clipDistance ? CKFF_PROGRAM_3D_CLIP : CKFF_PROGRAM_3D;
 }
 
-size_t CKFFShaderCache::CachedProgramCount() const
+CKFFProgramSelection CKFFShaderCache::ResolveProgram(
+    const CKFFShaderKey &key)
 {
-    size_t count = 0;
-    for (CKDWORD i = 0; i < CKFF_PROGRAM_VARIANT_COUNT; ++i) {
-        if (m_Programs[i])
-            ++count;
-    }
-    return count;
-}
-
-// The fragment shader is shared by the four vertex variants; shader handles
-// stay alive with the cache (the backend does not consume them).
-CKDWORD CKFFShaderCache::CreateProgramVariant(CKFFProgramVariant variant)
-{
-    if (!m_Backend || variant >= CKFF_PROGRAM_VARIANT_COUNT)
-        return 0;
-    if (!m_PixelShader && m_Backend->CreateShader(
-            &m_Shaders.Shaders[CKRST_SHADER_FF_FRAGMENT], &m_PixelShader) != CK_OK)
-        return 0;
-    if (!m_VertexShaders[variant] && m_Backend->CreateShader(
-            &m_Shaders.Shaders[variant], &m_VertexShaders[variant]) != CK_OK)
-        return 0;
-    CKDWORD program = 0;
-    const CKBOOL positionT = variant == CKFF_PROGRAM_POSITIONT ||
-        variant == CKFF_PROGRAM_POSITIONT_CLIP ? TRUE : FALSE;
-    const CKBackendProgramDesc desc = CKFFBuildProgramInterface(
-        m_VertexShaders[variant], m_PixelShader, m_Target.ShaderFormat,
-        FALSE, positionT);
-    if (m_Backend->CreateProgram(&desc, &program) != CK_OK)
-        return 0;
-
-    return program;
-}
-
-
-CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
-    const CKFFProgramVariant variant = ProgramVariantForKey(key);
-    if (m_Programs[variant] == 0)
-        m_Programs[variant] = CreateProgramVariant(variant);
-
-    SpecializationCache &cache = m_Specializations[variant];
+    CKFFProgramSelection selection;
+    selection.Variant = ProgramVariantForKey(key);
+    SpecializationCache &cache = m_Specializations[selection.Variant];
     ++cache.Clock;
     if (cache.Clock == 0) {
-        // Preserve cache correctness after counter wrap. Exact recency at this
-        // unreachable scale is immaterial, but zero remains reserved for an
-        // entry that has never been used.
         cache.Clock = 1;
         for (CKDWORD i = 0; i < cache.Count; ++i)
             cache.Entries[i].LastUse = 1;
@@ -162,7 +91,8 @@ CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
         SpecializationEntry &entry = cache.Entries[i];
         if (entry.Key == key.FS) {
             entry.LastUse = cache.Clock;
-            return CKFFProgramBinding(m_Programs[variant], entry.Value);
+            selection.Specialization = entry.Value;
+            return selection;
         }
     }
 
@@ -181,5 +111,39 @@ CKFFProgramBinding CKFFShaderCache::GetProgram(const CKFFShaderKey &key) {
     entry.Value = CKFFBuildSpecializationInfo(key.FS);
     entry.Key = key.FS;
     entry.LastUse = cache.Clock;
-    return CKFFProgramBinding(m_Programs[variant], entry.Value);
+    selection.Specialization = entry.Value;
+    return selection;
+}
+
+CKDWORD CKFFShaderCache::GetCachedSpecializationCount(CKFFProgramVariant variant) const
+{
+    return variant < CKFF_PROGRAM_VARIANT_COUNT ? m_Specializations[variant].Count : 0;
+}
+
+CKDWORD CKFFShaderCache::GetSpecializationCapacity()
+{
+    return SPECIALIZATION_CACHE_CAPACITY;
+}
+
+CKBOOL CKFFShaderCache::HasCachedSpecialization(CKFFProgramVariant variant, const CKFFShaderKeyFS &key) const
+{
+    if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
+        return FALSE;
+    const SpecializationCache &specializations = m_Specializations[variant];
+    for (CKDWORD i = 0; i < specializations.Count; ++i)
+        if (specializations.Entries[i].Key == key)
+            return TRUE;
+    return FALSE;
+}
+
+const CKShaderDesc &CKFFShaderCache::GetVertexShader(
+    CKFFProgramVariant variant) const
+{
+    return m_Shaders.Shaders[variant < CKFF_PROGRAM_VARIANT_COUNT
+                                 ? variant : CKFF_PROGRAM_3D];
+}
+
+const CKShaderDesc &CKFFShaderCache::GetPixelShader() const
+{
+    return m_Shaders.Shaders[CKRST_SHADER_FF_FRAGMENT];
 }

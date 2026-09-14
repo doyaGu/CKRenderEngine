@@ -3,27 +3,14 @@
 
 #include "CKBuiltinShaders.h"
 #include "CKFFShaderKey.h"
+#include "CKFFProgram.h"
 #include "CKFFShaderABI.h"
+#include "CKFFShaderInterface.h"
 #include "CKFFConstants.h"
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
+#include "CKRasterizerContextEnums.h"
+#include "CKRasterizerContextTypes.h"
 
 #include <stdint.h>
-
-class CKRasterizerBackend;
-struct CKFFShaderCacheTestAccess;
-
-// The fixed-function program family (spec 5.3): every draw runs the single
-// fragment uber shader with one of four vertex shaders selected by the
-// POSITIONT and user-clip bits of the shader key. Every other state travels
-// in u_ffSpec / u_stageParams instead of selecting a variant.
-enum CKFFProgramVariant {
-    CKFF_PROGRAM_3D = 0,
-    CKFF_PROGRAM_3D_CLIP = 1,
-    CKFF_PROGRAM_POSITIONT = 2,
-    CKFF_PROGRAM_POSITIONT_CLIP = 3,
-    CKFF_PROGRAM_VARIANT_COUNT = 4
-};
 
 struct CKFFProgramBinding {
     CKDWORD Program;
@@ -36,14 +23,12 @@ struct CKFFProgramBinding {
     operator CKDWORD() const { return Program; }
 };
 
-struct CKFFProgramContext {
-    CKFFShaderKey ShaderKey;
-    CKFFProgramBinding Binding;
-    CKDWORD Program;
+struct CKFFProgramSelection {
+    CKFFProgramVariant Variant;
     CKFFSpecializationInfo Specialization;
 
-    CKFFProgramContext()
-        : ShaderKey(), Binding(), Program(0), Specialization() {}
+    CKFFProgramSelection()
+        : Variant(CKFF_PROGRAM_3D), Specialization() {}
 };
 
 struct CKFFProgramSamplerBinding {
@@ -61,22 +46,21 @@ struct CKFFProgramSamplerLayout {
     CKFFProgramSamplerLayout() : BindingCount(0), Bindings() {}
 };
 
-void CKFFInitProgramContext(CKFFProgramContext *context,
-                            const CKFFShaderKey &key,
-                            const CKFFProgramBinding &binding);
-
 class CKFFShaderCache {
 public:
     CKFFShaderCache();
     ~CKFFShaderCache();
 
-    bool Init(CKRasterizerBackend *backend, const CKBackendShaderSet &shaders);
+    bool Init(const CKRasterizerTargetDesc &target, const CKFFShaderSet &shaders);
     void Shutdown();
 
-    // Select the fixed-function program for the given FFP shader key and
-    // derive its specialization data. Programs are created on first use.
-    CKFFProgramBinding GetProgram(const CKFFShaderKey &key);
+    // Resolve CPU-only program choice and specialization. Concrete contexts
+    // own and cache the native shader/program objects for the chosen variant.
+    CKFFProgramSelection ResolveProgram(const CKFFShaderKey &key);
     static CKFFProgramVariant ProgramVariantForKey(const CKFFShaderKey &key);
+    const CKShaderDesc &GetVertexShader(CKFFProgramVariant variant) const;
+    const CKShaderDesc &GetPixelShader() const;
+    CK_SHADER_FORMAT GetShaderFormat() const { return m_Target.ShaderFormat; }
 
     CKBOOL RequiresExplicitSamplerInitialization() const {
         return m_Target.ShaderProfile == CKRST_SHADER_PROFILE_GLSL ||
@@ -93,18 +77,13 @@ public:
         return flags;
     }
 
-    // Number of program variants created so far (at most CKFF_PROGRAM_VARIANT_COUNT).
-    size_t CachedProgramCount() const;
+    CKDWORD GetCachedSpecializationCount(CKFFProgramVariant variant) const;
+    static CKDWORD GetSpecializationCapacity();
+    CKBOOL HasCachedSpecialization(CKFFProgramVariant variant, const CKFFShaderKeyFS &key) const;
 
 private:
-    friend struct CKFFShaderCacheTestAccess;
-
-    CKRasterizerBackend *m_Backend;
     CKRasterizerTargetDesc m_Target;
-    CKBackendShaderSet m_Shaders;
-    CKDWORD m_Programs[CKFF_PROGRAM_VARIANT_COUNT];
-    CKDWORD m_VertexShaders[CKFF_PROGRAM_VARIANT_COUNT];
-    CKDWORD m_PixelShader;
+    CKFFShaderSet m_Shaders;
     CKFFProgramSamplerLayout m_SamplerLayout;
 
     // Repeated materials change matrices much more often than fragment state.
@@ -123,9 +102,9 @@ private:
     };
     SpecializationCache m_Specializations[CKFF_PROGRAM_VARIANT_COUNT];
 
-    bool ResolveShaderTarget();
+    bool ResolveShaderTarget(const CKRasterizerTargetDesc &target);
     void BuildSamplerLayout();
-    CKDWORD CreateProgramVariant(CKFFProgramVariant variant);
+    void Reset();
 };
 
 #endif // CKFFSHADERCACHE_H

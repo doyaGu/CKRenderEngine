@@ -52,23 +52,23 @@ const CK_VERTEX_ATTRIB VertexAttributes[16] = {
     CKRST_ATTRIB_TEXCOORD4, CKRST_ATTRIB_TEXCOORD5, CKRST_ATTRIB_TEXCOORD6, CKRST_ATTRIB_TEXCOORD7,
 };
 
-void AppendUniformBinding(CKBackendProgramDesc &program,
+void AppendUniformBinding(CKFFProgramDesc &program,
                           CKFFConstantBlock blockSlot,
                           CK_SHADER_STAGE stage,
                           CKDWORD bufferSlot,
                           CKDWORD &bufferSize)
 {
     const CKFFConstantBlockDesc &block = BlockTable[blockSlot];
-    CKBackendUniformBinding uniform;
+    CKFFUniformBinding uniform;
     uniform.Slot = blockSlot;
     uniform.Name = block.Name;
-    uniform.Type = block.Mat4 ? CKBACKEND_UNIFORM_MAT4 : CKBACKEND_UNIFORM_VEC4;
+    uniform.Type = block.Mat4 ? CKFF_UNIFORM_MAT4 : CKFF_UNIFORM_VEC4;
     uniform.Count = block.Count;
     uniform.Stage = stage;
     uniform.BufferSlot = bufferSlot;
     uniform.Offset = bufferSize;
     bufferSize += uniform.Size();
-    program.Uniforms.push_back(uniform);
+    program.Uniforms.PushBack(uniform);
 }
 
 } // namespace
@@ -90,33 +90,33 @@ const char *CKFFSamplerSlotName(CKDWORD slot)
     return slot < CKFF_SLOT_COUNT ? names[slot] : NULL;
 }
 
-CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
+CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
                                               CK_SHADER_FORMAT format, CKBOOL present,
                                               CKBOOL positionT)
 {
-    CKBackendProgramDesc result;
+    CKFFProgramDesc result;
     result.VertexShader = vertexShader;
     result.PixelShader = pixelShader;
     const bool packed = format != CKRST_SHADER_FORMAT_BGFX;
     const CKDWORD stageCount = present ? 1u : 2u;
-    result.UniformBuffers.reserve(packed ? stageCount * 2u : 0u);
-    result.Uniforms.reserve(present ? 1u : CKRST_BLOCK_COUNT * stageCount);
+    result.UniformBuffers.Reserve((int)(packed ? stageCount * 2u : 0u));
+    result.Uniforms.Reserve((int)(present ? 1u : CKRST_BLOCK_COUNT * stageCount));
 
-    CKDWORD metadataBufferSlot = ~0u;
+    CKDWORD metadataBufferSlot = UINT32_MAX;
     CKDWORD metadataOffset = 0;
     CKDWORD metadataCount = 0;
     for (CKDWORD stageIndex = 0; stageIndex < stageCount; ++stageIndex) {
         const CK_SHADER_STAGE stage = present ? CKRST_SHADER_PIXEL : static_cast<CK_SHADER_STAGE>(stageIndex);
         if (packed) {
             const NativeGroup group = present ? PRESENT : stage == CKRST_SHADER_VERTEX ? VERTEX : FRAGMENT;
-            CKDWORD bufferSizes[CKBACKEND_MAX_UNIFORM_BUFFERS] = {};
+            CKDWORD bufferSizes[CKFF_UNIFORM_BUFFER_COUNT] = {};
             for (const NativeBlock &entry : NativeBlocks) {
                 if (entry.Group != group)
                     continue;
                 if (group == VERTEX && positionT && entry.BufferSlot == 0)
                     continue;
-                if (entry.BufferSlot >= CKBACKEND_MAX_UNIFORM_BUFFERS)
-                    return CKBackendProgramDesc();
+                if (entry.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
+                    return CKFFProgramDesc();
                 const CKDWORD bufferSlot = group == VERTEX && positionT
                     ? entry.BufferSlot - 1u : entry.BufferSlot;
                 AppendUniformBinding(result, entry.Block, stage, bufferSlot,
@@ -125,8 +125,8 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
             for (const auto &entry : NativeMetadataCounts) {
                 if (entry.Group != group)
                     continue;
-                if (entry.BufferSlot >= CKBACKEND_MAX_UNIFORM_BUFFERS)
-                    return CKBackendProgramDesc();
+                if (entry.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
+                    return CKFFProgramDesc();
                 metadataBufferSlot = entry.BufferSlot;
                 metadataOffset = bufferSizes[entry.BufferSlot];
                 metadataCount = entry.Count;
@@ -134,16 +134,16 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
                 bufferSizes[entry.BufferSlot] += entry.Count * 32u;
             }
             CKDWORD bufferCount = 0;
-            for (CKDWORD slot = 0; slot < CKBACKEND_MAX_UNIFORM_BUFFERS; ++slot) {
+            for (CKDWORD slot = 0; slot < CKFF_UNIFORM_BUFFER_COUNT; ++slot) {
                 if (!bufferSizes[slot])
                     continue;
                 if (slot != bufferCount)
-                    return CKBackendProgramDesc();
-                CKBackendUniformBufferBinding buffer;
+                    return CKFFProgramDesc();
+                CKFFUniformBufferBinding buffer;
                 buffer.Stage = stage;
                 buffer.Slot = slot;
                 buffer.Size = bufferSizes[slot];
-                result.UniformBuffers.push_back(buffer);
+                result.UniformBuffers.PushBack(buffer);
                 ++bufferCount;
             }
         } else {
@@ -158,27 +158,27 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
     }
 
     const CKDWORD samplerCount = present ? 1u : CKFF_SAMPLER_SLOT_COUNT;
-    result.Samplers.reserve(samplerCount);
+    result.Samplers.Reserve((int)samplerCount);
     for (CKDWORD slot = 0; slot < samplerCount; ++slot) {
-        CKBackendSamplerBinding sampler;
+        CKFFSamplerBinding sampler;
         sampler.Slot = present ? CKFF_SLOT_PRESENT : slot;
         sampler.NativeSlot = slot;
         sampler.Name = CKFFSamplerSlotName(sampler.Slot);
-        sampler.Dimension = present || slot < CKFF_CUBE_SAMPLER_SLOT_BASE ? CKBACKEND_TEXTURE_2D :
-            slot < CKFF_VOLUME_SAMPLER_SLOT_BASE ? CKBACKEND_TEXTURE_CUBE : CKBACKEND_TEXTURE_3D;
+        sampler.Dimension = present || slot < CKFF_CUBE_SAMPLER_SLOT_BASE ? CKFF_TEXTURE_2D :
+            slot < CKFF_VOLUME_SAMPLER_SLOT_BASE ? CKFF_TEXTURE_CUBE : CKFF_TEXTURE_3D;
         if (packed) {
             sampler.MetadataBufferSlot = metadataBufferSlot;
             sampler.BorderColorOffset = metadataOffset + slot * 16u;
             sampler.SamplerStateOffset = metadataOffset + metadataCount * 16u + slot * 16u;
         }
-        result.Samplers.push_back(sampler);
+        result.Samplers.PushBack(sampler);
     }
 
-    result.VertexInputs.reserve(present ? 2u : 16u);
+    result.VertexInputs.Reserve((int)(present ? 2u : 16u));
     for (CKDWORD location = 0; location < 16; ++location) {
         if (present && location != 0 && location != 8)
             continue;
-        CKBackendVertexInput input;
+        CKFFVertexInput input;
         input.Attribute = VertexAttributes[location];
         input.Location = location;
         input.Integer = location == 6;
@@ -186,9 +186,11 @@ CKBackendProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pix
         // Integer indices are zero; other attributes have w=1; diffuse is white.
         if (!input.Integer)
             input.DefaultValue[3] = 0x3f800000u;
-        if (location == 4)
-            input.DefaultValue.fill(0x3f800000u);
-        result.VertexInputs.push_back(input);
+        if (location == 4) {
+            for (int component = 0; component < 4; ++component)
+                input.DefaultValue[component] = 0x3f800000u;
+        }
+        result.VertexInputs.PushBack(input);
     }
     return result;
 }

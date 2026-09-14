@@ -6,33 +6,25 @@
 #include "CKFFStateStore.h"
 
 class CKDrawStateCache;
-class CKRasterizerBackend;
-struct CKFFUniformEmitterTestAccess;
 
 class CKFFUniformEmitter {
 public:
     CKFFUniformEmitter(CKFFStateStore &state,
                        const CKDrawStateCache &drawState,
-                       CKFFShaderCache &shaderCache,
+                       const CKDWORD &shaderTargetFlags,
                        CKFFDrawProbes &probes);
 
     // Prepares producer-owned blocks for this draw, retaining unchanged revisions.
-    CKBOOL UploadUniforms(CKBackendConstants *constants,
+    CKBOOL UploadUniforms(CKFFConstantSet *constants,
                           const CKFFProgramContext *programContext,
                           CKDWORD activeTextureCount,
                           uint64_t staticUniformRevision);
+    CKBOOL UploadObjectUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext, CKDWORD activeTextureCount);
+    CKBOOL UploadStaticUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext, CKDWORD activeTextureCount);
     void ResetCache();
 
 private:
-    friend struct CKFFUniformEmitterTestAccess;
-
-    CKBOOL UploadObjectUniforms(CKBackendConstants *constants,
-                                const CKFFProgramContext *programContext,
-                                CKDWORD activeTextureCount);
-    CKBOOL UploadStaticUniforms(CKBackendConstants *constants,
-                                const CKFFProgramContext *programContext,
-                                CKDWORD activeTextureCount);
-    CKBOOL UploadUniform(CKBackendConstants *constants, CKFFConstantBlock block, const void *data,
+    CKBOOL UploadUniform(CKFFConstantSet *constants, CKFFConstantBlock block, const void *data,
                          CKDWORD vec4Count);
     CKBOOL Emit(CKFFUniformSink *sink, CKFFConstantBlock block, const void *data,
                 CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
@@ -47,7 +39,7 @@ private:
 
     CKFFStateStore &m_State;
     const CKDrawStateCache &m_DrawState;
-    CKFFShaderCache &m_ShaderCache;
+    const CKDWORD &m_ShaderTargetFlags;
     CKFFDrawProbes &m_Probes;
     CKBOOL m_StaticUniformCacheValid;
     uint64_t m_LastStaticConstantsIdentity;

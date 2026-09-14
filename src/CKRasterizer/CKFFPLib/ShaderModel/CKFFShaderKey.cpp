@@ -2,7 +2,7 @@
 
 #include "CKFFShaderABI.h"
 #include "CKFFStageState.h"
-#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerContextEnums.h"
 
 #include <string.h>
 
@@ -210,7 +210,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         if (dst.HasTexture &&
             (dst.SamplerType == CKFF_SAMPLER_CUBE || dst.SamplerType == CKFF_SAMPLER_VOLUME)) {
             // Fixed sampler layout: four cube and four volume samplers per draw.
-            // A stage beyond that samples as unbound (spec 5.3) and is reported.
+            // A stage beyond that samples as unbound and is reported.
             CKDWORD &typeStages = dst.SamplerType == CKFF_SAMPLER_CUBE ? cubeStages : volumeStages;
             if (typeStages >= CKFFSamplerTypeSlotCount(dst.SamplerType)) {
                 dst.HasTexture = false;

@@ -3,13 +3,13 @@
 
 #include "VxMath.h"
 #include "CKTypes.h"
-#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerContextEnums.h"
 
 #define CKFF_MAX_LIGHTS         8
 #define CKFF_MAX_TEXTURE_STAGES 8
 #define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
 #define CKFF_VERTEX_BLEND_MATRIX_COUNT 4
-// Fixed sampler layout (spec 5.3): one 2D sampler per stage plus four cube and
+// Fixed sampler layout: one 2D sampler per stage plus four cube and
 // four volume samplers filled by type ordinal.
 #define CKFF_CUBE_SAMPLER_COUNT 4
 #define CKFF_VOLUME_SAMPLER_COUNT 4

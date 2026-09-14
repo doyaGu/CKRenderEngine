@@ -1,7 +1,7 @@
 #ifndef CKBUILTINSHADERIDENTITY_H
 #define CKBUILTINSHADERIDENTITY_H
 
-#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerContextEnums.h"
 #include "CKTypes.h"
 
 // Identifies the fixed-function shader data consumed by CKFFPLib. Concrete

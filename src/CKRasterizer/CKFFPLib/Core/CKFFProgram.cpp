@@ -1,8 +1,7 @@
-#include "CKBackendProgram.h"
+#include "CKFFProgramDesc.h"
 #include "CKError.h"
 
-#include <map>
-#include <utility>
+#include <string.h>
 
 namespace {
 
@@ -27,12 +26,12 @@ bool ValidShaderTarget(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile)
     }
 }
 
-bool ValidName(const std::string &name)
+bool ValidName(const XString &name)
 {
-    if (name.empty())
+    if (name.IsEmpty())
         return false;
-    for (size_t i = 0; i < name.size(); ++i) {
-        const char c = name[i];
+    for (int i = 0; i < name.Length(); ++i) {
+        const char c = name.CStr()[i];
         if (c != '_' && !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') &&
             !(i != 0 && c >= '0' && c <= '9'))
             return false;
@@ -41,8 +40,8 @@ bool ValidName(const std::string &name)
 }
 
 struct BufferRanges {
-    const CKBackendUniformBufferBinding *Binding = nullptr;
-    std::array<bool, CKBACKEND_MAX_UNIFORM_BYTES / 16> Occupied = {};
+    const CKFFUniformBufferBinding *Binding = nullptr;
+    bool Occupied[CKFF_MAX_CONSTANT_BYTES / 16] = {};
 
     bool Reserve(CKDWORD offset, CKDWORD size)
     {
@@ -62,19 +61,21 @@ struct BufferRanges {
 struct SharedWrite {
     enum Kind { Uniform, BorderColor, SamplerState } Type;
     CKDWORD LogicalSlot;
-    CKBackendUniformType UniformType;
+    CKFFUniformType UniformType;
     CKDWORD Count;
     CKDWORD Offset;
     CKDWORD Size;
 };
 
 struct SharedBufferRanges {
+    CKDWORD Id = UINT32_MAX;
     CKDWORD Size = 0;
-    std::vector<SharedWrite> Writes;
+    XClassArray<SharedWrite> Writes;
 
     bool Reserve(const SharedWrite &write)
     {
-        for (const auto &previous : Writes) {
+        for (int i = 0; i < Writes.Size(); ++i) {
+            const SharedWrite &previous = Writes[i];
             if (write.Offset >= previous.Offset + previous.Size ||
                 previous.Offset >= write.Offset + write.Size)
                 continue;
@@ -82,33 +83,55 @@ struct SharedBufferRanges {
                    write.UniformType == previous.UniformType && write.Count == previous.Count &&
                    write.Offset == previous.Offset && write.Size == previous.Size;
         }
-        Writes.push_back(write);
+        Writes.PushBack(write);
         return true;
     }
 };
 
-bool ReserveShared(std::map<CKDWORD, SharedBufferRanges> &sharedBuffers,
+bool ReserveShared(XClassArray<SharedBufferRanges> &sharedBuffers,
                    const BufferRanges &buffer, const SharedWrite &write)
 {
-    return buffer.Binding->SharedData == ~0u ||
-           sharedBuffers[buffer.Binding->SharedData].Reserve(write);
+    if (buffer.Binding->SharedData == UINT32_MAX)
+        return true;
+    for (int i = 0; i < sharedBuffers.Size(); ++i) {
+        if (sharedBuffers[i].Id == buffer.Binding->SharedData)
+            return sharedBuffers[i].Reserve(write);
+    }
+    SharedBufferRanges ranges;
+    ranges.Id = buffer.Binding->SharedData;
+    ranges.Size = buffer.Binding->Size;
+    sharedBuffers.PushBack(ranges);
+    return sharedBuffers.Back().Reserve(write);
 }
 
 // bgfx uniform names are shared between shader stages, including samplers.
 // A name cannot designate different native types in the same program.
-bool RegisterName(std::map<std::string, std::pair<int, CKDWORD>> &names,
-                  const std::string &name, int type, CKDWORD count)
+struct NameSignature {
+    XString Name;
+    int Type = 0;
+    CKDWORD Count = 0;
+};
+
+bool RegisterName(XClassArray<NameSignature> &names,
+                  const XString &name, int type, CKDWORD count)
 {
     if (!ValidName(name))
         return false;
-    const auto signature = std::make_pair(type, count);
-    const auto existing = names.emplace(name, signature);
-    return existing.second || existing.first->second == signature;
+    for (int i = 0; i < names.Size(); ++i) {
+        if (strcmp(names[i].Name.CStr(), name.CStr()) == 0)
+            return names[i].Type == type && names[i].Count == count;
+    }
+    NameSignature signature;
+    signature.Name = name;
+    signature.Type = type;
+    signature.Count = count;
+    names.PushBack(signature);
+    return true;
 }
 
 } // namespace
 
-CKERROR CKValidateBackendProgram(const CKBackendProgramDesc &desc,
+CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
                                 const CKShaderDesc &vertex, const CKShaderDesc &pixel)
 {
     // The backend must resolve both handles before calling this function;
@@ -122,23 +145,36 @@ CKERROR CKValidateBackendProgram(const CKBackendProgramDesc &desc,
         return CKERR_INVALIDPARAMETER;
 
     const bool namedUniforms = vertex.Format == CKRST_SHADER_FORMAT_BGFX;
-    BufferRanges buffers[2][CKBACKEND_MAX_UNIFORM_BUFFERS];
-    std::map<CKDWORD, SharedBufferRanges> sharedBuffers;
+    BufferRanges buffers[2][CKFF_UNIFORM_BUFFER_COUNT];
+    XClassArray<SharedBufferRanges> sharedBuffers;
     CKDWORD bufferCounts[2] = {};
-    for (const auto &buffer : desc.UniformBuffers) {
-        if (!ValidStage(buffer.Stage) || buffer.Slot >= CKBACKEND_MAX_UNIFORM_BUFFERS ||
-            !buffer.Size || buffer.Size > CKBACKEND_MAX_UNIFORM_BYTES || buffer.Size % 16 != 0)
+    for (int i = 0; i < desc.UniformBuffers.Size(); ++i) {
+        const CKFFUniformBufferBinding &buffer = desc.UniformBuffers[i];
+        if (!ValidStage(buffer.Stage) || buffer.Slot >= CKFF_UNIFORM_BUFFER_COUNT ||
+            !buffer.Size || buffer.Size > CKFF_MAX_CONSTANT_BYTES || buffer.Size % 16 != 0)
             return CKERR_INVALIDPARAMETER;
         auto &ranges = buffers[buffer.Stage][buffer.Slot];
         if (ranges.Binding)
             return CKERR_INVALIDPARAMETER;
         ranges.Binding = &buffer;
         ++bufferCounts[buffer.Stage];
-        if (buffer.SharedData != ~0u) {
-            auto &shared = sharedBuffers[buffer.SharedData];
-            if (shared.Size && shared.Size != buffer.Size)
-                return CKERR_INVALIDPARAMETER;
-            shared.Size = buffer.Size;
+        if (buffer.SharedData != UINT32_MAX) {
+            bool found = false;
+            for (int sharedIndex = 0; sharedIndex < sharedBuffers.Size(); ++sharedIndex) {
+                SharedBufferRanges &shared = sharedBuffers[sharedIndex];
+                if (shared.Id == buffer.SharedData) {
+                    if (shared.Size != buffer.Size)
+                        return CKERR_INVALIDPARAMETER;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                SharedBufferRanges shared;
+                shared.Id = buffer.SharedData;
+                shared.Size = buffer.Size;
+                sharedBuffers.PushBack(shared);
+            }
         }
     }
     for (CKDWORD stage = 0; stage < 2; ++stage) {
@@ -148,16 +184,17 @@ CKERROR CKValidateBackendProgram(const CKBackendProgramDesc &desc,
         }
     }
 
-    const CKBackendUniformBinding *uniforms[2][CKBACKEND_MAX_CONSTANT_SLOTS] = {};
-    std::map<std::string, std::pair<int, CKDWORD>> names;
-    for (const auto &uniform : desc.Uniforms) {
-        if (!ValidStage(uniform.Stage) || uniform.Slot >= CKBACKEND_MAX_CONSTANT_SLOTS ||
-            uniform.BufferSlot >= CKBACKEND_MAX_UNIFORM_BUFFERS || uniform.Offset % 16 != 0 ||
-            (uniform.Type != CKBACKEND_UNIFORM_VEC4 && uniform.Type != CKBACKEND_UNIFORM_MAT4))
+    const CKFFUniformBinding *uniforms[2][CKFF_CONSTANT_SLOT_COUNT] = {};
+    XClassArray<NameSignature> names;
+    for (int i = 0; i < desc.Uniforms.Size(); ++i) {
+        const CKFFUniformBinding &uniform = desc.Uniforms[i];
+        if (!ValidStage(uniform.Stage) || uniform.Slot >= CKFF_CONSTANT_SLOT_COUNT ||
+            uniform.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT || uniform.Offset % 16 != 0 ||
+            (uniform.Type != CKFF_UNIFORM_VEC4 && uniform.Type != CKFF_UNIFORM_MAT4))
             return CKERR_INVALIDPARAMETER;
-        const CKDWORD elementSize = uniform.Type == CKBACKEND_UNIFORM_MAT4 ? 64u : 16u;
+        const CKDWORD elementSize = uniform.Type == CKFF_UNIFORM_MAT4 ? 64u : 16u;
         // Check the multiplication before calling Size(), including named uniforms.
-        if (!uniform.Count || uniform.Count > CKBACKEND_MAX_UNIFORM_BYTES / elementSize)
+        if (!uniform.Count || uniform.Count > CKFF_MAX_CONSTANT_BYTES / elementSize)
             return CKERR_INVALIDPARAMETER;
         auto &logical = uniforms[uniform.Stage][uniform.Slot];
         const auto *otherStage = uniforms[1 - uniform.Stage][uniform.Slot];
@@ -178,14 +215,15 @@ CKERROR CKValidateBackendProgram(const CKBackendProgramDesc &desc,
             return CKERR_INVALIDPARAMETER;
     }
 
-    const CKBackendSamplerBinding *logicalSamplers[2][CKBACKEND_MAX_TEXTURE_SLOTS] = {};
-    bool nativeSamplers[2][CKBACKEND_MAX_TEXTURE_SLOTS] = {};
+    const CKFFSamplerBinding *logicalSamplers[2][CKFF_TEXTURE_SLOT_COUNT] = {};
+    bool nativeSamplers[2][CKFF_TEXTURE_SLOT_COUNT] = {};
     CKDWORD samplerCounts[2] = {};
-    for (const auto &sampler : desc.Samplers) {
-        if (!ValidStage(sampler.Stage) || sampler.Slot >= CKBACKEND_MAX_TEXTURE_SLOTS ||
-            sampler.NativeSlot >= CKBACKEND_MAX_TEXTURE_SLOTS ||
-            (sampler.Dimension != CKBACKEND_TEXTURE_2D && sampler.Dimension != CKBACKEND_TEXTURE_CUBE &&
-             sampler.Dimension != CKBACKEND_TEXTURE_3D) ||
+    for (int i = 0; i < desc.Samplers.Size(); ++i) {
+        const CKFFSamplerBinding &sampler = desc.Samplers[i];
+        if (!ValidStage(sampler.Stage) || sampler.Slot >= CKFF_TEXTURE_SLOT_COUNT ||
+            sampler.NativeSlot >= CKFF_TEXTURE_SLOT_COUNT ||
+            (sampler.Dimension != CKFF_TEXTURE_2D && sampler.Dimension != CKFF_TEXTURE_CUBE &&
+             sampler.Dimension != CKFF_TEXTURE_3D) ||
             logicalSamplers[sampler.Stage][sampler.Slot] || nativeSamplers[sampler.Stage][sampler.NativeSlot])
             return CKERR_INVALIDPARAMETER;
         // BindTexture supplies one image per logical slot to both stages.
@@ -199,16 +237,16 @@ CKERROR CKValidateBackendProgram(const CKBackendProgramDesc &desc,
         ++samplerCounts[sampler.Stage];
         if (namedUniforms && !RegisterName(names, sampler.Name, 2 + sampler.Dimension, 1))
             return CKERR_INVALIDPARAMETER;
-        if (sampler.MetadataBufferSlot != ~0u) {
-            if (sampler.MetadataBufferSlot >= CKBACKEND_MAX_UNIFORM_BUFFERS)
+        if (sampler.MetadataBufferSlot != UINT32_MAX) {
+            if (sampler.MetadataBufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
                 return CKERR_INVALIDPARAMETER;
             auto &buffer = buffers[sampler.Stage][sampler.MetadataBufferSlot];
             if (!buffer.Reserve(sampler.BorderColorOffset, 16) ||
                 !buffer.Reserve(sampler.SamplerStateOffset, 16) ||
                 !ReserveShared(sharedBuffers, buffer, {SharedWrite::BorderColor, sampler.Slot,
-                    CKBACKEND_UNIFORM_VEC4, 1, sampler.BorderColorOffset, 16}) ||
+                    CKFF_UNIFORM_VEC4, 1, sampler.BorderColorOffset, 16}) ||
                 !ReserveShared(sharedBuffers, buffer, {SharedWrite::SamplerState, sampler.Slot,
-                    CKBACKEND_UNIFORM_VEC4, 1, sampler.SamplerStateOffset, 16}))
+                    CKFF_UNIFORM_VEC4, 1, sampler.SamplerStateOffset, 16}))
                 return CKERR_INVALIDPARAMETER;
         }
     }
@@ -225,7 +263,8 @@ CKERROR CKValidateBackendProgram(const CKBackendProgramDesc &desc,
 
     bool attributes[CKRST_ATTRIB_COUNT] = {};
     bool locations[16] = {};
-    for (const auto &input : desc.VertexInputs) {
+    for (int i = 0; i < desc.VertexInputs.Size(); ++i) {
+        const CKFFVertexInput &input = desc.VertexInputs[i];
         if (static_cast<CKDWORD>(input.Attribute) >= CKRST_ATTRIB_COUNT || input.Location >= 16 ||
             (input.Integer != FALSE && input.Integer != TRUE) ||
             attributes[input.Attribute] || locations[input.Location])

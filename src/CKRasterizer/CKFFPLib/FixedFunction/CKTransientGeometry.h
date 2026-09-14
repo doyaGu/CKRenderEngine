@@ -3,12 +3,8 @@
 
 #include "VxDefines.h"
 #include "VxMatrix.h"
-#include "CKRasterizerBackendEnums.h"
-#include "CKRasterizerBackendTypes.h"
-#include "CKRasterizerBackend.h"
+#include "CKRasterizerContextEnums.h"
 #include "XArray.h"
-
-class CKVertexLayoutCache;
 
 struct CKFFPointSpriteParams {
     float Size;
@@ -30,12 +26,11 @@ public:
     CKTransientGeometry();
     ~CKTransientGeometry();
 
-    void Init(CKRasterizerBackend *backend, CKVertexLayoutCache *layoutCache);
-    void Shutdown();
+    void Clear();
 
     // Pack VxDrawPrimitiveData (scattered attribute pointers with varying strides)
-    // into transient backend vertices, optionally with transient indices; the
-    // results (GetVertices / GetIndices) go into the CKBackendDraw of this draw.
+    // into reusable CPU arrays. The concrete rasterizer copies these bytes to
+    // its own transient storage immediately before submitting the draw.
     CKBOOL Prepare(
         VXPRIMITIVETYPE primType,
         CKWORD *indices,
@@ -47,13 +42,15 @@ public:
         const CKBYTE *texcoordComponentCounts = nullptr,
         const CKDWORD *wrapModes = nullptr);
 
-    // Get the layout handle for the last Prepare call
-    CKDWORD GetLayoutHandle() const { return m_LastLayout; }
+    CKDWORD GetFormatFlags() const { return m_FormatFlags; }
+    CKDWORD GetVertexCount() const { return m_VertexCount; }
+    CKDWORD GetVertexStride() const { return m_VertexStride; }
+    CKDWORD GetIndexCount() const { return m_IndexCount; }
+    CKBOOL IsIndex32() const { return m_Index32; }
     CKDWORD GetLastVertexBytes() const { return m_LastVertexBytes; }
     CKDWORD GetLastIndexBytes() const { return m_LastIndexBytes; }
-    // Geometry of the last successful Prepare (indices NULL when non-indexed).
-    const CKBackendTransientVertices *GetVertices() const { return &m_Vertices; }
-    const CKBackendTransientIndices *GetIndices() const { return m_HasIndices ? &m_Indices : NULL; }
+    const CKBYTE *GetVertices() const { return m_VertexData.IsEmpty() ? NULL : m_VertexData.Begin(); }
+    const CKBYTE *GetIndices() const { return m_IndexData.IsEmpty() ? NULL : m_IndexData.Begin(); }
 
     // Convert triangle fan/strip indices to triangle list.
     // Returns the number of output indices written to dst.
@@ -85,12 +82,13 @@ public:
                                  const float *texcoordOverrides = nullptr);
 
 private:
-    CKRasterizerBackend *m_Backend;
-    CKVertexLayoutCache *m_LayoutCache;
-    CKBackendTransientVertices m_Vertices;
-    CKBackendTransientIndices m_Indices;
-    CKBOOL m_HasIndices;
-    CKDWORD m_LastLayout;
+    XArray<CKBYTE> m_VertexData;
+    XArray<CKBYTE> m_IndexData;
+    CKDWORD m_FormatFlags;
+    CKDWORD m_VertexCount;
+    CKDWORD m_VertexStride;
+    CKDWORD m_IndexCount;
+    CKBOOL m_Index32;
     CKDWORD m_LastVertexBytes;
     CKDWORD m_LastIndexBytes;
     XArray<CKWORD> m_TempIndices;

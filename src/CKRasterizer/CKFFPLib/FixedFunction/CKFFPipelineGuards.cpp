@@ -1,7 +1,7 @@
 #include "CKFixedFunctionPipeline.h"
 
 CKFFStateGuard::CKFFStateGuard(CKFixedFunctionPipeline &pipeline)
-    : m_Pipeline(&pipeline), m_Snapshot(pipeline.m_State) {
+    : m_Pipeline(&pipeline), m_Snapshot(pipeline.CaptureState()) {
 }
 
 CKFFStateGuard::~CKFFStateGuard() {
@@ -11,8 +11,7 @@ CKFFStateGuard::~CKFFStateGuard() {
 void CKFFStateGuard::Restore() {
     if (!m_Pipeline)
         return;
-    m_Pipeline->m_State = m_Snapshot;
-    m_Pipeline->OnFixedFunctionStateChanged(CKFixedFunctionPipeline::CKFF_CHANGE_PROGRAM | CKFixedFunctionPipeline::CKFF_CHANGE_STATIC_UNIFORM);
+    m_Pipeline->RestoreState(m_Snapshot);
     m_Pipeline = nullptr;
 }
 

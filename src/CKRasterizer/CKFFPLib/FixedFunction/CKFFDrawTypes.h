@@ -2,16 +2,19 @@
 #define CKFFDRAWTYPES_H
 
 #include "CKFFStateDesc.h"
+#include "CKFFConstants.h"
 #include "CKFFShaderKey.h"
-#include "CKFFShaderCache.h"
-#include "CKRasterizerBackendTypes.h"
+#include "CKFFProgram.h"
+#include "CKFFShaderABI.h"
+#include "CKRasterizerContextTypes.h"
+#include "CKFFPipelineState.h"
 
 class CKDrawStateCache;
-class CKBackendConstants;
+class CKFFConstantSet;
 struct CKFFStateStore;
 
 struct CKFFUniformSink {
-    CKBackendConstants *Constants;
+    CKFFConstantSet *Constants;
     CKBOOL EmitStatic;
     CKBOOL EmitObject;
     CKBOOL Failed;
@@ -52,6 +55,43 @@ struct CKFFTextureBindingSet {
     CKDWORD ActiveTextureCount;
     CKDWORD Hash;
     CKFFTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
+};
+
+enum CKFFDrawSource {
+    CKFF_DRAW_PRIMITIVE,
+    CKFF_DRAW_VERTEX_BUFFER
+};
+
+// Fully resolved FFP output consumed immediately by a concrete rasterizer.
+// CPU geometry points into CKFixedFunctionPipeline scratch arrays and remains
+// valid until that pipeline prepares another draw.
+struct CKFFDraw {
+    CKFFPipelineState Pipeline;
+    CKFFTextureBindingSet Textures;
+    const CKFFConstantSet *Constants;
+    const char *Marker;
+    CKFFShaderKey ShaderKey;
+    CKFFSpecializationInfo Specialization;
+    CKDWORD VertexFormat;
+    CKDWORD VertexBuffer;
+    const CKBYTE *Vertices;
+    CKDWORD VertexStride;
+    CKDWORD StartVertex;
+    CKDWORD VertexCount;
+    CKDWORD IndexBuffer;
+    const CKBYTE *Indices;
+    CKBOOL Index32;
+    CKDWORD StartIndex;
+    CKDWORD IndexCount;
+    CKDWORD SortKey;
+    CKFFDrawSource Source;
+
+    CKFFDraw()
+        : Constants(NULL), Marker(NULL), VertexFormat(0),
+          VertexBuffer(0), Vertices(NULL),
+          VertexStride(0), StartVertex(0), VertexCount(0), IndexBuffer(0),
+          Indices(NULL), Index32(FALSE), StartIndex(0), IndexCount(0),
+          SortKey(0), Source(CKFF_DRAW_PRIMITIVE) {}
 };
 
 struct CKFFUniformEmissionContext {
