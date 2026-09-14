@@ -10,37 +10,23 @@
 #include <cstring>
 
 struct TransientGeometryHarness {
-    FFPRecordingDriver Driver;
-    FFPRecordingBackend Context;
-    CKVertexLayoutCache LayoutCache;
     CKTransientGeometry Geometry;
-
-    TransientGeometryHarness()
-        : Driver(), Context(&Driver), LayoutCache(), Geometry()
-    {
-        LayoutCache.Init(Context.StartedBackend());
-        Geometry.Init(Context.StartedBackend(), &LayoutCache);
-    }
 
     // Bytes of the last Prepare (empty when it produced no vertices / indices).
     const std::vector<CKBYTE> &VertexBytes()
     {
         m_VertexBytes.clear();
-        const CKBackendTransientVertices *vertices = Geometry.GetVertices();
-        if (vertices && vertices->Data && vertices->Count > 0) {
-            const CKBYTE *begin = static_cast<const CKBYTE *>(vertices->Data);
-            m_VertexBytes.assign(begin, begin + (size_t)vertices->Count * vertices->Stride);
-        }
+        const CKBYTE *vertices = Geometry.GetVertices();
+        if (vertices)
+            m_VertexBytes.assign(vertices, vertices + Geometry.GetLastVertexBytes());
         return m_VertexBytes;
     }
     const std::vector<CKBYTE> &IndexBytes()
     {
         m_IndexBytes.clear();
-        const CKBackendTransientIndices *indices = Geometry.GetIndices();
-        if (indices && indices->Data && indices->Count > 0) {
-            const CKBYTE *begin = static_cast<const CKBYTE *>(indices->Data);
-            m_IndexBytes.assign(begin, begin + (size_t)indices->Count * (indices->Index32 ? 4 : 2));
-        }
+        const CKBYTE *indices = Geometry.GetIndices();
+        if (indices)
+            m_IndexBytes.assign(indices, indices + Geometry.GetLastIndexBytes());
         return m_IndexBytes;
     }
 
@@ -226,7 +212,7 @@ static void IndexedTriangleFanUsesGenericPath()
 #endif
 }
 
-static void PairedTransientCapacityIsCheckedBeforeAllocation()
+static void PreparationDoesNotReserveDeviceMemory()
 {
     TransientGeometryHarness harness;
     VxDrawPrimitiveData data;
@@ -236,16 +222,14 @@ static void PairedTransientCapacityIsCheckedBeforeAllocation()
 
     FillQuadInput(positions, texcoords, colors);
     InitQuadData(&data, positions, texcoords, colors);
-    harness.Context.TransientVertexCapacity = 4;
-    harness.Context.TransientIndexCapacity = 5;
-
     TestCheck(harness.Geometry.Prepare(VX_TRIANGLEFAN,
                                        NULL,
                                        4,
-                                       &data) == FALSE,
-              "paired transient prepare must fail when the index budget is short");
-    TestCheck(harness.Context.TransientIndexAllocations == 0,
-              "paired transient capacity failure must not consume the index budget");
+                                       &data) == TRUE,
+              "geometry preparation must be independent of device transient capacity");
+    TestCheck(harness.Geometry.GetVertexCount() == 4 &&
+                  harness.Geometry.GetIndexCount() == 6,
+              "geometry preparation must expose exact CPU vertex and index counts");
 }
 
 static void ExtendedTexcoordDataUsesGenericPath()
@@ -571,6 +555,19 @@ static void InvalidTransientIndexIsRejected()
               "invalid indices must be rejected before transient allocation");
 }
 
+static void NegativeVertexCountIsRejected()
+{
+    TransientGeometryHarness harness;
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = -1;
+    data.Flags = CKRST_DP_TRANSFORM;
+
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data) == FALSE,
+              "transient geometry must reject a negative vertex count");
+    TestCheck(harness.VertexBytes().empty() && harness.IndexBytes().empty(),
+              "a negative vertex count must be rejected before allocation");
+}
+
 static void PointScaleClampsAfterViewportConversion()
 {
     const float size = CKTransientGeometry::ComputePointSpriteSizeForDistance(
@@ -720,7 +717,7 @@ static void TweenInputsUseDedicatedVertexAttributes()
 
     const CKDWORD formatFlags = CKFF_VF_POSITION | CKFF_VF_NORMAL |
         CKFF_VF_TWEENPOSITION | CKFF_VF_TWEENNORMAL;
-    const CKDWORD stride = CKVertexLayoutCache::ComputeStride(formatFlags);
+    const CKDWORD stride = CKFFVertexLayout::ComputeStride(formatFlags);
     CKBYTE vertex[48] = {};
     TestCheck(stride == sizeof(vertex),
               "Tween vertex layout must contain four float3 attributes");
@@ -759,15 +756,9 @@ static void TweenPrepareKeepsDedicatedVertexAttributes()
                   NULL, 0, &data, 0, FALSE, NULL, NULL),
               "Tween transient prepare must succeed");
 
-    CKBOOL hasTangent = FALSE;
-    CKBOOL hasBitangent = FALSE;
-    for (size_t i = 0; i < harness.Context.LastVertexLayoutElements.size(); ++i) {
-        const CK_VERTEX_ATTRIB attrib =
-            harness.Context.LastVertexLayoutElements[i].Attrib;
-        hasTangent = hasTangent || attrib == CKRST_ATTRIB_TANGENT;
-        hasBitangent = hasBitangent || attrib == CKRST_ATTRIB_BITANGENT;
-    }
-    TestCheck(hasTangent && hasBitangent,
+    const CKDWORD format = harness.Geometry.GetFormatFlags();
+    TestCheck((format & CKFF_VF_TWEENPOSITION) != 0 &&
+                  (format & CKFF_VF_TWEENNORMAL) != 0,
               "Tween transient prepare must retain both dedicated attributes");
     TestCheck(harness.VertexBytes().size() == 72,
               "Tween transient prepare must allocate the complete vertex stride");
@@ -865,7 +856,7 @@ static void CommonInterleaveMatchesGenericPacking()
         data.SpecularColorPtr = (void *)specular;
         data.SpecularColorStride = sizeof(specular[0]);
 
-        const CKDWORD stride = CKVertexLayoutCache::ComputeStride(layouts[layout]);
+        const CKDWORD stride = CKFFVertexLayout::ComputeStride(layouts[layout]);
         for (CKBYTE componentCount = 1; componentCount <= 4; ++componentCount) {
             CKBYTE componentCounts[CKFF_MAX_TEXTURE_STAGES] = {};
             componentCounts[0] = componentCount;
@@ -891,8 +882,8 @@ int main()
     TestFramework tests;
     tests.Run("2D quad uses generic fan path", &QuadUsesGenericFanPath);
     tests.Run("indexed triangle fan uses generic path", &IndexedTriangleFanUsesGenericPath);
-    tests.Run("paired transient capacity is checked before allocation",
-              &PairedTransientCapacityIsCheckedBeforeAllocation);
+    tests.Run("preparation does not reserve device memory",
+              &PreparationDoesNotReserveDeviceMemory);
     tests.Run("extended texcoord data uses generic path", &ExtendedTexcoordDataUsesGenericPath);
     tests.Run("four-component texcoord quad uses generic path", &FourComponentTexcoordQuadUsesGenericPath);
     tests.Run("multiple texture stages apply independent wrap modes",
@@ -907,6 +898,8 @@ int main()
               &PointSpritesReplaceEveryDeclaredTexcoord);
     tests.Run("invalid transient index is rejected",
               &InvalidTransientIndexIsRejected);
+    tests.Run("negative vertex count is rejected",
+              &NegativeVertexCountIsRejected);
     tests.Run("point scale clamps after viewport conversion",
               &PointScaleClampsAfterViewportConversion);
     tests.Run("sprite batch uses generic path", &SpriteBatchUsesGenericPath);

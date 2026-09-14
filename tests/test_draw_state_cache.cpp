@@ -2,7 +2,7 @@
 
 #include "CKDrawStateCache.h"
 #include "CKRasterizer.h"
-#include "CKRasterizerBackendEnums.h"
+#include "CKRasterizerContextEnums.h"
 #include "TestTriangleMultiset.h"
 
 namespace {

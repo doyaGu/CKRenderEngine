@@ -1,40 +1,57 @@
 #include "CKFixedFunctionPipeline.h"
+#include "CKFFContextState.h"
+#include "CKFFImage.h"
+#include "CKFFPresentDraw.h"
 #include "CKFFSpecializationInfo.h"
 #include "CKFFUniformState.h"
 #include "CKRenderSettings.h"
 #include "FFPRecordingHarness.h"
+#include "CKFFTestPipeline.h"
 #include "TestTriangleMultiset.h"
 
 #include <math.h>
 #include <string.h>
 
-struct CKFFShaderCacheTestAccess {
-    static size_t CachedSpecializationCount(
-        const CKFFShaderCache &cache, CKFFProgramVariant variant)
-    {
-        return cache.m_Specializations[variant].Count;
-    }
-
-    static size_t SpecializationCapacity()
-    {
-        return CKFFShaderCache::SPECIALIZATION_CACHE_CAPACITY;
-    }
-
-    static bool ContainsSpecialization(
-        const CKFFShaderCache &cache, CKFFProgramVariant variant,
-        const CKFFShaderKeyFS &key)
-    {
-        const CKFFShaderCache::SpecializationCache &specializations =
-            cache.m_Specializations[variant];
-        for (CKDWORD i = 0; i < specializations.Count; ++i) {
-            if (specializations.Entries[i].Key == key)
-                return true;
-        }
-        return false;
-    }
-};
+#define CKFixedFunctionPipeline CKFFTestPipeline
 
 namespace {
+
+void PointImageScalingUsesDestinationPixelCenters()
+{
+    const CKDWORD source[] = {
+        0xFF000001u, 0xFF000002u, 0xFF000003u,
+        0xFF000004u, 0xFF000005u, 0xFF000006u,
+    };
+    XArray<CKBYTE> pixels((int)sizeof(source));
+    pixels.Resize((int)sizeof(source));
+    memcpy(pixels.Begin(), source, sizeof(source));
+
+    VxImageDescEx image;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, image);
+    image.Width = 3;
+    image.Height = 2;
+    image.BytesPerLine = 3 * 4;
+    image.Image = pixels.Begin();
+
+    TestCheck(CKFFScaleImagePoint(image, pixels, 2, 3), "point scaling succeeds");
+    const CKDWORD *scaled = (const CKDWORD *)pixels.Begin();
+    const CKDWORD expected[] = {
+        0xFF000001u, 0xFF000003u,
+        0xFF000004u, 0xFF000006u,
+        0xFF000004u, 0xFF000006u,
+    };
+    TestCheck(image.Width == 2 && image.Height == 3 && image.BytesPerLine == 8 && image.Image == pixels.Begin(),
+              "scaled descriptor follows the output storage");
+    TestCheck(memcmp(scaled, expected, sizeof(expected)) == 0,
+              "destination pixel centers select the expected source texels");
+
+    pixels.Resize(4);
+    image.Width = image.Height = 2;
+    image.BytesPerLine = 8;
+    image.Image = pixels.Begin();
+    TestCheck(!CKFFScaleImagePoint(image, pixels, 4, 4),
+              "point scaling rejects truncated source storage");
+}
 
 void FixedFunctionProgramDeclaresItsShaderInterface()
 {
@@ -55,7 +72,7 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
 
     const CK_SHADER_FORMAT formats[] = {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_FORMAT_SPIRV};
     for (CK_SHADER_FORMAT format : formats) {
-        const CKBackendProgramDesc program = CKFFBuildProgramInterface(1, 2, format);
+        const CKFFProgramDesc program = CKFFBuildProgramInterface(1, 2, format);
         CKShaderDesc vertex, pixel;
         vertex.Format = pixel.Format = format;
         vertex.Profile = pixel.Profile = format == CKRST_SHADER_FORMAT_DXIL ?
@@ -64,9 +81,9 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
         vertex.UniformBufferCount = 2;
         pixel.UniformBufferCount = 1;
         pixel.SamplerCount = 16;
-        TestCheck(CKValidateBackendProgram(program, vertex, pixel) == CK_OK,
+        TestCheck(CKFFValidateProgram(program, vertex, pixel) == CK_OK,
                   "FFP native declarations satisfy generic backend validation");
-        TestCheck(program.UniformBuffers.size() == 3 &&
+        TestCheck(program.UniformBuffers.Size() == 3 &&
                       program.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
                       program.UniformBuffers[0].Slot == 0 && program.UniformBuffers[0].Size == 512 &&
                       program.UniformBuffers[1].Stage == CKRST_SHADER_VERTEX &&
@@ -74,18 +91,18 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                       program.UniformBuffers[2].Stage == CKRST_SHADER_PIXEL &&
                       program.UniformBuffers[2].Slot == 0 && program.UniformBuffers[2].Size == 1424,
                   "native 3D declarations isolate per-draw matrices");
-        TestCheck(program.Uniforms.size() == 13 &&
+        TestCheck(program.Uniforms.Size() == 13 &&
                       program.Uniforms[9].Slot == CKRST_BLOCK_DRAW_PARAMS &&
                       program.Uniforms[9].BufferSlot == 0 && program.Uniforms[9].Offset == 0 &&
-                      program.Samplers.size() == 16,
+                      program.Samplers.Size() == 16,
                   "native packing follows the stage layout schema");
-        TestCheck(program.Samplers[0].Dimension == CKBACKEND_TEXTURE_2D &&
-                      program.Samplers[8].Dimension == CKBACKEND_TEXTURE_CUBE &&
-                      program.Samplers[12].Dimension == CKBACKEND_TEXTURE_3D &&
+        TestCheck(program.Samplers[0].Dimension == CKFF_TEXTURE_2D &&
+                      program.Samplers[8].Dimension == CKFF_TEXTURE_CUBE &&
+                      program.Samplers[12].Dimension == CKFF_TEXTURE_3D &&
                       program.Samplers[15].BorderColorOffset == 912 + 15 * 16 &&
                       program.Samplers[15].SamplerStateOffset == 1168 + 15 * 16,
                   "sampler dimensions and border metadata are declared explicitly");
-        TestCheck(program.VertexInputs.size() == 16 && program.VertexInputs[6].Integer &&
+        TestCheck(program.VertexInputs.Size() == 16 && program.VertexInputs[6].Integer &&
                       program.VertexInputs[6].DefaultValue[3] == 0 &&
                       program.VertexInputs[4].DefaultValue[0] == 0x3f800000u &&
                       program.VertexInputs[4].DefaultValue[3] == 0x3f800000u &&
@@ -94,36 +111,36 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                       program.VertexInputs[8].DefaultValue[3] == 0x3f800000u,
                   "missing FFP vertex streams keep shader-family defaults");
 
-        const CKBackendProgramDesc positionT = CKFFBuildProgramInterface(
+        const CKFFProgramDesc positionT = CKFFBuildProgramInterface(
             1, 2, format, FALSE, TRUE);
         vertex.UniformBufferCount = 1;
-        TestCheck(CKValidateBackendProgram(positionT, vertex, pixel) == CK_OK &&
-                      positionT.UniformBuffers.size() == 2 &&
+        TestCheck(CKFFValidateProgram(positionT, vertex, pixel) == CK_OK &&
+                      positionT.UniformBuffers.Size() == 2 &&
                       positionT.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
                       positionT.UniformBuffers[0].Slot == 0 &&
                       positionT.UniformBuffers[0].Size == 2368,
                   "POSITIONT omits the unused matrix buffer and compacts native slots");
 
-        const CKBackendProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);
+        const CKFFProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);
         vertex.UniformBufferCount = 0;
         pixel.SamplerCount = 1;
-        TestCheck(CKValidateBackendProgram(present, vertex, pixel) == CK_OK &&
-                      present.UniformBuffers.size() == 1 &&
+        TestCheck(CKFFValidateProgram(present, vertex, pixel) == CK_OK &&
+                      present.UniformBuffers.Size() == 1 &&
                       present.UniformBuffers[0].Stage == CKRST_SHADER_PIXEL &&
                       present.UniformBuffers[0].Size == 48 &&
-                      present.Uniforms.size() == 1 && present.Uniforms[0].Offset == 0 &&
+                      present.Uniforms.Size() == 1 && present.Uniforms[0].Offset == 0 &&
                       present.Samplers[0].BorderColorOffset == 16 && present.Samplers[0].SamplerStateOffset == 32 &&
                       present.Samplers[0].Slot == CKFF_SLOT_PRESENT && present.Samplers[0].NativeSlot == 0 &&
-                      present.VertexInputs.size() == 2 && present.VertexInputs[1].Location == 8,
+                      present.VertexInputs.Size() == 2 && present.VertexInputs[1].Location == 8,
                   "presentation declares one native sampler independently of its logical slot");
     }
 
-    const CKBackendProgramDesc named = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_BGFX);
+    const CKFFProgramDesc named = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_BGFX);
     CKShaderDesc vertex, pixel;
     vertex.Format = pixel.Format = CKRST_SHADER_FORMAT_BGFX;
     vertex.Profile = pixel.Profile = CKRST_SHADER_PROFILE_DX11;
     pixel.Stage = CKRST_SHADER_PIXEL;
-    TestCheck(CKValidateBackendProgram(named, vertex, pixel) == CK_OK && named.UniformBuffers.empty() &&
+    TestCheck(CKFFValidateProgram(named, vertex, pixel) == CK_OK && named.UniformBuffers.Size() == 0 &&
                   named.Uniforms[CKRST_BLOCK_MATRICES].Name == "u_ffMatrices" &&
                   named.Samplers[15].MetadataBufferSlot == ~0u,
               "named-uniform artifacts need no invented buffer or border layout");
@@ -133,21 +150,21 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
 {
     FFPRecordingDriver driver;
     FFPRecordingBackend backend(&driver);
-    CKBackendShaderSet shaders = backend.ShaderSet();
-    CKFFShaderCache cache;
-    TestCheck(cache.Init(backend.StartedBackend(), shaders), "shader cache accepts explicit catalog");
-    shaders = CKBackendShaderSet();
+    CKFFShaderSet shaders = backend.ShaderSet();
+    CKFFTestShaderCache cache;
+    TestCheck(cache.Init(backend.GetCaps(), shaders), "shader cache accepts explicit catalog");
+    shaders = CKFFShaderSet();
     CKFFShaderKey key;
-    const CKDWORD first = cache.GetProgram(key).Program;
+    const CKDWORD first = cache.GetProgram(&backend, key).Program;
     TestCheck(first != 0 && backend.CreatedProgramCount == 1 &&
-                  backend.LastProgramInterface.Samplers.size() == 16,
+                  backend.LastProgramInterface.Samplers.Size() == 16,
               "lazy creation uses its retained descriptor catalog and explicit interface");
     for (unsigned draw = 0; draw < 1000; ++draw)
-        TestCheck(cache.GetProgram(key).Program == first, "cached program handle is stable");
+        TestCheck(cache.GetProgram(&backend, key).Program == first, "cached program handle is stable");
     TestCheck(backend.CreatedProgramCount == 1 && backend.CreatedShaderCount == 2,
               "cached draws do not rebuild programs or resource declarations");
 
-    const CKFFProgramBinding original = cache.GetProgram(key);
+    const CKFFProgramBinding original = cache.GetProgram(&backend, key);
     for (int change = 0; change < 32; ++change) {
         key.FS.AlphaTestEnable = (change & 1) != 0;
         key.FS.AlphaFunc = (change & 7) + 1;
@@ -157,7 +174,7 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
         stage.ColorArg1 = CKRST_TA_TEXTURE | ((change & 2) ? CKRST_TA_COMPLEMENT : 0);
         stage.MirrorOnceMask = change & 7;
         for (int repeat = 0; repeat < 3; ++repeat) {
-            const CKFFProgramBinding binding = cache.GetProgram(key);
+            const CKFFProgramBinding binding = cache.GetProgram(&backend, key);
             TestCheck(binding.Program == first &&
                           binding.Specialization == CKFFBuildSpecializationInfo(key.FS),
                       "repeated and changed materials must carry their own current specialization");
@@ -169,55 +186,54 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
               "fragment state changes must retain the fixed native program family");
 
     const float params[4] = {1.0f, 2.0f, 3.0f, 4.0f};
-    CKBackendConstants constants;
+    CKFFConstantSet constants;
     const CKERROR pushed = CKFFSetConstants(&constants, CKRST_BLOCK_VIEWPORT, params, 1);
     const auto &bytes = constants[CKRST_BLOCK_VIEWPORT].Bytes;
-    TestCheck(pushed == CK_OK && bytes.size() == sizeof(params) &&
-                  memcmp(bytes.data(), params, sizeof(params)) == 0,
+    TestCheck(pushed == CK_OK && bytes.Size() == sizeof(params) &&
+                  memcmp(bytes.Begin(), params, sizeof(params)) == 0,
               "FFP converts one vec4 into sixteen backend bytes");
-    cache.Shutdown();
+    cache.Shutdown(&backend);
 }
 
 void ShaderCacheRetainsAlternatingSpecializations()
 {
     FFPRecordingDriver driver;
     FFPRecordingBackend backend(&driver);
-    CKFFShaderCache cache;
-    TestCheck(cache.Init(backend.StartedBackend(), backend.ShaderSet()),
+    CKFFTestShaderCache cache;
+    TestCheck(cache.Init(backend.GetCaps(), backend.ShaderSet()),
               "shader cache accepts the benchmark catalog");
 
     CKFFShaderKey keys[8];
     for (CKDWORD i = 0; i < 8; ++i) {
         keys[i].FS.AlphaTestEnable = true;
         keys[i].FS.AlphaFunc = i + 1;
-        const CKFFProgramBinding binding = cache.GetProgram(keys[i]);
+        const CKFFProgramBinding binding = cache.GetProgram(&backend, keys[i]);
         TestCheck(binding.Program != 0 &&
                       binding.Specialization ==
                           CKFFBuildSpecializationInfo(keys[i].FS),
                   "each alternating fragment state must resolve correctly");
     }
 
-    TestCheck(CKFFShaderCacheTestAccess::CachedSpecializationCount(
-                  cache, CKFF_PROGRAM_3D) == 8,
+    TestCheck(cache.GetCachedSpecializationCount(CKFF_PROGRAM_3D) == 8,
               "one vertex variant must retain the eight-material working set");
     for (const CKFFShaderKey &key : keys) {
-        const CKFFProgramBinding binding = cache.GetProgram(key);
+        const CKFFProgramBinding binding = cache.GetProgram(&backend, key);
         TestCheck(binding.Specialization ==
                       CKFFBuildSpecializationInfo(key.FS),
                   "retained specialization values must survive alternation");
     }
-    cache.Shutdown();
+    cache.Shutdown(&backend);
 }
 
 void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
 {
     FFPRecordingDriver driver;
     FFPRecordingBackend backend(&driver);
-    CKFFShaderCache cache;
-    TestCheck(cache.Init(backend.StartedBackend(), backend.ShaderSet()),
+    CKFFTestShaderCache cache;
+    TestCheck(cache.Init(backend.GetCaps(), backend.ShaderSet()),
               "shader cache accepts the benchmark catalog");
 
-    const size_t capacity = CKFFShaderCacheTestAccess::SpecializationCapacity();
+    const size_t capacity = CKFFShaderCache::GetSpecializationCapacity();
     std::vector<CKFFShaderKey> keys(capacity + 1);
     for (size_t i = 0; i <= capacity; ++i) {
         keys[i].FS.AlphaTestEnable = true;
@@ -225,24 +241,20 @@ void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
         keys[i].FS.LastActiveTextureStage = static_cast<CKDWORD>(i / 8);
     }
     for (size_t i = 0; i < capacity; ++i)
-        cache.GetProgram(keys[i]);
+        cache.GetProgram(&backend, keys[i]);
 
-    cache.GetProgram(keys[0]);
-    cache.GetProgram(keys[capacity]);
+    cache.GetProgram(&backend, keys[0]);
+    cache.GetProgram(&backend, keys[capacity]);
 
-    TestCheck(CKFFShaderCacheTestAccess::CachedSpecializationCount(
-                  cache, CKFF_PROGRAM_3D) == capacity,
+    TestCheck(cache.GetCachedSpecializationCount(CKFF_PROGRAM_3D) == capacity,
               "specialization cache must remain bounded");
-    TestCheck(CKFFShaderCacheTestAccess::ContainsSpecialization(
-                  cache, CKFF_PROGRAM_3D, keys[0].FS),
+    TestCheck(cache.HasCachedSpecialization(CKFF_PROGRAM_3D, keys[0].FS),
               "recently used specialization must survive eviction");
-    TestCheck(!CKFFShaderCacheTestAccess::ContainsSpecialization(
-                  cache, CKFF_PROGRAM_3D, keys[1].FS),
+    TestCheck(!cache.HasCachedSpecialization(CKFF_PROGRAM_3D, keys[1].FS),
               "least recently used specialization must be evicted");
-    TestCheck(CKFFShaderCacheTestAccess::ContainsSpecialization(
-                  cache, CKFF_PROGRAM_3D, keys[capacity].FS),
+    TestCheck(cache.HasCachedSpecialization(CKFF_PROGRAM_3D, keys[capacity].FS),
               "new specialization must enter the bounded cache");
-    cache.Shutdown();
+    cache.Shutdown(&backend);
 }
 
 void NullRasterizerSupportsHeadlessFFP()
@@ -252,16 +264,16 @@ void NullRasterizerSupportsHeadlessFFP()
               "recording rasterizer must expose its headless driver");
     CKRecordingRasterizerDriver *driver =
         static_cast<CKRecordingRasterizerDriver *>(rasterizer.GetDriver(0));
-    CKRasterizerBackend *first = driver->CreateBackend();
-    CKRasterizerBackend *second = driver->CreateBackend();
+    CKRecordingBackend *first = driver->CreateBackend();
+    CKRecordingBackend *second = driver->CreateBackend();
     TestCheck(first != NULL && second != NULL, "Null driver must create headless backends");
-    CKBackendInitDesc firstDesc;
+    CKRasterizerInitParameters firstDesc;
     firstDesc.Width = 64;
     firstDesc.Height = 64;
     firstDesc.Bpp = 32;
     firstDesc.ZBpp = 24;
     firstDesc.StencilBpp = 8;
-    CKBackendInitDesc secondDesc;
+    CKRasterizerInitParameters secondDesc;
     secondDesc.Width = 32;
     secondDesc.Height = 32;
     secondDesc.Bpp = 32;
@@ -271,7 +283,7 @@ void NullRasterizerSupportsHeadlessFFP()
               "Null backends must allow independent headless contexts");
 
     CKFixedFunctionPipeline ffp;
-    CKBackendShaderSet shaders;
+    CKFFShaderSet shaders;
     TestCheck(driver->GetShaderSet(first->GetCaps(), shaders), "Null rasterizer shader catalog");
     TestCheck(ffp.Init(first, shaders),
               "FFP must initialize its programs on the headless backend");
@@ -2145,7 +2157,7 @@ void ProgramFamilyIsSharedAcrossStateBindings() {
     const CKFFSpecializationInfo current = CurrentDrawSpecialization(ffp, context);
     TestCheck(gouraud && flat && context.CreatedProgramCount == 1,
               "State variants of one vertex layout must share one backend program");
-    TestCheck(CKFFPipelineTestAccess::CachedProgramCount(ffp) == 1,
+    TestCheck(ffp.CachedProgramCount() == 1,
               "The shader cache must hold one program per created vertex variant");
     TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
               "The shared program must receive the current-draw specialization data");
@@ -2262,12 +2274,9 @@ void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "initial prepared-cache draw");
 
-    const uint64_t firstMatrices = CKFFPipelineTestAccess::ConstantRevision(
-        ffp, CKRST_BLOCK_MATRICES);
-    const uint64_t firstStageParams = CKFFPipelineTestAccess::ConstantRevision(
-        ffp, CKRST_BLOCK_STAGE_PARAMS);
-    const uint64_t firstDrawParams = CKFFPipelineTestAccess::ConstantRevision(
-        ffp, CKRST_BLOCK_DRAW_PARAMS);
+    const uint64_t firstMatrices = ffp.GetConstantRevision(CKRST_BLOCK_MATRICES);
+    const uint64_t firstStageParams = ffp.GetConstantRevision(CKRST_BLOCK_STAGE_PARAMS);
+    const uint64_t firstDrawParams = ffp.GetConstantRevision(CKRST_BLOCK_DRAW_PARAMS);
 
     VxMatrix world;
     Vx3DMatrixIdentity(world);
@@ -2276,12 +2285,9 @@ void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
     TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "world-only prepared-cache draw");
-    TestCheck(CKFFPipelineTestAccess::ConstantRevision(
-                  ffp, CKRST_BLOCK_MATRICES) > firstMatrices &&
-                  CKFFPipelineTestAccess::ConstantRevision(
-                      ffp, CKRST_BLOCK_STAGE_PARAMS) == firstStageParams &&
-                  CKFFPipelineTestAccess::ConstantRevision(
-                      ffp, CKRST_BLOCK_DRAW_PARAMS) == firstDrawParams,
+    TestCheck(ffp.GetConstantRevision(CKRST_BLOCK_MATRICES) > firstMatrices &&
+                  ffp.GetConstantRevision(CKRST_BLOCK_STAGE_PARAMS) == firstStageParams &&
+                  ffp.GetConstantRevision(CKRST_BLOCK_DRAW_PARAMS) == firstDrawParams,
               "world-only changes update object matrices without rewriting static blocks");
 
     CKMaterialData material = {};
@@ -2290,20 +2296,17 @@ void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
     TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "material prepared-cache draw");
-    TestCheck(CKFFPipelineTestAccess::ConstantRevision(
-                  ffp, CKRST_BLOCK_DRAW_PARAMS) > firstDrawParams,
+    TestCheck(ffp.GetConstantRevision(CKRST_BLOCK_DRAW_PARAMS) > firstDrawParams,
               "material changes invalidate the static draw-parameter block");
 
-    const uint64_t stageBeforeFlags = CKFFPipelineTestAccess::ConstantRevision(
-        ffp, CKRST_BLOCK_STAGE_PARAMS);
+    const uint64_t stageBeforeFlags = ffp.GetConstantRevision(CKRST_BLOCK_STAGE_PARAMS);
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_BUMPLUMINANCE);
     TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "texture-flag prepared-cache draw");
     const CKDWORD stageUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     const std::vector<float> &stageParams = context.Log.FloatUniforms[stageUniform];
-    TestCheck(CKFFPipelineTestAccess::ConstantRevision(
-                  ffp, CKRST_BLOCK_STAGE_PARAMS) > stageBeforeFlags &&
+    TestCheck(ffp.GetConstantRevision(CKRST_BLOCK_STAGE_PARAMS) > stageBeforeFlags &&
                   stageParams.size() >= 4 &&
                   (((CKDWORD)stageParams[1]) & CKFF_TTF_BUMP_UNORM) != 0,
               "non-program texture flags invalidate and repack stage parameters");
@@ -2341,7 +2344,7 @@ void ProgramFamilyHasFourVertexVariants() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend(), context.ShaderSet());
 
-    TestCheck(context.CreatedProgramCount == 0 && CKFFPipelineTestAccess::CachedProgramCount(ffp) == 0,
+    TestCheck(context.CreatedProgramCount == 0 && ffp.CachedProgramCount() == 0,
               "Programs are created on first use");
 
     ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
@@ -2361,7 +2364,7 @@ void ProgramFamilyHasFourVertexVariants() {
     ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                          CKRST_DP_VCT, CKFF_VF_POSITIONT | CKFF_VF_TEXCOORD0 | CKFF_VF_COLOR0, 1);
     TestCheck(context.CreatedProgramCount == 4 &&
-                  CKFFPipelineTestAccess::CachedProgramCount(ffp) == CKFF_PROGRAM_VARIANT_COUNT,
+                  ffp.CachedProgramCount() == CKFF_PROGRAM_VARIANT_COUNT,
               "User clip planes add the two clip-distance vertex variants");
 
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP);
@@ -3469,10 +3472,123 @@ void MaterialSourceUsesDeclaredDPColorStreams() {
     ffp.Shutdown();
 }
 
+void RepeatedStateSettersKeepPreparedCaches() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    TestCheck(ffp.Init(context.StartedBackend(), context.ShaderSet()),
+              "pipeline initialization");
+
+    VxMatrix identity;
+    identity.SetIdentity();
+    VxPlane plane(1.0f, 0.0f, 0.0f, 0.0f);
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 640;
+    viewport.ViewHeight = 480;
+    viewport.ViewZMax = 1.0f;
+
+    ffp.SetTransform(VXMATRIX_WORLD, identity);
+    ffp.SetTransform(VXMATRIX_VIEW, identity);
+    ffp.SetTransform(VXMATRIX_PROJECTION, identity);
+    ffp.SetViewport(viewport);
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderOptions(TRUE, FALSE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                             VXTEXTURE_ADDRESSCLAMP);
+    TestCheck(ffp.DrawVertexBuffer(
+                  VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKFF_VF_POSITION, 1),
+              "draw primes prepared caches");
+
+    const uint64_t revision = ffp.GetStaticUniformRevision();
+    TestCheck(ffp.IsVertexBufferProgramCacheValid() && ffp.IsDrawValidationCacheValid(),
+              "draw leaves prepared caches valid");
+
+    ffp.SetTransform(VXMATRIX_WORLD, identity);
+    ffp.SetTransform(VXMATRIX_VIEW, identity);
+    ffp.SetTransform(VXMATRIX_PROJECTION, identity);
+    ffp.SetViewport(viewport);
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderOptions(TRUE, FALSE, FALSE);
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                             VXTEXTURE_ADDRESSCLAMP);
+
+    TestCheck(ffp.GetStaticUniformRevision() == revision,
+              "equal state does not advance the uniform revision");
+    TestCheck(ffp.IsVertexBufferProgramCacheValid() && ffp.IsDrawValidationCacheValid(),
+              "equal state does not invalidate prepared caches");
+
+    ffp.ResetTextureStages(0, CKFF_MAX_TEXTURE_STAGES);
+    const uint64_t resetRevision = ffp.GetStaticUniformRevision();
+    ffp.ResetTextureStages(0, CKFF_MAX_TEXTURE_STAGES);
+    TestCheck(ffp.GetStaticUniformRevision() == resetRevision,
+              "repeating the same stage reset is free");
+
+    ffp.Shutdown();
+}
+
+void SharedPresentPreparationBuildsTheCompleteDraw() {
+    TestCheck(CKFFScaledDimension(0, 1.0f, 4096) == 1 &&
+                  CKFFScaledDimension(100, 0.5f, 4096) == 50 &&
+                  CKFFScaledDimension(100, 2.0f, 150) == 150 &&
+                  CKFFScaledDimension(100, 1.0f, 0) == 0,
+              "shared presentation sizing clamps zero, scale and device limits");
+    float vertices[15] = {};
+    CKTransientVertexData transient;
+    transient.Data = vertices;
+    transient.Count = 3;
+    transient.Stride = 5 * sizeof(float);
+    transient.Layout = 31;
+
+    CKFFPresentDraw present;
+    CKDrawCommand draw;
+    TestCheck(present.Prepare(11, 100, 50, TRUE, TRUE, 0.25f,
+                              FALSE, 21, 31, transient, draw) == CK_OK,
+              "shared presentation draw prepares valid inputs");
+    TestCheck(vertices[3] == 0.0f && vertices[4] == 0.0f &&
+                  vertices[8] == 2.0f && vertices[9] == 0.0f &&
+                  vertices[13] == 0.0f && vertices[14] == 2.0f,
+              "fullscreen triangle has the unflipped UV orientation");
+    TestCheck(draw.Program == 21 && draw.Layout == 31 &&
+                  draw.TransientVertices == &transient &&
+                  draw.VertexCount == 3 && draw.Textures && draw.Constants,
+              "prepared draw carries program, layout, geometry and CPU state");
+    const CKFFTextureSlot &slot = (*draw.Textures)[CKFF_SLOT_PRESENT];
+    TestCheck(slot.Texture == 11 &&
+                  slot.Sampler.MinFilter == CKRST_FILTER_LINEAR &&
+                  slot.Sampler.MagFilter == CKRST_FILTER_LINEAR &&
+                  slot.Sampler.AddressU == CKRST_ADDRESS_CLAMP &&
+                  slot.Sampler.AddressV == CKRST_ADDRESS_CLAMP,
+              "prepared draw carries the presentation texture and sampler");
+    float params[4] = {};
+    const XArray<CKBYTE> &bytes =
+        (*draw.Constants)[CKRST_BLOCK_PRESENT_PARAMS].Bytes;
+    if (bytes.Size() == sizeof(params))
+        memcpy(params, bytes.Begin(), sizeof(params));
+    TestCheck(bytes.Size() == sizeof(params) && params[0] == 0.01f &&
+                  params[1] == 0.02f && params[2] == 1.0f &&
+                  params[3] == 0.25f,
+              "prepared draw carries texel size, FXAA and sharpness constants");
+
+    TestCheck(present.Prepare(11, 100, 50, FALSE, FALSE, 0.0f,
+                              TRUE, 21, 31, transient, draw) == CK_OK &&
+                  vertices[4] == 1.0f && vertices[14] == -1.0f,
+              "shared presentation draw applies vertical flipping");
+    transient.Stride = 4 * sizeof(float);
+    TestCheck(present.Prepare(11, 100, 50, FALSE, FALSE, 0.0f,
+                              FALSE, 21, 31, transient, draw) ==
+                  CKERR_OUTOFMEMORY,
+              "undersized transient presentation vertices are rejected");
+}
+
 } // namespace
 
 int main() {
     TestFramework tests;
+    tests.Run("Point image scaling uses destination pixel centers",
+              &PointImageScalingUsesDestinationPixelCenters);
+    tests.Run("Shared presentation preparation builds the complete draw",
+              &SharedPresentPreparationBuildsTheCompleteDraw);
     tests.Run("FFP declares generic program resources", &FixedFunctionProgramDeclaresItsShaderInterface);
     tests.Run("Shader catalog and program metadata stay outside cached draws",
               &ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss);
@@ -3648,5 +3764,7 @@ int main() {
               &LocalViewerDoesNotSplitShaderWhenLightingDisabled);
     tests.Run("Material source uses declared DP color streams",
               &MaterialSourceUsesDeclaredDPColorStreams);
+    tests.Run("Repeated state setters keep prepared caches",
+              &RepeatedStateSettersKeepPreparedCaches);
     return tests.ExitCode();
 }

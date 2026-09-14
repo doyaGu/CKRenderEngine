@@ -666,14 +666,14 @@ void TweeningInputsAndShaderAreWired() {
 }
 
 void DPWeightFlagsAddBlendLayoutFlags() {
-    CKDWORD flags = CKVertexLayoutCache::DPFlagsToFormatFlags(
+    CKDWORD flags = CKFFVertexLayout::DPFlagsToFormatFlags(
         (CKRST_DPFLAGS)(CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS2), FALSE, FALSE);
     TestCheck((flags & CKFF_VF_BLENDWEIGHT) != 0,
               "DP weight flags must request blend weight attribute");
     TestCheck((flags & CKFF_VF_BLENDINDEX) == 0,
               "Non-indexed DP weight flags must not request blend index attribute");
 
-    CKDWORD indexed = CKVertexLayoutCache::DPFlagsToFormatFlags(
+    CKDWORD indexed = CKFFVertexLayout::DPFlagsToFormatFlags(
         (CKRST_DPFLAGS)(CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS2 | CKRST_DP_MATRIXPAL), FALSE, FALSE);
     TestCheck((indexed & CKFF_VF_BLENDWEIGHT) != 0 && (indexed & CKFF_VF_BLENDINDEX) != 0,
               "Matrix palette DP flags must request both weights and indices");
@@ -1100,7 +1100,7 @@ void TextureBindingMaskIgnoresInactiveStages() {
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
 void BgfxTransientAllocationsPreflightAvailability() {
     const std::string contents = ReadTextFile(
-        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/Backend/CKBgfxCommands.cpp");
+        "Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/Native/CKBgfxCommands.cpp");
     TestCheck(!contents.empty(),
               "bgfx rasterizer context source must be readable");
 
@@ -1112,13 +1112,13 @@ void BgfxTransientAllocationsPreflightAvailability() {
     };
     const AllocationSequence sequences[] = {
         {
-            "CKBOOL CKBgfxBackend::AllocTransientVertices",
+            "CKBOOL CKBgfxRasterizerContext::AllocTransientVertices",
             "bgfx::getAvailTransientVertexBuffer",
             "bgfx::allocTransientVertexBuffer",
             "RecordTransientAllocMiss(\"vertex\"",
         },
         {
-            "CKBOOL CKBgfxBackend::AllocTransientIndices",
+            "CKBOOL CKBgfxRasterizerContext::AllocTransientIndices",
             "bgfx::getAvailTransientIndexBuffer",
             "bgfx::allocTransientIndexBuffer",
             "RecordTransientAllocMiss(\"index\"",
