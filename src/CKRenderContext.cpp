@@ -41,7 +41,6 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <vector>
 
 CK_CLASSID RCKRenderContext::m_ClassID = CKCID_RENDERCONTEXT;
 
@@ -81,6 +80,15 @@ static const CKRECT *VxRectToRegion(const VxRect *rect, CKRECT &region) {
     region.right = (int) rect->right;
     region.bottom = (int) rect->bottom;
     return &region;
+}
+
+static CKDWORD RasterizerDiagnostic(CKRasterizerContext *context,
+                                    CKRST_DIAGNOSTIC diagnostic) {
+    if (!context)
+        return 0;
+    CKRenderStats stats = {};
+    context->GetStats(stats);
+    return (CKDWORD)stats.Diagnostics[diagnostic];
 }
 
 static void Update2dRootRect(CK2dEntity *entity, const VxRect &rect) {
@@ -586,7 +594,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
 
     // Outside a scene this becomes the frame's first pass; inside a scene
     // (ShadowStencil clears the stencil from a post-opaque callback) the
-    // rasterizer clears at the call position (spec 4.3).
+    // rasterizer clears at the call position.
     if (frameLog)
         CK_LOG("Clear", "rasterizer Clear");
     // The engine's Clear covers the complete target even when the camera
@@ -685,7 +693,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     }
 
     // Present. With a texture target the rasterizer keeps the window contents
-    // (spec 4.8) so later draws in this Virtools frame can sample the texture.
+    // so later draws in this Virtools frame can sample the texture.
     const CKBOOL waitVbl = (renderFlags & CK_RENDER_WAITVBL) != 0;
     if (!m_TargetTexture)
         LogPresentFrameRateState("BackToFront", inputFlags, renderFlags, timeManager);
@@ -699,7 +707,8 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     }
 
     const CKBOOL rejectedDraws = RejectedDrawCount() != 0;
-    m_FrameRejectBaseline = m_RasterizerContext->GetStats()->Diagnostics[CKRST_DIAG_REJECT_UNSUPPORTED_STATE];
+    m_FrameRejectBaseline = RasterizerDiagnostic(
+        m_RasterizerContext, CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
     if (m_FrameRenderError != CK_OK)
         return m_FrameRenderError;
     if (rejectedDraws)
@@ -896,15 +905,7 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
         return CKERR_ALREADYFULLSCREEN;
 
     // Save current settings for restoration later
-    CKRenderContextSettings savedSettings;
-    savedSettings.m_Rect.left = m_RasterizerContext->m_PosX;
-    savedSettings.m_Rect.top = m_RasterizerContext->m_PosY;
-    savedSettings.m_Rect.right = m_RasterizerContext->m_Width;
-    savedSettings.m_Rect.bottom = m_RasterizerContext->m_Height;
-    savedSettings.m_Bpp = m_RasterizerContext->m_Bpp;
-    savedSettings.m_Zbpp = m_RasterizerContext->m_ZBpp;
-    savedSettings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
-    m_FullscreenSettings = savedSettings;
+    m_FullscreenSettings = m_WindowSettings;
 
     // Save window parent and position
     m_AppHandle = VxGetParent(m_WinHandle);
@@ -914,8 +915,10 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
         VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.right);
     }
 
-    // Destroy current device
-    DestroyDevice();
+    // Keep the current context and its resource mappings intact when the
+    // rasterizer cannot complete shutdown yet.
+    if (!DestroyDevice())
+        return CKERR_INVALIDOPERATION;
 
     // Create fullscreen device
     CKRECT rect;
@@ -962,8 +965,8 @@ CKERROR RCKRenderContext::StopFullScreen() {
     if (!m_Fullscreen)
         return CK_OK;
 
-    m_Fullscreen = FALSE;
-    DestroyDevice();
+    if (!DestroyDevice())
+        return CKERR_INVALIDOPERATION;
 
     // Restore window parent and position
     VxSetParent(m_WinHandle, m_AppHandle);
@@ -1011,8 +1014,8 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     } else {
         // Check if forced to software
         if (m_RenderManager->m_ForceSoftware.Value != 0) {
-            CKRasterizerDriver *drv = m_RenderManager->GetDriver(NewDriver);
-            if (!drv || drv->m_Hardware) {
+            VxDriverDescEx *driverDesc = m_RenderManager->GetDriverDescription(NewDriver);
+            if (!driverDesc || driverDesc->Hardware) {
                 NewDriver = m_RenderManager->GetPreferredSoftwareDriver();
             }
         }
@@ -1026,17 +1029,12 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         return FALSE;
 
     // Check 2D caps
-    if (!(newDriver->m_2DCaps.Caps & CKRST_2DCAPS_WINDOWED))
+    VxDriverDescEx *newDriverDesc = m_RenderManager->GetDriverDescription(NewDriver);
+    if (!newDriverDesc || !(newDriverDesc->Caps2D.Caps & CKRST_2DCAPS_WINDOWED))
         return FALSE;
 
-    // Save current settings for fallback (IDA assumes m_RasterizerContext is valid)
-    m_FullscreenSettings.m_Rect.left = m_RasterizerContext->m_PosX;
-    m_FullscreenSettings.m_Rect.top = m_RasterizerContext->m_PosY;
-    m_FullscreenSettings.m_Rect.right = m_RasterizerContext->m_Width;
-    m_FullscreenSettings.m_Rect.bottom = m_RasterizerContext->m_Height;
-    m_FullscreenSettings.m_Bpp = m_RasterizerContext->m_Bpp;
-    m_FullscreenSettings.m_Zbpp = m_RasterizerContext->m_ZBpp;
-    m_FullscreenSettings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
+    // Save current settings for fallback.
+    m_FullscreenSettings = m_WindowSettings;
 
     m_DeviceDestroying = TRUE;
     ApplyDrawAnnotationDebugFlags(CKRST_DEBUG_NONE);
@@ -1046,22 +1044,23 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         return FALSE;
     }
 
-    // Do not invalidate device-backed objects until teardown can proceed.
-    m_RenderManager->DestroyingDevice((CKRenderContext *) this);
-    m_TargetTexture = nullptr;
-
     // Destroy old context
-    if (m_RasterizerDriver && m_RasterizerContext) {
-        if (!m_RasterizerDriver->DestroyContext(m_RasterizerContext)) {
+    CKRasterizerContext *oldContext = m_RasterizerContext;
+    const int oldDriverIndex = m_DriverIndex;
+    if (m_RasterizerDriver && oldContext) {
+        if (!m_RasterizerDriver->DestroyContext(oldContext)) {
             m_DeviceDestroying = FALSE;
             return FALSE;
         }
     }
+    m_RenderManager->ForgetRasterizerContext(oldContext);
+    m_TargetTexture = nullptr;
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
     m_ProjectionUpdated = FALSE;
 
     const auto createDevice = [this](CKRasterizerDriver *driver,
+                                     int driverIndex,
                                      const CKRenderContextSettings &settings) -> CKERROR {
         m_RasterizerDriver = driver;
         m_RasterizerContext = driver ? driver->CreateContext() : nullptr;
@@ -1076,51 +1075,50 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
                 settings.m_Bpp, 0, 0,
                 settings.m_Zbpp, settings.m_StencilBpp)) {
             m_RasterizerDriver->DestroyContext(m_RasterizerContext);
+            m_RasterizerContext = nullptr;
+            m_RasterizerDriver = nullptr;
             return CKERR_CANCREATERENDERCONTEXT;
         }
 
+        if (!m_RenderManager->RegisterRasterizerContext(
+                m_RasterizerContext, driverIndex)) {
+            m_RasterizerContext->BeginShutdown();
+            m_RasterizerDriver->DestroyContext(m_RasterizerContext);
+            m_RasterizerContext = nullptr;
+            m_RasterizerDriver = nullptr;
+            return CKERR_OUTOFMEMORY;
+        }
+
+        m_WindowSettings = settings;
+        m_Settings = settings;
         ApplyRenderOptions();
         SetFullViewport(&m_ViewportData,
-                        m_RasterizerContext->m_Width,
-                        m_RasterizerContext->m_Height);
+                        settings.m_Rect.right,
+                        settings.m_Rect.bottom);
         m_ProjectionUpdated = FALSE;
         return CK_OK;
     };
 
-    CKERROR created = createDevice(newDriver, m_Settings);
+    CKERROR created = createDevice(newDriver, NewDriver, m_WindowSettings);
 
     if (created == CK_OK) {
         m_RenderManager->RefreshDriverCaps(NewDriver);
-        // Success - update driver index and settings
+        // Success - update driver index.
         m_DriverIndex = NewDriver;
-        m_Settings.m_Rect.left = m_RasterizerContext->m_PosX;
-        m_Settings.m_Rect.top = m_RasterizerContext->m_PosY;
-        m_Settings.m_Rect.right = m_RasterizerContext->m_Width;
-        m_Settings.m_Rect.bottom = m_RasterizerContext->m_Height;
-        m_Settings.m_Bpp = m_RasterizerContext->m_Bpp;
-        m_Settings.m_Zbpp = m_RasterizerContext->m_ZBpp;
-        m_Settings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
 
         m_DeviceDestroying = FALSE;
         return TRUE;
     } else {
         // Failed - restore old driver
         m_RasterizerDriver = nullptr;
-        CKERROR restored = createDevice(oldDriver, m_FullscreenSettings);
+        CKERROR restored = createDevice(
+            oldDriver, oldDriverIndex, m_FullscreenSettings);
 
         m_DeviceDestroying = FALSE;
 
         if (restored != CK_OK) {
             m_RasterizerContext = nullptr;
             m_RasterizerDriver = nullptr;
-        } else {
-            m_Settings.m_Rect.left = m_RasterizerContext->m_PosX;
-            m_Settings.m_Rect.top = m_RasterizerContext->m_PosY;
-            m_Settings.m_Rect.right = m_RasterizerContext->m_Width;
-            m_Settings.m_Rect.bottom = m_RasterizerContext->m_Height;
-            m_Settings.m_Bpp = m_RasterizerContext->m_Bpp;
-            m_Settings.m_Zbpp = m_RasterizerContext->m_ZBpp;
-            m_Settings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
         }
         return FALSE;
     }
@@ -1233,17 +1231,23 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
     if (!m_RasterizerContext->Resize(PosX, PosY, SizeX, SizeY, Flags))
         return CKERR_INVALIDOPERATION;
     if ((Flags & VX_RESIZE_NOMOVE) == 0) {
-        m_Settings.m_Rect.left = PosX;
-        m_Settings.m_Rect.top = PosY;
+        m_WindowSettings.m_Rect.left = PosX;
+        m_WindowSettings.m_Rect.top = PosY;
     }
     if ((Flags & VX_RESIZE_NOSIZE) == 0 &&
-        (SizeX != m_Settings.m_Rect.right || SizeY != m_Settings.m_Rect.bottom)) {
-        m_Settings.m_Rect.right = SizeX;
-        m_Settings.m_Rect.bottom = SizeY;
-        SetFullViewport(&m_ViewportData, SizeX, SizeY);
-        m_ProjectionUpdated = FALSE;
-        m_RenderedScene->UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
+        (SizeX != m_WindowSettings.m_Rect.right ||
+         SizeY != m_WindowSettings.m_Rect.bottom)) {
+        m_WindowSettings.m_Rect.right = SizeX;
+        m_WindowSettings.m_Rect.bottom = SizeY;
+        if (!m_TargetTexture) {
+            SetFullViewport(&m_ViewportData, SizeX, SizeY);
+            m_ProjectionUpdated = FALSE;
+            m_RenderedScene->UpdateViewportSize(FALSE,
+                                                CK_RENDER_USECURRENTSETTINGS);
+        }
     }
+    if (!m_TargetTexture)
+        m_Settings = m_WindowSettings;
     return CK_OK;
 }
 
@@ -1348,7 +1352,7 @@ void CKRenderContextStateGuard::Restore() {
         if (rst->GetTexture(stage, &texture) && texture != m_Textures[stage])
             rst->SetTexture(m_Textures[stage], stage);
         // TEXTUREMAPBLEND first: it resets the combine states, which are
-        // replayed afterwards (spec 4.6).
+        // replayed afterwards.
         CKDWORD current = 0;
         if (rst->GetTextureStageState(stage, CKRST_TSS_TEXTUREMAPBLEND, &current) &&
             current != m_StageStates[stage][CKRST_TSS_TEXTUREMAPBLEND])
@@ -1430,7 +1434,7 @@ void RCKRenderContext::ApplyRenderOptions() {
         return;
 
     // Everything the rasterizer needs to know about presentation and debug
-    // output travels in one CKRasterizerOptions (spec 4.4). The rasterizer
+    // output travels in one CKRasterizerOptions. The rasterizer
     // clamps RenderScale / Sharpness itself.
     CKRasterizerOptions options;
     options.MSAASamples = (CKDWORD) m_RenderManager->m_Antialias.Value;
@@ -1653,15 +1657,15 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
 
 void RCKRenderContext::BeginFrameErrorTracking() {
     m_FrameRenderError = CK_OK;
-    m_FrameRejectBaseline = m_RasterizerContext
-        ? m_RasterizerContext->GetStats()->Diagnostics[CKRST_DIAG_REJECT_UNSUPPORTED_STATE]
-        : 0;
+    m_FrameRejectBaseline = RasterizerDiagnostic(
+        m_RasterizerContext, CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
 }
 
 CKDWORD RCKRenderContext::RejectedDrawCount() {
     if (!m_RasterizerContext)
         return 0;
-    const CKDWORD rejected = m_RasterizerContext->GetStats()->Diagnostics[CKRST_DIAG_REJECT_UNSUPPORTED_STATE];
+    const CKDWORD rejected = RasterizerDiagnostic(
+        m_RasterizerContext, CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
     return rejected >= m_FrameRejectBaseline ? rejected - m_FrameRejectBaseline : rejected;
 }
 
@@ -2523,8 +2527,8 @@ CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBU
     if (imageSize <= 0)
         return CKERR_INVALIDOPERATION;
 
-    std::vector<CKBYTE> pixels((size_t)imageSize);
-    image.Image = pixels.data();
+    XArray<CKBYTE> pixels(imageSize);
+    image.Image = pixels.Begin();
     if (DumpToMemory(rect, buffer, image) <= 0)
         return CKERR_INVALIDOPERATION;
 
@@ -2603,7 +2607,8 @@ void RCKRenderContext::ReadbackCallback(void *user, const CKRECT *rect, VXBUFFER
 VxDirectXData *RCKRenderContext::GetDirectXInfo() {
     // IDA: 0x1006bb75
     // Only return DirectX info if Family is 0 (DirectX family)
-    if (m_RasterizerDriver && m_RasterizerDriver->m_2DCaps.Family == 0) {
+    VxDriverDescEx *driverDesc = m_RenderManager->GetDriverDescription(m_DriverIndex);
+    if (driverDesc && driverDesc->Caps2D.Family == 0) {
         return (VxDirectXData *) nullptr;
     }
     return nullptr;
@@ -2644,7 +2649,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
         RCKTexture *target = static_cast<RCKTexture *>(texture);
         if (!target->EnsureRenderTarget(this))
             return FALSE;
-        // Depth buffer and framebuffer belong to the rasterizer (spec 4.8).
+        // Depth buffer and framebuffer belong to the rasterizer.
         if (!m_RasterizerContext->SetTargetTexture(target->GetRstTextureIndex(),
                                                    texture->GetWidth(), texture->GetHeight(),
                                                    static_cast<CKRST_CUBEFACE>(CubeMapFace)))
@@ -2673,15 +2678,7 @@ CKBOOL RCKRenderContext::SetRenderTarget(CKTexture *texture, int CubeMapFace) {
     m_TargetTexture = nullptr;
     m_CubeMapFace = CKRST_CUBEFACE_XPOS;
 
-    CKRenderContextSettings savedSettings;
-    savedSettings.m_Rect.left = m_RasterizerContext->m_PosX;
-    savedSettings.m_Rect.top = m_RasterizerContext->m_PosY;
-    savedSettings.m_Rect.right = m_RasterizerContext->m_Width;
-    savedSettings.m_Rect.bottom = m_RasterizerContext->m_Height;
-    savedSettings.m_Bpp = m_RasterizerContext->m_Bpp;
-    savedSettings.m_Zbpp = m_RasterizerContext->m_ZBpp;
-    savedSettings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
-    m_Settings = savedSettings;
+    m_Settings = m_WindowSettings;
 
     SetFullViewport(&m_ViewportData, m_Settings.m_Rect.right, m_Settings.m_Rect.bottom);
     UpdateProjection(TRUE);
@@ -2777,8 +2774,8 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // Check if forcing software driver
     if (m_RenderManager->m_ForceSoftware.Value != 0) {
-        CKRasterizerDriver *driverToCheck = m_RenderManager->GetDriver(Driver);
-        if (!driverToCheck || driverToCheck->m_Hardware) {
+        VxDriverDesc *driverToCheck = m_RenderManager->GetRenderDriverDescription(Driver);
+        if (!driverToCheck || driverToCheck->IsHardware) {
             Driver = m_RenderManager->GetPreferredSoftwareDriver();
         }
     }
@@ -2850,6 +2847,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
                 m_WinHandle, localRect.left, localRect.top,
                 width, height, Bpp, Fullscreen, RefreshRate, Zbpp, StencilBpp)) {
             driver->DestroyContext(m_RasterizerContext);
+            m_RasterizerContext = nullptr;
             return CKERR_CANCREATERENDERCONTEXT;
         }
         return CK_OK;
@@ -2871,21 +2869,36 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     m_DriverIndex = Driver;
 
-    width = m_RasterizerContext->m_Width;
-    height = m_RasterizerContext->m_Height;
+    if (!m_RenderManager->RegisterRasterizerContext(
+            m_RasterizerContext, m_DriverIndex)) {
+        m_RasterizerContext->BeginShutdown();
+        m_RasterizerDriver->DestroyContext(m_RasterizerContext);
+        m_RasterizerContext = nullptr;
+        m_RasterizerDriver = nullptr;
+        if (Fullscreen && restoreWindowOnFailure) {
+            VxSetParent(m_WinHandle, oldParent);
+            VxMoveWindow(m_WinHandle, oldWindowRect.left, oldWindowRect.top,
+                         oldWindowRect.right - oldWindowRect.left,
+                         oldWindowRect.bottom - oldWindowRect.top, FALSE);
+        }
+        m_DeviceDestroying = FALSE;
+        return CKERR_OUTOFMEMORY;
+    }
+
     SetFullViewport(&m_ViewportData, width, height);
     ApplyRenderOptions();
 
     m_Fullscreen = Fullscreen;
 
-    // Save settings from rasterizer context
-    m_Settings.m_Rect.left = m_RasterizerContext->m_PosX;
-    m_Settings.m_Rect.top = m_RasterizerContext->m_PosY;
-    m_Settings.m_Rect.right = m_RasterizerContext->m_Width;
-    m_Settings.m_Rect.bottom = m_RasterizerContext->m_Height;
-    m_Settings.m_Bpp = m_RasterizerContext->m_Bpp;
-    m_Settings.m_Zbpp = m_RasterizerContext->m_ZBpp;
-    m_Settings.m_StencilBpp = m_RasterizerContext->m_StencilBpp;
+    m_WindowSettings.m_Rect.left = localRect.left;
+    m_WindowSettings.m_Rect.top = localRect.top;
+    m_WindowSettings.m_Rect.right = width;
+    m_WindowSettings.m_Rect.bottom = height;
+    m_WindowSettings.m_Bpp = Bpp > 0 ? (CKDWORD)Bpp : 32;
+    m_WindowSettings.m_Zbpp = Zbpp > 0 ? (CKDWORD)Zbpp : 24;
+    m_WindowSettings.m_StencilBpp =
+        StencilBpp > 0 ? (CKDWORD)StencilBpp : 8;
+    m_Settings = m_WindowSettings;
 
     // Copy to fullscreen settings if not fullscreen
     if (!Fullscreen) {
@@ -2902,10 +2915,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
 
     // If going fullscreen with uninitialized WinRect, save settings
     if (Fullscreen && m_WinRect.left == -1 && m_WinRect.right == -1) {
-        m_FullscreenSettings.m_Rect.left = m_RasterizerContext->m_PosX;
-        m_FullscreenSettings.m_Rect.top = m_RasterizerContext->m_PosY;
-        m_FullscreenSettings.m_Rect.right = m_RasterizerContext->m_Width;
-        m_FullscreenSettings.m_Rect.bottom = m_RasterizerContext->m_Height;
+        m_FullscreenSettings = m_WindowSettings;
         m_WinRect.left = 0;
         m_WinRect.top = 0;
         m_WinRect.right = m_FullscreenSettings.m_Rect.right;
@@ -3002,6 +3012,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_FpsInterval = 0;
     memset(&m_Settings, 0, sizeof(m_Settings));
     memset(&m_FullscreenSettings, 0, sizeof(m_FullscreenSettings));
+    memset(&m_WindowSettings, 0, sizeof(m_WindowSettings));
     m_ProjectionMatrix.Identity();
     Vx3DMatrixIdentity(m_WorldMatrix);
     Vx3DMatrixIdentity(m_ViewMatrix);
@@ -3012,7 +3023,11 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
 
 RCKRenderContext::~RCKRenderContext() {
     // Based on IDA at 0x10066ebb
-    DestroyDevice();
+    if (!DestroyDevice() && m_RenderManager) {
+        m_RenderManager->ForgetRasterizerContext(m_RasterizerContext);
+        m_RasterizerContext = nullptr;
+        m_RasterizerDriver = nullptr;
+    }
     DetachAll();
     ClearCallbacks();
 
@@ -3050,6 +3065,7 @@ CKERROR RCKRenderContext::Copy(CKObject &o, CKDependenciesContext &context) {
         m_DriverIndex = src->m_DriverIndex;
         m_RenderFlags = src->m_RenderFlags;
         m_Settings = src->m_Settings;
+        m_WindowSettings = src->m_WindowSettings;
         m_WinRect = src->m_WinRect;
     }
     return CK_OK;
@@ -3065,15 +3081,16 @@ CKBOOL RCKRenderContext::DestroyDevice() {
         return FALSE;
     }
 
-    // Do not invalidate device-backed objects until teardown can proceed.
-    if (m_RenderManager)
-        m_RenderManager->DestroyingDevice(this);
     // Destroy the rasterizer context
-    if (m_RasterizerDriver && m_RasterizerContext &&
-        !m_RasterizerDriver->DestroyContext(m_RasterizerContext)) {
+    CKRasterizerContext *destroyedContext = m_RasterizerContext;
+    if (m_RasterizerDriver && destroyedContext &&
+        !m_RasterizerDriver->DestroyContext(destroyedContext)) {
         m_DeviceDestroying = FALSE;
         return FALSE;
     }
+
+    if (m_RenderManager)
+        m_RenderManager->ForgetRasterizerContext(destroyedContext);
 
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
@@ -3187,7 +3204,7 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
         m_ProjectionMatrix.Orthographic(m_Zoom, aspect, m_NearPlane, m_FarPlane);
 
     // The viewport and the projection derived from it travel together: the
-    // rasterizer maps clip space into m_ViewportData (spec 4.4).
+    // rasterizer maps clip space into m_ViewportData.
     m_RasterizerContext->SetViewport(&m_ViewportData);
     m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, m_ProjectionMatrix);
     m_ProjectionUpdated = TRUE;

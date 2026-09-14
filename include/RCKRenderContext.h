@@ -106,9 +106,9 @@ public:
     CKDWORD GetState(VXRENDERSTATETYPE State) override;
     CKBOOL SetTexture(CKTexture *tex, CKBOOL Clamped = 0, int Stage = 0) override;
     CKBOOL SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage = 0) override;
-    // CK2 public API: returns the v3 CKRasterizerContext.
+    // CK2 public API: returns the active CKRasterizerContext.
     CKRasterizerContext *GetRasterizerContext() override;
-    // Texture stage back to "not set" (spec 4.6): no texture, every stage
+    // Texture stage back to "not set": no texture, every stage
     // state 0 (TEXCOORDINDEX = stage), identity texture matrix. The
     // rasterizer then disables the stage until a texture is bound.
     void ResetTextureStage(int Stage);
@@ -282,8 +282,7 @@ public:
     CKCallbacksContainer m_PostRenderCallBacks;  // 0x6C (28 bytes)
     CKCallbacksContainer m_PostSpriteRenderCallBacks;  // 0x88 (28 bytes)
     RCKRenderManager *m_RenderManager;      // 0xA4 (4 bytes)
-    // v3 contract objects: the engine talks to the rasterizer only through
-    // these two (spec section 4).
+    // The engine talks to the rasterizer only through these two objects.
     CKRasterizerContext *m_RasterizerContext; // 0xA8 (4 bytes)
     CKRasterizerDriver *m_RasterizerDriver;   // 0xAC (4 bytes)
     int m_DriverIndex;                      // 0xB0 (4 bytes) - NOTE: m_Driver removed, only m_DriverIndex exists
@@ -365,11 +364,14 @@ public:
     CKDrawAnnotationState *m_DrawAnnotationState;
     // CKRST_DIAG_REJECT_UNSUPPORTED_STATE counter at BeginFrameErrorTracking().
     CKDWORD m_FrameRejectBaseline;
+    // Current window or fullscreen device. m_Settings may temporarily describe
+    // a texture render target instead.
+    CKRenderContextSettings m_WindowSettings;
 };
 
 // Saves the fixed-function state the engine changes around a special draw
 // (render states, texture stages with their textures, world / view /
-// projection and texture matrices) and restores it through the contract.
+// projection and texture matrices) and restores it through the rasterizer interface.
 class CKRenderContextStateGuard {
 public:
     explicit CKRenderContextStateGuard(CKRasterizerContext *Rst);

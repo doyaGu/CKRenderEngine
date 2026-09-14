@@ -2,13 +2,19 @@
 #define RCKRENDERMANAGER_H
 
 #include "XObjectArray.h"
+#include "XSHashTable.h"
 #include "CKRenderEngineTypes.h"
 #include "CKRenderEngineEnums.h"
 #include "CKRenderManager.h"
 #include "CKSceneGraph.h"
+#include "RCKRasterizerObjectStates.h"
 #include "VertexCacheOptimizer.h"
 
 class RCK3dEntity;
+class RCKMesh;
+class RCKSprite;
+class RCKTexture;
+struct RCKVertexBuffer;
 
 class RCKRenderManager : public CKRenderManager {
 public:
@@ -48,7 +54,8 @@ public:
     CKMaterial *GetDefaultMaterial();
 
     void DetachAllObjects();
-    void DestroyingDevice(CKRenderContext *ctx);
+    CKBOOL RegisterRasterizerContext(CKRasterizerContext *Context, int DriverIndex);
+    void ForgetRasterizerContext(CKRasterizerContext *Context);
 
     void DeleteAllVertexBuffers();
 
@@ -83,12 +90,37 @@ public:
 
     // Driver management
     CKRasterizerDriver *GetDriver(int DriverIndex);
+    VxDriverDescEx *GetDriverDescription(int DriverIndex);
+    VxDriverDescEx *GetDriverDescription(CKRasterizerContext *Context);
     // A driver reports the capability baseline until one of its contexts
-    // exists; the backend below then lowers the numeric limits to what it
-    // really supports, so the caps are refreshed after a context is created.
+    // exists; the concrete rasterizer then lowers numeric limits to what it
+    // really supports, so caps are refreshed after a context is created.
     void RefreshDriverCaps(int DriverIndex);
     CKRasterizerContext *GetFullscreenContext();
     int GetPreferredSoftwareDriver();
+    void FindNearestTextureFormatWithAlpha(int DriverIndex, VxImageDescEx &Format) const;
+
+    // Resource-object coordination used by the concrete render objects.
+    CKBOOL SelectTextureObject(RCKTexture *Texture, CKRasterizerContext *Context);
+    CKBOOL TextureObjectNeedsUpdate(RCKTexture *Texture);
+    void TextureObjectChanged(RCKTexture *Texture);
+    void TextureObjectUpdated(RCKTexture *Texture, CKBOOL Dirty = FALSE);
+    CKBOOL DeleteTextureObject(RCKTexture *Texture, CKRasterizerContext *Context);
+    CKBOOL DeleteTextureObjects(RCKTexture *Texture, CKBOOL PreserveOnFailure = TRUE);
+    CKBOOL SelectSpriteObject(RCKSprite *Sprite, CKRasterizerContext *Context);
+    CKBOOL SpriteObjectNeedsUpdate(RCKSprite *Sprite);
+    void SpriteObjectChanged(RCKSprite *Sprite);
+    void SpriteObjectUpdated(RCKSprite *Sprite, CKBOOL Dirty = FALSE);
+    CKBOOL DeleteSpriteObject(RCKSprite *Sprite, CKRasterizerContext *Context);
+    CKBOOL DeleteSpriteObjects(RCKSprite *Sprite, CKBOOL PreserveOnFailure = TRUE);
+    CKBOOL SelectVertexBufferObject(RCKVertexBuffer *Buffer, CKRasterizerContext *Context);
+    CKBOOL VertexBufferObjectUpdated(RCKVertexBuffer *Buffer);
+    CKBOOL DeleteVertexBufferObjects(RCKVertexBuffer *Buffer, CKBOOL PreserveOnFailure = TRUE);
+    CKBOOL SelectMeshBuffers(RCKMesh *Mesh, CKRasterizerContext *Context);
+    CKBOOL StoreMeshBuffers(RCKMesh *Mesh);
+    void MeshVerticesChanged(RCKMesh *Mesh);
+    void MeshIndicesChanged(RCKMesh *Mesh);
+    CKBOOL DeleteMeshBuffers(RCKMesh *Mesh, CKBOOL PreserveOnFailure = TRUE);
 
     XClassArray<VxCallBack> m_TemporaryPreRenderCallbacks;  // 0x28
     XClassArray<VxCallBack> m_TemporaryPostRenderCallbacks; // 0x34
@@ -122,6 +154,72 @@ public:
     CK_ID m_2DRootBackId;
     CK_ID m_2DRootForeId;
     XClassArray<VxEffectDescription> m_Effects;
+
+private:
+    typedef XSHashTable<int, CKRasterizerContext *> ContextDriverTable;
+
+    ContextDriverTable m_ContextDrivers;
+
+    struct TextureEntry {
+        CKRasterizerContext *Context;
+        CKDWORD ObjectIndex;
+        CKDWORD Flags;
+        CKDWORD MipMapCount;
+        VxImageDescEx Format;
+        CKBOOL Dirty;
+    };
+
+    typedef XClassArray<TextureEntry> TextureEntryArray;
+    typedef XSHashTable<TextureEntryArray, CK_ID> TextureEntryTable;
+
+    TextureEntry *FindTextureEntry(CKObject *Object,
+                                   CKRasterizerContext *Context);
+    TextureEntry *AddTextureEntry(CKObject *Object,
+                                  CKRasterizerContext *Context);
+    CKBOOL DeleteTextureEntry(CKObject *Object,
+                              CKRasterizerContext *Context);
+    CKBOOL DeleteTextureEntries(CKObject *Object, CKBOOL PreserveOnFailure);
+    void ResetTextureObjectState(RCKTexture *Texture,
+                                 CKRasterizerContext *Context);
+    void RestoreTextureObjectState(RCKTexture *Texture,
+                                   const TextureEntry &Entry);
+    void ResetTextureObjectState(RCKSprite *Sprite,
+                                 CKRasterizerContext *Context);
+    void RestoreTextureObjectState(RCKSprite *Sprite,
+                                   const TextureEntry &Entry);
+
+    void ForgetTextureObjects(CKRasterizerContext *Context);
+
+    TextureEntryTable m_TextureEntries;
+
+    typedef RCKVertexBufferObjectState VertexBufferEntry;
+    typedef XClassArray<VertexBufferEntry> VertexBufferEntryArray;
+    typedef XSHashTable<VertexBufferEntryArray, RCKVertexBuffer *>
+        VertexBufferEntryTable;
+
+    VertexBufferEntry *FindVertexBufferEntry(
+        RCKVertexBuffer *Buffer, CKRasterizerContext *Context);
+    VertexBufferEntry *AddVertexBufferEntry(
+        RCKVertexBuffer *Buffer, CKRasterizerContext *Context);
+    void ForgetVertexBufferObjects(CKRasterizerContext *Context);
+
+    VertexBufferEntryTable m_VertexBufferEntries;
+
+    typedef RCKMeshBufferState MeshBufferEntry;
+    typedef XClassArray<MeshBufferEntry> MeshBufferEntryArray;
+    typedef XSHashTable<MeshBufferEntryArray, CK_ID> MeshBufferEntryTable;
+
+    MeshBufferEntry *FindMeshBufferEntry(
+        RCKMesh *Mesh, CKRasterizerContext *Context);
+    MeshBufferEntry *AddMeshBufferEntry(
+        RCKMesh *Mesh, CKRasterizerContext *Context);
+    void ResetMeshBufferState(
+        RCKMesh *Mesh, CKRasterizerContext *Context);
+    void RestoreMeshBufferState(
+        RCKMesh *Mesh, const MeshBufferEntry &Entry);
+    void ForgetMeshBuffers(CKRasterizerContext *Context);
+
+    MeshBufferEntryTable m_MeshBufferEntries;
 };
 
 #endif // RCKRENDERMANAGER_H

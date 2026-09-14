@@ -588,7 +588,9 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
     rst->SetRenderState(VXRENDERSTATE_FOGENABLE, fogMode != VXFOG_NONE);
 
     if (fogMode != VXFOG_NONE) {
-        if ((rc->m_RasterizerDriver->m_3DCaps.RasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) == (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) {
+        VxDriverDescEx *driverDesc = rm->GetDriverDescription(rc->m_DriverIndex);
+        const CKDWORD rasterCaps = driverDesc ? driverDesc->Caps3D.RasterCaps : 0;
+        if ((rasterCaps & (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) == (CKRST_RASTERCAPS_FOGRANGE | CKRST_RASTERCAPS_FOGPIXEL)) {
             rst->SetRenderState(VXRENDERSTATE_FOGPIXELMODE, fogMode);
         } else {
             fogMode = VXFOG_LINEAR;

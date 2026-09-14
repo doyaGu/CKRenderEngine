@@ -19,7 +19,7 @@
 #include "CKAll.h"
 #include "CKPluginManager.h"
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
-// The public v3 contract is shared by the saved baseline and current engine.
+// The rasterizer interface is shared by the saved baseline and current engine.
 // Original Virtools SDK rasterizers have another vtable and are not queried.
 #include "../../include/CKRasterizer.h"
 #endif
@@ -462,12 +462,12 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
             sample.WindowFocused = (SDL_GetWindowFlags(m_Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
             if (auto *rasterizer = m_RenderContext->GetRasterizerContext()) {
-                if (const auto *stats = rasterizer->GetStats()) {
-                    sample.HasRasterizerStats = true;
-                    sample.DrawCalls = stats->DrawCalls; sample.Primitives = stats->Primitives;
-                    sample.Passes = stats->Passes; sample.Clears = stats->Clears;
-                    sample.TextureUploads = stats->TextureUploads; sample.BufferUploads = stats->BufferUploads;
-                }
+                CKRenderStats stats = {};
+                rasterizer->GetStats(stats);
+                sample.HasRasterizerStats = true;
+                sample.DrawCalls = stats.DrawCalls; sample.Primitives = stats.Primitives;
+                sample.Passes = stats.Passes; sample.Clears = stats.Clears;
+                sample.TextureUploads = stats.TextureUploads; sample.BufferUploads = stats.BufferUploads;
             }
 #endif
             m_ProfileFrames.push_back(sample);

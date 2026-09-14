@@ -1,6 +1,7 @@
 #include "RCKRenderManager.h"
 
 #include "CKRasterizerRegistration.h"
+#include "CKRasterizerCapsBaseline.h"
 
 #include "CKLevel.h"
 #include "CKMaterial.h"
@@ -17,6 +18,29 @@
 
 // External reference to rasterizer info array from CK2_3D.cpp
 extern XClassArray<CKRasterizerInfo> g_RasterizersInfo;
+
+static CKBOOL IsHardwareDriver(CKRasterizerDriver *driver) {
+    if (!driver)
+        return FALSE;
+    CKRasterizerDriverDesc desc = {};
+    return driver->GetDesc(&desc) ? desc.Hardware : FALSE;
+}
+
+static void ClearMeshVertexBufferState(RCKMeshBufferState &state) {
+    state.VertexBufferReady = 0;
+    state.VertexBuffer = 0;
+    state.VertexBufferDpFlags = 0;
+    state.VertexBufferVertexFormat = 0;
+    state.VertexBufferStride = 0;
+    state.VertexBufferVertexCount = 0;
+    state.VertexBufferWrapAware = FALSE;
+}
+
+static void ClearMeshIndexBufferState(RCKMeshBufferState &state) {
+    state.IndexBufferReady = FALSE;
+    state.IndexBuffer = 0;
+    state.IndexBufferIndexCount = 0;
+}
 
 // Helper function to update driver description from rasterizer driver
 static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
@@ -39,33 +63,77 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
         return;
     }
 
-    // Copy caps from rasterizer driver
-    drvDesc->CapsUpToDate = rstDriver->m_CapsUpToDate;
-    strncpy(drvDesc->DriverDesc, rstDriver->m_Desc.CStr(), sizeof(drvDesc->DriverDesc) - 1);
-    strncpy(drvDesc->DriverDesc2, rstDriver->m_Desc.CStr(), sizeof(drvDesc->DriverDesc2) - 1);
+    CKRasterizerDriverDesc rasterizerDesc = {};
+    if (!rstDriver->GetDesc(&rasterizerDesc))
+        return;
+
+    drvDesc->CapsUpToDate = rasterizerDesc.CapsFinal;
+    strncpy(drvDesc->DriverDesc, rasterizerDesc.Description.CStr(), sizeof(drvDesc->DriverDesc) - 1);
+    strncpy(drvDesc->DriverDesc2, rasterizerDesc.Description.CStr(), sizeof(drvDesc->DriverDesc2) - 1);
     drvDesc->DriverDesc[sizeof(drvDesc->DriverDesc) - 1] = '\0';
     drvDesc->DriverDesc2[sizeof(drvDesc->DriverDesc2) - 1] = '\0';
-    drvDesc->Hardware = rstDriver->m_Hardware;
+    drvDesc->Hardware = rasterizerDesc.Hardware;
 
-    // Copy 3D and 2D caps
-    memcpy(&drvDesc->Caps3D, &rstDriver->m_3DCaps, sizeof(Vx3DCapsDesc));
-    drvDesc->Caps2D = rstDriver->m_2DCaps;
+    memset(&drvDesc->Caps3D, 0, sizeof(drvDesc->Caps3D));
+    memset(&drvDesc->Caps2D, 0, sizeof(drvDesc->Caps2D));
+    if (!CKRSTGetCapsBaseline(&drvDesc->Caps3D, &drvDesc->Caps2D)) {
+        drvDesc->Caps3D.MinTextureWidth = 1;
+        drvDesc->Caps3D.MinTextureHeight = 1;
+        drvDesc->Caps3D.MaxTextureWidth = 4096;
+        drvDesc->Caps3D.MaxTextureHeight = 4096;
+        drvDesc->Caps3D.MaxTextureRatio = 4096;
+        drvDesc->Caps3D.MaxClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
+        drvDesc->Caps3D.MaxActiveLights = CKRST_MAX_LIGHTS;
+        drvDesc->Caps3D.MaxNumberBlendStage = CKRST_MAX_TEXTURE_STAGES;
+        drvDesc->Caps3D.MaxNumberTextureStage = CKRST_MAX_TEXTURE_STAGES;
+        drvDesc->Caps2D.Family = CKRST_DIRECTX;
+        drvDesc->Caps2D.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D;
+    }
+
+    CKRasterizerNativeCapsDesc nativeCaps;
+    if (rstDriver->GetNativeCaps(&nativeCaps)) {
+        Vx3DCapsDesc limits = {};
+        limits.MaxTextureWidth = nativeCaps.MaxTextureSize;
+        limits.MaxTextureHeight = nativeCaps.MaxTextureSize;
+        limits.MaxTextureRatio = nativeCaps.MaxTextureSize;
+        limits.MaxClipPlanes = nativeCaps.MaxUserClipPlanes;
+        limits.MaxActiveLights = nativeCaps.MaxLights;
+        limits.MaxNumberBlendStage = nativeCaps.MaxTextureStages;
+        limits.MaxNumberTextureStage = nativeCaps.MaxTextureStages;
+        CKRSTLowerCapsToLimits(&drvDesc->Caps3D, &limits);
+    }
+
+    const XDWORD hardwareCaps =
+        CKRST_SPECIFICCAPS_HARDWARE |
+        CKRST_SPECIFICCAPS_HARDWARETL |
+        CKRST_SPECIFICCAPS_SOFTWARE;
+    drvDesc->Caps3D.CKRasterizerSpecificCaps &= ~hardwareCaps;
+    drvDesc->Caps3D.CKRasterizerSpecificCaps |= rasterizerDesc.Hardware
+        ? CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL
+        : CKRST_SPECIFICCAPS_SOFTWARE;
+    drvDesc->Caps2D.Caps |= CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D;
+#if defined(_WIN32)
+    drvDesc->Caps2D.Caps |= CKRST_2DCAPS_GDI;
+#endif
 
     // Copy texture formats
-    int texFormatCount = rstDriver->m_TextureFormats.Size();
+    int texFormatCount = rstDriver->GetTextureFormatCount();
     drvDesc->TextureFormats.Resize(texFormatCount);
     for (int i = 0; i < texFormatCount; ++i) {
-        drvDesc->TextureFormats[i] = rstDriver->m_TextureFormats[i].Format;
+        CKTextureDesc textureDesc;
+        if (rstDriver->GetTextureFormat(i, &textureDesc))
+            drvDesc->TextureFormats[i] = textureDesc.Format;
     }
 
     // Copy display modes
-    int displayModeCount = rstDriver->m_DisplayModes.Size();
+    int displayModeCount = rstDriver->GetDisplayModeCount();
     drvDesc->DisplayModeCount = displayModeCount;
     if (drvDesc->DisplayModes) {
         delete[] drvDesc->DisplayModes;
     }
     drvDesc->DisplayModes = new VxDisplayMode[displayModeCount];
-    memcpy(drvDesc->DisplayModes, rstDriver->m_DisplayModes.Begin(), displayModeCount * sizeof(VxDisplayMode));
+    for (int i = 0; i < displayModeCount; ++i)
+        rstDriver->GetDisplayMode(i, &drvDesc->DisplayModes[i]);
 }
 
 static void ApplyIniRenderOptions(RCKRenderManager *manager) {
@@ -182,7 +250,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         for (int driverIndex = 0; rasterizer &&
              driverIndex < rasterizer->GetDriverCount(); ++driverIndex) {
             CKRasterizerDriver *driver = rasterizer->GetDriver(driverIndex);
-            if (driver && !driver->m_Hardware) {
+            if (driver && !IsHardwareDriver(driver)) {
                 hasSoftwareDriver = TRUE;
                 break;
             }
@@ -222,7 +290,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
         for (int k = 0; k < drvCount; ++k) {
             CKRasterizerDriver *rstDriver = rasterizer->GetDriver(k);
-            if (rstDriver && rstDriver->m_Hardware) {
+            if (IsHardwareDriver(rstDriver)) {
                 VxDriverDescEx *drvDesc = &m_Drivers[driverId];
                 drvDesc->Rasterizer = rasterizer;
                 drvDesc->RasterizerDriver = rstDriver;
@@ -240,7 +308,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 
         for (int m = 0; m < drvCount; ++m) {
             CKRasterizerDriver *rstDriver = rasterizer->GetDriver(m);
-            if (!rstDriver || !rstDriver->m_Hardware) {
+            if (!rstDriver || !IsHardwareDriver(rstDriver)) {
                 VxDriverDescEx *drvDesc = &m_Drivers[driverId];
                 drvDesc->Rasterizer = rasterizer;
                 drvDesc->RasterizerDriver = rstDriver;
@@ -278,6 +346,30 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
 }
 
 RCKRenderManager::~RCKRenderManager() {
+    DeleteAllVertexBuffers();
+
+    while (m_MeshBufferEntries.Size() > 0) {
+        MeshBufferEntryTable::Iterator entry = m_MeshBufferEntries.Begin();
+        CKObject *object = m_Context->GetObject(entry.GetKey());
+        if (object && CKIsChildClassOf(object, CKCID_MESH))
+            DeleteMeshBuffers(static_cast<RCKMesh *>(object), FALSE);
+        else
+            m_MeshBufferEntries.Remove(entry);
+    }
+
+    while (m_TextureEntries.Size() > 0) {
+        TextureEntryTable::Iterator entry = m_TextureEntries.Begin();
+        CKObject *object = m_Context->GetObject(entry.GetKey());
+        if (object && CKIsChildClassOf(object, CKCID_TEXTURE))
+            DeleteTextureObjects(static_cast<RCKTexture *>(object), FALSE);
+        else if (object && CKIsChildClassOf(object, CKCID_SPRITE))
+            DeleteSpriteObjects(static_cast<RCKSprite *>(object), FALSE);
+        else if (object)
+            DeleteTextureEntries(object, FALSE);
+        else
+            m_TextureEntries.Remove(entry);
+    }
+
     // Clean up drivers
     for (int i = 0; i < m_DriverCount; ++i) {
         delete[] m_Drivers[i].DisplayModes;
@@ -746,50 +838,27 @@ void RCKRenderManager::DetachAllObjects() {
     }
 }
 
-void RCKRenderManager::DestroyingDevice(CKRenderContext *ctx) {
-    RCKRenderContext *rctx = (RCKRenderContext *) ctx;
-    CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
+CKBOOL RCKRenderManager::RegisterRasterizerContext(
+    CKRasterizerContext *Context, int DriverIndex) {
+    if (!Context || DriverIndex < 0 || DriverIndex >= m_DriverCount)
+        return FALSE;
 
-    for (int i = 0; i < CKGetClassCount(); ++i) {
-        if (CKIsChildClassOf(i, CKCID_TEXTURE)) {
-            int count = m_Context->GetObjectsCountByClassID(i);
-            CK_ID *ids = m_Context->GetObjectsListByClassID(i);
-            for (int j = 0; j < count; ++j) {
-                RCKTexture *tex = (RCKTexture *) m_Context->GetObject(ids[j]);
-                if (tex && tex->m_RasterizerContext == rstCtx) {
-                    tex->m_RasterizerContext = nullptr;
-                    tex->m_InVideoMemory = FALSE;
-                }
-            }
-        } else if (CKIsChildClassOf(i, CKCID_SPRITE)) {
-            int count = m_Context->GetObjectsCountByClassID(i);
-            CK_ID *ids = m_Context->GetObjectsListByClassID(i);
-            for (int j = 0; j < count; ++j) {
-                RCKSprite *sprite = (RCKSprite *) m_Context->GetObject(ids[j]);
-                if (sprite && sprite->m_RasterizerContext == rstCtx) {
-                    sprite->m_RasterizerContext = nullptr;
-                    sprite->m_InVideoMemory = FALSE;
-                }
-            }
-        } else if (CKIsChildClassOf(i, CKCID_MESH)) {
-            int count = m_Context->GetObjectsCountByClassID(i);
-            CK_ID *ids = m_Context->GetObjectsListByClassID(i);
-            for (int j = 0; j < count; ++j) {
-                RCKMesh *mesh = (RCKMesh *) m_Context->GetObject(ids[j]);
-                if (mesh) {
-                    mesh->InvalidateHardwareBuffers();
-                }
-            }
-        }
-    }
+    int *registeredDriver = m_ContextDrivers.FindPtr(Context);
+    if (registeredDriver)
+        return *registeredDriver == DriverIndex;
 
-    for (CKVertexBuffer **it = (CKVertexBuffer **) m_VertexBuffers.Begin();
-         it != (CKVertexBuffer **) m_VertexBuffers.End(); ++it) {
-        RCKVertexBuffer *vb = (RCKVertexBuffer *) *it;
-        if (vb) {
-            vb->InvalidateHardwareBuffer();
-        }
-    }
+    return m_ContextDrivers.Insert(Context, DriverIndex, FALSE);
+}
+
+void RCKRenderManager::ForgetRasterizerContext(
+    CKRasterizerContext *Context) {
+    if (!Context)
+        return;
+
+    ForgetTextureObjects(Context);
+    ForgetVertexBufferObjects(Context);
+    ForgetMeshBuffers(Context);
+    m_ContextDrivers.Remove(Context);
 }
 
 void RCKRenderManager::DeleteAllVertexBuffers() {
@@ -1108,16 +1177,31 @@ CKRasterizerDriver *RCKRenderManager::GetDriver(int DriverIndex) {
     return m_Drivers[DriverIndex].RasterizerDriver;
 }
 
+VxDriverDescEx *RCKRenderManager::GetDriverDescription(int DriverIndex) {
+    if (DriverIndex < 0 || DriverIndex >= m_DriverCount)
+        return nullptr;
+
+    VxDriverDescEx *driver = &m_Drivers[DriverIndex];
+    if (!driver->CapsUpToDate)
+        UpdateDriverDescCaps(driver);
+    return driver;
+}
+
+VxDriverDescEx *RCKRenderManager::GetDriverDescription(CKRasterizerContext *Context) {
+    if (!Context)
+        return nullptr;
+
+    int *driverIndex = m_ContextDrivers.FindPtr(Context);
+    return driverIndex ? GetDriverDescription(*driverIndex) : nullptr;
+}
+
 CKRasterizerContext *RCKRenderManager::GetFullscreenContext() {
-    // A fullscreen context is one created with Fullscreen=TRUE.
-    for (int i = 0; i < m_DriverCount; ++i) {
-        CKRasterizerDriver *driver = GetDriver(i);
-        if (!driver) continue;
-        for (int c = 0; c < driver->m_Contexts.Size(); ++c) {
-            CKRasterizerContext *ctx = driver->m_Contexts[c];
-            if (ctx && ctx->m_Fullscreen)
-                return ctx;
-        }
+    for (ContextDriverTable::Iterator it = m_ContextDrivers.Begin();
+         it != m_ContextDrivers.End(); ++it) {
+        CKRasterizerContext *context = it.GetKey();
+        CKRasterizerContextDesc desc = {};
+        if (context && context->GetDesc(&desc) && desc.Fullscreen)
+            return context;
     }
     return nullptr;
 }
@@ -1128,9 +1212,9 @@ void RCKRenderManager::RefreshDriverCaps(int DriverIndex) {
     CKRasterizerDriver *driver = m_Drivers[DriverIndex].RasterizerDriver;
     if (!driver)
         return;
-    // Context creation refreshes the backend limits before this method is
-    // called. Keep the engine on the v3 driver interface instead of reaching
-    // into the translation-core implementation.
+    // Context creation refreshes native limits before this method is called.
+    // Keep the engine on the driver interface instead of reaching into a
+    // concrete rasterizer implementation.
     UpdateDriverDescCaps(&m_Drivers[DriverIndex]);
 }
 
@@ -1138,19 +1222,808 @@ int RCKRenderManager::GetPreferredSoftwareDriver() {
     // IDA: 0x100733f0
     // First pass: prefer OpenGL software driver
     for (int i = 0; i < m_DriverCount; ++i) {
-        CKRasterizerDriver *driver = GetDriver(i);
-        if (driver && !driver->m_Hardware && driver->m_2DCaps.Family == CKRST_OPENGL) {
+        if (!m_Drivers[i].Hardware && m_Drivers[i].Caps2D.Family == CKRST_OPENGL) {
             return i;
         }
     }
 
     // Second pass: any software driver
     for (int i = 0; i < m_DriverCount; ++i) {
-        CKRasterizerDriver *driver = GetDriver(i);
-        if (driver && !driver->m_Hardware) {
+        if (!m_Drivers[i].Hardware) {
             return i;
         }
     }
 
     return 0;
+}
+
+void RCKRenderManager::FindNearestTextureFormatWithAlpha(
+    int DriverIndex, VxImageDescEx &Format) const {
+    if (DriverIndex < 0 || DriverIndex >= m_DriverCount)
+        return;
+
+    const XSArray<VxImageDescEx> &formats =
+        m_Drivers[DriverIndex].TextureFormats;
+    int best = -1;
+    int bestDifference = 64;
+    for (int i = 0; i < formats.Size(); ++i) {
+        if (!formats[i].AlphaMask)
+            continue;
+        const int difference =
+            XAbs((int)formats[i].BitsPerPixel - (int)Format.BitsPerPixel);
+        if (difference < bestDifference) {
+            best = i;
+            bestDifference = difference;
+        }
+    }
+
+    if (best >= 0) {
+        Format.BitsPerPixel = formats[best].BitsPerPixel;
+        Format.RedMask = formats[best].RedMask;
+        Format.GreenMask = formats[best].GreenMask;
+        Format.BlueMask = formats[best].BlueMask;
+        Format.AlphaMask = formats[best].AlphaMask;
+    }
+}
+
+RCKRenderManager::VertexBufferEntry *RCKRenderManager::FindVertexBufferEntry(
+    RCKVertexBuffer *Buffer, CKRasterizerContext *Context) {
+    VertexBufferEntryArray *entries = Buffer
+        ? m_VertexBufferEntries.FindPtr(Buffer)
+        : nullptr;
+    if (!entries)
+        return nullptr;
+
+    for (VertexBufferEntry *entry = entries->Begin();
+         entry != entries->End(); ++entry) {
+        if (entry->Context == Context)
+            return entry;
+    }
+    return nullptr;
+}
+
+RCKRenderManager::VertexBufferEntry *RCKRenderManager::AddVertexBufferEntry(
+    RCKVertexBuffer *Buffer, CKRasterizerContext *Context) {
+    if (!Buffer || !Context)
+        return nullptr;
+
+    VertexBufferEntry *entry = FindVertexBufferEntry(Buffer, Context);
+    if (entry)
+        return entry;
+
+    VertexBufferEntryArray *entries = m_VertexBufferEntries.FindPtr(Buffer);
+    if (!entries) {
+        VertexBufferEntryArray empty;
+        if (!m_VertexBufferEntries.Insert(Buffer, empty, FALSE))
+            return nullptr;
+        entries = m_VertexBufferEntries.FindPtr(Buffer);
+    }
+    if (!entries)
+        return nullptr;
+
+    VertexBufferEntry newEntry = {};
+    newEntry.Context = Context;
+    entries->PushBack(newEntry);
+    return &entries->Back();
+}
+
+CKBOOL RCKRenderManager::SelectVertexBufferObject(
+    RCKVertexBuffer *Buffer, CKRasterizerContext *Context) {
+    if (!Buffer || !Context)
+        return FALSE;
+
+    VertexBufferEntry *entry = FindVertexBufferEntry(Buffer, Context);
+    VertexBufferEntry state = {};
+    state.Context = Context;
+    if (entry)
+        state = *entry;
+    Buffer->SetRasterizerObjectState(state);
+    return entry ? entry->Valid : FALSE;
+}
+
+CKBOOL RCKRenderManager::VertexBufferObjectUpdated(RCKVertexBuffer *Buffer) {
+    if (!Buffer)
+        return FALSE;
+
+    VertexBufferEntry state = {};
+    Buffer->GetRasterizerObjectState(state);
+    if (!state.Context || !state.ObjectIndex)
+        return FALSE;
+
+    VertexBufferEntry *entry = AddVertexBufferEntry(Buffer, state.Context);
+    if (!entry)
+        return FALSE;
+
+    *entry = state;
+    return TRUE;
+}
+
+CKBOOL RCKRenderManager::DeleteVertexBufferObjects(RCKVertexBuffer *Buffer, CKBOOL PreserveOnFailure) {
+    if (!Buffer)
+        return FALSE;
+
+    VertexBufferEntry selected = {};
+    Buffer->GetRasterizerObjectState(selected);
+    VertexBufferEntryArray *entries = m_VertexBufferEntries.FindPtr(Buffer);
+    CKBOOL result = TRUE;
+    if (entries) {
+        for (int i = entries->Size() - 1; i >= 0; --i) {
+            VertexBufferEntry &entry = (*entries)[i];
+            if (!entry.Context || !entry.ObjectIndex) {
+                entries->RemoveAt(i);
+                continue;
+            }
+            if (!entry.Context->DeleteObject(entry.ObjectIndex, CKRST_OBJ_VERTEXBUFFER)) {
+                result = FALSE;
+                if (PreserveOnFailure)
+                    continue;
+            }
+            entries->RemoveAt(i);
+        }
+        if (entries->Size() == 0) {
+            m_VertexBufferEntries.Remove(Buffer);
+            VertexBufferEntry empty = {};
+            Buffer->SetRasterizerObjectState(empty);
+        } else {
+            VertexBufferEntry *retained = nullptr;
+            for (VertexBufferEntry *entry = entries->Begin(); entry != entries->End(); ++entry) {
+                if (entry->Context == selected.Context) {
+                    retained = entry;
+                    break;
+                }
+            }
+            Buffer->SetRasterizerObjectState(retained ? *retained : (*entries)[0]);
+        }
+    } else {
+        if (selected.Context && selected.ObjectIndex)
+            result = selected.Context->DeleteObject(selected.ObjectIndex, CKRST_OBJ_VERTEXBUFFER);
+        if (result || !PreserveOnFailure) {
+            VertexBufferEntry empty = {};
+            Buffer->SetRasterizerObjectState(empty);
+        }
+    }
+    return result;
+}
+
+void RCKRenderManager::ForgetVertexBufferObjects(
+    CKRasterizerContext *Context) {
+    if (!Context)
+        return;
+
+    for (VertexBufferEntryTable::Iterator it = m_VertexBufferEntries.Begin();
+         it != m_VertexBufferEntries.End();) {
+        RCKVertexBuffer *buffer = it.GetKey();
+        VertexBufferEntryArray &entries = *it;
+        for (int i = entries.Size() - 1; i >= 0; --i) {
+            if (entries[i].Context == Context)
+                entries.RemoveAt(i);
+        }
+
+        VertexBufferEntry selected = {};
+        if (buffer)
+            buffer->GetRasterizerObjectState(selected);
+        if (buffer && selected.Context == Context) {
+            if (entries.Size() > 0)
+                buffer->SetRasterizerObjectState(entries[0]);
+            else {
+                VertexBufferEntry empty = {};
+                buffer->SetRasterizerObjectState(empty);
+            }
+        }
+
+        if (entries.Size() == 0)
+            it = m_VertexBufferEntries.Remove(it);
+        else
+            ++it;
+    }
+}
+
+RCKRenderManager::MeshBufferEntry *RCKRenderManager::FindMeshBufferEntry(
+    RCKMesh *Mesh, CKRasterizerContext *Context) {
+    MeshBufferEntryArray *entries = Mesh
+        ? m_MeshBufferEntries.FindPtr(Mesh->GetID())
+        : nullptr;
+    if (!entries)
+        return nullptr;
+
+    for (MeshBufferEntry *entry = entries->Begin();
+         entry != entries->End(); ++entry) {
+        if (entry->Context == Context)
+            return entry;
+    }
+    return nullptr;
+}
+
+RCKRenderManager::MeshBufferEntry *RCKRenderManager::AddMeshBufferEntry(
+    RCKMesh *Mesh, CKRasterizerContext *Context) {
+    if (!Mesh || !Context)
+        return nullptr;
+
+    MeshBufferEntry *entry = FindMeshBufferEntry(Mesh, Context);
+    if (entry)
+        return entry;
+
+    const CK_ID meshId = Mesh->GetID();
+    MeshBufferEntryArray *entries = m_MeshBufferEntries.FindPtr(meshId);
+    if (!entries) {
+        MeshBufferEntryArray empty;
+        if (!m_MeshBufferEntries.Insert(meshId, empty, FALSE))
+            return nullptr;
+        entries = m_MeshBufferEntries.FindPtr(meshId);
+    }
+    if (!entries)
+        return nullptr;
+
+    MeshBufferEntry newEntry = {};
+    newEntry.Context = Context;
+    entries->PushBack(newEntry);
+    return &entries->Back();
+}
+
+void RCKRenderManager::ResetMeshBufferState(
+    RCKMesh *Mesh, CKRasterizerContext *Context) {
+    if (!Mesh)
+        return;
+
+    MeshBufferEntry state = {};
+    state.Context = Context;
+    Mesh->SetRasterizerBufferState(state);
+}
+
+void RCKRenderManager::RestoreMeshBufferState(
+    RCKMesh *Mesh, const MeshBufferEntry &Entry) {
+    if (Mesh)
+        Mesh->SetRasterizerBufferState(Entry);
+}
+
+CKBOOL RCKRenderManager::SelectMeshBuffers(
+    RCKMesh *Mesh, CKRasterizerContext *Context) {
+    if (!Mesh || !Context)
+        return FALSE;
+
+    MeshBufferEntry *entry = FindMeshBufferEntry(Mesh, Context);
+    if (!entry) {
+        ResetMeshBufferState(Mesh, Context);
+        return FALSE;
+    }
+
+    RestoreMeshBufferState(Mesh, *entry);
+    return TRUE;
+}
+
+CKBOOL RCKRenderManager::StoreMeshBuffers(RCKMesh *Mesh) {
+    if (!Mesh)
+        return FALSE;
+
+    MeshBufferEntry state = {};
+    Mesh->GetRasterizerBufferState(state);
+    if (!state.Context)
+        return FALSE;
+
+    MeshBufferEntry *entry = FindMeshBufferEntry(Mesh, state.Context);
+    if (!entry && !state.VertexBuffer && !state.IndexBuffer)
+        return FALSE;
+    if (!entry)
+        entry = AddMeshBufferEntry(Mesh, state.Context);
+    if (!entry)
+        return FALSE;
+
+    *entry = state;
+    return TRUE;
+}
+
+void RCKRenderManager::MeshVerticesChanged(RCKMesh *Mesh) {
+    MeshBufferEntryArray *entries = Mesh
+        ? m_MeshBufferEntries.FindPtr(Mesh->GetID())
+        : nullptr;
+    if (!entries)
+        return;
+
+    for (MeshBufferEntry *entry = entries->Begin();
+         entry != entries->End(); ++entry) {
+        entry->VertexBufferReady = 0;
+    }
+}
+
+void RCKRenderManager::MeshIndicesChanged(RCKMesh *Mesh) {
+    MeshBufferEntryArray *entries = Mesh
+        ? m_MeshBufferEntries.FindPtr(Mesh->GetID())
+        : nullptr;
+    if (!entries)
+        return;
+
+    for (MeshBufferEntry *entry = entries->Begin();
+         entry != entries->End(); ++entry) {
+        entry->IndexBufferReady = FALSE;
+    }
+}
+
+CKBOOL RCKRenderManager::DeleteMeshBuffers(RCKMesh *Mesh, CKBOOL PreserveOnFailure) {
+    if (!Mesh)
+        return FALSE;
+
+    const CK_ID meshId = Mesh->GetID();
+    MeshBufferEntry selected = {};
+    Mesh->GetRasterizerBufferState(selected);
+    MeshBufferEntryArray *entries = m_MeshBufferEntries.FindPtr(meshId);
+    CKBOOL found = FALSE;
+    CKBOOL result = TRUE;
+    if (entries) {
+        for (int i = entries->Size() - 1; i >= 0; --i) {
+            MeshBufferEntry &entry = (*entries)[i];
+            if (!entry.Context) {
+                entries->RemoveAt(i);
+                continue;
+            }
+            if (entry.VertexBuffer) {
+                found = TRUE;
+                entry.VertexBufferReady = 0;
+                if (entry.Context->DeleteObject(entry.VertexBuffer, CKRST_OBJ_VERTEXBUFFER) || !PreserveOnFailure)
+                    ClearMeshVertexBufferState(entry);
+                else
+                    result = FALSE;
+            }
+            if (entry.IndexBuffer) {
+                found = TRUE;
+                entry.IndexBufferReady = FALSE;
+                if (entry.Context->DeleteObject(entry.IndexBuffer, CKRST_OBJ_INDEXBUFFER) || !PreserveOnFailure)
+                    ClearMeshIndexBufferState(entry);
+                else
+                    result = FALSE;
+            }
+            if (!entry.VertexBuffer && !entry.IndexBuffer)
+                entries->RemoveAt(i);
+        }
+        if (entries->Size() == 0) {
+            m_MeshBufferEntries.Remove(meshId);
+            ResetMeshBufferState(Mesh, nullptr);
+        } else {
+            MeshBufferEntry *retained = nullptr;
+            for (MeshBufferEntry *entry = entries->Begin(); entry != entries->End(); ++entry) {
+                if (entry->Context == selected.Context) {
+                    retained = entry;
+                    break;
+                }
+            }
+            RestoreMeshBufferState(Mesh, retained ? *retained : (*entries)[0]);
+        }
+    } else {
+        MeshBufferEntry state = selected;
+        if (state.Context && state.VertexBuffer) {
+            found = TRUE;
+            state.VertexBufferReady = 0;
+            if (state.Context->DeleteObject(state.VertexBuffer, CKRST_OBJ_VERTEXBUFFER) || !PreserveOnFailure)
+                ClearMeshVertexBufferState(state);
+            else
+                result = FALSE;
+        }
+        if (state.Context && state.IndexBuffer) {
+            found = TRUE;
+            state.IndexBufferReady = FALSE;
+            if (state.Context->DeleteObject(state.IndexBuffer, CKRST_OBJ_INDEXBUFFER) || !PreserveOnFailure)
+                ClearMeshIndexBufferState(state);
+            else
+                result = FALSE;
+        }
+        if (state.VertexBuffer || state.IndexBuffer)
+            RestoreMeshBufferState(Mesh, state);
+        else
+            ResetMeshBufferState(Mesh, nullptr);
+    }
+    return found && result;
+}
+
+void RCKRenderManager::ForgetMeshBuffers(CKRasterizerContext *Context) {
+    if (!Context)
+        return;
+
+    for (MeshBufferEntryTable::Iterator it = m_MeshBufferEntries.Begin();
+         it != m_MeshBufferEntries.End();) {
+        MeshBufferEntryArray &entries = *it;
+        for (int i = entries.Size() - 1; i >= 0; --i) {
+            if (entries[i].Context == Context)
+                entries.RemoveAt(i);
+        }
+
+        CKObject *object = m_Context->GetObject(it.GetKey());
+        RCKMesh *mesh = object && CKIsChildClassOf(object, CKCID_MESH)
+            ? static_cast<RCKMesh *>(object)
+            : nullptr;
+        MeshBufferEntry selected = {};
+        if (mesh)
+            mesh->GetRasterizerBufferState(selected);
+        if (entries.Size() == 0) {
+            if (mesh && selected.Context == Context)
+                ResetMeshBufferState(mesh, nullptr);
+            it = m_MeshBufferEntries.Remove(it);
+            continue;
+        }
+
+        if (!mesh) {
+            it = m_MeshBufferEntries.Remove(it);
+            continue;
+        }
+
+        if (selected.Context == Context)
+            RestoreMeshBufferState(mesh, entries[0]);
+
+        ++it;
+    }
+}
+
+RCKRenderManager::TextureEntry *RCKRenderManager::FindTextureEntry(
+    CKObject *Object, CKRasterizerContext *Context) {
+    TextureEntryArray *entries = Object
+        ? m_TextureEntries.FindPtr(Object->GetID())
+        : nullptr;
+    if (!entries)
+        return nullptr;
+
+    for (TextureEntry *entry = entries->Begin(); entry != entries->End(); ++entry) {
+        if (entry->Context == Context)
+            return entry;
+    }
+    return nullptr;
+}
+
+RCKRenderManager::TextureEntry *RCKRenderManager::AddTextureEntry(
+    CKObject *Object, CKRasterizerContext *Context) {
+    if (!Object || !Context)
+        return nullptr;
+
+    TextureEntry *entry = FindTextureEntry(Object, Context);
+    if (entry)
+        return entry;
+
+    const CK_ID objectId = Object->GetID();
+    TextureEntryArray *entries = m_TextureEntries.FindPtr(objectId);
+    if (!entries) {
+        TextureEntryArray empty;
+        if (!m_TextureEntries.Insert(objectId, empty, FALSE))
+            return nullptr;
+        entries = m_TextureEntries.FindPtr(objectId);
+    }
+    if (!entries)
+        return nullptr;
+
+    TextureEntry newEntry = {};
+    newEntry.Context = Context;
+    newEntry.Dirty = TRUE;
+    entries->PushBack(newEntry);
+    return &entries->Back();
+}
+
+CKBOOL RCKRenderManager::DeleteTextureEntry(
+    CKObject *Object, CKRasterizerContext *Context) {
+    if (!Object || !Context)
+        return FALSE;
+
+    const CK_ID objectId = Object->GetID();
+    TextureEntryArray *entries = m_TextureEntries.FindPtr(objectId);
+    if (!entries)
+        return FALSE;
+
+    for (int i = 0; i < entries->Size(); ++i) {
+        TextureEntry &entry = (*entries)[i];
+        if (entry.Context != Context)
+            continue;
+
+        const CKBOOL result = entry.ObjectIndex != 0
+            ? Context->DeleteObject(entry.ObjectIndex, CKRST_OBJ_TEXTURE)
+            : FALSE;
+        if (!result && entry.ObjectIndex != 0)
+            return FALSE;
+        entries->RemoveAt(i);
+        if (entries->Size() == 0)
+            m_TextureEntries.Remove(objectId);
+        return result;
+    }
+    return FALSE;
+}
+
+CKBOOL RCKRenderManager::DeleteTextureEntries(CKObject *Object, CKBOOL PreserveOnFailure) {
+    if (!Object)
+        return FALSE;
+
+    const CK_ID objectId = Object->GetID();
+    TextureEntryArray *entries = m_TextureEntries.FindPtr(objectId);
+    if (!entries)
+        return FALSE;
+
+    CKBOOL found = FALSE;
+    CKBOOL result = TRUE;
+    for (int i = entries->Size() - 1; i >= 0; --i) {
+        TextureEntry &entry = (*entries)[i];
+        if (!entry.Context || entry.ObjectIndex == 0) {
+            entries->RemoveAt(i);
+            continue;
+        }
+        found = TRUE;
+        if (!entry.Context->DeleteObject(entry.ObjectIndex, CKRST_OBJ_TEXTURE)) {
+            result = FALSE;
+            if (PreserveOnFailure)
+                continue;
+        }
+        entries->RemoveAt(i);
+    }
+    if (entries->Size() == 0)
+        m_TextureEntries.Remove(objectId);
+    return found && result;
+}
+
+void RCKRenderManager::ResetTextureObjectState(
+    RCKTexture *Texture, CKRasterizerContext *Context) {
+    Texture->m_RasterizerContext = Context;
+    Texture->m_ObjectIndex = 0;
+    Texture->m_InVideoMemory = FALSE;
+    Texture->m_TextureFlags = 0;
+    Texture->m_CachedMipMapCount = 0;
+    memset(&Texture->m_VideoFormat, 0, sizeof(Texture->m_VideoFormat));
+}
+
+void RCKRenderManager::RestoreTextureObjectState(
+    RCKTexture *Texture, const TextureEntry &Entry) {
+    Texture->m_RasterizerContext = Entry.Context;
+    Texture->m_ObjectIndex = Entry.ObjectIndex;
+    Texture->m_InVideoMemory = Entry.ObjectIndex != 0;
+    Texture->m_TextureFlags = Entry.Flags;
+    Texture->m_CachedMipMapCount = Entry.MipMapCount;
+    Texture->m_VideoFormat = Entry.Format;
+}
+
+void RCKRenderManager::ResetTextureObjectState(
+    RCKSprite *Sprite, CKRasterizerContext *Context) {
+    Sprite->m_RasterizerContext = Context;
+    Sprite->m_ObjectIndex = 0;
+    Sprite->m_InVideoMemory = FALSE;
+    memset(&Sprite->m_VideoFormatDesc, 0, sizeof(Sprite->m_VideoFormatDesc));
+}
+
+void RCKRenderManager::RestoreTextureObjectState(
+    RCKSprite *Sprite, const TextureEntry &Entry) {
+    Sprite->m_RasterizerContext = Entry.Context;
+    Sprite->m_ObjectIndex = Entry.ObjectIndex;
+    Sprite->m_InVideoMemory = Entry.ObjectIndex != 0;
+    Sprite->m_VideoFormatDesc = Entry.Format;
+}
+
+CKBOOL RCKRenderManager::SelectTextureObject(
+    RCKTexture *Texture, CKRasterizerContext *Context) {
+    if (!Texture || !Context)
+        return FALSE;
+
+    if (Texture->ToRestore())
+        TextureObjectChanged(Texture);
+
+    TextureEntry *entry = FindTextureEntry(Texture, Context);
+    if (!entry) {
+        ResetTextureObjectState(Texture, Context);
+        return FALSE;
+    }
+
+    RestoreTextureObjectState(Texture, *entry);
+    return Texture->m_InVideoMemory;
+}
+
+CKBOOL RCKRenderManager::TextureObjectNeedsUpdate(RCKTexture *Texture) {
+    if (!Texture || !Texture->m_RasterizerContext || !Texture->m_InVideoMemory)
+        return FALSE;
+
+    if (Texture->ToRestore())
+        TextureObjectChanged(Texture);
+
+    TextureEntry *entry = FindTextureEntry(Texture, Texture->m_RasterizerContext);
+    return entry ? entry->Dirty : TRUE;
+}
+
+void RCKRenderManager::TextureObjectChanged(RCKTexture *Texture) {
+    TextureEntryArray *entries = Texture
+        ? m_TextureEntries.FindPtr(Texture->GetID())
+        : nullptr;
+    if (!entries)
+        return;
+
+    for (TextureEntry *entry = entries->Begin(); entry != entries->End(); ++entry)
+        entry->Dirty = TRUE;
+}
+
+void RCKRenderManager::TextureObjectUpdated(RCKTexture *Texture, CKBOOL Dirty) {
+    if (!Texture || !Texture->m_RasterizerContext || !Texture->m_InVideoMemory ||
+        Texture->m_ObjectIndex == 0)
+        return;
+
+    TextureEntry *entry = AddTextureEntry(Texture, Texture->m_RasterizerContext);
+    if (!entry)
+        return;
+
+    entry->ObjectIndex = Texture->m_ObjectIndex;
+    entry->Flags = Texture->m_TextureFlags;
+    entry->MipMapCount = Texture->m_CachedMipMapCount;
+    entry->Format = Texture->m_VideoFormat;
+    entry->Dirty = Dirty;
+}
+
+CKBOOL RCKRenderManager::DeleteTextureObject(
+    RCKTexture *Texture, CKRasterizerContext *Context) {
+    if (!Texture || !Context)
+        return FALSE;
+
+    TextureEntry *entry = FindTextureEntry(Texture, Context);
+    const CKBOOL result = entry
+        ? DeleteTextureEntry(Texture, Context)
+        : (Texture->m_RasterizerContext == Context && Texture->m_ObjectIndex != 0
+               ? Context->DeleteObject(Texture->m_ObjectIndex, CKRST_OBJ_TEXTURE)
+               : FALSE);
+    if (result && Texture->m_RasterizerContext == Context)
+        ResetTextureObjectState(Texture, Context);
+    return result;
+}
+
+CKBOOL RCKRenderManager::DeleteTextureObjects(RCKTexture *Texture, CKBOOL PreserveOnFailure) {
+    if (!Texture)
+        return FALSE;
+
+    TextureEntryArray *entries = m_TextureEntries.FindPtr(Texture->GetID());
+    const CKBOOL tracked = entries != nullptr;
+    const CKBOOL result = entries
+        ? DeleteTextureEntries(Texture, PreserveOnFailure)
+        : (Texture->m_RasterizerContext && Texture->m_ObjectIndex != 0
+               ? Texture->m_RasterizerContext->DeleteObject(Texture->m_ObjectIndex, CKRST_OBJ_TEXTURE)
+               : FALSE);
+    if (result || !PreserveOnFailure) {
+        ResetTextureObjectState(Texture, Texture->m_RasterizerContext);
+    } else {
+        TextureEntry *retained = FindTextureEntry(Texture, Texture->m_RasterizerContext);
+        entries = m_TextureEntries.FindPtr(Texture->GetID());
+        if (!retained && entries && entries->Size() > 0)
+            retained = &(*entries)[0];
+        if (retained)
+            RestoreTextureObjectState(Texture, *retained);
+        else if (tracked)
+            ResetTextureObjectState(Texture, Texture->m_RasterizerContext);
+    }
+    return result;
+}
+
+CKBOOL RCKRenderManager::SelectSpriteObject(
+    RCKSprite *Sprite, CKRasterizerContext *Context) {
+    if (!Sprite || !Context)
+        return FALSE;
+
+    if (Sprite->ToRestore())
+        SpriteObjectChanged(Sprite);
+
+    TextureEntry *entry = FindTextureEntry(Sprite, Context);
+    if (!entry) {
+        ResetTextureObjectState(Sprite, Context);
+        return FALSE;
+    }
+
+    RestoreTextureObjectState(Sprite, *entry);
+    return Sprite->m_InVideoMemory;
+}
+
+CKBOOL RCKRenderManager::SpriteObjectNeedsUpdate(RCKSprite *Sprite) {
+    if (!Sprite || !Sprite->m_RasterizerContext || !Sprite->m_InVideoMemory)
+        return FALSE;
+
+    if (Sprite->ToRestore())
+        SpriteObjectChanged(Sprite);
+
+    TextureEntry *entry = FindTextureEntry(Sprite, Sprite->m_RasterizerContext);
+    return entry ? entry->Dirty : TRUE;
+}
+
+void RCKRenderManager::SpriteObjectChanged(RCKSprite *Sprite) {
+    TextureEntryArray *entries = Sprite
+        ? m_TextureEntries.FindPtr(Sprite->GetID())
+        : nullptr;
+    if (!entries)
+        return;
+
+    for (TextureEntry *entry = entries->Begin(); entry != entries->End(); ++entry)
+        entry->Dirty = TRUE;
+}
+
+void RCKRenderManager::SpriteObjectUpdated(RCKSprite *Sprite, CKBOOL Dirty) {
+    if (!Sprite || !Sprite->m_RasterizerContext || !Sprite->m_InVideoMemory ||
+        Sprite->m_ObjectIndex == 0)
+        return;
+
+    TextureEntry *entry = AddTextureEntry(Sprite, Sprite->m_RasterizerContext);
+    if (!entry)
+        return;
+
+    entry->ObjectIndex = Sprite->m_ObjectIndex;
+    entry->Flags = 0;
+    entry->MipMapCount = 0;
+    entry->Format = Sprite->m_VideoFormatDesc;
+    entry->Dirty = Dirty;
+}
+
+CKBOOL RCKRenderManager::DeleteSpriteObject(
+    RCKSprite *Sprite, CKRasterizerContext *Context) {
+    if (!Sprite || !Context)
+        return FALSE;
+
+    TextureEntry *entry = FindTextureEntry(Sprite, Context);
+    const CKBOOL result = entry
+        ? DeleteTextureEntry(Sprite, Context)
+        : (Sprite->m_RasterizerContext == Context && Sprite->m_ObjectIndex != 0
+               ? Context->DeleteObject(Sprite->m_ObjectIndex, CKRST_OBJ_TEXTURE)
+               : FALSE);
+    if (result && Sprite->m_RasterizerContext == Context)
+        ResetTextureObjectState(Sprite, Context);
+    return result;
+}
+
+CKBOOL RCKRenderManager::DeleteSpriteObjects(RCKSprite *Sprite, CKBOOL PreserveOnFailure) {
+    if (!Sprite)
+        return FALSE;
+
+    TextureEntryArray *entries = m_TextureEntries.FindPtr(Sprite->GetID());
+    const CKBOOL tracked = entries != nullptr;
+    const CKBOOL result = entries
+        ? DeleteTextureEntries(Sprite, PreserveOnFailure)
+        : (Sprite->m_ObjectIndex == 0
+               ? TRUE
+               : (Sprite->m_RasterizerContext
+                      ? Sprite->m_RasterizerContext->DeleteObject(Sprite->m_ObjectIndex, CKRST_OBJ_TEXTURE)
+                      : FALSE));
+    if (result || !PreserveOnFailure) {
+        ResetTextureObjectState(Sprite, Sprite->m_RasterizerContext);
+    } else {
+        TextureEntry *retained = FindTextureEntry(Sprite, Sprite->m_RasterizerContext);
+        entries = m_TextureEntries.FindPtr(Sprite->GetID());
+        if (!retained && entries && entries->Size() > 0)
+            retained = &(*entries)[0];
+        if (retained)
+            RestoreTextureObjectState(Sprite, *retained);
+        else if (tracked)
+            ResetTextureObjectState(Sprite, Sprite->m_RasterizerContext);
+    }
+    return result;
+}
+
+void RCKRenderManager::ForgetTextureObjects(CKRasterizerContext *Context) {
+    if (!Context)
+        return;
+
+    for (TextureEntryTable::Iterator it = m_TextureEntries.Begin();
+         it != m_TextureEntries.End();) {
+        TextureEntryArray &entries = *it;
+        for (int i = entries.Size() - 1; i >= 0; --i) {
+            if (entries[i].Context == Context)
+                entries.RemoveAt(i);
+        }
+
+        CKObject *object = m_Context->GetObject(it.GetKey());
+        if (!object) {
+            it = m_TextureEntries.Remove(it);
+            continue;
+        }
+
+        RCKTexture *texture = CKIsChildClassOf(object, CKCID_TEXTURE)
+            ? static_cast<RCKTexture *>(object)
+            : nullptr;
+        RCKSprite *sprite = CKIsChildClassOf(object, CKCID_SPRITE)
+            ? static_cast<RCKSprite *>(object)
+            : nullptr;
+
+        if (entries.Size() == 0) {
+            if (texture && texture->m_RasterizerContext == Context)
+                ResetTextureObjectState(texture, nullptr);
+            else if (sprite && sprite->m_RasterizerContext == Context)
+                ResetTextureObjectState(sprite, nullptr);
+            it = m_TextureEntries.Remove(it);
+            continue;
+        }
+
+        if (texture && texture->m_RasterizerContext == Context)
+            RestoreTextureObjectState(texture, entries[0]);
+        else if (sprite && sprite->m_RasterizerContext == Context)
+            RestoreTextureObjectState(sprite, entries[0]);
+
+        ++it;
+    }
 }
