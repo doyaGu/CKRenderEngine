@@ -20,17 +20,14 @@ CKNullRasterizer is implemented directly inside CKRasterizerLib.
 - **CKRasterizerLib** owns the public `CKRasterizer` interface, common
   configuration and diagnostics, capability baselines, registration support,
   and the direct NULL implementation.
-- **CKFFPLib** translates legacy fixed-function state into provider-neutral
-  resources, pipelines, draw packets, ordered commands, submission and
-  readback through `CKRasterizerBackend`.
+- **CKFFPLib** contains the shared CPU implementation for fixed-function state,
+  validation, shader keys and constants, and vertex/index conversion. It does
+  not own devices, native resources, submission, synchronization or presentation.
 - **CKSdlGpuRasterizer** and **CKBgfxRasterizer** each own a complete concrete
-  rasterizer: plugin entry points, device implementation, presentation, shader
-  containers and provider-specific build tools.
+  rasterizer context, including native resources, command submission,
+  synchronization, presentation, shader containers and native build tools.
 
-See [ARCHITECTURE.md](src/CKRasterizer/ARCHITECTURE.md) for source ownership,
-rendering semantics and the enforced dependency direction.
-
-The default provider is SDL GPU. bgfx is available only when explicitly enabled; NULL remains an independent engine fallback. Player selects providers by stable names `sdlgpu`, `bgfx` and `null`. Runtime settings live in `src/CK2_3D.ini` and, when enabled, `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini`.
+The default rasterizer is SDL GPU. bgfx is available only when explicitly enabled; NULL remains an independent engine fallback. Player selects rasterizers by stable names `sdlgpu`, `bgfx` and `null`. Runtime settings live in `src/CK2_3D.ini` and, when enabled, `src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini`.
 
 Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance.
 
