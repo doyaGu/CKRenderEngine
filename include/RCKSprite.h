@@ -56,7 +56,8 @@ protected:
     CKBitmapData m_BitmapData;
     VX_PIXELFORMAT m_VideoFormat;
     VxImageDescEx m_VideoFormatDesc;   // Cached video format (stands in for CKSpriteDesc)
-    CKRasterizerContext *m_RasterizerContext; // v3 context the video texture belongs to
+    // Source-compatible view of the entry selected from RCKRenderManager.
+    CKRasterizerContext *m_RasterizerContext;
     CKDWORD m_ObjectIndex;
     CKBOOL m_InVideoMemory;
 };

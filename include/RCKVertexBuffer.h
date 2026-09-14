@@ -4,6 +4,7 @@
 #include "VxMemoryPool.h"
 #include "CKVertexBuffer.h"
 #include "CKRasterizer.h"
+#include "RCKRasterizerObjectStates.h"
 
 struct RCKVertexBuffer : public CKVertexBuffer {
 public:
@@ -21,9 +22,13 @@ public:
 
     CKBOOL Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex, CKDWORD VertexCount) override;
 
-    void InvalidateHardwareBuffer();
+    void GetRasterizerObjectState(RCKVertexBufferObjectState &State) const;
+    void SetRasterizerObjectState(const RCKVertexBufferObjectState &State);
 
 protected:
+    CKBOOL Upload(CKRenderContext *Ctx, CKDWORD StartVertex,
+                  CKDWORD VertexCount, CKRST_LOCKFLAGS LockFlags);
+
     CKDWORD m_ObjectIndex;
     CKVertexBufferDesc m_Desc;
     CKBOOL m_Valid;
@@ -32,8 +37,12 @@ protected:
     VxDrawPrimitiveData m_DpData;
     VxDrawPrimitiveData m_LockedData;
     CKDWORD m_FormatFlags;
-    CKRasterizerContext *m_RasterizerContext; // v3 context owning m_ObjectIndex
+    // Source-compatible view of the object selected for the last context.
+    // RCKRenderManager owns the complete per-context list.
+    CKRasterizerContext *m_RasterizerContext;
     CKBOOL m_HardwareValid;
+    CKDWORD m_ContentVersion;
+    CKDWORD m_HardwareVersion;
     CKDWORD m_LockedStart;
     CKDWORD m_LockedCount;
     CKLOCKFLAGS m_LockFlags;

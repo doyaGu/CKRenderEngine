@@ -4,6 +4,7 @@
 #include "CKRenderEngineTypes.h"
 
 #include "CKMesh.h"
+#include "RCKRasterizerObjectStates.h"
 
 // Forward declarations for generic functions
 void BuildFaceNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVertex *vertices, int vertexCount);
@@ -22,6 +23,9 @@ class RCKMesh : public CKMesh {
                                                VxIntersectionDesc *desc, CK_RAYINTERSECTION mode, 
                                                const VxMatrix &worldMatrix);
 public:
+
+    void GetRasterizerBufferState(RCKMeshBufferState &State) const;
+    void SetRasterizerBufferState(const RCKMeshBufferState &State);
 
     //--------------------------------------------------------
     ////               Private Part
@@ -189,7 +193,7 @@ public:
     void ResetMaterialGroup(CKMaterialGroup *group, int a2);
     void UpdateHasValidPrimitives(CKMaterialGroup *group);
 
-    void InvalidateHardwareBuffers();
+    void InvalidateHardwareBuffers(CKBOOL PreserveOnFailure = TRUE);
 
     explicit RCKMesh(CKContext *Context, CKSTRING name = nullptr);
     ~RCKMesh() override;
@@ -243,12 +247,13 @@ protected:
     XArray<CKMaterialGroup *> m_MaterialGroups;
     CKDWORD m_Valid;
     CKDWORD m_VertexBufferReady; // Non-zero when HW vertex buffer is up to date
-    CKRasterizerContext *m_RasterizerContext; // v3 context owning the hardware buffers
+    CKBOOL m_IndexBufferReady;
+    CKRasterizerContext *m_RasterizerContext; // context selected for the fields below
     CKDWORD m_VertexBuffer;
     CKDWORD m_IndexBuffer;
     CKDWORD m_IndexBufferIndexCount;
     CKDWORD m_VertexBufferDpFlags;
-    CKDWORD m_VertexBufferVertexFormat; // contract vertex format of m_VertexBuffer
+    CKDWORD m_VertexBufferVertexFormat; // vertex format of m_VertexBuffer
     CKDWORD m_VertexBufferStride;
     CKDWORD m_VertexBufferVertexCount;
     CKBOOL m_VertexBufferWrapAware;

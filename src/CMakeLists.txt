@@ -41,6 +41,7 @@ set(CKRE_PUBLIC_HEADERS
 
         ${CKRE_INCLUDE_DIR}/RCKRenderManager.h
         ${CKRE_INCLUDE_DIR}/RCKRenderContext.h
+        ${CKRE_INCLUDE_DIR}/RCKRasterizerObjectStates.h
         ${CKRE_INCLUDE_DIR}/RCKMaterial.h
         ${CKRE_INCLUDE_DIR}/RCKTexture.h
         ${CKRE_INCLUDE_DIR}/RCKMesh.h

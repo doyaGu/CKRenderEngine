@@ -72,7 +72,7 @@ static void CKMeshSetDrawAnnotation(RCKRenderContext *rc,
 }
 
 // Mono-pass texture channels: the rasterizer folds a channel into one texture
-// stage only for the two modulate blends (STAGEBLEND semantics, spec 4.6).
+// stage only for the two modulate blends (STAGEBLEND semantics).
 static CKBOOL CKMeshMonoPassStageBlend(CKDWORD stageBlend) {
     const CKDWORD src = (stageBlend >> 4) & 0xF;
     const CKDWORD dst = stageBlend & 0xF;
@@ -102,7 +102,7 @@ void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
 
         channelMat->BindTextureSlotToStage(static_cast<CKRenderContext *>(dev), 0, stage);
         // The rasterizer derives the stage's colour / alpha operations from
-        // the blend (spec 4.6).
+        // the blend.
         dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND, stageBlend);
         dev->m_RasterizerContext->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
                                               CKRSTPackTexcoordIndex((CKDWORD)stage, CKRST_TEXGEN_PASSTHRU));
@@ -157,17 +157,27 @@ void RCKMesh::UpdateHasValidPrimitives(CKMaterialGroup *group) {
     }
 }
 
-void RCKMesh::InvalidateHardwareBuffers() {
-    m_RasterizerContext = nullptr;
-    m_VertexBuffer = 0;
-    m_IndexBuffer = 0;
-    m_VertexBufferReady = 0;
-    m_IndexBufferIndexCount = 0;
-    m_VertexBufferDpFlags = 0;
-    m_VertexBufferVertexFormat = 0;
-    m_VertexBufferStride = 0;
-    m_VertexBufferVertexCount = 0;
-    m_VertexBufferWrapAware = FALSE;
+void RCKMesh::InvalidateHardwareBuffers(CKBOOL PreserveOnFailure) {
+    RCKRenderManager *renderManager = m_Context
+        ? static_cast<RCKRenderManager *>(m_Context->GetRenderManager())
+        : nullptr;
+    if (renderManager) {
+        renderManager->DeleteMeshBuffers(this, PreserveOnFailure);
+        return;
+    } else if (m_RasterizerContext) {
+        if (m_VertexBuffer && (m_RasterizerContext->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER) || !PreserveOnFailure))
+            m_VertexBuffer = 0;
+        if (m_IndexBuffer && (m_RasterizerContext->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER) || !PreserveOnFailure))
+            m_IndexBuffer = 0;
+    }
+
+    if (!m_VertexBuffer && !m_IndexBuffer) {
+        RCKMeshBufferState rasterizerState = {};
+        SetRasterizerBufferState(rasterizerState);
+    } else {
+        m_VertexBufferReady = 0;
+        m_IndexBufferReady = FALSE;
+    }
 }
 
 CKVBuffer::CKVBuffer(int vertexCount) : m_Vertices(0), m_Colors(0), m_UVs(0), m_VertexRemap(0) {
@@ -258,6 +268,26 @@ static CKBOOL IsRenderableMaterialGroup(const CKMaterialGroup *group) {
     return group && group->m_HasValidPrimitives && group->m_Primitives.Size() > 0;
 }
 
+static CKBOOL CKMeshAccumulateCount(CKDWORD count, CKDWORD limit, CKDWORD &total) {
+    if (count > limit - total)
+        return FALSE;
+    total += count;
+    return TRUE;
+}
+
+static CKBOOL CKMeshGroupIndicesFit(const CKMaterialGroup *group, CKDWORD vertexCount) {
+    if (!group || vertexCount == 0)
+        return FALSE;
+    for (int primitiveIndex = 0; primitiveIndex < group->m_Primitives.Size(); ++primitiveIndex) {
+        const CKPrimitiveEntry &primitive = group->m_Primitives[primitiveIndex];
+        for (int index = 0; index < primitive.m_Indices.Size(); ++index) {
+            if ((CKDWORD)primitive.m_Indices[index] >= vertexCount)
+                return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 /**
  * @brief Progressive mesh pre-render callback for LOD processing.
  *
@@ -330,6 +360,7 @@ RCKMesh::RCKMesh(CKContext *Context, CKSTRING name) : CKMesh(Context, name) {
     m_FaceChannelMask = 0;
     m_Valid = 0;
     m_VertexBufferReady = 0;
+    m_IndexBufferReady = FALSE;
     m_IndexBufferIndexCount = 0;
     m_VertexBufferDpFlags = 0;
     m_VertexBufferVertexFormat = 0;
@@ -359,15 +390,35 @@ RCKMesh::~RCKMesh() {
         m_VertexWeights = nullptr;
     }
 
-    if (m_RasterizerContext) {
-        if (m_VertexBuffer)
-            m_RasterizerContext->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-        if (m_IndexBuffer)
-            m_RasterizerContext->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
-    }
-    m_RasterizerContext = nullptr;
-    m_VertexBuffer = 0;
-    m_IndexBuffer = 0;
+    InvalidateHardwareBuffers(FALSE);
+}
+
+void RCKMesh::GetRasterizerBufferState(RCKMeshBufferState &State) const {
+    State.Context = m_RasterizerContext;
+    State.VertexBufferReady = m_VertexBufferReady;
+    State.IndexBufferReady = m_IndexBufferReady;
+    State.VertexBuffer = m_VertexBuffer;
+    State.IndexBuffer = m_IndexBuffer;
+    State.IndexBufferIndexCount = m_IndexBufferIndexCount;
+    State.VertexBufferDpFlags = m_VertexBufferDpFlags;
+    State.VertexBufferVertexFormat = m_VertexBufferVertexFormat;
+    State.VertexBufferStride = m_VertexBufferStride;
+    State.VertexBufferVertexCount = m_VertexBufferVertexCount;
+    State.VertexBufferWrapAware = m_VertexBufferWrapAware;
+}
+
+void RCKMesh::SetRasterizerBufferState(const RCKMeshBufferState &State) {
+    m_RasterizerContext = State.Context;
+    m_VertexBufferReady = State.VertexBufferReady;
+    m_IndexBufferReady = State.IndexBufferReady;
+    m_VertexBuffer = State.VertexBuffer;
+    m_IndexBuffer = State.IndexBuffer;
+    m_IndexBufferIndexCount = State.IndexBufferIndexCount;
+    m_VertexBufferDpFlags = State.VertexBufferDpFlags;
+    m_VertexBufferVertexFormat = State.VertexBufferVertexFormat;
+    m_VertexBufferStride = State.VertexBufferStride;
+    m_VertexBufferVertexCount = State.VertexBufferVertexCount;
+    m_VertexBufferWrapAware = State.VertexBufferWrapAware;
 }
 
 // Get class ID
@@ -4245,8 +4296,10 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             CKBOOL needsMultiPass = FALSE;
 
             if (renderChannels && rstContext) {
-                const int textureStages = rc->m_RasterizerDriver
-                    ? (int)rc->m_RasterizerDriver->m_3DCaps.MaxNumberTextureStage
+                VxDriverDescEx *driverDesc =
+                    rc->m_RenderManager->GetDriverDescription(rc->m_DriverIndex);
+                const int textureStages = driverDesc
+                    ? (int)driverDesc->Caps3D.MaxNumberTextureStage
                     : 1;
                 int maxAdditionalStages = textureStages - 1;
                 if (maxAdditionalStages > CKRST_MAX_TEXTURE_STAGES - 1)
@@ -4338,11 +4391,21 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
             // Check HW vertex buffer
             VxDrawPrimitiveData *dp = &dpData;
+            const CKDWORD meshGeometryChangedFlags =
+                VXMESH_UV_CHANGED |
+                VXMESH_NORMAL_CHANGED |
+                VXMESH_COLOR_CHANGED |
+                VXMESH_POS_CHANGED;
+            if ((m_Flags & meshGeometryChangedFlags) != 0)
+                rc->m_RenderManager->MeshVerticesChanged(this);
             m_Valid++;
             const CKBOOL canUseVertexBuffers = rstContext != nullptr;
             if (m_Valid > 3 && canUseVertexBuffers) {
                 CK_RENDER_PERF_INC(renderStats, VertexBufferChecks);
-                if (CheckHWVertexBuffer(rc, rstContext, dp)) {
+                const CKBOOL hardwareReady =
+                    CheckHWVertexBuffer(rc, rstContext, dp);
+                rc->m_RenderManager->StoreMeshBuffers(this);
+                if (hardwareReady) {
                     dp = nullptr; // Use HW vertex buffer instead
                     m_VertexBufferReady = 1;
                     CK_RENDER_PERF_INC(renderStats, VertexBufferReady);
@@ -4385,11 +4448,6 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             }
 
             // Clear mesh geometry changed flags
-            const CKDWORD meshGeometryChangedFlags =
-                VXMESH_UV_CHANGED |
-                VXMESH_NORMAL_CHANGED |
-                VXMESH_COLOR_CHANGED |
-                VXMESH_POS_CHANGED;
             m_Flags &= ~meshGeometryChangedFlags;
 
             // Wireframe overlay
@@ -4706,7 +4764,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                                                  indexCount, hwVertexCount);
                     }
                     // The hardware index buffer holds absolute vertex indices
-                    // (spec 4.7); a primitive without one draws its own indices
+                    // A primitive without an index buffer draws its own indices
                     // relative to the group base.
                     if (ib) {
                         dev->m_RasterizerContext->DrawPrimitiveVBIB(
@@ -5285,17 +5343,28 @@ void RCKMesh::ResetHardwareVertexBufferState() {
 }
 
 // Creates the interleaved hardware vertex buffer for `vertexCount` vertices of
-// `vertexFormat`. Index buffers are 16-bit and absolute (spec 4.7), so a
+// `vertexFormat`. Index buffers are 16-bit and absolute, so a
 // mesh whose per-group vertex copies exceed 65536 stays on the software path.
 CKBOOL RCKMesh::CreateHardwareVertexBuffer(CKRasterizerContext *rst, CKDWORD vertexFormat,
                                            CKDWORD stride, CKDWORD vertexCount) {
-    if (m_VertexBuffer)
-        rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-    m_VertexBuffer = 0;
     if (vertexCount > 0x10000u) {
         ResetHardwareVertexBufferState();
         return FALSE;
     }
+
+    if (m_VertexBuffer &&
+        m_VertexBufferVertexFormat == vertexFormat &&
+        m_VertexBufferStride == stride &&
+        m_VertexBufferVertexCount == vertexCount) {
+        return TRUE;
+    }
+
+    if (m_VertexBuffer &&
+        !rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER)) {
+        m_VertexBufferReady = 0;
+        return FALSE;
+    }
+    m_VertexBuffer = 0;
 
     CKVertexBufferDesc desc;
     desc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY;
@@ -5314,22 +5383,34 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                                     CKRasterizerContext *rst,
                                     VxDrawPrimitiveData *data) {
     if (!renderContext || renderContext->m_RasterizerContext != rst ||
-        !rst || !data)
+        !rst || !data || data->VertexCount <= 0)
         return FALSE;
 
-    if (m_RasterizerContext != rst) {
-        if (m_RasterizerContext) {
-            if (m_VertexBuffer)
-                m_RasterizerContext->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-            if (m_IndexBuffer)
-                m_RasterizerContext->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
+    RCKRenderManager *renderManager = renderContext->m_RenderManager;
+    if (!renderManager)
+        return FALSE;
+
+    const CKDWORD geometryChangedFlags =
+        VXMESH_UV_CHANGED |
+        VXMESH_NORMAL_CHANGED |
+        VXMESH_COLOR_CHANGED |
+        VXMESH_POS_CHANGED;
+    CKBOOL indicesChanged = FALSE;
+    for (int i = 0; i < m_MaterialGroups.Size() && !indicesChanged; ++i) {
+        CKMaterialGroup *group = m_MaterialGroups[i];
+        if (!IsRenderableMaterialGroup(group))
+            continue;
+        for (int p = 0; p < group->m_Primitives.Size(); ++p) {
+            if (group->m_Primitives[p].m_IndexBufferOffset < 0) {
+                indicesChanged = TRUE;
+                break;
+            }
         }
-        m_RasterizerContext = rst;
-        m_VertexBuffer = 0;
-        m_IndexBuffer = 0;
-        m_VertexBufferReady = 0;
-        m_IndexBufferIndexCount = 0;
     }
+    if (indicesChanged)
+        renderManager->MeshIndicesChanged(this);
+
+    renderManager->SelectMeshBuffers(this, rst);
 
     // Public vertex format and the canonical interleaved layout Lock memory uses.
     const CKDWORD vertexFormat = CKRSTVertexFormatFromDrawData(data);
@@ -5348,6 +5429,14 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (!IsRenderableMaterialGroup(group))
                 continue;
+            const CKDWORD sourceVertexCount = group->m_RemapData && group->m_VertexCount > 0
+                ? group->m_VertexCount : (CKDWORD)data->VertexCount;
+            if (!CKMeshGroupIndicesFit(group, sourceVertexCount)) {
+                m_VertexBufferReady = 0;
+                m_IndexBufferReady = FALSE;
+                m_VertexBufferWrapAware = FALSE;
+                return FALSE;
+            }
             for (int p = 0; p < group->m_Primitives.Size(); p++) {
                 CKPrimitiveEntry *prim = &group->m_Primitives[p];
                 if (prim->m_Type != VX_TRIANGLELIST) {
@@ -5355,19 +5444,22 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                     m_VertexBufferWrapAware = FALSE;
                     return FALSE;
                 }
-                totalVertexCount += (prim->m_Indices.Size() / 3) * 3;
+                if (!CKMeshAccumulateCount((CKDWORD)(prim->m_Indices.Size() / 3) * 3, 0x10000u, totalVertexCount)) {
+                    m_VertexBufferReady = 0;
+                    m_IndexBufferReady = FALSE;
+                    m_VertexBufferWrapAware = FALSE;
+                    return FALSE;
+                }
             }
         }
 
         if (totalVertexCount == 0)
             return FALSE;
 
-        const CKDWORD geometryChangedFlags =
-            VXMESH_UV_CHANGED |
-            VXMESH_NORMAL_CHANGED |
-            VXMESH_COLOR_CHANGED |
-            VXMESH_POS_CHANGED;
         const CKBOOL geometryChanged = (m_Flags & geometryChangedFlags) != 0;
+
+        if (!m_VertexBufferWrapAware)
+            m_IndexBufferReady = FALSE;
 
         if (m_VertexBufferReady != 0 &&
             m_VertexBufferWrapAware &&
@@ -5392,8 +5484,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         CKBYTE *vbData = (CKBYTE *)rst->LockVertexBuffer(m_VertexBuffer, 0, totalVertexCount, CKRST_LOCK_DISCARD);
         if (!vbData) {
             VxFree(ibData);
-            rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-            m_VertexBuffer = 0;
+            if (rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER))
+                m_VertexBuffer = 0;
             ResetHardwareVertexBufferState();
             return FALSE;
         }
@@ -5411,8 +5503,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                 if (!vb) {
                     rst->UnlockVertexBuffer(m_VertexBuffer);
                     VxFree(ibData);
-                    rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-                    m_VertexBuffer = 0;
+                    if (rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER))
+                        m_VertexBuffer = 0;
                     ResetHardwareVertexBufferState();
                     return FALSE;
                 }
@@ -5421,8 +5513,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                     vb->m_Colors.Size() < (int)group->m_VertexCount) {
                     rst->UnlockVertexBuffer(m_VertexBuffer);
                     VxFree(ibData);
-                    rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-                    m_VertexBuffer = 0;
+                    if (rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER))
+                        m_VertexBuffer = 0;
                     ResetHardwareVertexBufferState();
                     return FALSE;
                 }
@@ -5464,34 +5556,65 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                 }
             }
         }
-        rst->UnlockVertexBuffer(m_VertexBuffer);
-
-        if (m_IndexBuffer)
-            rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
-        m_IndexBuffer = 0;
-        CKIndexBufferDesc ibDesc;
-        ibDesc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY | CKRST_VB_SHARED;
-        ibDesc.m_MaxIndexCount = totalVertexCount;
-        ibDesc.m_CurrentICount = totalVertexCount;
-        if (!rst->CreateIndexBuffer(&ibDesc, ibData, &m_IndexBuffer)) {
-            rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-            m_VertexBuffer = 0;
+        if (!rst->UnlockVertexBuffer(m_VertexBuffer)) {
             VxFree(ibData);
+            if (rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER))
+                m_VertexBuffer = 0;
             ResetHardwareVertexBufferState();
             return FALSE;
         }
-        m_IndexBufferIndexCount = totalVertexCount;
 
-        VxFree(ibData);
         m_VertexBufferDpFlags = data->Flags;
         m_VertexBufferVertexFormat = vertexFormat;
         m_VertexBufferStride = stride;
         m_VertexBufferVertexCount = totalVertexCount;
-        m_VertexBufferReady = 1;
         m_VertexBufferWrapAware = TRUE;
+        m_VertexBufferReady = 0;
+
+        if (!m_IndexBuffer || m_IndexBufferIndexCount < totalVertexCount) {
+            if (m_IndexBuffer &&
+                !rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER)) {
+                m_IndexBufferReady = FALSE;
+                VxFree(ibData);
+                return FALSE;
+            }
+            m_IndexBuffer = 0;
+            m_IndexBufferReady = FALSE;
+
+            CKIndexBufferDesc ibDesc;
+            ibDesc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY | CKRST_VB_SHARED;
+            ibDesc.m_MaxIndexCount = totalVertexCount;
+            ibDesc.m_CurrentICount = totalVertexCount;
+            if (!rst->CreateIndexBuffer(&ibDesc, ibData, &m_IndexBuffer)) {
+                m_IndexBufferIndexCount = 0;
+                VxFree(ibData);
+                return FALSE;
+            }
+            m_IndexBufferIndexCount = totalVertexCount;
+        } else if (!m_IndexBufferReady) {
+            CKWORD *dst = static_cast<CKWORD *>(rst->LockIndexBuffer(
+                m_IndexBuffer, 0, totalVertexCount, CKRST_LOCK_DISCARD));
+            if (!dst) {
+                VxFree(ibData);
+                return FALSE;
+            }
+            memcpy(dst, ibData, totalVertexCount * sizeof(CKWORD));
+            if (!rst->UnlockIndexBuffer(m_IndexBuffer)) {
+                VxFree(ibData);
+                return FALSE;
+            }
+        }
+
+        VxFree(ibData);
+        m_IndexBufferReady = TRUE;
+        m_VertexBufferReady = 1;
         return TRUE;
     }
 
+    if (m_VertexBufferWrapAware) {
+        m_VertexBufferReady = 0;
+        m_IndexBufferReady = FALSE;
+    }
     m_VertexBufferWrapAware = FALSE;
 
     // Count total vertices needed
@@ -5504,14 +5627,27 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         if (!IsRenderableMaterialGroup(group))
             continue;
         if (group->m_RemapData && group->m_VertexCount > 0) {
+            if (!CKMeshGroupIndicesFit(group, group->m_VertexCount) ||
+                !CKMeshAccumulateCount(group->m_VertexCount, 0x10000u, totalVertexCount)) {
+                m_VertexBufferReady = 0;
+                m_IndexBufferReady = FALSE;
+                return FALSE;
+            }
             hasRemappedVertices = TRUE;
-            totalVertexCount += group->m_VertexCount;
         } else {
+            if (!CKMeshGroupIndicesFit(group, (CKDWORD)data->VertexCount)) {
+                m_VertexBufferReady = 0;
+                m_IndexBufferReady = FALSE;
+                return FALSE;
+            }
             hasDirectVertices = TRUE;
         }
     }
-    if (hasDirectVertices)
-        totalVertexCount += data->VertexCount;
+    if (hasDirectVertices && !CKMeshAccumulateCount((CKDWORD)data->VertexCount, 0x10000u, totalVertexCount)) {
+        m_VertexBufferReady = 0;
+        m_IndexBufferReady = FALSE;
+        return FALSE;
+    }
 
     if (totalVertexCount == 0)
         return FALSE;
@@ -5529,11 +5665,6 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         }
     }
 
-    const CKDWORD geometryChangedFlags =
-        VXMESH_UV_CHANGED |
-        VXMESH_NORMAL_CHANGED |
-        VXMESH_COLOR_CHANGED |
-        VXMESH_POS_CHANGED;
     const CKBOOL geometryChanged = (m_Flags & geometryChangedFlags) != 0;
 
     // If buffer is up to date for this exact format, just check index buffer and return.
@@ -5557,8 +5688,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         return FALSE;
     CKBYTE *vbData = (CKBYTE *)rst->LockVertexBuffer(m_VertexBuffer, 0, totalVertexCount, CKRST_LOCK_DISCARD);
     if (!vbData) {
-        rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
-        m_VertexBuffer = 0;
+        if (rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER))
+            m_VertexBuffer = 0;
         ResetHardwareVertexBufferState();
         return FALSE;
     }
@@ -5626,7 +5757,12 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
             currentOffset += group->m_VertexCount;
         }
     }
-    rst->UnlockVertexBuffer(m_VertexBuffer);
+    if (!rst->UnlockVertexBuffer(m_VertexBuffer)) {
+        if (rst->DeleteObject(m_VertexBuffer, CKRST_OBJ_VERTEXBUFFER))
+            m_VertexBuffer = 0;
+        ResetHardwareVertexBufferState();
+        return FALSE;
+    }
 
     m_VertexBufferDpFlags = data->Flags;
     m_VertexBufferVertexFormat = vertexFormat;
@@ -5654,7 +5790,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     if (!rst)
         return FALSE;
 
-    CKBOOL needUpdate = FALSE;
+    CKBOOL needUpdate = !m_IndexBufferReady;
     CKDWORD totalIndexCount = 0;
 
     // Count total indices needed and check if any group needs update
@@ -5666,19 +5802,41 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
         // Iterate through primitive entries
         for (int p = 0; p < group->m_Primitives.Size(); p++) {
             CKPrimitiveEntry *prim = &group->m_Primitives[p];
-            totalIndexCount += prim->m_Indices.Size();
+            const CKDWORD indexCount = (CKDWORD)prim->m_Indices.Size();
+            if (!CKMeshAccumulateCount(indexCount, 0x3fffffffu, totalIndexCount)) {
+                m_IndexBufferReady = FALSE;
+                return FALSE;
+            }
+            for (CKDWORD index = 0; index < indexCount; ++index) {
+                const CKDWORD value = prim->m_Indices[index];
+                if (group->m_BaseVertex > 0xffffu - value ||
+                    group->m_BaseVertex + value >= m_VertexBufferVertexCount) {
+                    m_IndexBufferReady = FALSE;
+                    return FALSE;
+                }
+            }
             if (prim->m_IndexBufferOffset < 0) {
                 needUpdate = TRUE;
             }
         }
     }
 
-    CKBOOL needResize = (m_IndexBufferIndexCount < totalIndexCount);
+    if (totalIndexCount == 0) {
+        m_IndexBufferReady = TRUE;
+        return TRUE;
+    }
+
+    CKBOOL needResize = !m_IndexBuffer ||
+                        (m_IndexBufferIndexCount < totalIndexCount);
 
     if (needResize) {
-        if (m_IndexBuffer)
-            rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER);
+        if (m_IndexBuffer &&
+            !rst->DeleteObject(m_IndexBuffer, CKRST_OBJ_INDEXBUFFER)) {
+            m_IndexBufferReady = FALSE;
+            return FALSE;
+        }
         m_IndexBuffer = 0;
+        m_IndexBufferReady = FALSE;
 
         CKIndexBufferDesc newDesc;
         newDesc.m_Flags = CKRST_VB_VALID | CKRST_VB_WRITEONLY | CKRST_VB_SHARED;
@@ -5696,9 +5854,11 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                 }
             }
             m_IndexBufferIndexCount = 0;
+            m_IndexBufferReady = FALSE;
             return FALSE;
         }
         m_IndexBufferIndexCount = totalIndexCount;
+        m_IndexBufferReady = FALSE;
         needUpdate = TRUE;
     }
 
@@ -5717,6 +5877,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
             }
         }
         m_IndexBufferIndexCount = 0;
+        m_IndexBufferReady = FALSE;
         return FALSE;
     }
 
@@ -5776,9 +5937,11 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                 group->m_Primitives[p].m_IndexBufferOffset = -1;
             }
         }
+        m_IndexBufferReady = FALSE;
         return FALSE;
     }
 
+    m_IndexBufferReady = TRUE;
     return TRUE;
 }
 

@@ -58,7 +58,8 @@ protected:
                             int CubeMapFace);
 
     VX_PIXELFORMAT m_DesiredVideoFormat;
-    CKRasterizerContext *m_RasterizerContext; // v3 context the video texture belongs to
+    // Source-compatible view of the entry selected from RCKRenderManager.
+    CKRasterizerContext *m_RasterizerContext;
     CKDWORD m_MipMapLevel;
     CKDWORD m_ObjectIndex;
     XClassArray<VxImageDescEx> *m_MipMaps;

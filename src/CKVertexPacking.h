@@ -2,7 +2,7 @@
 #define CKVERTEXPACKING_H
 
 // Engine-side helpers that write VxDrawPrimitiveData into the canonical
-// interleaved vertex layout of the public CKRasterizer v3 interface
+// interleaved vertex layout of the private CKRasterizer interface
 // (CKRSTGetVertexLayout in CKRasterizer.h). This is the memory the engine
 // hands to LockVertexBuffer / UnlockVertexBuffer.
 

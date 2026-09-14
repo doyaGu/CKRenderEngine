@@ -31,29 +31,6 @@ static CKBOOL IsPowerOfTwo(CKDWORD x) {
     return x && !(x & (x - 1));
 }
 
-static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx &desc) {
-    VxImageDescEx *bestFormat = nullptr;
-    int bestDiff = 64;
-
-    for (auto it = driver->m_TextureFormats.Begin(); it != driver->m_TextureFormats.End(); ++it) {
-        if (it->Format.AlphaMask) {
-            int diff = abs((int) it->Format.BitsPerPixel - (int) desc.BitsPerPixel);
-            if (diff < bestDiff) {
-                bestFormat = &it->Format;
-                bestDiff = diff;
-            }
-        }
-    }
-
-    if (bestFormat) {
-        desc.BitsPerPixel = bestFormat->BitsPerPixel;
-        desc.RedMask = bestFormat->RedMask;
-        desc.GreenMask = bestFormat->GreenMask;
-        desc.BlueMask = bestFormat->BlueMask;
-        desc.AlphaMask = bestFormat->AlphaMask;
-    }
-}
-
 static CKBOOL SamePixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
     return a.BitsPerPixel == b.BitsPerPixel &&
            a.RedMask == b.RedMask &&
@@ -158,8 +135,8 @@ CKBOOL RCKTexture::Create(int Width, int Height, int BPP, int Slot) {
 
     SetUserMipMapMode(FALSE);
 
-    if (oldWidth != GetWidth() || oldHeight != GetHeight())
-        FreeVideoMemory();
+    if ((oldWidth != GetWidth() || oldHeight != GetHeight()) && m_InVideoMemory && !FreeVideoMemory())
+        return FALSE;
 
     return TRUE;
 }
@@ -180,8 +157,8 @@ CKBOOL RCKTexture::LoadImage(CKSTRING Name, int Slot) {
     if (!result)
         SetSlotFileName(Slot, Name);
 
-    if (oldWidth != GetWidth() || oldHeight != GetHeight())
-        FreeVideoMemory();
+    if ((oldWidth != GetWidth() || oldHeight != GetHeight()) && m_InVideoMemory && !FreeVideoMemory())
+        return FALSE;
 
     return result;
 }
@@ -192,7 +169,8 @@ CKBOOL RCKTexture::LoadMovie(CKSTRING Name) {
     if (!Name)
         return FALSE;
 
-    FreeVideoMemory();
+    if (m_InVideoMemory && !FreeVideoMemory())
+        return FALSE;
 
     XString path(Name);
     m_Context->GetPathManager()->ResolveFileName(path, BITMAP_PATH_IDX, -1);
@@ -210,6 +188,10 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
         return FALSE;
 
     CKRasterizerContext *rstCtx = dev->m_RasterizerContext;
+    RCKRenderManager *renderManager = dev->m_RenderManager;
+    renderManager->SelectTextureObject(this, rstCtx);
+    VxDriverDescEx *driverDesc =
+        renderManager->GetDriverDescription(dev->m_DriverIndex);
 
     if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0) {
         dev->ResetTextureStage(TextureStage);
@@ -217,7 +199,7 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     }
 
     // Check driver support for clamping
-    if (!(dev->m_RasterizerDriver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA))
+    if (!driverDesc || !(driverDesc->Caps3D.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA))
         Clamping = FALSE;
 
     CKBOOL needsAlpha = (m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 || Clamping;
@@ -227,24 +209,16 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     int result = 1;
 
     if (m_InVideoMemory) {
-        if (m_RasterizerContext != rstCtx) {
-            if (m_RasterizerContext)
-                m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-            m_ObjectIndex = 0;
-            m_InVideoMemory = FALSE;
-            m_TextureFlags = 0;
-            m_CachedMipMapCount = 0;
-            memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
-            needsCreate = TRUE;
-        } else {
-            isRenderTarget = (m_TextureFlags & CKRST_TEXTURE_RENDERTARGET) != 0;
-        }
+        isRenderTarget = (m_TextureFlags & CKRST_TEXTURE_RENDERTARGET) != 0;
         if (m_InVideoMemory && !isRenderTarget &&
-            ((!HasAlphaFormat(m_VideoFormat) && needsAlpha) ||
+            (m_VideoFormat.Width != GetWidth() ||
+                m_VideoFormat.Height != GetHeight() ||
+                (!HasAlphaFormat(m_VideoFormat) && needsAlpha) ||
                 m_CachedMipMapCount != m_MipMapLevel)) {
-            rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-            m_ObjectIndex = 0;
-            m_InVideoMemory = FALSE;
+            if (!renderManager->DeleteTextureObject(this, rstCtx)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
             needsCreate = TRUE;
         }
     } else {
@@ -260,9 +234,9 @@ CKBOOL RCKTexture::SetAsCurrent(CKRenderContext *Dev, CKBOOL Clamping, int Textu
     } else {
         // Check if texture needs to be restored
         if (!isRenderTarget) {
-            needsRestore = ((m_BitmapFlags & CKBITMAPDATA_FORCERESTORE) != 0 || (Clamping && !(m_BitmapFlags & CKBITMAPDATA_CLAMPUPTODATE)));
+            needsRestore = renderManager->TextureObjectNeedsUpdate(this) ||
+                (Clamping && !(m_BitmapFlags & CKBITMAPDATA_CLAMPUPTODATE));
         }
-        m_RasterizerContext = rstCtx;
     }
 
     if (needsRestore && !Restore(Clamping)) {
@@ -294,8 +268,21 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
     if ((m_BitmapFlags & CKBITMAPDATA_INVALID) != 0)
         return FALSE;
 
-    if (!m_RasterizerContext->m_Driver)
+    RCKRenderManager *renderManager =
+        static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    VxDriverDescEx *driverDesc = renderManager
+        ? renderManager->GetDriverDescription(m_RasterizerContext)
+        : nullptr;
+    if (!driverDesc)
         return FALSE;
+
+    const CKBOOL clampChangesPixels = Clamp &&
+        !(m_BitmapFlags & CKBITMAPDATA_CLAMPUPTODATE) &&
+        driverDesc &&
+        (driverDesc->Caps3D.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0;
+    if (renderManager &&
+        ((m_BitmapFlags & CKBITMAPDATA_FORCERESTORE) || clampChangesPixels))
+        renderManager->TextureObjectChanged(this);
 
     m_BitmapFlags &= ~CKBITMAPDATA_CLAMPUPTODATE;
 
@@ -340,8 +327,11 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
                 if (!result)
                     break;
             }
-            if (result)
+            if (result) {
                 m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
+                if (renderManager)
+                    renderManager->TextureObjectUpdated(this);
+            }
             return result;
         }
     }
@@ -364,7 +354,7 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             SetAlphaForTransparentColor(desc);
 
         // Handle clamping
-        if ((m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0) {
+        if (driverDesc && (driverDesc->Caps3D.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0) {
             if (Clamp)
                 SetBorderColorForClamp(desc);
         } else {
@@ -413,16 +403,15 @@ CKBOOL RCKTexture::Restore(CKBOOL Clamp) {
             result = TRUE;
         } else {
             result = m_RasterizerContext->LoadTexture(m_ObjectIndex, uploadDesc, 0, CKRST_CUBEFACE_XPOS, nullptr);
-            delete[] converted;
-            if (result)
-                m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
-            return result;
         }
         delete[] converted;
     }
 
-    if (result)
+    if (result) {
         m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
+        if (renderManager)
+            renderManager->TextureObjectUpdated(this);
+    }
     return result;
 }
 
@@ -443,13 +432,19 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     if (!dev->m_RasterizerDriver)
         return FALSE;
 
-    m_RasterizerContext = dev->m_RasterizerContext;
-    if (!m_RasterizerContext->m_Driver)
+    RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    if (!rm)
+        return FALSE;
+    rm->SelectTextureObject(this, dev->m_RasterizerContext);
+    VxDriverDescEx *driverDesc = rm->GetDriverDescription(m_RasterizerContext);
+    if (!driverDesc)
         return FALSE;
 
-    RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
-    const VX_PIXELFORMAT fallbackFormat =
-        rm ? static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value) : UNKNOWN_PF;
+    if (m_InVideoMemory &&
+        !rm->DeleteTextureObject(this, m_RasterizerContext))
+        return FALSE;
+
+    const VX_PIXELFORMAT fallbackFormat = static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value);
 
     CKTextureDesc desc;
     VxImageDescEx systemDesc;
@@ -491,8 +486,8 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
     // If no alpha format and we need alpha, find nearest format with alpha
     if (!HasAlphaFormat(desc.Format)) {
         if ((m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) != 0 ||
-            (Clamping && (m_RasterizerContext->m_Driver->m_3DCaps.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0)) {
-            FindNearestFormatWithAlpha(dev->m_RasterizerDriver, desc.Format);
+            (Clamping && driverDesc && (driverDesc->Caps3D.CKRasterizerSpecificCaps & CKRST_SPECIFICCAPS_CLAMPEDGEALPHA) != 0)) {
+            dev->m_RenderManager->FindNearestTextureFormatWithAlpha(dev->m_DriverIndex, desc.Format);
         }
     }
 
@@ -504,16 +499,11 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
         m_TextureFlags = desc.Flags;
         m_CachedMipMapCount = m_MipMapLevel;
         m_VideoFormat = desc.Format;
+        rm->TextureObjectUpdated(this, TRUE);
         if (Restore(Clamping))
             return TRUE;
 
-        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-        m_ObjectIndex = 0;
-        m_InVideoMemory = FALSE;
-        m_TextureFlags = 0;
-        m_CachedMipMapCount = 0;
-        memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
-        m_ObjectIndex = 0;
+        rm->DeleteTextureObject(this, m_RasterizerContext);
         return FALSE;
     }
 
@@ -521,20 +511,16 @@ CKBOOL RCKTexture::SystemToVideoMemory(CKRenderContext *Dev, CKBOOL Clamping) {
 }
 
 CKBOOL RCKTexture::FreeVideoMemory() {
-    if (!m_RasterizerContext) {
-        m_InVideoMemory = FALSE;
-        m_ObjectIndex = 0;
-        m_TextureFlags = 0;
-        m_CachedMipMapCount = 0;
-        memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
-        return FALSE;
-    }
+    RCKRenderManager *renderManager = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    if (renderManager)
+        return renderManager->DeleteTextureObjects(this);
 
-    CKBOOL result = FALSE;
-    if (m_InVideoMemory) {
-        result = m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-        m_ObjectIndex = 0;
-    }
+    if (!m_RasterizerContext || !m_InVideoMemory || m_ObjectIndex == 0)
+        return FALSE;
+    const CKBOOL result = m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+    if (!result)
+        return FALSE;
+    m_ObjectIndex = 0;
     m_InVideoMemory = FALSE;
     m_TextureFlags = 0;
     m_CachedMipMapCount = 0;
@@ -554,8 +540,9 @@ CKBOOL RCKTexture::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest, 
         return FALSE;
 
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
-    if (!rctx->m_RasterizerContext || rctx->m_RasterizerContext != m_RasterizerContext)
+    if (!rctx->m_RasterizerContext)
         return FALSE;
+    rctx->m_RenderManager->SelectTextureObject(this, rctx->m_RasterizerContext);
     if (!m_RasterizerContext || !m_InVideoMemory)
         return FALSE;
     if (CubeMapFace < CKRST_CUBEFACE_XPOS || CubeMapFace > CKRST_CUBEFACE_ZNEG)
@@ -572,9 +559,10 @@ CKBOOL RCKTexture::ApplyContextCopy(RCKRenderContext *context,
                                     const VxImageDescEx &source,
                                     const VxRect *destination,
                                     int cubeMapFace) {
-    if (!context || !context->m_RasterizerContext ||
-        context->m_RasterizerContext != m_RasterizerContext ||
-        !m_InVideoMemory)
+    if (!context || !context->m_RasterizerContext)
+        return FALSE;
+    context->m_RenderManager->SelectTextureObject(this, context->m_RasterizerContext);
+    if (!m_InVideoMemory)
         return FALSE;
     if (cubeMapFace < CKRST_CUBEFACE_XPOS || cubeMapFace > CKRST_CUBEFACE_ZNEG)
         return FALSE;
@@ -611,8 +599,8 @@ CKBOOL RCKTexture::UseMipmap(int UseMipMap) {
         mipMapLevel = (CKDWORD)UseMipMap;
     }
 
-    if (m_MipMapLevel != mipMapLevel)
-        FreeVideoMemory();
+    if (m_MipMapLevel != mipMapLevel && m_InVideoMemory && !FreeVideoMemory())
+        return FALSE;
 
     m_MipMapLevel = mipMapLevel;
 
@@ -644,8 +632,9 @@ CKBOOL RCKTexture::GetSystemTextureDesc(VxImageDescEx &desc) {
 
 void RCKTexture::SetDesiredVideoFormat(VX_PIXELFORMAT Format) {
     if (m_DesiredVideoFormat != Format) {
+        if (m_InVideoMemory && !FreeVideoMemory())
+            return;
         m_DesiredVideoFormat = Format;
-        FreeVideoMemory();
     }
 }
 
@@ -662,6 +651,9 @@ CKBOOL RCKTexture::SetUserMipMapMode(CKBOOL UserMipmap) {
             if (!IsPowerOfTwo(GetWidth()))
                 return FALSE;
             if (!IsPowerOfTwo(GetHeight()))
+                return FALSE;
+
+            if (m_InVideoMemory && !FreeVideoMemory())
                 return FALSE;
 
             m_MipMaps = new XClassArray<VxImageDescEx>();
@@ -696,13 +688,13 @@ CKBOOL RCKTexture::SetUserMipMapMode(CKBOOL UserMipmap) {
                 VxImageDescEx *mipmap = m_MipMaps->At(i);
                 *mipmap = mipDesc;
             }
-            FreeVideoMemory();
         }
-        UseMipmap(TRUE);
-        return TRUE;
+        return UseMipmap(TRUE);
     } else {
         // Clean up user mipmaps
         if (m_MipMaps) {
+            if (m_InVideoMemory && !FreeVideoMemory())
+                return FALSE;
             int count = m_MipMaps->Size();
             for (int i = 0; i < count; ++i) {
                 VxImageDescEx *mipmap = m_MipMaps->At(i);
@@ -711,7 +703,6 @@ CKBOOL RCKTexture::SetUserMipMapMode(CKBOOL UserMipmap) {
             }
             delete m_MipMaps;
             m_MipMaps = nullptr;
-            FreeVideoMemory();
         }
         return TRUE;
     }
@@ -741,32 +732,25 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev) {
     if (GetWidth() <= 0 || GetHeight() <= 0)
         return FALSE;
     const CKBOOL isCubeTarget = IsCubeMap() && GetSlotCount() == 6 && GetWidth() == GetHeight();
+    RCKRenderManager *rm = dev->m_RenderManager;
+    rm->SelectTextureObject(this, dev->m_RasterizerContext);
 
     // Readbacks go through the render context (DumpToMemory / RequestReadback
     // read the presented frame or the bound target); they are not a texture
-    // property in the public v3 texture interface.
+    // property in the rasterizer texture interface.
     const CKDWORD requiredFlags = CKRST_TEXTURE_RENDERTARGET |
                                   (isCubeTarget ? CKRST_TEXTURE_CUBEMAP : 0);
-    if (m_InVideoMemory &&
-        m_RasterizerContext == dev->m_RasterizerContext &&
-        (m_TextureFlags & requiredFlags) == requiredFlags) {
+    if (m_InVideoMemory && (m_TextureFlags & requiredFlags) == requiredFlags) {
         return TRUE;
     }
 
-    if (m_InVideoMemory && m_RasterizerContext)
-        m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-    m_ObjectIndex = 0;
-
-    m_RasterizerContext = dev->m_RasterizerContext;
-    m_InVideoMemory = FALSE;
-    m_TextureFlags = 0;
-    m_CachedMipMapCount = 0;
-    memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
+    if (m_InVideoMemory &&
+        !rm->DeleteTextureObject(this, m_RasterizerContext))
+        return FALSE;
 
     CKTextureDesc desc;
-    RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
     const VX_PIXELFORMAT fallbackFormat =
-        rm ? static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value) : UNKNOWN_PF;
+        static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value);
     const VX_PIXELFORMAT videoFormat = ResolveObjectVideoFormat(
         m_DesiredVideoFormat,
         fallbackFormat);
@@ -786,6 +770,7 @@ CKBOOL RCKTexture::EnsureRenderTarget(CKRenderContext *Dev) {
     m_TextureFlags = desc.Flags;
     m_CachedMipMapCount = desc.MipMapCount;
     m_VideoFormat = desc.Format;
+    rm->TextureObjectUpdated(this);
     return TRUE;
 }
 
@@ -803,7 +788,20 @@ RCKTexture::RCKTexture(CKContext *Context, CKSTRING name) : CKTexture(Context, n
 }
 
 RCKTexture::~RCKTexture() {
-    FreeVideoMemory();
+    RCKRenderManager *renderManager = m_Context
+        ? static_cast<RCKRenderManager *>(m_Context->GetRenderManager())
+        : nullptr;
+    if (renderManager) {
+        renderManager->DeleteTextureObjects(this, FALSE);
+    } else {
+        if (m_RasterizerContext && m_ObjectIndex)
+            m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+        m_ObjectIndex = 0;
+        m_InVideoMemory = FALSE;
+        m_TextureFlags = 0;
+        m_CachedMipMapCount = 0;
+        memset(&m_VideoFormat, 0, sizeof(m_VideoFormat));
+    }
     RCKTexture::SetUserMipMapMode(FALSE);
 }
 

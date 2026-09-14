@@ -47,27 +47,6 @@ static VX_PIXELFORMAT ResolveObjectVideoFormat(VX_PIXELFORMAT requested, VX_PIXE
     return _32_ARGB8888;
 }
 
-static void FindNearestFormatWithAlpha(CKRasterizerDriver *driver, VxImageDescEx *desc) {
-    VxImageDescEx *best = nullptr;
-    int minDiff = 64;
-    for (auto it = driver->m_TextureFormats.Begin(); it != driver->m_TextureFormats.End(); ++it) {
-        if (it->Format.AlphaMask) {
-            int diff = abs(it->Format.BitsPerPixel - desc->BitsPerPixel);
-            if (diff < minDiff) {
-                best = &it->Format;
-                minDiff = diff;
-            }
-        }
-    }
-    if (best) {
-        desc->BitsPerPixel = best->BitsPerPixel;
-        desc->RedMask = best->RedMask;
-        desc->GreenMask = best->GreenMask;
-        desc->BlueMask = best->BlueMask;
-        desc->AlphaMask = best->AlphaMask;
-    }
-}
-
 static CKBOOL SamePixelFormat(const VxImageDescEx &a, const VxImageDescEx &b) {
     return a.BitsPerPixel == b.BitsPerPixel &&
            a.RedMask == b.RedMask &&
@@ -166,7 +145,18 @@ RCKSprite::RCKSprite(CKContext *Context, CKSTRING name) : RCK2dEntity(Context, n
 }
 
 RCKSprite::~RCKSprite() {
-    FreeVideoMemory();
+    RCKRenderManager *renderManager = m_Context
+        ? static_cast<RCKRenderManager *>(m_Context->GetRenderManager())
+        : nullptr;
+    if (renderManager) {
+        renderManager->DeleteSpriteObjects(this, FALSE);
+    } else {
+        if (m_RasterizerContext && m_ObjectIndex)
+            m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+        m_InVideoMemory = FALSE;
+        m_ObjectIndex = 0;
+        memset(&m_VideoFormatDesc, 0, sizeof(m_VideoFormatDesc));
+    }
 }
 
 CK_CLASSID RCKSprite::GetClassID() {
@@ -208,14 +198,12 @@ CKBOOL RCKSprite::Create(int Width, int Height, int BPP, int Slot) {
         m_SourceRect.right = (float) GetWidth();
         m_SourceRect.bottom = (float) GetHeight();
 
-        if (oldWidth != m_BitmapData.m_Width || oldHeight != m_BitmapData.m_Height) {
-            FreeVideoMemory();
-        }
+        if ((oldWidth != m_BitmapData.m_Width || oldHeight != m_BitmapData.m_Height) && m_InVideoMemory && !FreeVideoMemory())
+            return FALSE;
         return TRUE;
     } else {
-        if (oldWidth != m_BitmapData.m_Width || oldHeight != m_BitmapData.m_Height) {
+        if ((oldWidth != m_BitmapData.m_Width || oldHeight != m_BitmapData.m_Height) && m_InVideoMemory)
             FreeVideoMemory();
-        }
         return FALSE;
     }
 }
@@ -244,9 +232,8 @@ CKBOOL RCKSprite::LoadImage(CKSTRING Name, int Slot) {
         m_BitmapData.SetSlotFileName(Slot, Name);
     }
 
-    if (oldWidth != m_BitmapData.m_Width || oldHeight != m_BitmapData.m_Height) {
-        FreeVideoMemory();
-    }
+    if ((oldWidth != m_BitmapData.m_Width || oldHeight != m_BitmapData.m_Height) && m_InVideoMemory && !FreeVideoMemory())
+        return FALSE;
 
     return result;
 }
@@ -265,19 +252,16 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
         return CKERR_INVALIDRENDERCONTEXT;
 
     CKRasterizerContext *rstCtx = rctx->m_RasterizerContext;
-    if (m_RasterizerContext != rstCtx) {
-        FreeVideoMemory();
-        m_ObjectIndex = 0;
-    }
-    m_RasterizerContext = rstCtx;
+    RCKRenderManager *renderManager = rctx->m_RenderManager;
+    renderManager->SelectSpriteObject(this, rstCtx);
 
     CKBOOL reload = FALSE;
 
     if (m_InVideoMemory) {
-        if (!m_VideoFormatDesc.AlphaMask && m_VideoFormatDesc.Flags < _DXT1 && (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT)) {
-            rstCtx->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
-            m_ObjectIndex = 0;
-            m_InVideoMemory = FALSE;
+        if (m_VideoFormatDesc.Width != m_BitmapData.m_Width || m_VideoFormatDesc.Height != m_BitmapData.m_Height ||
+            (!m_VideoFormatDesc.AlphaMask && m_VideoFormatDesc.Flags < _DXT1 && (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT))) {
+            if (!renderManager->DeleteSpriteObject(this, rstCtx))
+                return CKERR_INVALIDOPERATION;
             reload = TRUE;
         }
     } else {
@@ -285,13 +269,13 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     }
 
     if (reload) {
-        SystemToVideoMemory(dev, FALSE);
-    } else {
-        m_RasterizerContext = rstCtx;
+        if (!SystemToVideoMemory(dev, FALSE))
+            return CKERR_INVALIDOPERATION;
     }
 
-    if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_FORCERESTORE) {
-        Restore(FALSE);
+    if (renderManager->SpriteObjectNeedsUpdate(this)) {
+        if (!Restore(FALSE))
+            return CKERR_INVALIDOPERATION;
     }
 
     CKRenderContextStateGuard ffpState(rctx->m_RasterizerContext);
@@ -386,9 +370,13 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID) return FALSE;
 
     RCKRenderContext *rctx = (RCKRenderContext *) dev;
-    if (!rctx->m_RasterizerContext) return FALSE;
+    if (!rctx || !rctx->m_RasterizerContext) return FALSE;
 
-    m_RasterizerContext = rctx->m_RasterizerContext;
+    RCKRenderManager *rm = rctx->m_RenderManager;
+    rm->SelectSpriteObject(this, rctx->m_RasterizerContext);
+    if (m_InVideoMemory &&
+        !rm->DeleteSpriteObject(this, m_RasterizerContext))
+        return FALSE;
 
     CKTextureDesc spriteDesc;
     spriteDesc.Format.Width = m_BitmapData.m_Width;
@@ -396,30 +384,34 @@ CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
     spriteDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_MANAGED | CKRST_TEXTURE_SPRITE | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
     spriteDesc.MipMapCount = 0;
 
-    RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
     const VX_PIXELFORMAT videoFormat = ResolveObjectVideoFormat(
         m_VideoFormat,
-        rm ? static_cast<VX_PIXELFORMAT>(rm->m_SpriteVideoFormat.Value) : UNKNOWN_PF);
+        static_cast<VX_PIXELFORMAT>(rm->m_SpriteVideoFormat.Value));
 
     VxPixelFormat2ImageDesc(videoFormat, spriteDesc.Format);
 
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_TRANSPARENT) {
-        FindNearestFormatWithAlpha(rctx->m_RasterizerDriver, &spriteDesc.Format);
+        rctx->m_RenderManager->FindNearestTextureFormatWithAlpha(rctx->m_DriverIndex, spriteDesc.Format);
     }
 
     if (m_RasterizerContext->CreateTexture(&spriteDesc, &m_ObjectIndex)) {
         m_InVideoMemory = TRUE;
         m_VideoFormatDesc = spriteDesc.Format;
-        return Restore(Clamping);
+        rm->SpriteObjectUpdated(this, TRUE);
+        if (Restore(Clamping))
+            return TRUE;
+        rm->DeleteSpriteObject(this, m_RasterizerContext);
     }
     return FALSE;
 }
 
 CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
-    if (!m_RasterizerContext) return FALSE;
+    if (!m_RasterizerContext || !m_InVideoMemory || !m_ObjectIndex) return FALSE;
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID) return FALSE;
 
-    m_BitmapData.m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
+    RCKRenderManager *renderManager = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    if (renderManager && m_BitmapData.ToRestore())
+        renderManager->SpriteObjectChanged(this);
 
     CKBYTE *ptr = m_BitmapData.LockSurfacePtr(-1);
     if (ptr) {
@@ -441,12 +433,21 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
 
         const CKBOOL result = m_RasterizerContext->LoadTexture(m_ObjectIndex, uploadDesc, 0, CKRST_CUBEFACE_XPOS, nullptr);
         delete[] converted;
+        if (result) {
+            m_BitmapData.m_BitmapFlags &= ~CKBITMAPDATA_FORCERESTORE;
+            if (renderManager)
+                renderManager->SpriteObjectUpdated(this);
+        }
         return result;
     }
     return FALSE;
 }
 
 CKBOOL RCKSprite::FreeVideoMemory() {
+    RCKRenderManager *renderManager = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    if (renderManager)
+        return renderManager->DeleteSpriteObjects(this);
+
     if (!m_ObjectIndex) {
         m_InVideoMemory = FALSE;
         return TRUE;
@@ -454,8 +455,11 @@ CKBOOL RCKSprite::FreeVideoMemory() {
     if (!m_RasterizerContext)
         return FALSE;
     const CKBOOL result = m_RasterizerContext->DeleteObject(m_ObjectIndex, CKRST_OBJ_TEXTURE);
+    if (!result)
+        return FALSE;
     m_InVideoMemory = FALSE;
     m_ObjectIndex = 0;
+    memset(&m_VideoFormatDesc, 0, sizeof(m_VideoFormatDesc));
     return result;
 }
 
@@ -464,12 +468,14 @@ CKBOOL RCKSprite::IsInVideoMemory() {
 }
 
 CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
-    if (!ctx || !m_RasterizerContext || !m_InVideoMemory)
+    if (!ctx)
         return FALSE;
 
     RCKRenderContext *rctx = static_cast<RCKRenderContext *>(ctx);
-    if (!rctx->m_RasterizerContext ||
-        rctx->m_RasterizerContext != m_RasterizerContext)
+    if (!rctx->m_RasterizerContext)
+        return FALSE;
+    rctx->m_RenderManager->SelectSpriteObject(this, rctx->m_RasterizerContext);
+    if (!m_InVideoMemory)
         return FALSE;
 
     return rctx->QueueSpriteCopy(this, Src, Dest);
@@ -478,9 +484,10 @@ CKBOOL RCKSprite::CopyContext(CKRenderContext *ctx, VxRect *Src, VxRect *Dest) {
 CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
                                    const VxImageDescEx &source,
                                    const VxRect *destination) {
-    if (!context || !context->m_RasterizerContext ||
-        context->m_RasterizerContext != m_RasterizerContext ||
-        !m_InVideoMemory)
+    if (!context || !context->m_RasterizerContext)
+        return FALSE;
+    context->m_RenderManager->SelectSpriteObject(this, context->m_RasterizerContext);
+    if (!m_InVideoMemory)
         return FALSE;
 
     VxImageDescEx uploadDesc = source;
@@ -524,8 +531,9 @@ CKBOOL RCKSprite::GetSystemTextureDesc(VxImageDescEx &desc) {
 
 void RCKSprite::SetDesiredVideoFormat(VX_PIXELFORMAT pf) {
     if (m_VideoFormat != pf) {
+        if (m_InVideoMemory && !FreeVideoMemory())
+            return;
         m_VideoFormat = pf;
-        FreeVideoMemory();
     }
 }
 
@@ -720,7 +728,15 @@ CKBOOL RCKSprite::LoadMovie(CKSTRING Name, int width, int height, int Bpp) {
 
 // Proxy methods for CKBitmapData
 CKBYTE *RCKSprite::LockSurfacePtr(int Slot) { return m_BitmapData.LockSurfacePtr(Slot); }
-CKBOOL RCKSprite::ReleaseSurfacePtr(int Slot) { return m_BitmapData.ReleaseSurfacePtr(Slot); }
+CKBOOL RCKSprite::ReleaseSurfacePtr(int Slot) {
+    const CKBOOL result = m_BitmapData.ReleaseSurfacePtr(Slot);
+    if (result) {
+        RCKRenderManager *renderManager = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+        if (renderManager)
+            renderManager->SpriteObjectChanged(this);
+    }
+    return result;
+}
 CKBOOL RCKSprite::SetPixel(int x, int y, CKDWORD Color, int Slot) { return m_BitmapData.SetPixel(x, y, Color, Slot); }
 CKDWORD RCKSprite::GetPixel(int x, int y, int Slot) { return m_BitmapData.GetPixel(x, y, Slot); }
 void RCKSprite::SetTransparent(CKBOOL Trans) { m_BitmapData.SetTransparent(Trans); }
