@@ -1,7 +1,7 @@
 #ifndef CKRASTERIZERCAPSBASELINE_H
 #define CKRASTERIZERCAPSBASELINE_H
 
-// Capability baseline (spec 4.9.2).
+// Capability baseline shared by rasterizer drivers.
 //
 // The baseline is the Vx3DCapsDesc / Vx2DCapsDesc snapshot reported by the
 // original CKDX8Rasterizer.dll on the reference machine. It is captured by
@@ -21,7 +21,7 @@ CKBOOL CKRSTGetCapsBaseline(Vx3DCapsDesc *Caps3D, Vx2DCapsDesc *Caps2D);
 // <date>"), or NULL when no baseline is compiled in.
 const char *CKRSTGetCapsBaselineSource();
 
-// Applies the numeric-field-only lowering rule of spec 4.9.2: every numeric
+// Lowers numeric limits to the values reported by the concrete driver: every numeric
 // field of Caps is clamped to the corresponding field of Limits when Limits
 // is smaller (and non-zero); bit fields are left untouched.
 void CKRSTLowerCapsToLimits(Vx3DCapsDesc *Caps, const Vx3DCapsDesc *Limits);

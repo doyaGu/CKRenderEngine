@@ -4,6 +4,5 @@
 #include "CKRasterizer.h"
 
 CKRasterizerContext *CKNullCreateRasterizerContext(CKRasterizerDriver *driver);
-CKBOOL CKNullDestroyRasterizerContext(CKRasterizerContext *context);
 
 #endif // CKNULLRASTERIZERINTERNAL_H

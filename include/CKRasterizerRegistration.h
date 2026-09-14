@@ -3,8 +3,8 @@
 
 #include "CKRasterizer.h"
 
-// Built-in fallback registration uses the same v3 entry points as a plugin.
-// CK_3D does not construct or depend on the translation core or a GPU backend.
+// Built-in fallback registration uses the same entry points as a plugin.
+// CK_3D does not construct or depend on a concrete GPU rasterizer.
 void CKNullRasterizerGetInfo(CKRasterizerInfo *Info);
 
 #endif

@@ -1,19 +1,16 @@
 #include "CKNullRasterizer.h"
 
 #include "CKNullRasterizerInternal.h"
-#include "CKRasterizerCapsBaseline.h"
-
 #include <cstring>
 #include <new>
 
 namespace {
 
-void CKNullInitializeDriverCaps(CKRasterizerDriver &driver)
+void CKNullInitializeDriverCaps(
+    XArray<VxDisplayMode> &displayModes,
+    XClassArray<CKTextureDesc> &textureFormats,
+    CKRasterizerNativeCapsDesc &caps)
 {
-    driver.m_Desc = "NULL Rasterizer";
-    driver.m_Hardware = FALSE;
-    driver.m_CapsUpToDate = TRUE;
-
     static const int resolutions[][2] = {
         {640, 480}, {800, 600}, {1024, 768}, {1280, 720}, {1280, 960},
         {1280, 1024}, {1366, 768}, {1600, 900}, {1920, 1080},
@@ -26,46 +23,39 @@ void CKNullInitializeDriverCaps(CKRasterizerDriver &driver)
             mode.Height = resolution[1];
             mode.Bpp = bpp;
             mode.RefreshRate = 60;
-            driver.m_DisplayModes.PushBack(mode);
+            displayModes.PushBack(mode);
         }
     }
 
     CKTextureDesc texture;
     texture.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
     VxPixelFormat2ImageDesc(_32_ARGB8888, texture.Format);
-    driver.m_TextureFormats.PushBack(texture);
+    textureFormats.PushBack(texture);
 
-    std::memset(&driver.m_3DCaps, 0, sizeof(driver.m_3DCaps));
-    std::memset(&driver.m_2DCaps, 0, sizeof(driver.m_2DCaps));
-    if (!CKRSTGetCapsBaseline(&driver.m_3DCaps, &driver.m_2DCaps)) {
-        driver.m_3DCaps.MinTextureWidth = driver.m_3DCaps.MinTextureHeight = 1;
-        driver.m_3DCaps.MaxTextureWidth = driver.m_3DCaps.MaxTextureHeight = 4096;
-        driver.m_3DCaps.MaxTextureRatio = 4096;
-        driver.m_3DCaps.MaxClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
-        driver.m_3DCaps.MaxActiveLights = CKRST_MAX_LIGHTS;
-        driver.m_3DCaps.MaxNumberBlendStage = CKRST_MAX_TEXTURE_STAGES;
-        driver.m_3DCaps.MaxNumberTextureStage = CKRST_MAX_TEXTURE_STAGES;
-        driver.m_2DCaps.Caps =
-            CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D | CKRST_2DCAPS_GDI;
-    }
-    driver.m_3DCaps.CKRasterizerSpecificCaps &=
-        ~(CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL);
-    driver.m_3DCaps.CKRasterizerSpecificCaps |= CKRST_SPECIFICCAPS_SOFTWARE;
+    caps = CKRasterizerNativeCapsDesc();
+    caps.MaxTextureSize = 4096;
+    caps.MaxTextureStages = CKRST_MAX_TEXTURE_STAGES;
+    caps.MaxAnisotropy = 1;
+    caps.MaxUserClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
+    caps.MaxVertexBlendMatrices = CKRST_MAX_WORLD_MATRICES;
+    caps.MaxMSAASamples = 1;
+    caps.MaxPointSize = 1.0f;
+    caps.MaxLights = CKRST_MAX_LIGHTS;
 }
 
 class CKNullRasterizerDriver final : public CKRasterizerDriver {
 public:
     explicit CKNullRasterizerDriver(CKRasterizer *owner)
+        : CKRasterizerDriver(owner, 0, "NULL Rasterizer", FALSE)
     {
-        m_Owner = owner;
-        m_DriverIndex = 0;
-        CKNullInitializeDriverCaps(*this);
+        CKNullInitializeDriverCaps(
+            m_DisplayModes, m_TextureFormats, m_NativeCaps);
+        m_CapsFinal = TRUE;
     }
 
     ~CKNullRasterizerDriver() override
     {
-        while (m_Contexts.Size() > 0)
-            DestroyContext(m_Contexts[m_Contexts.Size() - 1]);
+        DestroyContexts();
     }
 
     CKRasterizerContext *CreateContext() override
@@ -73,51 +63,24 @@ public:
         CKRasterizerContext *context = CKNullCreateRasterizerContext(this);
         if (!context)
             return NULL;
-        m_Contexts.PushBack(context);
+        AddContext(context);
         return context;
-    }
-
-    CKBOOL DestroyContext(CKRasterizerContext *context) override
-    {
-        if (!context)
-            return FALSE;
-        for (int i = 0; i < m_Contexts.Size(); ++i) {
-            if (m_Contexts[i] != context)
-                continue;
-            if (!CKNullDestroyRasterizerContext(context))
-                return FALSE;
-            m_Contexts.RemoveAt(i);
-            return TRUE;
-        }
-        return FALSE;
     }
 };
 
 class CKNullRasterizer final : public CKRasterizer {
 public:
-    ~CKNullRasterizer() override
-    {
-        Close();
-    }
-
     CKBOOL Start(WIN_HANDLE appWindow) override
     {
-        m_MainWindow = appWindow;
-        if (m_Drivers.Size() > 0)
+        if (GetDriverCount() != 0)
             return TRUE;
+        CKRasterizer::Start(appWindow);
         CKNullRasterizerDriver *driver =
             new (std::nothrow) CKNullRasterizerDriver(this);
         if (!driver)
             return FALSE;
-        m_Drivers.PushBack(driver);
+        AddDriver(driver);
         return TRUE;
-    }
-
-    void Close() override
-    {
-        for (int i = 0; i < m_Drivers.Size(); ++i)
-            delete static_cast<CKNullRasterizerDriver *>(m_Drivers[i]);
-        m_Drivers.Clear();
     }
 };
 

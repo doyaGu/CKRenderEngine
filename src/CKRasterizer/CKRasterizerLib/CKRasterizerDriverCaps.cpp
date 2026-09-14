@@ -1,7 +1,5 @@
 #include "CKRasterizerDriverCaps.h"
 
-#include "CKRasterizerCapsBaseline.h"
-
 #include <SDL3/SDL.h>
 
 #include <string.h>
@@ -48,63 +46,23 @@ int CompareDisplayModes(const void *lhs, const void *rhs)
     return 0;
 }
 
-void InitializeFallbackCaps(Vx3DCapsDesc &caps3D, Vx2DCapsDesc &caps2D)
-{
-    caps3D.MinTextureWidth = 1;
-    caps3D.MinTextureHeight = 1;
-    caps3D.MaxTextureWidth = 16384;
-    caps3D.MaxTextureHeight = 16384;
-    caps3D.MaxTextureRatio = 16384;
-    caps3D.MaxClipPlanes = 6;
-    caps3D.MaxActiveLights = 8;
-    caps3D.MaxNumberBlendStage = 8;
-    caps3D.MaxNumberTextureStage = 8;
-    caps3D.TextureFilterCaps = CKRST_TFILTERCAPS_NEAREST |
-                              CKRST_TFILTERCAPS_LINEAR |
-                              CKRST_TFILTERCAPS_MIPNEAREST |
-                              CKRST_TFILTERCAPS_MIPLINEAR |
-                              CKRST_TFILTERCAPS_LINEARMIPNEAREST |
-                              CKRST_TFILTERCAPS_LINEARMIPLINEAR |
-                              CKRST_TFILTERCAPS_ANISOTROPIC;
-    caps3D.TextureAddressCaps = CKRST_TADDRESSCAPS_WRAP |
-                               CKRST_TADDRESSCAPS_MIRROR |
-                               CKRST_TADDRESSCAPS_CLAMP |
-                               CKRST_TADDRESSCAPS_BORDER |
-                               CKRST_TADDRESSCAPS_INDEPENDENTUV;
-    caps3D.RasterCaps = CKRST_RASTERCAPS_FOGVERTEX |
-                        CKRST_RASTERCAPS_FOGPIXEL |
-                        CKRST_RASTERCAPS_FOGRANGE |
-                        CKRST_RASTERCAPS_ZTEST;
-    caps3D.CKRasterizerSpecificCaps = CKRST_SPECIFICCAPS_CANDOVERTEXBUFFER |
-                                      CKRST_SPECIFICCAPS_CANDOINDEXBUFFER |
-                                      CKRST_SPECIFICCAPS_COPYTEXTURE |
-                                      CKRST_SPECIFICCAPS_HARDWARETL |
-                                      CKRST_SPECIFICCAPS_DX8;
-    caps2D.Family = CKRST_DIRECTX;
-    caps2D.Caps = CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D;
-}
-
 } // namespace
 
-void CKRSTInitializeDriverCaps(CKRasterizerDriver *driver)
+void CKRSTInitializeDriverCaps(
+    XArray<VxDisplayMode> &displayModes,
+    XClassArray<CKTextureDesc> &textureFormats,
+    CKRasterizerNativeCapsDesc &caps)
 {
-    if (!driver)
-        return;
-
-    driver->m_Hardware = TRUE;
-    driver->m_CapsUpToDate = FALSE;
-    driver->m_DriverIndex = 0;
-
     int displayCount = 0;
     SDL_DisplayID *displays = SDL_GetDisplays(&displayCount);
     for (int displayIndex = 0; displays && displayIndex < displayCount; ++displayIndex) {
-        AddDisplayMode(driver->m_DisplayModes, SDL_GetCurrentDisplayMode(displays[displayIndex]));
-        AddDisplayMode(driver->m_DisplayModes, SDL_GetDesktopDisplayMode(displays[displayIndex]));
+        AddDisplayMode(displayModes, SDL_GetCurrentDisplayMode(displays[displayIndex]));
+        AddDisplayMode(displayModes, SDL_GetDesktopDisplayMode(displays[displayIndex]));
 
         int modeCount = 0;
         SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(displays[displayIndex], &modeCount);
         for (int modeIndex = 0; modes && modeIndex < modeCount; ++modeIndex)
-            AddDisplayMode(driver->m_DisplayModes, modes[modeIndex]);
+            AddDisplayMode(displayModes, modes[modeIndex]);
         SDL_free(modes);
     }
     SDL_free(displays);
@@ -119,32 +77,23 @@ void CKRSTInitializeDriverCaps(CKRasterizerDriver *driver)
     for (int i = 0;
          i < static_cast<int>(sizeof(fallbackResolutions) / sizeof(fallbackResolutions[0]));
          ++i) {
-        AddDisplayMode(driver->m_DisplayModes, fallbackResolutions[i][0],
+        AddDisplayMode(displayModes, fallbackResolutions[i][0],
                        fallbackResolutions[i][1], 32, 60);
     }
-    driver->m_DisplayModes.Sort(CompareDisplayModes);
+    displayModes.Sort(CompareDisplayModes);
 
     CKTextureDesc texture;
     texture.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
     VxPixelFormat2ImageDesc(_32_ARGB8888, texture.Format);
-    driver->m_TextureFormats.PushBack(texture);
+    textureFormats.PushBack(texture);
 
-    memset(&driver->m_3DCaps, 0, sizeof(driver->m_3DCaps));
-    memset(&driver->m_2DCaps, 0, sizeof(driver->m_2DCaps));
-    if (!CKRSTGetCapsBaseline(&driver->m_3DCaps, &driver->m_2DCaps))
-        InitializeFallbackCaps(driver->m_3DCaps, driver->m_2DCaps);
-
-    Vx3DCapsDesc limits;
-    memset(&limits, 0, sizeof(limits));
-    limits.MaxClipPlanes = 6;
-    limits.MaxActiveLights = 8;
-    limits.MaxNumberBlendStage = 8;
-    limits.MaxNumberTextureStage = 8;
-    CKRSTLowerCapsToLimits(&driver->m_3DCaps, &limits);
-#if defined(_WIN32)
-    driver->m_2DCaps.Caps |= CKRST_2DCAPS_GDI;
-#endif
-
-    driver->m_CapsUpToDate = FALSE;
+    caps = CKRasterizerNativeCapsDesc();
+    caps.MaxTextureSize = 4096;
+    caps.MaxTextureStages = CKRST_MAX_TEXTURE_STAGES;
+    caps.MaxAnisotropy = 1;
+    caps.MaxUserClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
+    caps.MaxVertexBlendMatrices = 4;
+    caps.MaxMSAASamples = 1;
+    caps.MaxPointSize = 1.0f;
+    caps.MaxLights = CKRST_MAX_LIGHTS;
 }
-

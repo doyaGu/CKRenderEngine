@@ -1,16 +1,14 @@
 #ifndef CKRASTERIZERENUMS_H
 #define CKRASTERIZERENUMS_H
 
-// CKRasterizer v3 interface: enumerations and constants.
+// CKRasterizer private interface: enumerations and constants.
 //
-// The v3 interface is D3D7 shaped: the engine sets fixed-function state
+// The interface is D3D7 shaped: the engine sets fixed-function state
 // (render states, texture stage states, transforms, lights, material,
 // viewport, clip planes) and issues draws; all translation to a modern GPU
 // API happens inside the rasterizer implementation.
 //
-// The backend interface of the translation core
-// (src/CKRasterizer/CKFFPLib/Interface/CKRasterizerBackend.h) includes this
-// header for the enumerations shared by both interfaces.
+// CKFFPLib and the concrete rasterizers share these public state values.
 
 #include <stdint.h>
 
@@ -18,12 +16,12 @@
 #include "CKTypes.h"  // CKDWORD
 
 // ===========================================================================
-// Interface revision (spec 4.1)
+// Interface revision
 // ===========================================================================
 
-// Revision 5 adds the bulk material operation. Rebuild every rasterizer plugin;
-// there is no v3 adapter or fallback to repeated state setters.
-#define CKRST_INTERFACE_REVISION 0x00050000u
+// The current revision contains the direct concrete-Context refactor. Rebuild
+// every rasterizer plugin; older revisions are intentionally incompatible.
+#define CKRST_INTERFACE_REVISION 0x00060000u
 
 // ===========================================================================
 // Limits
@@ -36,19 +34,22 @@
 #define CKRST_MAX_TEXCOORD_DIMS         4
 
 // ===========================================================================
-// Object kinds (spec 4.5)
+// Object kinds
 // ===========================================================================
-// Only three kinds of handles cross the public interface. Framebuffers, depth
-// buffers, shaders, programs, uniforms, vertex layouts and samplers are
-// rasterizer-internal objects.
+typedef CKDWORD CKRST_HANDLE;
+typedef CKDWORD CKRST_OBJECTMASK;
 
-#define CKRST_OBJ_TEXTURE         0x00000001u
-#define CKRST_OBJ_VERTEXBUFFER    0x00000004u
-#define CKRST_OBJ_INDEXBUFFER     0x00000008u
-#define CKRST_OBJ_ALL             0xFFFFFFFFu
+typedef enum CKRST_OBJECTTYPE {
+    CKRST_OBJ_TEXTURE = 0x00000001u,
+    // 0x00000002 is reserved for the removed original sprite object.
+    CKRST_OBJ_VERTEXBUFFER = 0x00000004u,
+    CKRST_OBJ_INDEXBUFFER = 0x00000008u
+} CKRST_OBJECTTYPE;
+
+#define CKRST_OBJ_ALL ((CKRST_OBJECTMASK)0xffffffffu)
 
 // ===========================================================================
-// Clear flags (spec 4.3, v1 section 15)
+// Clear flags
 // ===========================================================================
 
 typedef enum CKRST_CTXCLEAR_FLAGS {
@@ -104,7 +105,7 @@ typedef enum CKRST_TEXTUREFLAGS {
     CKRST_TEXTURE_RENDERTARGET       = 0x10000000
 } CKRST_TEXTUREFLAGS;
 
-// MipMapCount convention (spec 4.5): 0 or 1 = no mips; N = the engine
+// MipMapCount convention: 0 or 1 = no mips; N = the engine
 // uploads N levels itself; CKRST_MIPMAP_GENERATE = upload level 0 only and
 // let the rasterizer build the full filtered chain.
 #define CKRST_MIPMAP_GENERATE ((CKDWORD)-1)
@@ -127,7 +128,7 @@ typedef enum CKRST_LOCKFLAGS {
 } CKRST_LOCKFLAGS;
 
 // ===========================================================================
-// Vertex format (spec 4.5)
+// Vertex format
 // ===========================================================================
 // The vertex format of a vertex buffer is the vertex-data subset of
 // CKRST_DPFLAGS. CKRST_DP_TRANSFORM missing means pre-transformed vertices
@@ -140,7 +141,7 @@ typedef enum CKRST_LOCKFLAGS {
                        CKRST_DP_MATRIXPAL | CKRST_DP_PSIZE | CKRST_DP_TWEEN)
 
 // ===========================================================================
-// Render state extensions (spec 4.6)
+// Render state extensions
 // ===========================================================================
 // VXRENDERSTATE_COLORWRITEENABLE = 168 has the D3D8 value; VxMath's
 // VXRENDERSTATETYPE enumeration leaves it free and does not declare it.
@@ -154,11 +155,11 @@ typedef enum CKRST_LOCKFLAGS {
 #define CKRST_COLORWRITE_ALL   0x0000000Fu
 
 // ===========================================================================
-// Transform matrices (spec 4.6): v1 / D3D values
+// Transform matrices: original / D3D values
 // ===========================================================================
 // VXMATRIX_WORLD is an alias of VXMATRIX_WORLDMATRIX(0): setting either
 // updates the same matrix. This is the only definition of VXMATRIX_TYPE; the
-// engine and the translation core both use it.
+// engine and CKFFPLib both use it.
 
 typedef enum VXMATRIX_TYPE {
     VXMATRIX_WORLD      = 1,
@@ -220,27 +221,22 @@ inline CKDWORD CKRSTTexcoordGeneration(CKDWORD Packed)
 }
 
 // ===========================================================================
-// Backend capability bits (spec 4.9.1) - tests and diagnostics only
+// Concrete rasterizer capability bits - tests and diagnostics only
 // ===========================================================================
-// CKRasterizerCapsDesc::Features describes what the backend below the
-// translation core can do natively. The engine MUST NOT read it; the
-// translation core approximates whatever is missing (appendix C / D).
+// CKRasterizerCapsDesc::Features describes what a concrete rasterizer can do
+// directly. The engine MUST NOT read it; the rasterizer approximates whatever
+// is missing.
 
 typedef uint64_t CKRST_CAPS;
 
 #define CKRST_CAPS_SYNC_READBACK        UINT64_C(0x0000000000000001)
-#define CKRST_CAPS_MIDFRAME_READBACK    UINT64_C(0x0000000000000002)
 #define CKRST_CAPS_POINT_SIZE           UINT64_C(0x0000000000000004)
-#define CKRST_CAPS_DEPTH_BIAS           UINT64_C(0x0000000000000008)
 #define CKRST_CAPS_STENCIL_WRITE_MASK   UINT64_C(0x0000000000000010)
-#define CKRST_CAPS_SAMPLER_LOD_CONTROL  UINT64_C(0x0000000000000020)
-#define CKRST_CAPS_ANISOTROPY_LEVEL     UINT64_C(0x0000000000000040)
 #define CKRST_CAPS_MSAA                 UINT64_C(0x0000000000000080)
 #define CKRST_CAPS_TEXTURE_CUBE         UINT64_C(0x0000000000000100)
 #define CKRST_CAPS_TEXTURE_VOLUME       UINT64_C(0x0000000000000200)
 #define CKRST_CAPS_BORDER_COLOR         UINT64_C(0x0000000000000400)
 #define CKRST_CAPS_SEPARATE_ALPHA_BLEND UINT64_C(0x0000000000000800)
-#define CKRST_CAPS_MIRROR_ONCE          UINT64_C(0x0000000000001000)
 #define CKRST_CAPS_TEXTURE_DXT          UINT64_C(0x0000000000002000)
 
 // ===========================================================================
@@ -260,7 +256,7 @@ typedef uint64_t CKRST_CAPS;
 #define CKRST_DEBUG_DRAWMAP_SUMMARY   0x00000800u
 
 // ===========================================================================
-// Diagnostics (spec 4.10, appendix C / D)
+// Diagnostics
 // ===========================================================================
 // Every counter is cumulative since context creation and exposed through
 // CKRenderStats::Diagnostics[]. REJECT_* counters are the only cases where a
@@ -288,7 +284,7 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_INVALID_TARGET,          // SetTargetTexture inside a scene / bad face / bad size
     CKRST_DIAG_OVERLAY_ON_TARGET,       // BeginOverlayPhase while target != 0
 
-    // Render state approximations (appendix C)
+    // Render state approximations
     CKRST_DIAG_APPROX_FILLMODE_POINT,
     CKRST_DIAG_APPROX_STENCIL_WRITE_MASK,
     CKRST_DIAG_IGNORE_WRAP,
@@ -304,7 +300,7 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF,
     CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING,
 
-    // Texture stage approximations (appendix D)
+    // Texture stage approximations
     CKRST_DIAG_APPROX_TEXTURE_OP,
     CKRST_DIAG_APPROX_ALPHA_BUMP_OP,
     CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS,
@@ -317,7 +313,7 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_APPROX_COMPAREFUNC_FILTER,   // shader depth compare sampled with a filtering sampler
     CKRST_DIAG_APPROX_SAMPLER_SLOTS,        // more than four cube or volume stages: the extra stages sample as unbound
 
-    // Presentation (spec 4.4)
+    // Presentation
     CKRST_DIAG_APPROX_MSAA,                 // no multisampled targets on this device: the scene rendered single sampled
 
     CKRST_DIAG_COUNT

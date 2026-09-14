@@ -1,12 +1,9 @@
 #include "CKNullRasterizerInternal.h"
 
-#include <algorithm>
+#include <climits>
 #include <cstring>
-#include <limits>
 #include <new>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#include <utility>
 
 namespace {
 
@@ -17,16 +14,16 @@ enum CKNullFramePhase {
 };
 
 struct CKNullResource {
-    CKDWORD Type = 0;
+    CKRST_OBJECTTYPE Type = (CKRST_OBJECTTYPE)0;
     CKDWORD Handle = 0;
     CKTextureDesc Texture;
     CKVertexBufferDesc VertexBuffer;
     CKIndexBufferDesc IndexBuffer;
-    std::vector<CKBYTE> Data;
+    XArray<CKBYTE> Data;
     CKBOOL Locked = FALSE;
     CKDWORD LockStart = 0;
     CKDWORD LockCount = 0;
-    std::string Name;
+    XString Name;
 };
 
 struct CKNullReadback {
@@ -71,27 +68,25 @@ static CKBOOL CKNullValidRect(const CKRECT *rect, CKDWORD width, CKDWORD height)
            (CKDWORD)rect->right <= width && (CKDWORD)rect->bottom <= height;
 }
 
-static CKBOOL CKNullCheckedByteSize(CKDWORD count, CKDWORD stride, size_t *size)
+static CKBOOL CKNullCheckedByteSize(CKDWORD count, CKDWORD stride, int *size)
 {
     if (!size || count == 0 || stride == 0)
         return FALSE;
-    if ((size_t)count > (std::numeric_limits<size_t>::max)() / (size_t)stride)
+    if (count > (CKDWORD)INT_MAX / stride)
         return FALSE;
-    *size = (size_t)count * (size_t)stride;
+    *size = (int)(count * stride);
     return TRUE;
 }
 
 class CKNullRasterizerContext final : public CKRasterizerContext {
 public:
     explicit CKNullRasterizerContext(CKRasterizerDriver *driver)
-        : m_Created(FALSE), m_ShuttingDown(FALSE), m_Phase(CKNULL_FRAME_IDLE),
+        : CKRasterizerContext(driver), m_Phase(CKNULL_FRAME_IDLE),
           m_FrameOpen(FALSE), m_Target(0), m_TargetFace(CKRST_CUBEFACE_XPOS),
           m_NextHandle(1), m_FrameDrawCalls(0), m_FramePrimitives(0),
           m_FramePasses(0), m_FrameClears(0), m_FrameTextureUploads(0),
           m_FrameBufferUploads(0)
     {
-        m_Driver = driver;
-        std::memset(&m_Stats, 0, sizeof(m_Stats));
         std::memset(m_RenderStates, 0, sizeof(m_RenderStates));
         std::memset(m_StageStates, 0, sizeof(m_StageStates));
         std::memset(m_StageQueryMasks, 0, sizeof(m_StageQueryMasks));
@@ -115,16 +110,7 @@ public:
     {
         if (m_Created || width <= 0 || height <= 0)
             return FALSE;
-        m_Window = window;
-        m_PosX = (CKDWORD)posX;
-        m_PosY = (CKDWORD)posY;
-        m_Width = (CKDWORD)width;
-        m_Height = (CKDWORD)height;
-        m_Bpp = bpp > 0 ? (CKDWORD)bpp : 32;
-        m_ZBpp = zBpp > 0 ? (CKDWORD)zBpp : 24;
-        m_StencilBpp = stencilBpp > 0 ? (CKDWORD)stencilBpp : 8;
-        m_Fullscreen = fullscreen ? TRUE : FALSE;
-        m_RefreshRate = refreshRate > 0 ? (CKDWORD)refreshRate : 0;
+        SetContextDesc(window, posX, posY, width, height, bpp, fullscreen, refreshRate, zBpp, stencilBpp);
         m_Viewport = CKViewportData();
         m_Viewport.ViewWidth = m_Width;
         m_Viewport.ViewHeight = m_Height;
@@ -140,24 +126,14 @@ public:
 
     CKBOOL Resize(int posX, int posY, int width, int height, CKDWORD flags) override
     {
-        if (!CanWork() || m_FrameOpen || (flags & ~(VX_RESIZE_NOMOVE | VX_RESIZE_NOSIZE)))
-            return FALSE;
-        if (flags & VX_RESIZE_NOMOVE) {
-            posX = (int)m_PosX;
-            posY = (int)m_PosY;
-        }
-        if (flags & VX_RESIZE_NOSIZE) {
-            width = (int)m_Width;
-            height = (int)m_Height;
-        }
-        if (width <= 0 || height <= 0)
+        if (!CanWork() || m_FrameOpen || !ResolveResize(posX, posY, width, height, flags))
             return FALSE;
         const CKBOOL sizeChanged = width != (int)m_Width || height != (int)m_Height;
-        m_PosX = (CKDWORD)posX;
-        m_PosY = (CKDWORD)posY;
+        m_PosX = posX;
+        m_PosY = posY;
         if (sizeChanged) {
-            m_Width = (CKDWORD)width;
-            m_Height = (CKDWORD)height;
+            m_Width = width;
+            m_Height = height;
             m_Viewport.ViewX = 0;
             m_Viewport.ViewY = 0;
             m_Viewport.ViewWidth = m_Width;
@@ -170,17 +146,11 @@ public:
 
     CKBOOL SetOptions(const CKRasterizerOptions *options) override
     {
-        if (!options || options->Size != sizeof(CKRasterizerOptions)) {
+        if (!options) {
             Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
             return FALSE;
         }
-        m_Options = *options;
-        m_Options.Size = sizeof(CKRasterizerOptions);
-        if (m_Options.RenderScale < 0.5f) m_Options.RenderScale = 0.5f;
-        if (m_Options.RenderScale > 2.0f) m_Options.RenderScale = 2.0f;
-        if (m_Options.Sharpness < 0.0f) m_Options.Sharpness = 0.0f;
-        if (m_Options.Sharpness > 1.0f) m_Options.Sharpness = 1.0f;
-        if (m_Options.MSAASamples <= 1) m_Options.MSAASamples = 0;
+        SetContextOptions(*options);
         return TRUE;
     }
 
@@ -213,7 +183,7 @@ public:
             return TRUE;
         m_ShuttingDown = TRUE;
         CancelReadbacks();
-        m_Resources.clear();
+        m_Resources.Clear();
         std::memset(m_Textures, 0, sizeof(m_Textures));
         m_Target = 0;
         m_Phase = CKNULL_FRAME_IDLE;
@@ -237,10 +207,10 @@ public:
         const int count = rectCount > 0 ? rectCount : 1;
         for (int i = 0; i < count; ++i) {
             CKRECT rect = rectCount > 0 ? rects[i] : ViewportRect();
-            rect.left = (std::max)(rect.left, 0);
-            rect.top = (std::max)(rect.top, 0);
-            rect.right = (std::min)(rect.right, target.right);
-            rect.bottom = (std::min)(rect.bottom, target.bottom);
+            rect.left = XMax(rect.left, 0);
+            rect.top = XMax(rect.top, 0);
+            rect.right = XMin(rect.right, target.right);
+            rect.bottom = XMin(rect.bottom, target.bottom);
             if (rect.right > rect.left && rect.bottom > rect.top) {
                 ++m_FrameClears;
                 ++m_FramePasses;
@@ -627,11 +597,11 @@ public:
         const CKBOOL cube = (resource->Texture.Flags & CKRST_TEXTURE_CUBEMAP) != 0;
         const CKBOOL volume = (resource->Texture.Flags & CKRST_TEXTURE_VOLUMEMAP) != 0;
         const CKDWORD layers = cube ? CKRST_CUBEFACE_COUNT :
-            (volume ? (std::max<CKDWORD>)(1, resource->Texture.Depth >> mipLevel) : 1);
+            (volume ? XMax<CKDWORD>(1, resource->Texture.Depth >> mipLevel) : 1);
         const CKDWORD levels = resource->Texture.MipMapCount == CKRST_MIPMAP_GENERATE
-            ? 1 : (std::max<CKDWORD>)(1, resource->Texture.MipMapCount);
-        const CKDWORD width = (std::max<CKDWORD>)(1, (CKDWORD)resource->Texture.Format.Width >> mipLevel);
-        const CKDWORD height = (std::max<CKDWORD>)(1, (CKDWORD)resource->Texture.Format.Height >> mipLevel);
+            ? 1 : XMax<CKDWORD>(1, resource->Texture.MipMapCount);
+        const CKDWORD width = XMax<CKDWORD>(1, (CKDWORD)resource->Texture.Format.Width >> mipLevel);
+        const CKDWORD height = XMax<CKDWORD>(1, (CKDWORD)resource->Texture.Format.Height >> mipLevel);
         if ((CKDWORD)face >= layers || (CKDWORD)mipLevel >= levels || !CKNullValidRect(region, width, height)) {
             Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
             return FALSE;
@@ -668,15 +638,27 @@ public:
             return FALSE;
         }
         resource.VertexBuffer.m_VertexSize = stride;
-        size_t size = 0;
+        int size = 0;
         if (!CKNullCheckedByteSize(desc->m_MaxVertexCount, stride, &size))
             return FALSE;
-        resource.Data.resize(size, 0);
+        resource.Data.Resize(size);
+        resource.Data.Memset(0);
         if (data) {
-            std::memcpy(resource.Data.data(), data, size);
+            std::memcpy(resource.Data.Begin(), data, (size_t)size);
             ++m_FrameBufferUploads;
         }
         return InsertResource(std::move(resource), outHandle);
+    }
+
+    CKBOOL GetVertexBufferDesc(CKDWORD vb, CKVertexBufferDesc *desc) const override
+    {
+        if (!desc)
+            return FALSE;
+        const CKNullResource *resource = FindResource(CKRST_OBJ_VERTEXBUFFER, vb);
+        if (!resource)
+            return FALSE;
+        *desc = resource->VertexBuffer;
+        return TRUE;
     }
 
     CKBOOL CreateIndexBuffer(const CKIndexBufferDesc *desc, const void *data, CKDWORD *outHandle) override
@@ -689,15 +671,27 @@ public:
         CKNullResource resource;
         resource.Type = CKRST_OBJ_INDEXBUFFER;
         resource.IndexBuffer = *desc;
-        size_t size = 0;
+        int size = 0;
         if (!CKNullCheckedByteSize(desc->m_MaxIndexCount, 2, &size))
             return FALSE;
-        resource.Data.resize(size, 0);
+        resource.Data.Resize(size);
+        resource.Data.Memset(0);
         if (data) {
-            std::memcpy(resource.Data.data(), data, size);
+            std::memcpy(resource.Data.Begin(), data, (size_t)size);
             ++m_FrameBufferUploads;
         }
         return InsertResource(std::move(resource), outHandle);
+    }
+
+    CKBOOL GetIndexBufferDesc(CKDWORD ib, CKIndexBufferDesc *desc) const override
+    {
+        if (!desc)
+            return FALSE;
+        const CKNullResource *resource = FindResource(CKRST_OBJ_INDEXBUFFER, ib);
+        if (!resource)
+            return FALSE;
+        *desc = resource->IndexBuffer;
+        return TRUE;
     }
 
     void *LockVertexBuffer(CKDWORD vb, CKDWORD startVertex, CKDWORD vertexCount, CKRST_LOCKFLAGS) override
@@ -725,7 +719,7 @@ public:
         return UnlockBuffer(FindResource(CKRST_OBJ_INDEXBUFFER, ib));
     }
 
-    CKBOOL DeleteObject(CKDWORD handle, CKDWORD type) override
+    CKBOOL DeleteObject(CKRST_HANDLE handle, CKRST_OBJECTTYPE type) override
     {
         if (type != CKRST_OBJ_TEXTURE && type != CKRST_OBJ_VERTEXBUFFER && type != CKRST_OBJ_INDEXBUFFER) {
             Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
@@ -741,26 +735,33 @@ public:
             for (CKDWORD &texture : m_Textures)
                 if (texture == handle) texture = 0;
         }
-        m_Resources.erase(handle);
+        m_Resources.Remove(handle);
         return TRUE;
     }
 
-    CKBOOL FlushObjects(CKDWORD typeMask) override
+    CKBOOL FlushObjects(CKRST_OBJECTMASK typeMask) override
     {
-        std::vector<CKDWORD> handles;
-        for (const auto &entry : m_Resources)
-            if ((entry.second.Type & typeMask) != 0) handles.push_back(entry.first);
-        for (CKDWORD handle : handles) {
-            auto found = m_Resources.find(handle);
-            if (found != m_Resources.end()) DeleteObject(handle, found->second.Type);
+        XArray<CKDWORD> handles;
+        for (XHashTable<CKNullResource, CKDWORD>::Iterator it = m_Resources.Begin();
+             it != m_Resources.End(); ++it) {
+            if (((*it).Type & typeMask) != 0)
+                handles.PushBack(it.GetKey());
+        }
+        for (CKDWORD *it = handles.Begin(); it != handles.End(); ++it) {
+            CKNullResource *resource = m_Resources.FindPtr(*it);
+            if (resource)
+                DeleteObject(*it, resource->Type);
         }
         return TRUE;
     }
 
-    void SetResourceName(CKDWORD handle, CKDWORD type, CKSTRING name) override
+    CKBOOL SetResourceName(CKRST_HANDLE handle, CKRST_OBJECTTYPE type, CKSTRING name) override
     {
         CKNullResource *resource = FindResource(type, handle);
-        if (resource) resource->Name = name ? name : "";
+        if (!resource)
+            return FALSE;
+        resource->Name = name ? name : "";
+        return TRUE;
     }
 
     CKBOOL SetTargetTexture(CKDWORD texture, int width, int height, CKRST_CUBEFACE face) override
@@ -833,8 +834,8 @@ public:
         }
         const CKDWORD width = rect ? (CKDWORD)(rect->right - rect->left) : (CKDWORD)target.right;
         const CKDWORD height = rect ? (CKDWORD)(rect->bottom - rect->top) : (CKDWORD)target.bottom;
-        if (width == 0 || height == 0 || width > (CKDWORD)(std::numeric_limits<int>::max)() / 4 ||
-            height > (CKDWORD)(std::numeric_limits<int>::max)() / (width * 4))
+        if (width == 0 || height == 0 || width > (CKDWORD)INT_MAX / 4 ||
+            height > (CKDWORD)INT_MAX / (width * 4))
             return 0;
         CKBYTE *destination = image.Image;
         VxPixelFormat2ImageDesc(_32_ARGB8888, image);
@@ -855,10 +856,10 @@ public:
         }
         CKRECT destination = rect ? *rect : TargetRect();
         const CKRECT target = TargetRect();
-        destination.left = (std::max)(destination.left, 0);
-        destination.top = (std::max)(destination.top, 0);
-        destination.right = (std::min)(destination.right, target.right);
-        destination.bottom = (std::min)(destination.bottom, target.bottom);
+        destination.left = XMax(destination.left, 0);
+        destination.top = XMax(destination.top, 0);
+        destination.right = XMin(destination.right, target.right);
+        destination.bottom = XMin(destination.bottom, target.bottom);
         const int width = destination.right - destination.left;
         const int height = destination.bottom - destination.top;
         if (width <= 0 || height <= 0 || image.Width != width || image.Height != height) {
@@ -893,18 +894,8 @@ public:
             readback.Rect = *rect;
             readback.HasRect = TRUE;
         }
-        m_Readbacks.push_back(readback);
+        m_Readbacks.PushBack(readback);
         return TRUE;
-    }
-
-    void SetDebugMarker(CKSTRING name) override
-    {
-        m_Marker = name ? name : "";
-    }
-
-    const CKRenderStats *GetStats() override
-    {
-        return &m_Stats;
     }
 
 private:
@@ -968,7 +959,7 @@ private:
         ++m_FrameDrawCalls;
         m_FramePrimitives += CKNullPrimitiveCount(type, elementCount);
         if (m_FramePasses == 0) ++m_FramePasses;
-        m_Marker.clear();
+        m_Marker = "";
         return TRUE;
     }
 
@@ -978,23 +969,24 @@ private:
             return FALSE;
         resource.Handle = m_NextHandle++;
         const CKDWORD handle = resource.Handle;
-        m_Resources.emplace(handle, std::move(resource));
+        if (!m_Resources.Insert(handle, std::move(resource), FALSE))
+            return FALSE;
         *outHandle = handle;
         return TRUE;
     }
 
-    CKNullResource *FindResource(CKDWORD type, CKDWORD handle)
+    CKNullResource *FindResource(CKRST_OBJECTTYPE type, CKRST_HANDLE handle)
     {
         if (!handle) return NULL;
-        auto found = m_Resources.find(handle);
-        return found != m_Resources.end() && found->second.Type == type ? &found->second : NULL;
+        CKNullResource *resource = m_Resources.FindPtr(handle);
+        return resource && resource->Type == type ? resource : NULL;
     }
 
-    const CKNullResource *FindResource(CKDWORD type, CKDWORD handle) const
+    const CKNullResource *FindResource(CKRST_OBJECTTYPE type, CKRST_HANDLE handle) const
     {
         if (!handle) return NULL;
-        auto found = m_Resources.find(handle);
-        return found != m_Resources.end() && found->second.Type == type ? &found->second : NULL;
+        const CKNullResource *resource = m_Resources.FindPtr(handle);
+        return resource && resource->Type == type ? resource : NULL;
     }
 
     void *LockResource(CKNullResource *resource, CKDWORD start, CKDWORD count,
@@ -1012,7 +1004,7 @@ private:
         resource->Locked = TRUE;
         resource->LockStart = start;
         resource->LockCount = count;
-        return resource->Data.data() + (size_t)start * stride;
+        return resource->Data.Begin() + (size_t)start * stride;
     }
 
     CKBOOL UnlockBuffer(CKNullResource *resource)
@@ -1067,9 +1059,10 @@ private:
 
     void DeliverReadbacks(CKBOOL success)
     {
-        std::vector<CKNullReadback> ready;
-        ready.swap(m_Readbacks);
-        for (CKNullReadback &readback : ready) {
+        XClassArray<CKNullReadback> ready;
+        ready.Swap(m_Readbacks);
+        for (CKNullReadback *it = ready.Begin(); it != ready.End(); ++it) {
+            CKNullReadback &readback = *it;
             if (!success) {
                 readback.Callback(readback.User, readback.HasRect ? &readback.Rect : NULL,
                                   readback.Buffer, NULL, FALSE);
@@ -1078,13 +1071,15 @@ private:
             const CKRECT target = TargetRect();
             const int width = readback.HasRect ? readback.Rect.right - readback.Rect.left : target.right;
             const int height = readback.HasRect ? readback.Rect.bottom - readback.Rect.top : target.bottom;
-            std::vector<CKBYTE> pixels((size_t)width * (size_t)height * 4, 0);
+            XArray<CKBYTE> pixels;
+            pixels.Resize(width * height * 4);
+            pixels.Memset(0);
             VxImageDescEx image;
             VxPixelFormat2ImageDesc(_32_ARGB8888, image);
             image.Width = width;
             image.Height = height;
             image.BytesPerLine = width * 4;
-            image.Image = pixels.data();
+            image.Image = pixels.Begin();
             readback.Callback(readback.User, readback.HasRect ? &readback.Rect : NULL,
                               readback.Buffer, &image, TRUE);
         }
@@ -1095,15 +1090,12 @@ private:
         DeliverReadbacks(FALSE);
     }
 
-    CKBOOL m_Created;
-    CKBOOL m_ShuttingDown;
     CKNullFramePhase m_Phase;
     CKBOOL m_FrameOpen;
     CKDWORD m_Target;
     CKRST_CUBEFACE m_TargetFace;
     CKDWORD m_NextHandle;
-    std::unordered_map<CKDWORD, CKNullResource> m_Resources;
-    CKRasterizerOptions m_Options;
+    XHashTable<CKNullResource, CKDWORD> m_Resources;
     CKDWORD m_RenderStates[VXRENDERSTATE_MAXSTATE];
     CKDWORD m_StageStates[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
     uint64_t m_StageQueryMasks[CKRST_MAX_TEXTURE_STAGES];
@@ -1114,9 +1106,7 @@ private:
     CKMaterialData m_Material;
     CKViewportData m_Viewport;
     VxPlane m_ClipPlanes[CKRST_MAX_USER_CLIP_PLANES];
-    std::vector<CKNullReadback> m_Readbacks;
-    std::string m_Marker;
-    CKRenderStats m_Stats;
+    XClassArray<CKNullReadback> m_Readbacks;
     CKDWORD m_FrameDrawCalls;
     CKDWORD m_FramePrimitives;
     CKDWORD m_FramePasses;
@@ -1130,16 +1120,4 @@ private:
 CKRasterizerContext *CKNullCreateRasterizerContext(CKRasterizerDriver *driver)
 {
     return new (std::nothrow) CKNullRasterizerContext(driver);
-}
-
-CKBOOL CKNullDestroyRasterizerContext(CKRasterizerContext *context)
-{
-    if (!context)
-        return FALSE;
-    CKNullRasterizerContext *nullContext =
-        static_cast<CKNullRasterizerContext *>(context);
-    if (!nullContext->BeginShutdown())
-        return FALSE;
-    delete nullContext;
-    return TRUE;
 }

@@ -12,11 +12,9 @@
 #include "CKRasterizerTypes.h"
 #include "CKRenderEngineEnums.h"
 
-typedef CKDWORD CKRST_OBJECTTYPE;
-
 class CKRenderContext;
 
-// CKViewportData, CKMaterialData and CKLightData are the v3 contract types
+// CKViewportData, CKMaterialData and CKLightData are rasterizer interface types
 // (CKRasterizerTypes.h).
 
 class RCKRenderManager;

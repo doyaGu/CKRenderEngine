@@ -1,7 +1,7 @@
 #ifndef CKRASTERIZERTYPES_H
 #define CKRASTERIZERTYPES_H
 
-// CKRasterizer v3 interface: descriptor and data structures.
+// CKRasterizer interface: descriptor and data structures.
 
 #include <stdint.h>
 
@@ -15,6 +15,43 @@ class CKRasterizerDriver;
 class CKRasterizerContext;
 class CKRasterizer;
 
+struct CKRasterizerDriverDesc {
+    CKDWORD DriverIndex;
+    CKBOOL Hardware;
+    CKBOOL CapsFinal;
+    XString Description;
+};
+
+struct CKRasterizerContextDesc {
+    int PosX;
+    int PosY;
+    int Width;
+    int Height;
+    int Bpp;
+    int ZBpp;
+    int StencilBpp;
+    CKBOOL Fullscreen;
+    int RefreshRate;
+    WIN_HANDLE Window;
+};
+
+struct CKRasterizerNativeCapsDesc {
+    uint64_t Features;
+    CKDWORD MaxTextureSize;
+    CKDWORD MaxTextureStages;
+    CKDWORD MaxAnisotropy;
+    CKDWORD MaxUserClipPlanes;
+    CKDWORD MaxVertexBlendMatrices;
+    CKDWORD MaxMSAASamples;
+    float MaxPointSize;
+    CKDWORD MaxLights;
+
+    CKRasterizerNativeCapsDesc()
+        : Features(0), MaxTextureSize(0), MaxTextureStages(0), MaxAnisotropy(0),
+          MaxUserClipPlanes(0), MaxVertexBlendMatrices(0),
+          MaxMSAASamples(0), MaxPointSize(0.0f), MaxLights(0) {}
+};
+
 // ===========================================================================
 // DLL entry points
 // ===========================================================================
@@ -23,7 +60,7 @@ typedef CKRasterizer *(*CKRST_STARTFUNCTION)(WIN_HANDLE);
 typedef void (*CKRST_CLOSEFUNCTION)(CKRasterizer *);
 
 // ===========================================================================
-// Vertex buffer descriptor (spec 4.5)
+// Vertex buffer descriptor
 // ===========================================================================
 // m_VertexFormat is the vertex-data subset of CKRST_DPFLAGS (CKRST_VF_MASK).
 // m_TexcoordDims[i] gives the component count (1..4) of texture coordinate
@@ -47,7 +84,7 @@ struct CKVertexBufferDesc {
 };
 
 // ===========================================================================
-// Index buffer descriptor (spec 4.5): 16-bit indices
+// Index buffer descriptor: 16-bit indices
 // ===========================================================================
 
 struct CKIndexBufferDesc {
@@ -59,7 +96,7 @@ struct CKIndexBufferDesc {
 };
 
 // ===========================================================================
-// Canonical interleaved vertex layout (spec 4.5)
+// Canonical interleaved vertex layout
 // ===========================================================================
 // Byte offsets of each component inside one vertex, -1 when absent. Derived
 // from a vertex format by CKRSTGetVertexLayout() in CKRasterizer.h. Both the
@@ -85,7 +122,7 @@ struct CKRSTVertexLayout {
 };
 
 // ===========================================================================
-// Fixed-function data (spec 4.6)
+// Fixed-function data
 // ===========================================================================
 
 struct CKViewportData {
@@ -136,13 +173,12 @@ struct CKLightData {
 };
 
 // ===========================================================================
-// Rasterizer options (spec 4.2)
+// Rasterizer options
 // ===========================================================================
 // Merges the presentation and sampler options that CK2_3D.ini exposes.
 // SetOptions() may be called at any frame boundary.
 
 struct CKRasterizerOptions {
-    CKDWORD Size;
     CKDWORD MSAASamples;               // Antialias (0 / 1 = off)
     float RenderScale;                 // RenderScale, clamped to 0.5..2.0
     CKBOOL FXAA;                       // FXAA
@@ -153,18 +189,16 @@ struct CKRasterizerOptions {
     CKDWORD DebugFlags;                // CKRST_DEBUG_*
 
     CKRasterizerOptions()
-        : Size(sizeof(CKRasterizerOptions)), MSAASamples(0), RenderScale(1.0f), FXAA(FALSE),
+        : MSAASamples(0), RenderScale(1.0f), FXAA(FALSE),
           Sharpness(0.0f), DisableTextureFiltering(FALSE), DisableMipmaps(FALSE),
           ForceAnisotropicFiltering(FALSE), DebugFlags(CKRST_DEBUG_NONE) {}
 };
 
 // ===========================================================================
-// Backend capabilities (spec 4.9.1) - tests and diagnostics only
+// Concrete rasterizer capabilities - tests and diagnostics only
 // ===========================================================================
 
 struct CKRasterizerCapsDesc {
-    CKDWORD Size;
-    CKDWORD Version;
     CKRST_CAPS Features;
     CKDWORD MaxTextureSize;
     CKDWORD MaxTextureStages;
@@ -176,13 +210,14 @@ struct CKRasterizerCapsDesc {
     CKDWORD MaxLights;
 
     CKRasterizerCapsDesc()
-        : Size(sizeof(CKRasterizerCapsDesc)), Version(1), Features(0), MaxTextureSize(0),
+        : Features(0), MaxTextureSize(0),
           MaxTextureStages(0), MaxAnisotropy(0), MaxUserClipPlanes(0),
-          MaxVertexBlendMatrices(0), MaxMSAASamples(0), MaxPointSize(0.0f), MaxLights(0) {}
+          MaxVertexBlendMatrices(0), MaxMSAASamples(0), MaxPointSize(0.0f),
+          MaxLights(0) {}
 };
 
 // ===========================================================================
-// Asynchronous readback (spec 4.8)
+// Asynchronous readback
 // ===========================================================================
 // Image is valid only for the duration of the callback. Success is FALSE
 // when the readback could not be completed (device lost, shutdown).
@@ -191,7 +226,7 @@ typedef void (*CKReadbackCallback)(void *User, const CKRECT *Rect, VXBUFFER_TYPE
                                    const VxImageDescEx *Image, CKBOOL Success);
 
 // ===========================================================================
-// Statistics (spec 4.13 GetStats)
+// Statistics returned by GetStats
 // ===========================================================================
 
 struct CKRenderStats {

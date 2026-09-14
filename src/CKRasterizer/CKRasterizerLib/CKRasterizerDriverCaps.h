@@ -3,9 +3,12 @@
 
 #include "CKRasterizer.h"
 
-// Initializes the common legacy capability baseline and enumerates host display
-// modes. A concrete driver lowers the numeric limits after its device is ready.
-void CKRSTInitializeDriverCaps(CKRasterizerDriver *driver);
+// Publishes conservative discovery data before a Context has opened a device.
+// The concrete driver replaces Caps and texture formats with its final snapshot
+// after successful native initialization.
+void CKRSTInitializeDriverCaps(
+    XArray<VxDisplayMode> &DisplayModes,
+    XClassArray<CKTextureDesc> &TextureFormats,
+    CKRasterizerNativeCapsDesc &Caps);
 
 #endif
-

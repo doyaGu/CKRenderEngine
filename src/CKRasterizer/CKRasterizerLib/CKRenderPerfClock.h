@@ -5,7 +5,7 @@
 #include "CKTypes.h"
 
 // High-resolution clock shared by the engine's CKRenderPerfStats sections and
-// the translation core's draw probes / present-sync log. The real
+// the rasterizer's draw probes / present-sync log. The real
 // implementation exists only with CKRE_ENABLE_RENDER_STATS; otherwise the
 // inline stubs return 0 so callers compile to nothing.
 #if CKRE_ENABLE_RENDER_STATS

@@ -4,6 +4,7 @@
 option(CKRE_ENABLE_PROFILING "Compile external NVTX timeline annotations (not for FPS acceptance)" OFF)
 
 set(CKRASTERIZER_LIB_SOURCES
+    CKRasterizer.cpp
     CKRasterizerCapsBaseline.cpp
     CKNullRasterizerContext.cpp
     CKNullRasterizerLifecycle.cpp
