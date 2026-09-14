@@ -26,7 +26,7 @@ FORBIDDEN_TARGETS = {
     "CKBgfxBackend",
 }
 FORBIDDEN_DIRECTORIES = {"CKRenderSupport", "CKRasterizerBackend", "tests"}
-ADAPTER_BUILD_TOKENS = {
+CONCRETE_BUILD_TOKENS = {
     "BGFX_DIR",
     "CKBgfxShaderArtifacts",
     "CKRE_SHADERC_COMMAND",
@@ -151,9 +151,11 @@ def check(root):
             errors.append(f"non-module directory remains under src/CKRasterizer: {directory}")
 
     ffp_cmake = (module_roots["CKFFPLib"] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
-    for token in sorted(ADAPTER_BUILD_TOKENS):
+    for token in sorted(CONCRETE_BUILD_TOKENS):
         if token in ffp_cmake:
-            errors.append(f"CMake: CKFFPLib references Adapter build input {token}")
+            errors.append(
+                f"CMake: CKFFPLib references concrete-rasterizer build input {token}"
+            )
 
     ffp_public_includes = target_public_include_paths(ffp_cmake, "CKFFPLib")
     if not ffp_public_includes:
@@ -164,22 +166,6 @@ def check(root):
                 f"src/CKRasterizer/CKFFPLib/CMakeLists.txt:{line}: "
                 f"CKFFPLib exposes non-interface include path {include}"
             )
-
-    for adapter in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
-        adapter_cmake_path = module_roots[adapter] / "CMakeLists.txt"
-        adapter_cmake = adapter_cmake_path.read_text(encoding="utf-8-sig")
-        for command, values, line in commands(adapter_cmake):
-            if command != "target_include_directories":
-                continue
-            if values and (values[0].startswith("test_") or values[0] == "${_test}"):
-                continue
-            for value in values[1:]:
-                normalized = value.replace('\\', '/')
-                if re.search(r'CKFFPLib/(?:Backend|Context|FixedFunction|ShaderModel)(?:/|$)', normalized):
-                    errors.append(
-                        f"{adapter_cmake_path.relative_to(root)}:{line}: "
-                        f"{adapter} exposes CKFFPLib Implementation include path {value}"
-                    )
 
     for module, targets in MODULE_TARGETS.items():
         for target in targets:
@@ -232,10 +218,10 @@ def check(root):
         if dependency in {"CKSdlGpuRasterizer", "CKSdlGpuRasterizerStatic",
                           "CKBgfxRasterizer", "CKBgfxRasterizerStatic"}:
             errors.append(f"CMake: CKFFPLib depends on concrete rasterizer {dependency}")
-    for adapter in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
-        cmake_text = (module_roots[adapter] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
+    for concrete in ("CKSdlGpuRasterizer", "CKBgfxRasterizer"):
+        cmake_text = (module_roots[concrete] / "CMakeLists.txt").read_text(encoding="utf-8-sig")
         if not re.search(r'\btarget_link_libraries\s*\([^)]*\bCKFFPLib\b', cmake_text, re.DOTALL):
-            errors.append(f"CMake: {adapter} must link CKFFPLib")
+            errors.append(f"CMake: {concrete} must link CKFFPLib")
 
     forbidden_ffp_lifecycle = {
         "CKRasterizerBackendLibrary",
@@ -258,6 +244,16 @@ def check(root):
         "CKScopedDrawAnnotation",
         "CKRenderDrawAnnotation.h",
     }
+    obsolete_production_tokens = {
+        "CKSdlGpuDevice",
+        "CKRasterizerContract",
+        "RCKTextureRealization",
+        "RCKContextTexture",
+        "CKRasterizerContextGuard",
+        "CKBackendRetirementToken",
+        "CKBackendBufferVersion",
+        "VertexBufferVersion",
+    }
     for module, directory in module_roots.items():
         for source in directory.rglob("*"):
             if source.suffix.lower() not in {".cpp", ".h"} or "generated" in source.parts:
@@ -268,6 +264,34 @@ def check(root):
                     errors.append(
                         f"{source.relative_to(root)}: {module} owns render-side draw annotation token {token}"
                     )
+            for token in sorted(obsolete_production_tokens):
+                if token in text:
+                    errors.append(
+                        f"{source.relative_to(root)}: {module} retains obsolete production token {token}"
+                    )
+            if re.search(r'\bfprintf\s*\(\s*stderr\b', text):
+                errors.append(
+                    f"{source.relative_to(root)}: {module} writes diagnostics directly to stderr"
+                )
+            stl_container = re.search(
+                r'\bstd::(?:vector|array|deque|list|map|multimap|set|multiset|'
+                r'unordered_map|unordered_multimap|unordered_set|'
+                r'unordered_multiset|queue|priority_queue|stack)\b',
+                text,
+            )
+            if stl_container:
+                errors.append(
+                    f"{source.relative_to(root)}: {module} uses STL container "
+                    f"{stl_container.group(0)}"
+                )
+            obsolete_family = re.search(
+                r'\bCK(?:Backend|Translated)[A-Za-z0-9_]*\b', text
+            )
+            if obsolete_family:
+                errors.append(
+                    f"{source.relative_to(root)}: {module} retains obsolete production token "
+                    f"{obsolete_family.group(0)}"
+                )
 
     header_index = defaultdict(list)
     for folder in (public_root, rasterizer):
@@ -300,14 +324,7 @@ def check(root):
                 continue
             imported = module_for(resolved, module_roots, public_root)
             if imported == "CKFFPLib":
-                adapter = owner in {"CKSdlGpuRasterizer", "CKBgfxRasterizer"}
                 interface_header = resolved.is_relative_to(ffp_interface_root)
-                if adapter and not interface_header:
-                    line = text.count('\n', 0, match.start()) + 1
-                    errors.append(
-                        f"{source.relative_to(root)}:{line}: {owner} imports private "
-                        f"CKFFPLib header {match.group(1)}"
-                    )
                 if source.is_relative_to(ffp_interface_root) and not interface_header:
                     line = text.count('\n', 0, match.start()) + 1
                     errors.append(
