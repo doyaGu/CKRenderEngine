@@ -12,7 +12,7 @@
 #include "RCKMaterial.h"
 #include "RCKMesh.h"
 #include "RCKTexture.h"
-#include "CKFFRasterizerContextInternal.h"
+#include "FFPRecordingContext.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -24,7 +24,7 @@ namespace {
 void AddDriverTextureFormat(FFPRecordingDriver &driver, VX_PIXELFORMAT format) {
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(format, desc.Format);
-    driver.m_TextureFormats.PushBack(desc);
+    driver.AddTextureFormat(desc);
 }
 
 struct MaterialTestWorld {
@@ -44,16 +44,21 @@ struct MaterialTestWorld {
         AddDriverTextureFormat(*translated.BackendDriver(), _32_ARGB8888);
         AddDriverTextureFormat(*translated.BackendDriver(), _16_RGB565);
 
-        TestCheck(translated.CreateContext(64, 64), "translated context creation failed");
+        TestCheck(translated.CreateContext(64, 64), "recording Context creation failed");
         rasterizer = translated.Backend;
 
         renderContext = new RCKRenderContext(context);
         renderContext->m_RasterizerContext = translated.Context;
         renderContext->m_RasterizerDriver = translated.Driver;
+        TestCheck(renderManager->RegisterRasterizerContext(
+                      translated.Context, renderContext->m_DriverIndex),
+                  "rasterizer context registration failed");
     }
 
     ~MaterialTestWorld() {
         if (renderContext) {
+            renderManager->ForgetRasterizerContext(
+                renderContext->m_RasterizerContext);
             renderContext->m_RasterizerContext = nullptr;
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
@@ -68,7 +73,7 @@ struct MaterialTestWorld {
     CKContext *context;
     RCKRenderManager *renderManager;
     RCKRenderContext *renderContext;
-    FFPTranslatedWorld translated;
+    FFPRecordingWorld translated;
     FFPRecordingBackend *rasterizer;
 };
 
@@ -80,6 +85,27 @@ void FillTextureSlot(RCKTexture &texture, int slot, CKDWORD seed) {
         pixels[i] = seed + (CKDWORD)i;
     texture.ReleaseSurfacePtr(slot);
 }
+
+void DrawMeshOnce(RCKMesh &mesh, RCKRenderContext *context,
+                  FFPRecordingWorld &translated) {
+    TestCheck(translated.Context->BeginScene(), "mesh BeginScene failed");
+    TestCheck(mesh.DefaultRender(context, nullptr), "mesh draw failed");
+    TestCheck(translated.Context->EndScene(), "mesh EndScene failed");
+}
+
+class HardwareMeshForTest : public RCKMesh {
+public:
+    HardwareMeshForTest(CKContext *context, CKSTRING name) : RCKMesh(context, name) {}
+
+    void CorruptFirstPrimitiveIndex(CKWORD value) {
+        TestCheck(m_MaterialGroups.Size() > 0 && m_MaterialGroups[0] &&
+                      m_MaterialGroups[0]->m_Primitives.Size() > 0 &&
+                      m_MaterialGroups[0]->m_Primitives[0].m_Indices.Size() > 0,
+                  "mesh test requires one optimized primitive");
+        m_MaterialGroups[0]->m_Primitives[0].m_Indices[0] = value;
+        m_MaterialGroups[0]->m_Primitives[0].m_IndexBufferOffset = -1;
+    }
+};
 
 void CheckResetTextureStage(CKRasterizerContext &context, int stage) {
     CKDWORD value = ~0u;
@@ -111,7 +137,7 @@ void MaterialBindingClearsTailAndPreservesLowerStages() {
         VxMatrix previousMatrices[CKRST_MAX_TEXTURE_STAGES];
         for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
             TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, stage), "seed stage texture");
-            // Valid state IDs retain arbitrary values at the public v3 boundary.
+            // Valid state IDs retain arbitrary values at the rasterizer boundary.
             for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
                 context.SetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), 0x1000u + state);
             previousMatrices[stage].SetIdentity();
@@ -333,6 +359,296 @@ void MeshAdditionalPassPreservesMonoPassChannels() {
     world.translated.Context->GetTexture(1, &texture);
     TestCheck(texture == 0, "mesh completion must retire its additional stages");
     world.translated.Context->EndScene();
+}
+
+void MeshBuffersAreIndependentPerContext() {
+    MaterialTestWorld world;
+    FFPRecordingWorld second;
+    AddDriverTextureFormat(*second.BackendDriver(), _32_ARGB8888);
+    TestCheck(second.CreateContext(64, 64),
+              "second recording Context creation failed");
+
+    RCKRenderContext secondContext(world.context);
+    secondContext.m_RasterizerContext = second.Context;
+    secondContext.m_RasterizerDriver = second.Driver;
+    TestCheck(world.renderManager->RegisterRasterizerContext(
+                  second.Context, secondContext.m_DriverIndex),
+              "second rasterizer context registration failed");
+    world.renderContext->SetFullViewport(
+        &world.renderContext->m_ViewportData, 64, 64);
+    secondContext.SetFullViewport(&secondContext.m_ViewportData, 64, 64);
+
+    const CKDWORD firstDeletesBeforeMesh =
+        world.rasterizer->DeletedObjectCount;
+    const CKDWORD secondDeletesBeforeMesh =
+        second.Backend->DeletedObjectCount;
+    {
+        RCKMaterial material(world.context, "TwoContextMeshMaterial");
+        RCKMesh mesh(world.context, "TwoContextMesh");
+        TestCheck(mesh.SetVertexCount(3) && mesh.SetFaceCount(1),
+                  "mesh creation failed");
+        VxVector positions[] = {
+            VxVector(-0.5f, -0.5f, 0.5f),
+            VxVector(0.5f, -0.5f, 0.5f),
+            VxVector(0.0f, 0.5f, 0.5f),
+        };
+        VxVector normal(0.0f, 0.0f, -1.0f);
+        for (int i = 0; i < 3; ++i) {
+            mesh.SetVertexPosition(i, &positions[i]);
+            mesh.SetVertexNormal(i, &normal);
+        }
+        mesh.SetFaceVertexIndex(0, 0, 1, 2);
+        mesh.SetFaceMaterial(0, &material);
+
+        const CKDWORD firstCreates = world.rasterizer->CreatedBufferCount;
+        const CKDWORD firstUpdates = world.rasterizer->UpdatedBufferCount;
+        for (int i = 0; i < 4; ++i)
+            DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->CreatedBufferCount == firstCreates + 2 &&
+                      world.rasterizer->UpdatedBufferCount == firstUpdates + 2,
+                  "first context should create and upload one mesh VB and IB");
+        TestCheck(world.rasterizer->Log.VertexBufferSetCount != 0 &&
+                      world.rasterizer->Log.IndexBufferSetCount != 0,
+                  "the warmed mesh should draw through its hardware buffers");
+
+        const CKDWORD secondCreates = second.Backend->CreatedBufferCount;
+        const CKDWORD secondUpdates = second.Backend->UpdatedBufferCount;
+        DrawMeshOnce(mesh, &secondContext, second);
+        TestCheck(second.Backend->CreatedBufferCount == secondCreates + 2 &&
+                      second.Backend->UpdatedBufferCount == secondUpdates + 2,
+                  "second context should create and upload its own mesh VB and IB");
+        TestCheck(world.rasterizer->DeletedObjectCount ==
+                      firstDeletesBeforeMesh,
+                  "using a second context must not delete the first mesh buffers");
+
+        const CKDWORD firstCreatesBeforeReturn =
+            world.rasterizer->CreatedBufferCount;
+        const CKDWORD firstUpdatesBeforeReturn =
+            world.rasterizer->UpdatedBufferCount;
+        DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->CreatedBufferCount ==
+                      firstCreatesBeforeReturn,
+                  "switching back must not recreate the first context's mesh buffers");
+        TestCheck(world.rasterizer->UpdatedBufferCount ==
+                      firstUpdatesBeforeReturn,
+                  "switching back must not re-upload the first context's mesh buffers");
+
+        positions[0].x -= 0.1f;
+        mesh.SetVertexPosition(0, &positions[0]);
+        const CKDWORD firstCreatesBeforeChange =
+            world.rasterizer->CreatedBufferCount;
+        const CKDWORD firstUpdatesBeforeChange =
+            world.rasterizer->UpdatedBufferCount;
+        const CKDWORD firstDeletesBeforeChange =
+            world.rasterizer->DeletedObjectCount;
+        for (int i = 0; i < 4; ++i)
+            DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->CreatedBufferCount ==
+                      firstCreatesBeforeChange,
+                  "a vertex edit must not recreate the first context's handles");
+        TestCheck(world.rasterizer->DeletedObjectCount ==
+                      firstDeletesBeforeChange,
+                  "a vertex edit must not delete the first context's handles");
+        TestCheck(world.rasterizer->UpdatedBufferCount ==
+                      firstUpdatesBeforeChange + 1,
+                  "a vertex edit should upload only the first context's VB");
+        TestCheck(world.rasterizer->LastBufferUpdateKind ==
+                      CKRST_BUFFER_VERTEX &&
+                      world.rasterizer->LastBufferUpdateMode ==
+                      CKRST_BUFFER_UPDATE_DISCARD,
+                  "mesh vertex refresh should use the discard update path");
+
+        const CKDWORD secondCreatesBeforeChange =
+            second.Backend->CreatedBufferCount;
+        const CKDWORD secondUpdatesBeforeChange =
+            second.Backend->UpdatedBufferCount;
+        const CKDWORD secondDeletesBeforeChange =
+            second.Backend->DeletedObjectCount;
+        DrawMeshOnce(mesh, &secondContext, second);
+        TestCheck(second.Backend->CreatedBufferCount ==
+                      secondCreatesBeforeChange &&
+                      second.Backend->UpdatedBufferCount ==
+                      secondUpdatesBeforeChange + 1 &&
+                      second.Backend->DeletedObjectCount ==
+                      secondDeletesBeforeChange,
+                  "the same vertex edit should refresh the second VB once");
+
+        mesh.SetFaceVertexIndex(0, 0, 2, 1);
+        const CKDWORD firstUpdatesBeforeIndices =
+            world.rasterizer->UpdatedBufferCount;
+        for (int i = 0; i < 4; ++i)
+            DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->UpdatedBufferCount ==
+                      firstUpdatesBeforeIndices + 1,
+                  "changed indices should upload only the first context's IB");
+        TestCheck(world.rasterizer->LastBufferUpdateKind ==
+                      CKRST_BUFFER_INDEX &&
+                      world.rasterizer->LastBufferUpdateMode ==
+                      CKRST_BUFFER_UPDATE_DISCARD,
+                  "changed indices should use the discard update path");
+
+        const CKDWORD secondUpdatesBeforeIndices =
+            second.Backend->UpdatedBufferCount;
+        DrawMeshOnce(mesh, &secondContext, second);
+        TestCheck(second.Backend->UpdatedBufferCount ==
+                      secondUpdatesBeforeIndices + 1 &&
+                      second.Backend->LastBufferUpdateKind ==
+                      CKRST_BUFFER_INDEX,
+                  "changed indices should refresh the second context's IB once");
+
+        const CKDWORD firstCreatesBeforeWrap =
+            world.rasterizer->CreatedBufferCount;
+        const CKDWORD firstUpdatesBeforeWrap =
+            world.rasterizer->UpdatedBufferCount;
+        const CKDWORD firstDeletesBeforeWrap =
+            world.rasterizer->DeletedObjectCount;
+        mesh.SetWrapMode(VXTEXTUREWRAP_U);
+        DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->CreatedBufferCount ==
+                      firstCreatesBeforeWrap &&
+                      world.rasterizer->DeletedObjectCount ==
+                      firstDeletesBeforeWrap &&
+                      world.rasterizer->UpdatedBufferCount ==
+                      firstUpdatesBeforeWrap + 2,
+                  "enabling wrap should refresh the existing VB and IB handles");
+
+        mesh.SetWrapMode((VXTEXTURE_WRAPMODE)0);
+        DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->CreatedBufferCount ==
+                      firstCreatesBeforeWrap &&
+                      world.rasterizer->DeletedObjectCount ==
+                      firstDeletesBeforeWrap &&
+                      world.rasterizer->UpdatedBufferCount ==
+                      firstUpdatesBeforeWrap + 4,
+                  "disabling wrap should restore the existing VB and IB handles");
+
+        world.renderManager->ForgetRasterizerContext(second.Context);
+        const CKDWORD firstCreatesBeforeForget =
+            world.rasterizer->CreatedBufferCount;
+        const CKDWORD firstUpdatesBeforeForget =
+            world.rasterizer->UpdatedBufferCount;
+        DrawMeshOnce(mesh, world.renderContext, world.translated);
+        TestCheck(world.rasterizer->CreatedBufferCount ==
+                      firstCreatesBeforeForget &&
+                      world.rasterizer->UpdatedBufferCount ==
+                      firstUpdatesBeforeForget,
+                  "forgetting the second context must preserve the first mesh buffers");
+    }
+
+    TestCheck(world.rasterizer->DeletedObjectCount ==
+                  firstDeletesBeforeMesh + 2 &&
+                  second.Backend->DeletedObjectCount ==
+                  secondDeletesBeforeMesh,
+              "mesh destruction should delete only buffers on the live context");
+
+    secondContext.m_RasterizerContext = nullptr;
+    secondContext.m_RasterizerDriver = nullptr;
+}
+
+void MeshPartialDeletionRetriesOnlyTheFailedBuffer() {
+    MaterialTestWorld world;
+    RCKMaterial material(world.context, "PartialDeleteMaterial");
+    RCKMesh mesh(world.context, "PartialDeleteMesh");
+    TestCheck(mesh.SetVertexCount(3) && mesh.SetFaceCount(1), "mesh creation failed");
+    VxVector positions[] = {
+        VxVector(-0.5f, -0.5f, 0.5f),
+        VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(0.0f, 0.5f, 0.5f),
+    };
+    VxVector normal(0.0f, 0.0f, -1.0f);
+    for (int i = 0; i < 3; ++i) {
+        mesh.SetVertexPosition(i, &positions[i]);
+        mesh.SetVertexNormal(i, &normal);
+    }
+    mesh.SetFaceVertexIndex(0, 0, 1, 2);
+    mesh.SetFaceMaterial(0, &material);
+    for (int i = 0; i < 4; ++i)
+        DrawMeshOnce(mesh, world.renderContext, world.translated);
+
+    const CKDWORD deletesBeforeFailure = world.rasterizer->DeletedObjectCount;
+    world.rasterizer->FailDestroyObjectAfter = 2;
+    TestCheck(!world.renderManager->DeleteMeshBuffers(&mesh),
+              "mesh deletion must report a partially failed buffer pair");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletesBeforeFailure + 2,
+              "mesh deletion must attempt both buffers before reporting failure");
+
+    TestCheck(world.renderManager->DeleteMeshBuffers(&mesh),
+              "mesh deletion must retry the retained buffer");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletesBeforeFailure + 3,
+              "mesh retry must delete only the previously failed buffer");
+}
+
+void WrapAwareHardwareMeshRejectsOutOfRangeIndices() {
+    MaterialTestWorld world;
+    HardwareMeshForTest mesh(world.context, "InvalidWrapIndexMesh");
+    TestCheck(mesh.SetVertexCount(3) && mesh.SetFaceCount(1), "mesh creation failed");
+    VxVector positions[] = {
+        VxVector(-0.5f, -0.5f, 0.5f),
+        VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(0.0f, 0.5f, 0.5f),
+    };
+    VxVector normal(0.0f, 0.0f, -1.0f);
+    for (int i = 0; i < 3; ++i) {
+        mesh.SetVertexPosition(i, &positions[i]);
+        mesh.SetVertexNormal(i, &normal);
+        mesh.SetVertexTextureCoordinates(i, (float)i, 0.0f, -1);
+    }
+    mesh.SetFaceVertexIndex(0, 0, 1, 2);
+    DrawMeshOnce(mesh, world.renderContext, world.translated);
+    mesh.CorruptFirstPrimitiveIndex(3);
+    mesh.SetWrapMode(VXTEXTUREWRAP_U);
+
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_STAGE(0);
+    data.PositionPtr = mesh.GetPositionsPtr(&data.PositionStride);
+    data.NormalPtr = mesh.GetNormalsPtr(&data.NormalStride);
+    data.TexCoordPtr = mesh.GetTextureCoordinatesPtr(&data.TexCoordStride, -1);
+    data.ColorPtr = mesh.GetColorsPtr(&data.ColorStride);
+    data.SpecularColorPtr = mesh.GetSpecularColorsPtr(&data.SpecularColorStride);
+
+    const CKDWORD creates = world.rasterizer->CreatedBufferCount;
+    const CKDWORD updates = world.rasterizer->UpdatedBufferCount;
+    TestCheck(!mesh.CheckHWVertexBuffer(world.renderContext, world.translated.Context, &data),
+              "wrap-aware hardware packing must reject an out-of-range source index");
+    TestCheck(world.rasterizer->CreatedBufferCount == creates && world.rasterizer->UpdatedBufferCount == updates,
+              "invalid wrap-aware indices must be rejected before allocating or uploading buffers");
+}
+
+void ForgettingLastContextDetachesSelectedMeshBuffers() {
+    MaterialTestWorld world;
+    world.renderContext->SetFullViewport(
+        &world.renderContext->m_ViewportData, 64, 64);
+
+    const CKDWORD deletesBeforeMesh =
+        world.rasterizer->DeletedObjectCount;
+    {
+        RCKMaterial material(world.context, "ForgottenContextMaterial");
+        RCKMesh mesh(world.context, "ForgottenContextMesh");
+        TestCheck(mesh.SetVertexCount(3) && mesh.SetFaceCount(1),
+                  "mesh creation failed");
+        VxVector positions[] = {
+            VxVector(-0.5f, -0.5f, 0.5f),
+            VxVector(0.5f, -0.5f, 0.5f),
+            VxVector(0.0f, 0.5f, 0.5f),
+        };
+        VxVector normal(0.0f, 0.0f, -1.0f);
+        for (int i = 0; i < 3; ++i) {
+            mesh.SetVertexPosition(i, &positions[i]);
+            mesh.SetVertexNormal(i, &normal);
+        }
+        mesh.SetFaceVertexIndex(0, 0, 1, 2);
+        mesh.SetFaceMaterial(0, &material);
+
+        for (int i = 0; i < 4; ++i)
+            DrawMeshOnce(mesh, world.renderContext, world.translated);
+
+        world.renderManager->ForgetRasterizerContext(
+            world.translated.Context);
+    }
+
+    TestCheck(world.rasterizer->DeletedObjectCount == deletesBeforeMesh,
+              "a mesh must not delete buffers through a forgotten Context");
 }
 
 void AdditionalTexturesSaveWithoutEffect() {
@@ -573,6 +889,14 @@ int main() {
     tests.Run("Channel texture binding preserves texture flags",
               &ChannelTextureBindingPreservesTextureFlags);
     tests.Run("Mesh additional pass preserves mono-pass channels", &MeshAdditionalPassPreservesMonoPassChannels);
+    tests.Run("Mesh buffers are independent per context",
+              &MeshBuffersAreIndependentPerContext);
+    tests.Run("Mesh partial deletion retries only the failed buffer",
+              &MeshPartialDeletionRetriesOnlyTheFailedBuffer);
+    tests.Run("Wrap-aware hardware mesh rejects out-of-range indices",
+              &WrapAwareHardwareMeshRejectsOutOfRangeIndices);
+    tests.Run("Forgetting the last context detaches selected mesh buffers",
+              &ForgettingLastContextDetachesSelectedMeshBuffers);
     tests.Run("Multi-texture effect propagates secondary upload failure",
               &MultiTextureEffectPropagatesSecondaryUploadFailure);
     tests.Run("Additional textures save without effect",

@@ -13,7 +13,8 @@
 #include "RCKRenderManager.h"
 #include "RCKTexture.h"
 #include "RCKSprite.h"
-#include "CKFFRasterizerContextInternal.h"
+#include "RCKVertexBuffer.h"
+#include "FFPRecordingContext.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
 
@@ -24,7 +25,7 @@ namespace {
 void AddDriverTextureFormat(FFPRecordingDriver &driver, VX_PIXELFORMAT format) {
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(format, desc.Format);
-    driver.m_TextureFormats.PushBack(desc);
+    driver.AddTextureFormat(desc);
 }
 
 struct TextureTestWorld {
@@ -45,16 +46,29 @@ struct TextureTestWorld {
         AddDriverTextureFormat(*translated.BackendDriver(), _16_RGB565);
         AddDriverTextureFormat(*translated.BackendDriver(), _16_ARGB4444);
 
-        TestCheck(translated.CreateContext(64, 64), "translated context creation failed");
+        TestCheck(translated.CreateContext(64, 64), "recording Context creation failed");
         rasterizer = translated.Backend;
 
         renderContext = new RCKRenderContext(context);
         renderContext->m_RasterizerContext = translated.Context;
         renderContext->m_RasterizerDriver = translated.Driver;
+        TestCheck(renderManager->RegisterRasterizerContext(
+                      translated.Context, renderContext->m_DriverIndex),
+                  "rasterizer context registration failed");
+        renderContext->m_WindowSettings.m_Rect.left = 0;
+        renderContext->m_WindowSettings.m_Rect.top = 0;
+        renderContext->m_WindowSettings.m_Rect.right = 64;
+        renderContext->m_WindowSettings.m_Rect.bottom = 64;
+        renderContext->m_WindowSettings.m_Bpp = 32;
+        renderContext->m_WindowSettings.m_Zbpp = 24;
+        renderContext->m_WindowSettings.m_StencilBpp = 8;
+        renderContext->m_Settings = renderContext->m_WindowSettings;
     }
 
     ~TextureTestWorld() {
         if (renderContext) {
+            renderManager->ForgetRasterizerContext(
+                renderContext->m_RasterizerContext);
             renderContext->m_RasterizerContext = nullptr;
             renderContext->m_RasterizerDriver = nullptr;
             delete renderContext;
@@ -69,7 +83,7 @@ struct TextureTestWorld {
     CKContext *context;
     RCKRenderManager *renderManager;
     RCKRenderContext *renderContext;
-    FFPTranslatedWorld translated;
+    FFPRecordingWorld translated;
     FFPRecordingBackend *rasterizer;
 };
 
@@ -80,6 +94,63 @@ void FillTexture(RCKTexture &texture, CKDWORD seed) {
     for (int i = 0; i < count; ++i)
         pixels[i] = seed + (CKDWORD)i;
     texture.ReleaseSurfacePtr();
+}
+
+void FillSprite(RCKSprite &sprite, CKDWORD seed) {
+    CKDWORD *pixels = reinterpret_cast<CKDWORD *>(sprite.LockSurfacePtr());
+    TestCheck(pixels != nullptr, "sprite surface must lock");
+    const int count = sprite.GetWidth() * sprite.GetHeight();
+    for (int i = 0; i < count; ++i)
+        pixels[i] = seed + (CKDWORD)i;
+    TestCheck(sprite.ReleaseSurfacePtr(), "sprite surface must release");
+}
+
+void DrawSprite(RCKSprite &sprite, RCKRenderContext &context,
+                FFPRecordingWorld &translated) {
+    TestCheck(translated.Context->BeginScene(), "begin sprite scene failed");
+    TestCheck(sprite.Draw(&context) == CK_OK, "sprite draw failed");
+    TestCheck(translated.Context->EndScene(), "end sprite scene failed");
+}
+
+const CKRST_DPFLAGS StandaloneVertexFormat =
+    static_cast<CKRST_DPFLAGS>(CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE);
+
+void FillVertexBuffer(CKVertexBuffer *buffer, RCKRenderContext *context,
+                      CKLOCKFLAGS flags, float offset) {
+    VxDrawPrimitiveData *data = buffer->Lock(context, 0, 3, flags);
+    TestCheck(data != nullptr, "vertex buffer lock failed");
+
+    const VxVector positions[3] = {
+        VxVector(-0.5f + offset, -0.5f, 0.0f),
+        VxVector(0.5f + offset, -0.5f, 0.0f),
+        VxVector(offset, 0.5f, 0.0f),
+    };
+    for (int i = 0; i < 3; ++i) {
+        *reinterpret_cast<VxVector *>(
+            static_cast<CKBYTE *>(data->PositionPtr) +
+            i * data->PositionStride) = positions[i];
+        *reinterpret_cast<CKDWORD *>(
+            static_cast<CKBYTE *>(data->ColorPtr) +
+            i * data->ColorStride) = 0xFFFFFFFFu;
+    }
+    buffer->Unlock(context);
+}
+
+void DrawVertexBuffer(CKVertexBuffer *buffer, RCKRenderContext &context,
+                      FFPRecordingWorld &translated) {
+    TestCheck(translated.Context->BeginScene(),
+              "begin vertex buffer scene failed");
+    TestCheck(buffer->Draw(&context, VX_TRIANGLELIST, nullptr, 0, 0, 3),
+              "vertex buffer draw failed");
+    TestCheck(translated.Context->EndScene(),
+              "end vertex buffer scene failed");
+}
+
+VxVector ReadPackedPosition(const FFPRecordingBackend &backend, CKDWORD vertexIndex, CKDWORD nativeStride) {
+    VxVector position;
+    const CKBYTE *source = backend.LastBufferUpdateData.data() + vertexIndex * nativeStride;
+    memcpy(&position, source, sizeof(position));
+    return position;
 }
 
 void StandardTextureUploadPreservesSourceFormat() {
@@ -139,20 +210,185 @@ void RestoreFailureKeepsDirtyFlag() {
     TestCheck(texture.ToRestore(), "failed Restore must keep restore flag set");
 }
 
-void SystemToVideoMemoryRejectsMissingRasterizerDriver() {
+void TextureReplacementStopsWhenDeleteFails() {
+    TextureTestWorld world;
+    RCKTexture texture(world.context, "FailTextureDelete");
+
+    TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
+    FillTexture(texture, 0xFF203040u);
+    TestCheck(texture.SystemToVideoMemory(world.renderContext, FALSE),
+              "initial texture upload failed");
+    const CKDWORD createdBeforeFailure = world.rasterizer->CreatedTextureCount;
+    const CKDWORD deletedBeforeFailure = world.rasterizer->DeletedObjectCount;
+
+    world.rasterizer->FailDestroyObject = TRUE;
+    TestCheck(!texture.SystemToVideoMemory(world.renderContext, FALSE),
+              "texture replacement must report deletion failure");
+    TestCheck(world.rasterizer->CreatedTextureCount == createdBeforeFailure,
+              "texture replacement must not create after deletion failure");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletedBeforeFailure + 1,
+              "texture replacement must attempt the failed deletion once");
+    world.rasterizer->FailDestroyObject = FALSE;
+    TestCheck(texture.SystemToVideoMemory(world.renderContext, FALSE),
+              "texture replacement must retry after deletion recovers");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletedBeforeFailure + 2 &&
+                  world.rasterizer->CreatedTextureCount == createdBeforeFailure + 1,
+              "texture retry must delete the retained handle before creating its replacement");
+}
+
+void SpriteReplacementStopsWhenDeleteFails() {
+    TextureTestWorld world;
+    RCKSprite sprite(world.context, "FailSpriteDelete");
+
+    TestCheck(sprite.Create(2, 2, 32, 0), "sprite Create failed");
+    FillSprite(sprite, 0xFF506070u);
+    TestCheck(sprite.SystemToVideoMemory(world.renderContext, FALSE),
+              "initial sprite upload failed");
+    const CKDWORD createdBeforeFailure = world.rasterizer->CreatedTextureCount;
+    const CKDWORD deletedBeforeFailure = world.rasterizer->DeletedObjectCount;
+
+    world.rasterizer->FailDestroyObject = TRUE;
+    TestCheck(!sprite.SystemToVideoMemory(world.renderContext, FALSE),
+              "sprite replacement must report deletion failure");
+    TestCheck(world.rasterizer->CreatedTextureCount == createdBeforeFailure,
+              "sprite replacement must not create after deletion failure");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletedBeforeFailure + 1,
+              "sprite replacement must attempt the failed deletion once");
+    world.rasterizer->FailDestroyObject = FALSE;
+    TestCheck(sprite.SystemToVideoMemory(world.renderContext, FALSE),
+              "sprite replacement must retry after deletion recovers");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletedBeforeFailure + 2 &&
+                  world.rasterizer->CreatedTextureCount == createdBeforeFailure + 1,
+              "sprite retry must delete the retained handle before creating its replacement");
+}
+
+void TexturePartialDeletionRetriesOnlyTheFailedContext() {
+    TextureTestWorld world;
+    FFPRecordingWorld second;
+    AddDriverTextureFormat(*second.BackendDriver(), _32_ARGB8888);
+    TestCheck(second.CreateContext(64, 64), "second recording Context creation failed");
+
+    RCKRenderContext secondContext(world.context);
+    secondContext.m_RasterizerContext = second.Context;
+    secondContext.m_RasterizerDriver = second.Driver;
+    TestCheck(world.renderManager->RegisterRasterizerContext(second.Context, secondContext.m_DriverIndex),
+              "second rasterizer context registration failed");
+
+    RCKTexture texture(world.context, "PartialTextureDelete");
+    TestCheck(texture.Create(4, 4, 32, 0), "texture Create failed");
+    FillTexture(texture, 0xFF304050u);
+    TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, 0), "first context upload failed");
+    TestCheck(texture.SetAsCurrent(&secondContext, FALSE, 0), "second context upload failed");
+
+    const CKDWORD firstDeletes = world.rasterizer->DeletedObjectCount;
+    const CKDWORD secondDeletes = second.Backend->DeletedObjectCount;
+    world.rasterizer->FailDestroyObject = TRUE;
+    TestCheck(!texture.FreeVideoMemory(), "partial deletion must report the failed context");
+    TestCheck(texture.IsInVideoMemory(), "partial deletion must retain the failed context handle");
+    TestCheck(world.rasterizer->DeletedObjectCount == firstDeletes + 1 &&
+                  second.Backend->DeletedObjectCount == secondDeletes + 1,
+              "partial deletion must attempt every context once");
+
+    world.rasterizer->FailDestroyObject = FALSE;
+    TestCheck(texture.FreeVideoMemory(), "partial deletion must retry after recovery");
+    TestCheck(!texture.IsInVideoMemory(), "successful retry must clear the final texture handle");
+    TestCheck(world.rasterizer->DeletedObjectCount == firstDeletes + 2 &&
+                  second.Backend->DeletedObjectCount == secondDeletes + 1,
+              "retry must delete only the previously failed context handle");
+
+    world.renderManager->ForgetRasterizerContext(second.Context);
+    secondContext.m_RasterizerContext = nullptr;
+    secondContext.m_RasterizerDriver = nullptr;
+}
+
+void VertexBufferReplacementRetriesFailedDeletion() {
+    TextureTestWorld world;
+    CKVertexBuffer *buffer = world.renderManager->CreateVertexBuffer();
+    TestCheck(buffer != nullptr, "CreateVertexBuffer failed");
+    TestCheck(buffer->Check(world.renderContext, 3, StandaloneVertexFormat, TRUE) == CK_VB_LOST,
+              "new vertex buffer should request its initial contents");
+    FillVertexBuffer(buffer, world.renderContext, CK_LOCK_DEFAULT, 0.0f);
+
+    const CKDWORD createdBeforeFailure = world.rasterizer->CreatedBufferCount;
+    const CKDWORD deletedBeforeFailure = world.rasterizer->DeletedObjectCount;
+    world.rasterizer->FailDestroyObject = TRUE;
+    TestCheck(buffer->Check(world.renderContext, 6, StandaloneVertexFormat, TRUE) == CK_VB_FAILED,
+              "incompatible vertex buffer must stop when deletion fails");
+    TestCheck(world.rasterizer->CreatedBufferCount == createdBeforeFailure &&
+                  world.rasterizer->DeletedObjectCount == deletedBeforeFailure + 1,
+              "failed vertex buffer replacement must retain the old handle");
+
+    world.rasterizer->FailDestroyObject = FALSE;
+    TestCheck(buffer->Check(world.renderContext, 6, StandaloneVertexFormat, TRUE) == CK_VB_LOST,
+              "vertex buffer replacement must retry after deletion recovers");
+    TestCheck(world.rasterizer->DeletedObjectCount == deletedBeforeFailure + 2,
+              "vertex buffer retry must delete the retained handle");
+    FillVertexBuffer(buffer, world.renderContext, CK_LOCK_DEFAULT, 0.1f);
+    TestCheck(world.rasterizer->CreatedBufferCount == createdBeforeFailure + 1,
+              "vertex buffer retry must create exactly one replacement");
+    buffer->Destroy();
+}
+
+void TextureConfigurationStaysUnchangedWhenDeleteFails() {
+    {
+        TextureTestWorld world;
+        RCKTexture texture(world.context, "FailMipmapDelete");
+        TestCheck(texture.Create(4, 4, 32, 0), "texture Create failed");
+        FillTexture(texture, 0xFF203040u);
+        TestCheck(texture.SystemToVideoMemory(world.renderContext, FALSE), "initial texture upload failed");
+
+        const int oldMipMapCount = texture.GetMipmapCount();
+        world.rasterizer->FailDestroyObject = TRUE;
+        TestCheck(!texture.UseMipmap(TRUE), "mipmap change must report deletion failure");
+        TestCheck(texture.GetMipmapCount() == oldMipMapCount, "failed deletion must preserve the mipmap request");
+        world.rasterizer->FailDestroyObject = FALSE;
+    }
+
+    {
+        TextureTestWorld world;
+        RCKTexture texture(world.context, "FailFormatDelete");
+        TestCheck(texture.Create(4, 4, 32, 0), "texture Create failed");
+        FillTexture(texture, 0xFF506070u);
+        TestCheck(texture.SystemToVideoMemory(world.renderContext, FALSE), "initial texture upload failed");
+
+        const VX_PIXELFORMAT oldFormat = texture.GetDesiredVideoFormat();
+        world.rasterizer->FailDestroyObject = TRUE;
+        texture.SetDesiredVideoFormat(oldFormat == _16_RGB565 ? _32_ARGB8888 : _16_RGB565);
+        TestCheck(texture.GetDesiredVideoFormat() == oldFormat, "failed deletion must preserve the desired texture format");
+        world.rasterizer->FailDestroyObject = FALSE;
+    }
+
+    {
+        TextureTestWorld world;
+        RCKSprite sprite(world.context, "FailSpriteFormatDelete");
+        TestCheck(sprite.Create(4, 4, 32, 0), "sprite Create failed");
+        FillSprite(sprite, 0xFF8090A0u);
+        TestCheck(sprite.SystemToVideoMemory(world.renderContext, FALSE), "initial sprite upload failed");
+
+        const VX_PIXELFORMAT oldFormat = sprite.GetDesiredVideoFormat();
+        world.rasterizer->FailDestroyObject = TRUE;
+        sprite.SetDesiredVideoFormat(oldFormat == _16_RGB565 ? _32_ARGB8888 : _16_RGB565);
+        TestCheck(sprite.GetDesiredVideoFormat() == oldFormat, "failed deletion must preserve the desired sprite format");
+        world.rasterizer->FailDestroyObject = FALSE;
+    }
+}
+
+void SystemToVideoMemoryRejectsUnregisteredRasterizerContext() {
     TextureTestWorld world;
     RCKTexture texture(world.context, "MissingDriver");
 
     TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
     FillTexture(texture, 0xFF112233u);
-    CKRasterizerDriver *driver = world.translated.Context->m_Driver;
-    world.translated.Context->m_Driver = nullptr;
+    world.renderManager->ForgetRasterizerContext(world.translated.Context);
 
     TestCheck(!texture.SystemToVideoMemory(world.renderContext, FALSE),
-              "SystemToVideoMemory should reject a rasterizer context without a driver");
+              "SystemToVideoMemory should reject an unregistered rasterizer context");
     TestCheck(!texture.IsInVideoMemory(),
               "failed upload must not mark the texture as resident");
-    world.translated.Context->m_Driver = driver;
+    TestCheck(world.renderManager->RegisterRasterizerContext(
+                  world.translated.Context,
+                  world.renderContext->m_DriverIndex),
+              "rasterizer context re-registration failed");
 }
 
 void MipmapRequestsKeepLegacyBoolAndExplicitCounts() {
@@ -361,6 +597,324 @@ void CopyPreservesUserMipmapsAndInvalidatesDestinationVideoMemory() {
     TestCheck(dest.ToRestore(), "copied texture should be marked for restore");
 }
 
+void TextureObjectsAreIndependentPerContext() {
+    TextureTestWorld world;
+    FFPRecordingWorld second;
+    AddDriverTextureFormat(*second.BackendDriver(), _32_ARGB8888);
+    AddDriverTextureFormat(*second.BackendDriver(), _16_RGB565);
+    AddDriverTextureFormat(*second.BackendDriver(), _16_ARGB4444);
+    TestCheck(second.CreateContext(64, 64),
+              "second recording Context creation failed");
+
+    RCKRenderContext secondContext(world.context);
+    secondContext.m_RasterizerContext = second.Context;
+    secondContext.m_RasterizerDriver = second.Driver;
+    TestCheck(world.renderManager->RegisterRasterizerContext(
+                  second.Context, secondContext.m_DriverIndex),
+              "second rasterizer context registration failed");
+
+    RCKTexture texture(world.context, "TwoContexts");
+    TestCheck(texture.Create(4, 4, 32, 0), "texture Create failed");
+    FillTexture(texture, 0xFF102030u);
+
+    TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, 0),
+              "first context upload failed");
+    TestCheck(world.rasterizer->CreatedTextureCount == 1 &&
+                  world.rasterizer->UpdatedTextureCount == 1,
+              "first context should create and upload one texture object");
+
+    TestCheck(texture.SetAsCurrent(&secondContext, FALSE, 0),
+              "second context upload failed");
+    TestCheck(second.Backend->CreatedTextureCount == 1 &&
+                  second.Backend->UpdatedTextureCount == 1,
+              "second context should create and upload its own texture object");
+    TestCheck(world.rasterizer->DeletedObjectCount == 0,
+              "using a second context must not delete the first texture object");
+
+    TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, 0),
+              "switching back to the first context failed");
+    TestCheck(world.rasterizer->CreatedTextureCount == 1 &&
+                  world.rasterizer->UpdatedTextureCount == 1 &&
+                  second.Backend->CreatedTextureCount == 1 &&
+                  second.Backend->UpdatedTextureCount == 1,
+              "context switches must reuse both texture objects");
+
+    FillTexture(texture, 0xFF405060u);
+    TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, 0),
+              "first context refresh failed");
+    TestCheck(world.rasterizer->UpdatedTextureCount == 2,
+              "changed pixels should refresh the first context once");
+    TestCheck(texture.SetAsCurrent(&secondContext, FALSE, 0),
+              "second context refresh failed");
+    TestCheck(second.Backend->UpdatedTextureCount == 2,
+              "changed pixels should refresh the second context once");
+
+    world.renderManager->ForgetRasterizerContext(second.Context);
+    TestCheck(texture.IsInVideoMemory(),
+              "forgetting the active context must retain another live texture object");
+    TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, 0),
+              "forgetting the second context must preserve the first texture object");
+    TestCheck(world.rasterizer->CreatedTextureCount == 1 &&
+                  world.rasterizer->UpdatedTextureCount == 2,
+              "forgetting another context must neither recreate nor upload this texture object");
+
+    TestCheck(texture.FreeVideoMemory(),
+              "freeing the remaining texture object failed");
+    TestCheck(world.rasterizer->DeletedObjectCount == 1 &&
+                  second.Backend->DeletedObjectCount == 0,
+              "only the live context should receive an explicit texture delete");
+
+    secondContext.m_RasterizerContext = nullptr;
+    secondContext.m_RasterizerDriver = nullptr;
+}
+
+void SpriteObjectsAreIndependentPerContext() {
+    TextureTestWorld world;
+    FFPRecordingWorld second;
+    AddDriverTextureFormat(*second.BackendDriver(), _32_ARGB8888);
+    TestCheck(second.CreateContext(64, 64),
+              "second recording Context creation failed");
+
+    RCKRenderContext secondContext(world.context);
+    secondContext.m_RasterizerContext = second.Context;
+    secondContext.m_RasterizerDriver = second.Driver;
+    TestCheck(world.renderManager->RegisterRasterizerContext(
+                  second.Context, secondContext.m_DriverIndex),
+              "second rasterizer context registration failed");
+    world.renderContext->SetFullViewport(&world.renderContext->m_ViewportData, 64, 64);
+    secondContext.SetFullViewport(&secondContext.m_ViewportData, 64, 64);
+
+    RCKSprite sprite(world.context, "TwoContextSprite");
+    TestCheck(sprite.Create(4, 4, 32, 0), "sprite Create failed");
+    FillSprite(sprite, 0xFF102030u);
+
+    DrawSprite(sprite, *world.renderContext, world.translated);
+    const CKDWORD firstCreatedTextures = world.rasterizer->CreatedTextureCount;
+    TestCheck(firstCreatedTextures >= 1,
+              "first context should create a sprite texture");
+    TestCheck(world.rasterizer->UpdatedTextureCount == 1,
+              "first context should upload one sprite texture");
+
+    DrawSprite(sprite, secondContext, second);
+    const CKDWORD secondCreatedTextures = second.Backend->CreatedTextureCount;
+    TestCheck(secondCreatedTextures >= 1,
+              "second context should create its own sprite texture");
+    TestCheck(second.Backend->UpdatedTextureCount == 1,
+              "second context should upload its own sprite texture");
+    TestCheck(world.rasterizer->DeletedObjectCount == 0,
+              "using a second context must not delete the first sprite texture");
+
+    DrawSprite(sprite, *world.renderContext, world.translated);
+    TestCheck(world.rasterizer->CreatedTextureCount == firstCreatedTextures &&
+                  world.rasterizer->UpdatedTextureCount == 1 &&
+                  second.Backend->CreatedTextureCount == secondCreatedTextures &&
+                  second.Backend->UpdatedTextureCount == 1,
+              "sprite context switches must reuse both texture objects");
+
+    FillSprite(sprite, 0xFF405060u);
+    DrawSprite(sprite, *world.renderContext, world.translated);
+    TestCheck(world.rasterizer->UpdatedTextureCount == 2,
+              "changed sprite pixels should refresh the first context once");
+    DrawSprite(sprite, secondContext, second);
+    TestCheck(second.Backend->UpdatedTextureCount == 2,
+              "changed sprite pixels should refresh the second context once");
+
+    world.renderManager->ForgetRasterizerContext(second.Context);
+    TestCheck(sprite.IsInVideoMemory(),
+              "forgetting the active context must retain another live sprite texture");
+    DrawSprite(sprite, *world.renderContext, world.translated);
+    TestCheck(world.rasterizer->CreatedTextureCount == firstCreatedTextures &&
+                  world.rasterizer->UpdatedTextureCount == 2,
+              "forgetting another context must preserve the first sprite texture");
+
+    const CKDWORD firstDeletes = world.rasterizer->DeletedObjectCount;
+    const CKDWORD secondDeletes = second.Backend->DeletedObjectCount;
+    TestCheck(sprite.FreeVideoMemory(),
+              "freeing the remaining sprite texture failed");
+    TestCheck(world.rasterizer->DeletedObjectCount == firstDeletes + 1 &&
+                  second.Backend->DeletedObjectCount == secondDeletes,
+              "only the live context should receive an explicit sprite delete");
+
+    secondContext.m_RasterizerContext = nullptr;
+    secondContext.m_RasterizerDriver = nullptr;
+}
+
+void ForgettingLastContextDetachesTextureObjects() {
+    TextureTestWorld world;
+    world.renderContext->SetFullViewport(
+        &world.renderContext->m_ViewportData, 64, 64);
+
+    CKDWORD deletesBeforeDestruction = 0;
+    {
+        RCKTexture texture(world.context, "LastContextTexture");
+        TestCheck(texture.Create(4, 4, 32, 0), "texture Create failed");
+        FillTexture(texture, 0xFF102030u);
+        TestCheck(texture.SetAsCurrent(world.renderContext, FALSE, 0),
+                  "texture upload failed");
+
+        RCKSprite sprite(world.context, "LastContextSprite");
+        TestCheck(sprite.Create(4, 4, 32, 0), "sprite Create failed");
+        FillSprite(sprite, 0xFF405060u);
+        DrawSprite(sprite, *world.renderContext, world.translated);
+
+        world.renderManager->ForgetRasterizerContext(world.translated.Context);
+        TestCheck(!texture.IsInVideoMemory(),
+                  "forgetting the last context must detach the texture object");
+        TestCheck(!sprite.IsInVideoMemory(),
+                  "forgetting the last context must detach the sprite object");
+        deletesBeforeDestruction = world.rasterizer->DeletedObjectCount;
+    }
+
+    TestCheck(world.rasterizer->DeletedObjectCount == deletesBeforeDestruction,
+              "detached objects must not delete through a forgotten context");
+}
+
+void SpriteUploadFailureDoesNotDraw() {
+    TextureTestWorld world;
+    RCKSprite sprite(world.context, "FailSpriteUpload");
+    TestCheck(sprite.Create(4, 4, 32, 0), "sprite Create failed");
+    FillSprite(sprite, 0xFF102030u);
+    world.renderContext->SetFullViewport(
+        &world.renderContext->m_ViewportData, 64, 64);
+    world.rasterizer->FailUpdateTexture = TRUE;
+
+    TestCheck(world.translated.Context->BeginScene(),
+              "begin failed sprite scene failed");
+    TestCheck(sprite.Draw(world.renderContext) == CKERR_INVALIDOPERATION,
+              "sprite Draw should report its upload failure");
+    TestCheck(world.translated.Context->EndScene(),
+              "end failed sprite scene failed");
+    TestCheck(!sprite.IsInVideoMemory(),
+              "failed sprite upload must discard the incomplete texture object");
+    TestCheck(sprite.ToRestore(),
+              "failed sprite upload must preserve the dirty flag");
+    TestCheck(world.rasterizer->Log.DrawCount == 0,
+              "failed sprite upload must not submit a draw");
+}
+
+void VertexBufferObjectsAreIndependentPerContext() {
+    TextureTestWorld world;
+    FFPRecordingWorld second;
+    AddDriverTextureFormat(*second.BackendDriver(), _32_ARGB8888);
+    TestCheck(second.CreateContext(64, 64),
+              "second recording Context creation failed");
+
+    RCKRenderContext secondContext(world.context);
+    secondContext.m_RasterizerContext = second.Context;
+    secondContext.m_RasterizerDriver = second.Driver;
+    TestCheck(world.renderManager->RegisterRasterizerContext(
+                  second.Context, secondContext.m_DriverIndex),
+              "second rasterizer context registration failed");
+    world.renderContext->SetFullViewport(
+        &world.renderContext->m_ViewportData, 64, 64);
+    secondContext.SetFullViewport(&secondContext.m_ViewportData, 64, 64);
+
+    CKVertexBuffer *buffer = world.renderManager->CreateVertexBuffer();
+    TestCheck(buffer != nullptr, "CreateVertexBuffer failed");
+    TestCheck(buffer->Check(world.renderContext, 3, StandaloneVertexFormat,
+                            TRUE) == CK_VB_LOST,
+              "new vertex buffer should request its initial contents");
+
+    const CKDWORD firstCreates = world.rasterizer->CreatedBufferCount;
+    FillVertexBuffer(buffer, world.renderContext, CK_LOCK_DEFAULT, 0.0f);
+    TestCheck(world.rasterizer->CreatedBufferCount == firstCreates + 1 &&
+                  world.rasterizer->UpdatedBufferCount == 1,
+              "first context should create and upload one vertex buffer");
+    DrawVertexBuffer(buffer, *world.renderContext, world.translated);
+
+    const CKDWORD secondCreates = second.Backend->CreatedBufferCount;
+    TestCheck(buffer->Check(&secondContext, 3, StandaloneVertexFormat,
+                            TRUE) == CK_VB_OK,
+              "existing CPU vertices should realize on a second context");
+    TestCheck(second.Backend->CreatedBufferCount == secondCreates + 1 &&
+                  second.Backend->UpdatedBufferCount == 1,
+              "second context should create and upload its own vertex buffer");
+    DrawVertexBuffer(buffer, secondContext, second);
+    TestCheck(world.rasterizer->DeletedObjectCount == 0,
+              "using a second context must not delete the first vertex buffer");
+
+    TestCheck(buffer->Check(world.renderContext, 3, StandaloneVertexFormat,
+                            TRUE) == CK_VB_OK,
+              "switching back should find the first vertex buffer");
+    DrawVertexBuffer(buffer, *world.renderContext, world.translated);
+    TestCheck(world.rasterizer->CreatedBufferCount == firstCreates + 1 &&
+                  world.rasterizer->UpdatedBufferCount == 1,
+              "switching back must reuse the first vertex buffer");
+
+    const CKDWORD deletesBeforeDiscard =
+        world.rasterizer->DeletedObjectCount;
+    FillVertexBuffer(buffer, world.renderContext, CK_LOCK_DISCARD, 0.1f);
+    TestCheck(world.rasterizer->CreatedBufferCount == firstCreates + 1 &&
+                  world.rasterizer->DeletedObjectCount ==
+                      deletesBeforeDiscard,
+              "discard must keep the Rasterizer Handle");
+    TestCheck(world.rasterizer->LastBufferUpdateMode ==
+                  CKRST_BUFFER_UPDATE_DISCARD,
+              "discard must reach the concrete Context unchanged");
+
+    TestCheck(buffer->Check(&secondContext, 3, StandaloneVertexFormat,
+                            TRUE) == CK_VB_OK,
+              "changed CPU vertices should refresh the second context");
+    TestCheck(second.Backend->CreatedBufferCount == secondCreates + 1 &&
+                  second.Backend->UpdatedBufferCount == 2,
+              "refreshing another context must update its existing buffer");
+    DrawVertexBuffer(buffer, secondContext, second);
+
+    world.renderManager->ForgetRasterizerContext(second.Context);
+    TestCheck(buffer->Check(world.renderContext, 3, StandaloneVertexFormat,
+                            TRUE) == CK_VB_OK,
+              "forgetting another context must preserve the first buffer");
+
+    const CKDWORD firstDeletes = world.rasterizer->DeletedObjectCount;
+    const CKDWORD secondDeletes = second.Backend->DeletedObjectCount;
+    buffer->Destroy();
+    TestCheck(world.rasterizer->DeletedObjectCount == firstDeletes + 1 &&
+                  second.Backend->DeletedObjectCount == secondDeletes,
+              "only the live context should receive an explicit buffer delete");
+
+    secondContext.m_RasterizerContext = nullptr;
+    secondContext.m_RasterizerDriver = nullptr;
+}
+
+void PartialVertexBufferDiscardUploadsCompleteCpuContents() {
+    TextureTestWorld world;
+    CKVertexBuffer *buffer = world.renderManager->CreateVertexBuffer();
+    TestCheck(buffer != nullptr, "CreateVertexBuffer failed");
+    TestCheck(buffer->Check(world.renderContext, 3, StandaloneVertexFormat, TRUE) == CK_VB_LOST,
+              "new vertex buffer should request its initial contents");
+    FillVertexBuffer(buffer, world.renderContext, CK_LOCK_DEFAULT, 0.0f);
+    const CKDWORD fullUpdateSize = world.rasterizer->LastBufferUpdateSize;
+    TestCheck(fullUpdateSize != 0 && fullUpdateSize % 3 == 0,
+              "initial upload must contain three complete native vertices");
+
+    VxDrawPrimitiveData *data = buffer->Lock(world.renderContext, 1, 1, CK_LOCK_DISCARD);
+    TestCheck(data != nullptr, "partial discard lock failed");
+    const VxVector replacement(2.0f, 3.0f, 4.0f);
+    *static_cast<VxVector *>(data->PositionPtr) = replacement;
+    *static_cast<CKDWORD *>(data->ColorPtr) = 0xFF102030u;
+    buffer->Unlock(world.renderContext);
+
+    TestCheck(world.rasterizer->LastBufferUpdateMode == CKRST_BUFFER_UPDATE_DISCARD,
+              "partial discard must preserve the discard update mode");
+    TestCheck(world.rasterizer->LastBufferUpdateOffset == 0,
+              "partial discard must begin at the start of the native buffer");
+    TestCheck(world.rasterizer->LastBufferUpdateSize == fullUpdateSize,
+              "partial discard must upload the complete CPU vertex snapshot");
+
+    const CKDWORD nativeStride = fullUpdateSize / 3;
+    const VxVector first = ReadPackedPosition(*world.rasterizer, 0, nativeStride);
+    const VxVector changed = ReadPackedPosition(*world.rasterizer, 1, nativeStride);
+    const VxVector last = ReadPackedPosition(*world.rasterizer, 2, nativeStride);
+    TestCheck(first.x == -0.5f && first.y == -0.5f && first.z == 0.0f,
+              "partial discard must preserve the first staged vertex");
+    TestCheck(changed.x == replacement.x && changed.y == replacement.y && changed.z == replacement.z,
+              "partial discard must upload the modified staged vertex");
+    TestCheck(last.x == 0.0f && last.y == 0.5f && last.z == 0.0f,
+              "partial discard must preserve the last staged vertex");
+
+    buffer->Destroy();
+}
+
 void RenderTargetPreservesCameraAspectRatio() {
     TextureTestWorld world;
     RCKTexture target(world.context, "CameraRatioTarget");
@@ -384,6 +938,9 @@ void RenderTargetPreservesCameraAspectRatio() {
                   clear.Rect.right == 256 && clear.Rect.bottom == 256,
               "engine Clear must clear the full target, independently of the camera viewport");
     TestCheck(world.renderContext->SetRenderTarget(NULL, 0), "camera-ratio target release");
+    TestCheck(world.renderContext->GetWidth() == 64 &&
+                  world.renderContext->GetHeight() == 64,
+              "target release restores the window dimensions");
     world.renderContext->DetachViewpointFromCamera();
 }
 
@@ -470,8 +1027,18 @@ int main() {
               &SetAsCurrentFailureDoesNotBindOrClearRestoreFlag);
     tests.Run("Restore failure keeps dirty flag",
               &RestoreFailureKeepsDirtyFlag);
-    tests.Run("SystemToVideoMemory rejects missing rasterizer driver",
-              &SystemToVideoMemoryRejectsMissingRasterizerDriver);
+    tests.Run("Texture replacement stops when delete fails",
+              &TextureReplacementStopsWhenDeleteFails);
+    tests.Run("Sprite replacement stops when delete fails",
+              &SpriteReplacementStopsWhenDeleteFails);
+    tests.Run("Texture partial deletion retries only the failed context",
+              &TexturePartialDeletionRetriesOnlyTheFailedContext);
+    tests.Run("Vertex buffer replacement retries failed deletion",
+              &VertexBufferReplacementRetriesFailedDeletion);
+    tests.Run("Texture configuration stays unchanged when delete fails",
+              &TextureConfigurationStaysUnchangedWhenDeleteFails);
+    tests.Run("SystemToVideoMemory rejects unregistered rasterizer context",
+              &SystemToVideoMemoryRejectsUnregisteredRasterizerContext);
     tests.Run("Mipmap requests keep legacy bool and explicit counts",
               &MipmapRequestsKeepLegacyBoolAndExplicitCounts);
     tests.Run("Generated and user mipmaps use initialized creation modes",
@@ -490,6 +1057,18 @@ int main() {
               &UserMipmapsUploadUsingCreatedTextureFormat);
     tests.Run("Copy preserves user mipmaps and invalidates destination video memory",
               &CopyPreservesUserMipmapsAndInvalidatesDestinationVideoMemory);
+    tests.Run("Texture objects are independent per context",
+              &TextureObjectsAreIndependentPerContext);
+    tests.Run("Sprite objects are independent per context",
+              &SpriteObjectsAreIndependentPerContext);
+    tests.Run("Forgetting the last context detaches texture objects",
+              &ForgettingLastContextDetachesTextureObjects);
+    tests.Run("Sprite upload failure does not draw",
+              &SpriteUploadFailureDoesNotDraw);
+    tests.Run("Vertex buffer objects are independent per context",
+              &VertexBufferObjectsAreIndependentPerContext);
+    tests.Run("Partial vertex buffer discard uploads complete CPU contents",
+              &PartialVertexBufferDiscardUploadsCompleteCpuContents);
     tests.Run("EnsureRenderTarget preserves mip request and uses desired format",
               &EnsureRenderTargetPreservesMipRequestAndUsesDesiredFormat);
     tests.Run("RenderTarget preserves camera aspect ratio",
