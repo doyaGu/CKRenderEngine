@@ -1060,7 +1060,6 @@ void TestApproximationsKeepDrawing()
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
         {"sampler LOD bias", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
         {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
-        {"bump op without DuDv texture", CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS, &SetupBumpWithoutDuDv},
         {"tween without streams", CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN, &SetupTweenWithoutStreams},
         {"vertex blend without weights", CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS, &SetupBlendWithoutWeights},
     };
@@ -1165,7 +1164,7 @@ void TestApproximationsKeepDrawing()
     }
 }
 
-void TestInvalidAlphaBumpOpRejected()
+void TestInvalidBumpInputsRejected()
 {
     Fixture f;
     CKRasterizerContext *ctx = f.Context;
@@ -1186,10 +1185,16 @@ void TestInvalidAlphaBumpOpRejected()
     ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_BUMPENVMAPLUMINANCE);
     TestCheck(!ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
               "alpha luminance bump texture op rejects draw");
+    ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    SetupBumpWithoutDuDv(ctx, texture);
+    TestCheck(!ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+              "bump texture op rejects a color texture without signed DuDv data");
     TestCheck(ctx->EndScene(), "end invalid alpha bump scene");
     TestCheck(CountDraws(f) == 0 &&
-                  Diag(f.Context, CKRST_DIAG_APPROX_ALPHA_BUMP_OP) == 0,
-              "invalid alpha bump ops never draw or silently approximate");
+                  Diag(f.Context, CKRST_DIAG_APPROX_ALPHA_BUMP_OP) == 0 &&
+                  Diag(f.Context, CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS) == 0 &&
+                  Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 3,
+              "invalid bump inputs never draw or silently approximate");
     TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
               "delete alpha bump test texture");
 }
@@ -1982,7 +1987,7 @@ int main()
     framework.Run("buffers", TestBuffers);
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
     framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
-    framework.Run("invalid alpha bump op rejected", TestInvalidAlphaBumpOpRejected);
+    framework.Run("invalid bump inputs rejected", TestInvalidBumpInputsRejected);
     framework.Run("vertex buffer wrap uses primitive coordinates", TestVertexBufferWrapUsesPrimitiveCoordinates);
     framework.Run("vertex buffer point expansion uses per-vertex size", TestVertexBufferPointExpansionUsesPerVertexSize);
     framework.Run("draw order and markers", TestDrawOrderAndMarkers);

@@ -1768,11 +1768,12 @@ void AlphaBumpOpIsRejected() {
 
     ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
-    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
-                                   1, 0, 0, 3, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
-                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS),
-              "A bump op on a texture without DuDv data samples it as an ordinary texture with a diagnostic");
+    TestCheck(!ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                    1, 0, 0, 3, 0, 0,
+                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "A bump op rejects a texture without signed DuDv data");
     ffp.Shutdown();
 }
 
@@ -2868,7 +2869,7 @@ void DrawUploadsPerStageBumpEnvUniforms() {
     ffp.Shutdown();
 }
 
-void UnsupportedBumpInputsApproximateWithDiagnostics() {
+void InvalidBumpFormatsRejectWithoutApproximation() {
     {
         FFPRecordingDriver driver;
         FFPRecordingBackend context(&driver);
@@ -2878,12 +2879,14 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         ffp.SetTexture(1, 101);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
-                                       1, 0, 0, 3, 0, 0,
-                                       CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "unsigned textures in bump mapping draw as ordinary textures");
-        TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS),
-                  "unsigned bump mapping must report the bump texture approximation");
+        TestCheck(!ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                        1, 0, 0, 3, 0, 0,
+                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "unsigned textures cannot provide signed bump deltas");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP &&
+                      ffp.GetLastDrawApproximationMask() == 0 &&
+                      context.Log.DrawCount == 0,
+                  "invalid bump texture format rejects without approximation");
         ffp.Shutdown();
     }
     {
@@ -2895,12 +2898,14 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         ffp.SetTexture(1, 101);
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAPLUMINANCE);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
-                                       1, 0, 0, 3, 0, 0,
-                                       CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "luminance bump mapping without a luminance channel still draws");
-        TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS),
-                  "missing luminance bump channel must report the bump texture approximation");
+        TestCheck(!ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                        1, 0, 0, 3, 0, 0,
+                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+                  "luminance bump mapping requires a luminance channel");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP &&
+                      ffp.GetLastDrawApproximationMask() == 0 &&
+                      context.Log.DrawCount == 0,
+                  "missing luminance rejects without approximation");
         ffp.Shutdown();
     }
     {
@@ -3754,8 +3759,8 @@ int main() {
               &ProjectedSamplerStageFourEntersSpecialization);
     tests.Run("Draw uploads per-stage bump env uniforms",
               &DrawUploadsPerStageBumpEnvUniforms);
-    tests.Run("Unsupported bump inputs approximate with diagnostics",
-              &UnsupportedBumpInputsApproximateWithDiagnostics);
+    tests.Run("Invalid bump formats reject without approximation",
+              &InvalidBumpFormatsRejectWithoutApproximation);
     tests.Run("Vertex blend zero weights uploads matrix palette",
               &VertexBlendZeroWeightsUploadsMatrixPalette);
     tests.Run("Vertex blend uploads world matrix palette for clip planes",

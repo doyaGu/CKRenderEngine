@@ -446,15 +446,14 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             // Bump operations are defined only for the color channel.
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
-        if ((colorOp == CKRST_TOP_BUMPENVMAP ||
-             colorOp == CKRST_TOP_BUMPENVMAPLUMINANCE) &&
-            (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPDUDV) == 0) {
-            // Sampled as an ordinary texture (spec appendix D).
-            RecordDrawApproximation(CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS);
-        }
-        if (colorOp == CKRST_TOP_BUMPENVMAPLUMINANCE &&
-            (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) == 0) {
-            RecordDrawApproximation(CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS);
+        if (((colorOp == CKRST_TOP_BUMPENVMAP ||
+              colorOp == CKRST_TOP_BUMPENVMAPLUMINANCE) &&
+             (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPDUDV) == 0) ||
+            (colorOp == CKRST_TOP_BUMPENVMAPLUMINANCE &&
+             (m_State.TextureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) == 0)) {
+            // A color texture has no signed DuDv data, and a DuDv-only texture
+            // has no luminance channel. Neither can implement the selected op.
+            return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
         CKFFShaderKeyFSStage shaderStage = {};
         shaderStage.ColorOp = colorOp;
