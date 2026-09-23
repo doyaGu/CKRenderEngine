@@ -115,17 +115,37 @@ float4 ckLevel3D(Texture3D<float4> image, uint slot, float3 uv, uint mip, bool f
     return value;
 }
 
-float4 ckSample3D(Texture3D<float4> image, SamplerState state, uint slot, float3 uv)
+float4 ckSample3DAtLod(Texture3D<float4> image, uint slot, float3 uv, float lod, uint modes)
 {
-    uint modes = uint(ck_samplerInfo[slot].x);
-    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4 && ((modes >> 8) & 15) != 4) return image.Sample(state, uv);
     uint width, height, depth, levels;
     image.GetDimensions(0, width, height, depth, levels);
-    float lod = image.CalculateLevelOfDetailUnclamped(state, uv);
     bool filtered = (lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z) != 1.0;
     uint mipFilter = uint(ck_samplerInfo[slot].w);
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
     if (mipFilter != 2) return ckLevel3D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
     uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
     return lerp(ckLevel3D(image, slot, uv, lower, filtered, modes), ckLevel3D(image, slot, uv, upper, filtered, modes), frac(lod));
+}
+
+float4 ckSample3D(Texture3D<float4> image, SamplerState state, uint slot, float3 uv)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4 && ((modes >> 8) & 15) != 4)
+        return image.Sample(state, uv);
+    float lod = image.CalculateLevelOfDetailUnclamped(state, uv);
+    return ckSample3DAtLod(image, slot, uv, lod, modes);
+}
+
+float4 ckSample3DGrad(Texture3D<float4> image, SamplerState state, uint slot,
+                      float3 uv, float3 originalUv, int mirrorOnceMask)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    if (mirrorOnceMask == 0 && (modes & 15) != 4 && ((modes >> 4) & 15) != 4 && ((modes >> 8) & 15) != 4)
+        return image.Sample(state, uv);
+    // Compute mip selection before MIRRORONCE folds the coordinates. Keep the
+    // per-tap border path for axes that use BORDER instead of the native clamp.
+    float lod = image.CalculateLevelOfDetailUnclamped(state, originalUv);
+    if ((modes & 15) == 4 || ((modes >> 4) & 15) == 4 || ((modes >> 8) & 15) == 4)
+        return ckSample3DAtLod(image, slot, uv, lod, modes);
+    return image.SampleLevel(state, uv, lod);
 }

@@ -621,8 +621,8 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_MIRROR_ONCE),
-              "Volume MIRRORONCE still reports its unresolved mip footprint");
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0,
+              "Volume MIRRORONCE preserves the sampler footprint in the shader");
 
     ffp.Shutdown();
 }

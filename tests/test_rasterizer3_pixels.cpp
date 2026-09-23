@@ -357,7 +357,8 @@ const CKDWORD kBlue[3] = {0xFF0000FFu, 0xFF0000FFu, 0xFF0000FFu};
 struct Textures {
     CKDWORD Transform;      // 2x1: red | green
     CKDWORD BumpLuminance;  // 4x4 X8L8V8U8 with two uploaded mips
-    Textures() : Transform(0), BumpLuminance(0) {}
+    CKDWORD MirrorVolume;   // 2x2x2: red | green in each slice
+    Textures() : Transform(0), BumpLuminance(0), MirrorVolume(0) {}
 };
 
 void CreateTextures(CKRasterizerContext *ctx, Textures &t)
@@ -374,6 +375,29 @@ void CreateTextures(CKRasterizerContext *ctx, Textures &t)
     VxImageDescEx transformImage = transformDesc.Format;
     transformImage.Image = (XBYTE *)transformPixels;
     TestCheck(ctx->LoadTexture(t.Transform, transformImage, 0, CKRST_CUBEFACE_XPOS, NULL), "transform texture upload");
+
+    CKTextureDesc volumeDesc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, volumeDesc.Format);
+    volumeDesc.Format.Width = volumeDesc.Format.Height = 2;
+    volumeDesc.Format.BytesPerLine = 2 * 4;
+    volumeDesc.Depth = 2;
+    volumeDesc.MipMapCount = 2;
+    volumeDesc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_VOLUMEMAP;
+    TestCheck(ctx->CreateTexture(&volumeDesc, &t.MirrorVolume) && t.MirrorVolume != 0,
+              "mirror volume texture");
+    CKDWORD volumePixels[4] = {0xFFFF0000u, 0xFF00FF00u, 0xFFFF0000u, 0xFF00FF00u};
+    VxImageDescEx volumeImage = volumeDesc.Format;
+    volumeImage.Image = (XBYTE *)volumePixels;
+    for (unsigned slice = 0; slice < 2; ++slice)
+        TestCheck(ctx->LoadTexture(t.MirrorVolume, volumeImage, 0, (CKRST_CUBEFACE)slice, NULL),
+                  "mirror volume slice upload");
+    CKDWORD volumeMipPixel = 0xFF0000FFu;
+    VxImageDescEx volumeMipImage = volumeImage;
+    volumeMipImage.Width = volumeMipImage.Height = 1;
+    volumeMipImage.BytesPerLine = 4;
+    volumeMipImage.Image = (XBYTE *)&volumeMipPixel;
+    TestCheck(ctx->LoadTexture(t.MirrorVolume, volumeMipImage, 1, CKRST_CUBEFACE_XPOS, NULL),
+              "mirror volume mip upload");
 
     CKTextureDesc bumpDesc;
     VxPixelFormat2ImageDesc(_32_X8L8V8U8, bumpDesc.Format);
@@ -402,6 +426,8 @@ void DestroyTextures(CKRasterizerContext *ctx, Textures &t)
         ctx->DeleteObject(t.Transform, CKRST_OBJ_TEXTURE);
     if (t.BumpLuminance)
         ctx->DeleteObject(t.BumpLuminance, CKRST_OBJ_TEXTURE);
+    if (t.MirrorVolume)
+        ctx->DeleteObject(t.MirrorVolume, CKRST_OBJ_TEXTURE);
     t = Textures();
 }
 
@@ -418,6 +444,9 @@ enum SampleId {
     SAMPLE_TEXTURE_MATRIX,
     SAMPLE_STAGEBLEND,
     SAMPLE_MIRROR_ONCE,
+    SAMPLE_VOLUME_MIRROR_ONCE,
+    SAMPLE_VOLUME_MIRROR_BORDER,
+    SAMPLE_VOLUME_MIRROR_MIP,
     SAMPLE_BUMP_LUMINANCE,
     SAMPLE_TWEEN,
     SAMPLE_PIXEL_FOG,
@@ -667,6 +696,72 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     snprintf(what, sizeof(what), "[%s] MIRRORONCE maps negative U to the reflected texel", mode);
     ExpectCenter(pixels, 0, 255, 0, what);
     Record(samples, SAMPLE_MIRROR_ONCE, pixels);
+
+    SetDiffuseState(ctx);
+    ctx->SetTexture(textures.MirrorVolume, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
+    VxMatrix volumeTransform;
+    Vx3DMatrixIdentity(volumeTransform);
+    volumeTransform[3][2] = 0.25f;
+    ctx->SetTransformMatrix(VXMATRIX_TEXTURE0, volumeTransform);
+    float mirroredVolumeCoords[3][4] = {
+        {-0.75f, 0.25f, 0.0f, 0.0f},
+        {-0.75f, 0.25f, 0.0f, 0.0f},
+        {-0.75f, 0.25f, 0.0f, 0.0f}
+    };
+    float directVolumeCoords[3][4] = {
+        {0.75f, 0.25f, 0.0f, 0.0f},
+        {0.75f, 0.25f, 0.0f, 0.0f},
+        {0.75f, 0.25f, 0.0f, 0.0f}
+    };
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, directVolumeCoords),
+                  "volume direct sample draw");
+    }, pixels);
+    ExpectCenter(pixels, 0, 255, 0, "volume direct sample");
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, mirroredVolumeCoords),
+                  "volume MIRRORONCE draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] volume MIRRORONCE maps negative U to the reflected texel", mode);
+    ExpectCenter(pixels, 0, 255, 0, what);
+    Record(samples, SAMPLE_VOLUME_MIRROR_ONCE, pixels);
+
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xFF0000FFu);
+    float borderVolumeCoords[3][4] = {
+        {-0.75f, -0.25f, 0.0f, 0.0f},
+        {-0.75f, -0.25f, 0.0f, 0.0f},
+        {-0.75f, -0.25f, 0.0f, 0.0f}
+    };
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, borderVolumeCoords),
+                  "volume MIRRORONCE and BORDER draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] volume MIRRORONCE keeps the other axis BORDER color", mode);
+    ExpectCenter(pixels, 0, 0, 255, what);
+    Record(samples, SAMPLE_VOLUME_MIRROR_BORDER, pixels);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSMIRRORONCE);
+
+    float mipVolumeCoords[3][4] = {
+        {-100.0f, 0.25f, 0.0f, 0.0f},
+        {-200.0f, 0.25f, 0.0f, 0.0f},
+        {-100.0f, 0.25f, 0.0f, 0.0f}
+    };
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, mipVolumeCoords),
+                  "volume MIRRORONCE mip draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] volume MIRRORONCE keeps the source mip footprint", mode);
+    ExpectCenter(pixels, 0, 0, 255, what);
+    Record(samples, SAMPLE_VOLUME_MIRROR_MIP, pixels);
 
     // Neither tween endpoint covers the centre; the half-way tween does.
     SetDiffuseState(ctx);

@@ -11,6 +11,7 @@
 #define vec3_splat(x) float3(x, x, x)
 #define vec4_splat(x) float4(x, x, x, x)
 #define uvec4_splat(x) uint4(x, x, x, x)
+#define CKFF_NATIVE_SDL_GPU 1
 #define dFdx(x) ddx(x)
 #define dFdy(x) ddy(x)
 
@@ -31,3 +32,4 @@
 #define texture2DGrad(name, uv, dx, dy) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy)
 #define textureCube(name, uv) name.Sample(name##Sampler, uv)
 #define texture3D(name, uv) ckSample3D(name, name##Sampler, name##Slot, uv)
+#define texture3DGrad(name, uv, original, mirror) ckSample3DGrad(name, name##Sampler, name##Slot, uv, original, mirror)

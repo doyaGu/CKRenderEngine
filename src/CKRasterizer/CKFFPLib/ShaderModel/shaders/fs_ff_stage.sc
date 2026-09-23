@@ -52,6 +52,21 @@ vec4 applyMirrorOnceCoord(vec4 coord, int mirrorOnceMask, int samplerType)
     return coord;
 }
 
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror) \
+    (_mirror != 0 ? textureGrad(_sampler, _uv, _dx, _dy) : texture3D(_sampler, _uv))
+#elif !CKFF_NATIVE_SDL_GPU
+vec4 ckffTexture3DGrad(BgfxSampler3D sampleState, vec3 uv, vec3 dx, vec3 dy)
+{
+    return sampleState.m_texture.SampleGrad(sampleState.m_sampler, uv, dx, dy);
+}
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror) \
+    (_mirror != 0 ? ckffTexture3DGrad(_sampler, _uv, _dx, _dy) : texture3D(_sampler, _uv))
+#else
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror) \
+    texture3DGrad(_sampler, _uv, _original, _mirror)
+#endif
+
 // Ordinal of this stage among the stages sampling the same sampler type
 // (mirrors CKFFSamplerOrdinal on the C++ side).
 int ckffSamplerOrdinal(int stage, int samplerType)
@@ -73,6 +88,9 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     // force the LOD to zero instead of preserving the source footprint.
     vec2 originalDx = dFdx(coord.xy);
     vec2 originalDy = dFdy(coord.xy);
+    vec3 originalCoord3 = coord.xyz;
+    vec3 originalDx3 = dFdx(coord.xyz);
+    vec3 originalDy3 = dFdy(coord.xyz);
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
@@ -83,10 +101,12 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     }
     if (samplerType == 3) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
-        if (ordinal == 0) return texture3D(s_textureVolume0, coord.xyz);
-        if (ordinal == 1) return texture3D(s_textureVolume1, coord.xyz);
-        if (ordinal == 2) return texture3D(s_textureVolume2, coord.xyz);
-        return texture3D(s_textureVolume3, coord.xyz);
+#define CKFF_SAMPLE_3D(_sampler) CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask)
+        if (ordinal == 0) return CKFF_SAMPLE_3D(s_textureVolume0);
+        if (ordinal == 1) return CKFF_SAMPLE_3D(s_textureVolume1);
+        if (ordinal == 2) return CKFF_SAMPLE_3D(s_textureVolume2);
+        return CKFF_SAMPLE_3D(s_textureVolume3);
+#undef CKFF_SAMPLE_3D
     }
 
     vec2 uv = coord.xy;
