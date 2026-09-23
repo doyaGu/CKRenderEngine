@@ -235,8 +235,13 @@ CKDrawState CKDrawStateCache::BuildDrawState(VXPRIMITIVETYPE topology) {
     }
     lo |= CKRST_STATE_CULL(RemapCullMode(cullMode));
 
-    // Fill mode
-    lo |= CKRST_STATE_FILLMODE(RemapFillMode(m_States[VXRENDERSTATE_FILLMODE]));
+    // D3D fill mode rasterizes triangle primitives. It must not change the
+    // topology of an explicit line or point draw on either backend.
+    const CKBOOL triangles = topology == VX_TRIANGLELIST ||
+                             topology == VX_TRIANGLESTRIP ||
+                             topology == VX_TRIANGLEFAN;
+    lo |= CKRST_STATE_FILLMODE(triangles
+        ? RemapFillMode(m_States[VXRENDERSTATE_FILLMODE]) : 0);
     if (m_States[VXRENDERSTATE_ANTIALIAS] || m_MultisampledTarget)
         lo |= CKRST_STATE_MSAA;
 

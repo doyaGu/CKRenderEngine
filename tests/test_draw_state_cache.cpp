@@ -143,6 +143,25 @@ void AntialiasStateMapsToMsaa() {
               "Leaving the multisampled target must clear rasterizer MSAA");
 }
 
+void PointFillDoesNotChangeLineOrPointTopology() {
+    CKDrawStateCache cache;
+    cache.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    const CKDrawState triangles = cache.BuildDrawState(VX_TRIANGLELIST);
+    const CKDrawState lines = cache.BuildDrawState(VX_LINELIST);
+    const CKDrawState lineStrip = cache.BuildDrawState(VX_LINESTRIP);
+    const CKDrawState points = cache.BuildDrawState(VX_POINTLIST);
+    TestCheck(((triangles.Lo >> 12) & 3u) == 2u,
+              "Point fill must still apply to triangle primitives");
+    TestCheck(((lines.Lo >> 12) & 3u) == 0u &&
+                  ((lineStrip.Lo >> 12) & 3u) == 0u &&
+                  ((points.Lo >> 12) & 3u) == 0u,
+              "Point fill must not turn explicit lines or points into different primitives");
+    TestCheck(((lines.Mid >> 6) & 7u) == VX_LINELIST &&
+                  ((lineStrip.Mid >> 6) & 7u) == VX_LINESTRIP &&
+                  ((points.Mid >> 6) & 7u) == VX_POINTLIST,
+              "Explicit line and point topology must survive draw state encoding");
+}
+
 void DisabledDepthBufferCannotWriteDepth() {
     CKDrawStateCache cache;
     cache.SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
@@ -191,6 +210,8 @@ int main() {
               &StencilWriteMaskInvalidatesCachedDrawState);
     tests.Run("Antialias state maps to MSAA",
               &AntialiasStateMapsToMsaa);
+    tests.Run("Point fill does not change line or point topology",
+              &PointFillDoesNotChangeLineOrPointTopology);
     tests.Run("Disabled depth buffer cannot write depth",
               &DisabledDepthBufferCannotWriteDepth);
     tests.Run("Public query values track defaults and explicit writes",
