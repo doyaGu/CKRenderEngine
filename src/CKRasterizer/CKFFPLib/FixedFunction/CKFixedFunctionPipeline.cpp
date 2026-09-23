@@ -508,7 +508,8 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
                 // bgfx anisotropy is a switch: any level above one is "on".
                 RecordDrawApproximation(CKRST_DIAG_APPROX_ANISOTROPY);
             }
-            if (CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]) != 0)
+            if (CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]) != 0 &&
+                (m_State.TextureFlags[stage] & CKRST_TEXTURE_VOLUMEMAP) != 0)
                 RecordDrawApproximation(CKRST_DIAG_APPROX_MIRROR_ONCE);
             if ((m_State.TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
                 m_State.StageStates[stage][CKRST_TSS_COMPAREFUNC] != CKRST_COMPARE_NONE &&

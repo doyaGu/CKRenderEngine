@@ -65,6 +65,31 @@ float4 ckSample2D(Texture2D<float4> image, SamplerState state, uint slot, float2
     return ckMips2D(image, slot, uv, lod, levels, filter != 1, modes, uint(ck_samplerInfo[slot].w));
 }
 
+float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
+                      float2 uv, float2 dx, float2 dy)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
+        return image.SampleGrad(state, uv, dx, dy);
+    uint width, height, levels;
+    image.GetDimensions(0, width, height, levels);
+    float2 extent = float2(width, height);
+    float lx = length(dx * extent), ly = length(dy * extent);
+    float lod = log2(max(max(lx, ly), 0.000001));
+    uint filter = uint(lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z);
+    if (filter == 7 && lod > 0.0) {
+        float major = max(lx, ly), minor = max(min(lx, ly), major / 16.0);
+        uint taps = uint(clamp(ceil(major / max(minor, 1.0)), 1.0, 16.0));
+        float2 step = (lx > ly ? dx : dy) / float(taps);
+        float4 result = 0.0;
+        [loop] for (uint i = 0; i < taps; ++i)
+            result += ckMips2D(image, slot, uv + (float(i) - float(taps - 1) * 0.5) * step,
+                               log2(max(minor, 1.0)), levels, true, modes, uint(ck_samplerInfo[slot].w));
+        return result / float(taps);
+    }
+    return ckMips2D(image, slot, uv, lod, levels, filter != 1, modes, uint(ck_samplerInfo[slot].w));
+}
+
 float4 ckTap3D(Texture3D<float4> image, uint slot, int3 p, uint3 extent, uint mip, uint modes)
 {
     bool outside = false;

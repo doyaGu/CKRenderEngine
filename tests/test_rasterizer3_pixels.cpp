@@ -417,6 +417,7 @@ enum SampleId {
     SAMPLE_DEPTH_ORDER,
     SAMPLE_TEXTURE_MATRIX,
     SAMPLE_STAGEBLEND,
+    SAMPLE_MIRROR_ONCE,
     SAMPLE_BUMP_LUMINANCE,
     SAMPLE_TWEEN,
     SAMPLE_PIXEL_FOG,
@@ -646,6 +647,26 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     }, pixels);
     TestCheck(PixelNear(pixels, 20, 40, 255, 0, 0),
               "affine texture interpolation selects the red texel");
+
+    SetDiffuseState(ctx);
+    ctx->SetTexture(textures.Transform, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE);
+    float mirroredTexcoords[3][4] = {
+        {-0.75f, 0.5f, 0.0f, 0.0f},
+        {-0.75f, 0.5f, 0.0f, 0.0f},
+        {-0.75f, 0.5f, 0.0f, 0.0f}
+    };
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, mirroredTexcoords),
+                  "MIRRORONCE draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] MIRRORONCE maps negative U to the reflected texel", mode);
+    ExpectCenter(pixels, 0, 255, 0, what);
+    Record(samples, SAMPLE_MIRROR_ONCE, pixels);
 
     // Neither tween endpoint covers the centre; the half-way tween does.
     SetDiffuseState(ctx);

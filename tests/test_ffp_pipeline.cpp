@@ -613,8 +613,16 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0,
+              "2D MIRRORONCE addressing preserves the sampler footprint in the shader");
+
+    ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID | CKRST_TEXTURE_VOLUMEMAP);
+    drawn = ffp.DrawVertexBuffer(
+        VX_TRIANGLELIST,
+        1, 0, 0, 3, 0, 0,
+        CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     TestCheck(drawn && ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_MIRROR_ONCE),
-              "MIRRORONCE addressing reports the shader-side approximation");
+              "Volume MIRRORONCE still reports its unresolved mip footprint");
 
     ffp.Shutdown();
 }

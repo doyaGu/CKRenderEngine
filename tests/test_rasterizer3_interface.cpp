@@ -1060,7 +1060,6 @@ void TestApproximationsKeepDrawing()
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
         {"sampler LOD bias", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
         {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
-        {"MIRRORONCE", CKRST_DIAG_APPROX_MIRROR_ONCE, &SetupMirrorOnce},
         {"alpha bump op", CKRST_DIAG_APPROX_ALPHA_BUMP_OP, &SetupAlphaBumpOp},
         {"bump op without DuDv texture", CKRST_DIAG_APPROX_BUMP_TEXTURE_FLAGS, &SetupBumpWithoutDuDv},
         {"tween without streams", CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN, &SetupTweenWithoutStreams},

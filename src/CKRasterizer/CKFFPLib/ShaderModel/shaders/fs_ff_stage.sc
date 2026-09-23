@@ -68,6 +68,11 @@ int ckffSamplerOrdinal(int stage, int samplerType)
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    // Addressing must not change the derivatives used to choose a mip level.
+    // In particular, clamping the coordinate outside [0, 1] would otherwise
+    // force the LOD to zero instead of preserving the source footprint.
+    vec2 originalDx = dFdx(coord.xy);
+    vec2 originalDy = dFdy(coord.xy);
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
@@ -86,14 +91,25 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 
     vec2 uv = coord.xy;
     vec4 color;
-    if (stage == 0) color = texture2D(s_texture0, uv);
-    else if (stage == 1) color = texture2D(s_texture1, uv);
-    else if (stage == 2) color = texture2D(s_texture2, uv);
-    else if (stage == 3) color = texture2D(s_texture3, uv);
-    else if (stage == 4) color = texture2D(s_texture4, uv);
-    else if (stage == 5) color = texture2D(s_texture5, uv);
-    else if (stage == 6) color = texture2D(s_texture6, uv);
-    else color = texture2D(s_texture7, uv);
+#if BGFX_SHADER_LANGUAGE_GLSL
+    // bgfx's OpenGL compatibility preamble aliases texture2DGrad to the ARB
+    // extension even on core GLSL contexts; use the core entry point here.
+#define CKFF_TEXTURE_2D_GRAD(_sampler) textureGrad(_sampler, uv, originalDx, originalDy)
+#else
+#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx, originalDy)
+#endif
+#define CKFF_SAMPLE_2D(_sampler) (mirrorOnceMask != 0 ? \
+    CKFF_TEXTURE_2D_GRAD(_sampler) : texture2D(_sampler, uv))
+    if (stage == 0) color = CKFF_SAMPLE_2D(s_texture0);
+    else if (stage == 1) color = CKFF_SAMPLE_2D(s_texture1);
+    else if (stage == 2) color = CKFF_SAMPLE_2D(s_texture2);
+    else if (stage == 3) color = CKFF_SAMPLE_2D(s_texture3);
+    else if (stage == 4) color = CKFF_SAMPLE_2D(s_texture4);
+    else if (stage == 5) color = CKFF_SAMPLE_2D(s_texture5);
+    else if (stage == 6) color = CKFF_SAMPLE_2D(s_texture6);
+    else color = CKFF_SAMPLE_2D(s_texture7);
+#undef CKFF_SAMPLE_2D
+#undef CKFF_TEXTURE_2D_GRAD
     if (samplerType == 2) {
         float depth = color.r;
         if (compareFunc != 0) return vec4_splat(compareDepth(depth, coord.z, compareFunc));
