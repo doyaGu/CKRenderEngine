@@ -481,6 +481,12 @@ static void TestOpenGLAutoMipPolicy()
                 "oversized mip count requests automatic mipmaps");
     TEST_ASSERT(CKBgfxIsAutoMipRequest(4, full) == FALSE,
                 "explicit in-range mip count is not automatic");
+    TEST_ASSERT(CKBgfxCanRepresentMipCount(0, full) == TRUE &&
+                CKBgfxCanRepresentMipCount(1, full) == TRUE &&
+                CKBgfxCanRepresentMipCount(full, full) == TRUE &&
+                CKBgfxCanRepresentMipCount((CKDWORD)-1, full) == TRUE &&
+                CKBgfxCanRepresentMipCount(4, full) == FALSE,
+                "bgfx rejects partial explicit chains that would leave physical mips uninitialized");
 
     TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE, FALSE) == FALSE,
                 "OpenGL defers automatic mips until data can populate the full chain");

@@ -71,6 +71,7 @@ CKDWORD CKBgfxResolveImagePitch(CKDWORD Width, CKDWORD Height,
                                 CKDWORD BitsPerPixel, CKDWORD PitchOrImageSize);
 CKDWORD CKBgfxTextureMipCount(CKDWORD Width, CKDWORD Height, CKDWORD Depth);
 CKBOOL CKBgfxIsAutoMipRequest(CKDWORD RequestedMipCount, CKDWORD FullMipCount);
+CKBOOL CKBgfxCanRepresentMipCount(CKDWORD RequestedMipCount, CKDWORD FullMipCount);
 CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD RequestedMipCount,
                                          CKDWORD FullMipCount,
                                          CKBOOL OpenGL,

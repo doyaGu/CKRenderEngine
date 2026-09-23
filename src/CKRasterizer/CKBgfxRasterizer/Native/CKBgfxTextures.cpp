@@ -365,6 +365,10 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
     }
     CKDWORD fullMipCount = CKBgfxTextureMipCount(w, h, d);
     CKDWORD requestedMipCount = Desc->MipMapCount;
+    // bgfx's dimension-based creation API allocates either one level or the
+    // entire chain. A partial explicit chain would expose uninitialized mips.
+    if (!CKBgfxCanRepresentMipCount(requestedMipCount, fullMipCount))
+        return CKERR_NOTIMPLEMENTED;
     CKBOOL openGL = CKBgfxIsOpenGLRenderer() ? TRUE : FALSE;
     CKBOOL requestedAutoMips = CKBgfxIsAutoMipRequest(
         requestedMipCount, fullMipCount);

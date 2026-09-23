@@ -647,6 +647,11 @@ CKBOOL CKBgfxIsAutoMipRequest(CKDWORD requestedMipCount, CKDWORD fullMipCount)
             requestedMipCount > fullMipCount) ? TRUE : FALSE;
 }
 
+CKBOOL CKBgfxCanRepresentMipCount(CKDWORD requestedMipCount, CKDWORD fullMipCount)
+{
+    return (requestedMipCount <= 1 || requestedMipCount >= fullMipCount) ? TRUE : FALSE;
+}
+
 CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD requestedMipCount,
                                           CKDWORD fullMipCount,
                                           CKBOOL openGL,
