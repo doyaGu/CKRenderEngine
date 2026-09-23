@@ -767,6 +767,7 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     // Neither tween endpoint covers the centre; the half-way tween does.
     SetDiffuseState(ctx);
     ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
     ctx->SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatBits(0.5f));
     const VxVector tweenFrom[3] = {VxVector(-1.9f, -0.9f, 0.5f), VxVector(-0.1f, -0.9f, 0.5f), VxVector(-1.0f, 0.9f, 0.5f)};
     const VxVector tweenTo[3] = {VxVector(0.1f, -0.9f, 0.5f), VxVector(1.9f, -0.9f, 0.5f), VxVector(1.0f, 0.9f, 0.5f)};
@@ -776,6 +777,28 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     snprintf(what, sizeof(what), "[%s] half-way vertex tween covers the centre", mode);
     ExpectCenter(pixels, 255, 0, 0, what);
     Record(samples, SAMPLE_TWEEN, pixels);
+    ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, FALSE);
+
+    // A normal-only tween must keep the original position when the factor is 1.
+    ctx->SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatBits(1.0f));
+    VxVector tweenNormals[3] = {VxVector(0, 0, 1), VxVector(0, 0, 1), VxVector(0, 0, 1)};
+    VxDrawPrimitiveData normalTween = {};
+    normalTween.VertexCount = 3;
+    normalTween.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_DIFFUSE | CKRST_DP_TWEEN;
+    normalTween.PositionPtr = const_cast<VxVector *>(kCenterTriangle);
+    normalTween.PositionStride = sizeof(VxVector);
+    normalTween.NormalPtr = tweenNormals;
+    normalTween.NormalStride = sizeof(VxVector);
+    normalTween.TweenNormalPtr = tweenNormals;
+    normalTween.TweenNormalStride = sizeof(VxVector);
+    normalTween.ColorPtr = const_cast<CKDWORD *>(kRed);
+    normalTween.ColorStride = sizeof(CKDWORD);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &normalTween),
+                  "normal-only tween draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] normal-only tween preserves position", mode);
+    ExpectCenter(pixels, 255, 0, 0, what);
 
     // Table fog consumes eye-space depth; projection-space z/w would leave this nearly white.
     SetDiffuseState(ctx);

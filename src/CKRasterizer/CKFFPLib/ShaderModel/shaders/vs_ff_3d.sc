@@ -161,8 +161,10 @@ void main()
     int vertexBlendMode = ckffVsVertexBlendMode();
     int vertexBlendCount = ckffVsVertexBlendCount();
     if (vertexBlendMode == 2) {
-        localPos.xyz = mix(a_position.xyz, a_tangent.xyz, u_ffDrawParams[19].x);
-        localNormal = mix(a_normal, a_bitangent, u_ffDrawParams[19].x);
+        if (vertexBlendCount == 1 || vertexBlendCount == 3)
+            localPos.xyz = mix(a_position.xyz, a_tangent.xyz, u_ffDrawParams[19].x);
+        if (vertexBlendCount >= 2)
+            localNormal = mix(a_normal, a_bitangent, u_ffDrawParams[19].x);
     }
 
     vec4 viewPos;

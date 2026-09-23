@@ -293,20 +293,11 @@ CKFFVertexBlendState CKFFResolveVertexBlendState(CKDWORD vertexBlend,
     }
 
     if (vertexBlend == VXVBLEND_TWEENING) {
-        if (indexed) {
-            state.Supported = FALSE;
-            state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_INDEXED_TWEEN;
-            return state;
-        }
-        if ((formatFlags & CKFF_VF_TWEENPOSITION) == 0) {
+        // Matrix indices apply to weighted blending, not vertex tweening.
+        // Tweening may interpolate positions, normals, or both.
+        if ((formatFlags & (CKFF_VF_TWEENPOSITION | CKFF_VF_TWEENNORMAL)) == 0) {
             state.Supported = FALSE;
             state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_POSITION;
-            return state;
-        }
-        if ((formatFlags & CKFF_VF_NORMAL) != 0 &&
-            (formatFlags & CKFF_VF_TWEENNORMAL) == 0) {
-            state.Supported = FALSE;
-            state.UnsupportedReason = CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_NORMAL;
             return state;
         }
         state.Mode = CKFF_VERTEX_BLEND_TWEEN;

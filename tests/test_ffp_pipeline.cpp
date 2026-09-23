@@ -3309,7 +3309,7 @@ void VertexBlendWeightFlagsCreateWeightLayout() {
     ffp.Shutdown();
 }
 
-void VertexTweenWithoutStreamsRendersUntweened() {
+void VertexTweenRequiresSecondStream() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -3323,18 +3323,60 @@ void VertexTweenWithoutStreamsRendersUntweened() {
     data.PositionStride = sizeof(VxVector);
 
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
-    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST,
-                                NULL, 0, &data) && context.Log.DrawCount == 1,
-              "Vertex tween without its second stream must still draw");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN),
-              "Vertex tween input failures must report the tween approximation");
+    TestCheck(!ffp.DrawPrimitive(VX_TRIANGLELIST,
+                                 NULL, 0, &data) && context.Log.DrawCount == 0,
+              "Vertex tween without either second stream must reject the draw");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_INVALID_INPUT &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "missing tween input is invalid rather than an untweened approximation");
+
+    ffp.Shutdown();
+}
+
+void VertexTweenUsesAvailableStreams() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    VxVector positions[3] = {};
+    VxVector normals[3] = {};
+    VxVector tweenPositions[3] = {};
+    VxVector tweenNormals[3] = {};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_TWEEN;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.NormalPtr = normals;
+    data.NormalStride = sizeof(VxVector);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    ffp.SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    data.TweenPositionPtr = tweenPositions;
+    data.TweenPositionStride = sizeof(VxVector);
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+              "position-only tween draws even with indexed blend state enabled");
+    TestCheck(LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_TANGENT) &&
+                  !LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_BITANGENT),
+              "position-only tween binds only the second position");
     const CKDWORD drawParams = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
-    std::unordered_map<CKDWORD, std::vector<float> >::const_iterator params =
-        context.Log.FloatUniforms.find(drawParams);
-    TestCheck(params != context.Log.FloatUniforms.end() &&
-                  params->second.size() >= (CKFF_DRAW_PARAM_TWEEN + 1) * 4 &&
-                  params->second[CKFF_DRAW_PARAM_TWEEN * 4 + 1] == (float)CKFF_VERTEX_BLEND_DISABLED,
-              "The shader must receive the resolved (disabled) blend mode, not the raw render state");
+    TestCheck(context.Log.FloatUniforms[drawParams][CKFF_DRAW_PARAM_TWEEN * 4 + 2] == 1.0f &&
+                  context.Log.FloatUniforms[drawParams][CKFF_DRAW_PARAM_TWEEN * 4 + 3] == 0.0f &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "position-only tween selects position interpolation without indexing");
+
+    data.TweenPositionPtr = NULL;
+    data.TweenNormalPtr = tweenNormals;
+    data.TweenNormalStride = sizeof(VxVector);
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+              "normal-only tween draws without a second position");
+    TestCheck(!LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_TANGENT) &&
+                  LayoutHasAttrib(context.LastVertexLayoutElements, CKRST_ATTRIB_BITANGENT),
+              "normal-only tween binds only the second normal");
+    TestCheck(context.Log.FloatUniforms[drawParams][CKFF_DRAW_PARAM_TWEEN * 4 + 2] == 2.0f &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "normal-only tween selects normal interpolation");
 
     ffp.Shutdown();
 }
@@ -3769,8 +3811,10 @@ int main() {
               &VertexBlendUploadsExplicitMatrixPaletteSlot);
     tests.Run("Vertex blend weight flags create weight layout",
               &VertexBlendWeightFlagsCreateWeightLayout);
-    tests.Run("Vertex tween without streams renders untweened",
-              &VertexTweenWithoutStreamsRendersUntweened);
+    tests.Run("Vertex tween requires a second stream",
+              &VertexTweenRequiresSecondStream);
+    tests.Run("Vertex tween uses available streams",
+              &VertexTweenUsesAvailableStreams);
     tests.Run("Indexed vertex blend requires index layout",
               &IndexedVertexBlendRequiresIndexLayout);
     tests.Run("Indexed vertex blend clamps palette overflow",

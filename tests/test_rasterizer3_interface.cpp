@@ -1060,7 +1060,6 @@ void TestApproximationsKeepDrawing()
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
         {"sampler LOD bias", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
         {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
-        {"tween without streams", CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN, &SetupTweenWithoutStreams},
         {"vertex blend without weights", CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS, &SetupBlendWithoutWeights},
     };
 
@@ -1197,6 +1196,27 @@ void TestInvalidBumpInputsRejected()
               "invalid bump inputs never draw or silently approximate");
     TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
               "delete alpha bump test texture");
+}
+
+void TestTweenWithoutSecondStreamRejected()
+{
+    Fixture f;
+    CKRasterizerContext *ctx = f.Context;
+    VxVector positions[3] = {};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_TWEEN;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    SetupTweenWithoutStreams(ctx, 0);
+    TestCheck(ctx->BeginScene(), "begin missing tween stream scene");
+    TestCheck(!ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+              "tween without a second input is rejected");
+    TestCheck(ctx->EndScene(), "end missing tween stream scene");
+    TestCheck(CountDraws(f) == 0 &&
+                  Diag(f.Context, CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN) == 0 &&
+                  Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 1,
+              "missing tween input is invalid, not an untweened approximation");
 }
 
 void TestVertexBufferWrapUsesPrimitiveCoordinates()
@@ -1988,6 +2008,7 @@ int main()
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
     framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
     framework.Run("invalid bump inputs rejected", TestInvalidBumpInputsRejected);
+    framework.Run("tween without second stream rejected", TestTweenWithoutSecondStreamRejected);
     framework.Run("vertex buffer wrap uses primitive coordinates", TestVertexBufferWrapUsesPrimitiveCoordinates);
     framework.Run("vertex buffer point expansion uses per-vertex size", TestVertexBufferPointExpansionUsesPerVertexSize);
     framework.Run("draw order and markers", TestDrawOrderAndMarkers);

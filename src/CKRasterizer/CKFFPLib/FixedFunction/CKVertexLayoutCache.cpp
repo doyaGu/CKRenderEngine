@@ -47,8 +47,9 @@ CKDWORD CKFFVertexLayout::DrawPrimitiveDataToFormatFlags(
     const bool hasUV = data->TexCoordPtr != nullptr;
     CKDWORD flags = DPFlagsToFormatFlags(
         data->Flags, hasNormal, hasUV, data->PositionStride);
-    if ((data->Flags & CKRST_DP_TWEEN) != 0 && data->TweenPositionPtr) {
-        flags |= CKFF_VF_TWEENPOSITION;
+    if ((data->Flags & CKRST_DP_TWEEN) != 0) {
+        if (data->TweenPositionPtr)
+            flags |= CKFF_VF_TWEENPOSITION;
         if (hasNormal && data->TweenNormalPtr)
             flags |= CKFF_VF_TWEENNORMAL;
     }

@@ -396,11 +396,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         case CKFF_VERTEX_BLEND_UNSUPPORTED_POSITIONT:
             break; // D3D ignores vertex blending for pre-transformed vertices
         case CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_POSITION:
-        case CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_NORMAL:
-        case CKFF_VERTEX_BLEND_UNSUPPORTED_INDEXED_TWEEN:
-            // Renders without tweening (the key resolved the blend mode off).
-            RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_TWEEN);
-            break;
+            return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
         default:
             // Missing weights / indices read as zero in the shader.
             RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS);

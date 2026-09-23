@@ -107,7 +107,11 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
         positionT ? 0 : formatFlags);
     stateDesc.VS.SetVertexBlendMode(vertexBlend.Mode);
     stateDesc.VS.SetVertexBlendIndexed(vertexBlend.Indexed != 0);
-    stateDesc.VS.SetVertexBlendCount(vertexBlend.Count);
+    // In tween mode the count field carries the two available input streams.
+    stateDesc.VS.SetVertexBlendCount(vertexBlend.Mode == CKFF_VERTEX_BLEND_TWEEN
+        ? (((formatFlags & CKFF_VF_TWEENPOSITION) != 0 ? 1u : 0u) |
+           ((formatFlags & CKFF_VF_TWEENNORMAL) != 0 ? 2u : 0u))
+        : vertexBlend.Count);
 
     const CKBOOL colorVertex = drawState.GetRenderState(VXRENDERSTATE_COLORVERTEX);
     const CKDWORD diffuseSource = CKFFResolveMaterialSource(
@@ -269,9 +273,8 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
     drawParams[CKFF_DRAW_PARAM_TWEEN][0] = CKFFReadFloatRenderState(
         drawState, VXRENDERSTATE_TWEENFACTOR, 0.0f);
-    // Vertex blend mode, weight count and indexing come from the shader key so
-    // that approximated inputs (missing tween streams, missing weights) render
-    // the way the key resolved them.
+    // Vertex blend mode, weight count (or tween stream mask) and indexing come
+    // from the shader key so the shader sees the validated input layout.
     drawParams[CKFF_DRAW_PARAM_TWEEN][1] = (float)((shaderKey.VS.Bits >> 35) & 3u);
     drawParams[CKFF_DRAW_PARAM_TWEEN][2] = (float)((shaderKey.VS.Bits >> 38) & 3u);
     drawParams[CKFF_DRAW_PARAM_TWEEN][3] = ((shaderKey.VS.Bits >> 37) & 1u) ? 1.0f : 0.0f;
