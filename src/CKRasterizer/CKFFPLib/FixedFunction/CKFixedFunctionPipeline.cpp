@@ -431,13 +431,11 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             CKDWORD ignoredAlphaOp = 0;
             CKDWORD ignoredAlphaArg1 = 0;
             CKDWORD ignoredAlphaArg2 = 0;
-            CKBOOL exact = TRUE;
-            CKFFStageBlendToTextureOps(
+            if (!CKFFStageBlendToTextureOps(
                 m_State.StageStates[stage][CKRST_TSS_STAGEBLEND],
                 ignoredOp, ignoredArg1, ignoredArg2,
-                ignoredAlphaOp, ignoredAlphaArg1, ignoredAlphaArg2, &exact);
-            if (!exact)
-                RecordDrawApproximation(CKRST_DIAG_APPROX_STAGEBLEND);
+                ignoredAlphaOp, ignoredAlphaArg1, ignoredAlphaArg2))
+                return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
         }
         // Unknown operation values are invalid parameters, not approximations.
         if (CKFFClassifyTextureOpCoverage(colorOp) != CKFF_COVERAGE_EXACT)

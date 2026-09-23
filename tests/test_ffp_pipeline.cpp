@@ -555,9 +555,14 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck(drawn && context.Log.DrawCount == 1 &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STAGEBLEND) == 1 &&
-                  spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE,
-              "An inexact STAGEBLEND pair must draw with the nearest op and report the approximation");
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKFF_TOP_STAGEBLEND,
+              "An arbitrary STAGEBLEND pair must use the exact shader operation");
+    const CKDWORD stageUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
+    const std::vector<float> &stageParams = context.Log.FloatUniforms[stageUniform];
+    TestCheck(stageParams.size() >= 4 &&
+                  stageParams[3] == (float)STAGEBLEND(VXBLEND_SRCCOLOR, VXBLEND_DESTALPHA),
+              "STAGEBLEND factors must reach the shared fragment shader");
 
     ffp.ResetTextureStage(0);
     ffp.SetTexture(0, 101, CKRST_TEXTURE_VALID);

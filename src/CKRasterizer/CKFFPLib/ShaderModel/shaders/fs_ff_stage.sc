@@ -176,6 +176,35 @@ vec4 applyOp(int op, vec4 a, vec4 b, vec4 c, vec4 dst, vec4 current, vec4 diffus
     return current;
 }
 
+vec4 ckffBlendFactor(int factor, vec4 source, vec4 destination)
+{
+    if (factor == 1) return vec4_splat(0.0);
+    if (factor == 2) return vec4_splat(1.0);
+    if (factor == 3) return source;
+    if (factor == 4) return vec4_splat(1.0) - source;
+    if (factor == 5 || factor == 12) return source.aaaa;
+    if (factor == 6 || factor == 13) return vec4_splat(1.0) - source.aaaa;
+    if (factor == 7) return destination.aaaa;
+    if (factor == 8) return vec4_splat(1.0) - destination.aaaa;
+    if (factor == 9) return destination;
+    if (factor == 10) return vec4_splat(1.0) - destination;
+    if (factor == 11) {
+        float saturated = min(source.a, 1.0 - destination.a);
+        return vec4(saturated, saturated, saturated, 1.0);
+    }
+    return vec4_splat(0.0);
+}
+
+vec4 ckffStageBlend(vec4 source, vec4 destination, int packedFactors)
+{
+    int src = (packedFactors >> 4) & 15;
+    int dst = packedFactors & 15;
+    if (src == 12) { src = 5; dst = 6; }
+    else if (src == 13) { src = 6; dst = 5; }
+    return clamp(source * ckffBlendFactor(src, source, destination) +
+                 destination * ckffBlendFactor(dst, source, destination), 0.0, 1.0);
+}
+
 bool alphaPass(float alpha, int func)
 {
     float ref = u_ffDrawParams[8].x;
@@ -269,7 +298,9 @@ void main()
 
         int resultArg = stageParams.ResultArg;
         vec4 stageResult = resultArg == 5 ? temp : current;
-        vec4 colorResult = applyOp(colorOp, colorA, colorB, colorC, stageResult, current, diffuse, texColor);
+        vec4 colorResult = colorOp == 27
+            ? ckffStageBlend(texColor, current, stageParams.StageBlend)
+            : applyOp(colorOp, colorA, colorB, colorC, stageResult, current, diffuse, texColor);
         vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, stageResult, current, diffuse, texColor);
         stageResult.rgb = colorResult.rgb;
         stageResult.a = alphaResult.a;

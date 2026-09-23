@@ -112,14 +112,18 @@ static const CKDWORD CKFF_TTF_BUMP_UNORM = 0x2000u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_MASK = CKFF_TTF_MIRRORONCE_U |
                                                 CKFF_TTF_MIRRORONCE_V |
                                                 CKFF_TTF_MIRRORONCE_W;
+// Shader-only operation for STAGEBLEND pairs that cannot be represented by
+// one of the public texture combiners. The 5-bit specialization field has
+// room for this value after CKRST_TOP_LERP (26).
+static const CKDWORD CKFF_TOP_STAGEBLEND = 27u;
 
 CKDWORD CKFFBaseTextureArg(CKDWORD arg);
 CKFFTextureStageOps CKFFLegacyTextureBlendToStageOps(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToColorOp(CKDWORD blend);
 CKDWORD CKFFLegacyTextureBlendToAlphaOp(CKDWORD blend);
 // Converts a Virtools STAGEBLEND(src, dst) pair into texture combiner ops.
-// Always succeeds; *exact is FALSE when the pair has no exact combiner and
-// the nearest op was chosen (spec appendix D).
+// Unmapped valid factor pairs use CKFF_TOP_STAGEBLEND in the shared shader.
+// Returns FALSE only for invalid factor values.
 CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
                                   CKDWORD &colorOp, CKDWORD &colorArg1, CKDWORD &colorArg2,
                                   CKDWORD &alphaOp, CKDWORD &alphaArg1, CKDWORD &alphaArg2,

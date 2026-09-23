@@ -86,6 +86,10 @@ CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
                                   CKBOOL *exact) {
     const CKDWORD src = (stageBlend >> 4) & 0xF;
     const CKDWORD dst = stageBlend & 0xF;
+    if ((stageBlend & ~0xffu) != 0 ||
+        src < VXBLEND_ZERO || src > VXBLEND_BOTHINVSRCALPHA ||
+        dst < VXBLEND_ZERO || dst > VXBLEND_BOTHINVSRCALPHA)
+        return FALSE;
 
     // STAGEBLEND(src, dst) means result = texture * src + current * dst with the
     // usual blend factor semantics. Arg1 is the texture, arg2 the current colour.
@@ -94,7 +98,6 @@ CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
     alphaOp = CKRST_TOP_SELECTARG2;
     alphaArg1 = CKRST_TA_TEXTURE;
     alphaArg2 = CKRST_TA_CURRENT;
-    CKBOOL isExact = TRUE;
     if ((src == VXBLEND_ZERO && dst == VXBLEND_SRCCOLOR) ||
         (src == VXBLEND_DESTCOLOR && dst == VXBLEND_ZERO)) {
         colorOp = CKRST_TOP_MODULATE;
@@ -106,8 +109,6 @@ CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
         colorOp = CKRST_TOP_SELECTARG2;
     } else if (src == VXBLEND_SRCALPHA && dst == VXBLEND_INVSRCALPHA) {
         colorOp = CKRST_TOP_BLENDTEXTUREALPHA;
-    } else if (src == VXBLEND_SRCALPHA && dst == VXBLEND_ONE) {
-        colorOp = CKRST_TOP_MODULATEALPHA_ADDCOLOR;
     } else if (src == VXBLEND_ONE && dst == VXBLEND_INVSRCALPHA) {
         colorOp = CKRST_TOP_BLENDTEXTUREALPHAPM;
     } else if (src == VXBLEND_DESTCOLOR && dst == VXBLEND_SRCCOLOR) {
@@ -118,13 +119,10 @@ CKBOOL CKFFStageBlendToTextureOps(CKDWORD stageBlend,
         colorArg1 = CKRST_TA_CURRENT;
         colorArg2 = CKRST_TA_TEXTURE;
     } else {
-        // No exact combiner: keep the modulation the material channel code
-        // path expects and report the approximation.
-        colorOp = CKRST_TOP_MODULATE;
-        isExact = FALSE;
+        colorOp = CKFF_TOP_STAGEBLEND;
     }
     if (exact)
-        *exact = isExact;
+        *exact = TRUE;
     return TRUE;
 }
 
@@ -510,6 +508,7 @@ CKFFCoverage CKFFClassifyTextureOpCoverage(CKDWORD op) {
     case CKRST_TOP_DOTPRODUCT3:
     case CKRST_TOP_MULTIPLYADD:
     case CKRST_TOP_LERP:
+    case CKFF_TOP_STAGEBLEND:
     case CKRST_TOP_BUMPENVMAP:
     case CKRST_TOP_BUMPENVMAPLUMINANCE:
         return CKFF_COVERAGE_EXACT;

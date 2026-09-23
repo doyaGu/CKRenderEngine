@@ -38,7 +38,7 @@ enum CKFFDrawParamSlot {
 enum CKFFStageParamSlot {
     // x = packed TEXCOORDINDEX (index | texgen << 16), y = texture transform
     // flags (count, PROJECTED, MIRRORONCE axes, render-target flip, bump
-    // unorm), z = 1 when the stage samples a bound texture, w = reserved.
+    // unorm), z = 1 when the stage samples a bound texture, w = STAGEBLEND pair.
     CKFF_STAGE_PARAM_COORD = 0,
     // RGBA stage constant (CKRST_TSS_CONSTANT).
     CKFF_STAGE_PARAM_CONSTANT = 1,

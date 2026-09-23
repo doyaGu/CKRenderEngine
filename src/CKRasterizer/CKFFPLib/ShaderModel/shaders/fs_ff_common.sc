@@ -15,6 +15,7 @@ struct CKFFStageParams
     int SamplerCompareFunc;
     bool BumpUnorm;
     bool HasTexture;
+    int StageBlend;
     vec4 Constant;
 };
 
@@ -78,6 +79,7 @@ CKFFStageParams ckffReadStageParams(int stage, vec4 coordParams, vec4 constant)
     params.SamplerCompareFunc = ckffSpecStage_SAMPLER_COMPARE_FUNC(stage);
     params.BumpUnorm = (flags & 0x2000) != 0;
     params.HasTexture = coordParams.z > 0.5;
+    params.StageBlend = int(coordParams.w + 0.5);
     params.Constant = constant;
     return params;
 }

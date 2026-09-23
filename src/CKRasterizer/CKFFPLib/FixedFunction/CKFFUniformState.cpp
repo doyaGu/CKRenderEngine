@@ -92,7 +92,6 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          CKFFStageParamsUniform &outParams,
                          const uint64_t *stageStateSetMasks,
                          CKDWORD samplerSlotOverflowMask) {
-    (void)stageStateSetMasks;
     memset(&outParams, 0, sizeof(outParams));
     if (!stageStates)
         return;
@@ -119,7 +118,9 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
         coord[0] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         coord[1] = (float)textureTransformFlags;
         coord[2] = hasTexture ? 1.0f : 0.0f;
-        coord[3] = 0.0f;
+        coord[3] = stageActive && stageStateSetMasks &&
+                           (stageStateSetMasks[stage] & (1ull << CKRST_TSS_STAGEBLEND)) != 0
+                       ? (float)stageStates[stage][CKRST_TSS_STAGEBLEND] : 0.0f;
         memcpy(constant, stageConstants[stage], sizeof(float) * 4);
     }
 }

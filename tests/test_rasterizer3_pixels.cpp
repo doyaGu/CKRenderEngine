@@ -400,6 +400,7 @@ enum SampleId {
     SAMPLE_TEMP_FINAL,
     SAMPLE_DEPTH_ORDER,
     SAMPLE_TEXTURE_MATRIX,
+    SAMPLE_STAGEBLEND,
     SAMPLE_BUMP_LUMINANCE,
     SAMPLE_TWEEN,
     SAMPLE_PIXEL_FOG,
@@ -573,6 +574,29 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     snprintf(what, sizeof(what), "[%s] luminance bump modulates the environment texel", mode);
     ExpectCenter(pixels, 128, 0, 0, what);
     Record(samples, SAMPLE_BUMP_LUMINANCE, pixels);
+
+    // STAGEBLEND(SRCCOLOR, DESTALPHA) has no equivalent public texture op.
+    // The red texel contributes red^2 and the half-alpha blue vertex adds
+    // half blue; MODULATE would instead produce black.
+    SetDiffuseState(ctx);
+    ctx->SetTexture(textures.Transform, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_STAGEBLEND,
+                              STAGEBLEND(VXBLEND_SRCCOLOR, VXBLEND_DESTALPHA));
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    const CKDWORD halfBlue[3] = {0x800000FFu, 0x800000FFu, 0x800000FFu};
+    float redTexcoords[3][4] = {
+        {0.25f, 0.5f, 0.0f, 0.0f},
+        {0.25f, 0.5f, 0.0f, 0.0f},
+        {0.25f, 0.5f, 0.0f, 0.0f}
+    };
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, halfBlue, redTexcoords),
+                  "stage blend draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] arbitrary STAGEBLEND factors", mode);
+    ExpectCenter(pixels, 255, 0, 128, what);
+    Record(samples, SAMPLE_STAGEBLEND, pixels);
 
     // Neither tween endpoint covers the centre; the half-way tween does.
     SetDiffuseState(ctx);
