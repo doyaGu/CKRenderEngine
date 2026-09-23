@@ -411,8 +411,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
 
     if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
         activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
-    const CKBOOL perspectiveTexture =
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) != 0;
     CKDWORD previousColorOp = 0;
     CKDWORD previousAlphaOp = 0;
     for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
@@ -512,8 +510,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             }
             if (CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]) != 0)
                 RecordDrawApproximation(CKRST_DIAG_APPROX_MIRROR_ONCE);
-            if (!perspectiveTexture)
-                RecordDrawApproximation(CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF);
             if ((m_State.TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
                 m_State.StageStates[stage][CKRST_TSS_COMPAREFUNC] != CKRST_COMPARE_NONE &&
                 (sampler.MinFilter != CKRST_FILTER_NEAREST ||

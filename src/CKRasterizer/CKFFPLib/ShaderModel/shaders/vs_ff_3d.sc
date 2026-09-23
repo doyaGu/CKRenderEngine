@@ -208,7 +208,9 @@ void main()
     if (u_ffDrawParams[7].y > 0.5) {
         viewNormal = normalize(viewNormal);
     }
-    v_fogPos = vec4(0.0, 0.0, abs(viewPos.z), 1.0);
+    // Perspective interpolation of clip W gives the denominator needed to
+    // reconstruct affine attributes from attributes multiplied by clip W.
+    v_fogPos = vec4(gl_Position.w, 0.0, abs(viewPos.z), 1.0);
 
     vec4 matDiffuse  = selectMaterialSource(u_ffDrawParams[5].x, u_ffDrawParams[0], a_color0, a_color1);
     vec4 matAmbient  = selectMaterialSource(u_ffDrawParams[5].y, u_ffDrawParams[1], a_color0, a_color1);
@@ -319,6 +321,16 @@ void main()
     v_texcoord7Fog = transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
     float fogDepth = u_ffDrawParams[7].z > 0.5 ? length(viewPos.xyz) : abs(viewPos.z);
     v_texcoord7Fog.z = ckffFogFactor(fogDepth, int(u_ffDrawParams[10].w + 0.5), u_ffDrawParams[10]);
+    if (u_ffDrawParams[4].z > 0.5) {
+        v_texcoord0 *= gl_Position.w;
+        v_texcoord1 *= gl_Position.w;
+        v_texcoord2 *= gl_Position.w;
+        v_texcoord3 *= gl_Position.w;
+        v_texcoord4 *= gl_Position.w;
+        v_texcoord5 *= gl_Position.w;
+        v_texcoord6 *= gl_Position.w;
+        v_texcoord7Fog.xyw *= gl_Position.w;
+    }
     // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     ckffApplyBackendClipSpace(gl_Position);

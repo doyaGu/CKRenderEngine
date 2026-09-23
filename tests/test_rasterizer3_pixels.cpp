@@ -312,6 +312,22 @@ CKBOOL DrawTexturedTriangle(CKRasterizerContext *ctx, const VxVector positions[3
     return ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data);
 }
 
+CKBOOL DrawTexturedPositionTTriangle(CKRasterizerContext *ctx, float positions[3][4],
+                                     const CKDWORD colors[3], float texcoords[3][4])
+{
+    VxDrawPrimitiveData data;
+    memset(&data, 0, sizeof(data));
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_CL_VCT;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(positions[0]);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+    return ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data);
+}
+
 CKBOOL DrawTweenTriangle(CKRasterizerContext *ctx, const VxVector positions[3], const VxVector tween[3],
                          const CKDWORD colors[3])
 {
@@ -597,6 +613,39 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     snprintf(what, sizeof(what), "[%s] arbitrary STAGEBLEND factors", mode);
     ExpectCenter(pixels, 255, 0, 128, what);
     Record(samples, SAMPLE_STAGEBLEND, pixels);
+
+    // One corner has W=8. At (20, 40) affine U is 0.25 (red), while the
+    // perspective-correct U is about 0.60 (green).
+    SetDiffuseState(ctx);
+    ctx->SetTexture(textures.Transform, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    float positionT[3][4] = {
+        {8.0f, 8.0f, 0.5f, 1.0f},
+        {56.0f, 8.0f, 0.5f, 1.0f},
+        {8.0f, 56.0f, 0.5f, 0.125f}
+    };
+    float varyingTexcoords[3][4] = {
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f, 0.0f}
+    };
+    ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedPositionTTriangle(ctx, positionT, kWhite, varyingTexcoords),
+                  "perspective texture draw");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 20, 40, 0, 255, 0),
+              "perspective texture interpolation selects the green texel");
+    ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedPositionTTriangle(ctx, positionT, kWhite, varyingTexcoords),
+                  "affine texture draw");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 20, 40, 255, 0, 0),
+              "affine texture interpolation selects the red texel");
 
     // Neither tween endpoint covers the centre; the half-way tween does.
     SetDiffuseState(ctx);

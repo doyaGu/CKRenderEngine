@@ -272,6 +272,13 @@ void main()
         else if (stage == 6) stageCoord = v_texcoord6;
         else if (stage == 7) stageCoord = v_texcoord7Fog;
 
+        if (u_ffDrawParams[4].z > 0.5) {
+            float affineW = abs(v_fogPos.x) < 0.000001
+                ? (v_fogPos.x < 0.0 ? -0.000001 : 0.000001) : v_fogPos.x;
+            if (stage == 7) stageCoord.xyw /= affineW;
+            else stageCoord /= affineW;
+        }
+
         vec4 sampleCoord = getSampleCoord(stageCoord, stageParams.TexcoordTransformFlags);
 
         if (stage != 0 && (previousColorOp == 22 || previousColorOp == 23)) {

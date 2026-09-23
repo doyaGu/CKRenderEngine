@@ -1592,7 +1592,7 @@ void FilteredDepthTextureCompareApproximates() {
     ffp.Shutdown();
 }
 
-void AffineTextureCoordinatesAreIgnoredWithDiagnostic() {
+void AffineTextureCoordinatesReachSharedShader() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1606,10 +1606,13 @@ void AffineTextureCoordinatesAreIgnoredWithDiagnostic() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(drawn && context.Log.DrawCount == 1,
-              "Affine texture coordinates render perspective-correct");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF),
-              "Disabled texture perspective must be reported as ignored");
+    const CKDWORD drawUniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const std::vector<float> &drawParams = context.Log.FloatUniforms[drawUniform];
+    TestCheck(drawn && context.Log.DrawCount == 1 &&
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  drawParams.size() > CKFF_DRAW_PARAM_MATERIAL_POWER * 4 + 2 &&
+                  drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER * 4 + 2] == 1.0f,
+              "Disabled texture perspective must select affine interpolation in both shaders");
     ffp.Shutdown();
 }
 
@@ -3627,8 +3630,8 @@ int main() {
               &DrawVertexBufferStopsBeforeSubmitAfterBindingFailure);
     tests.Run("DrawVertexBuffer rejects constant packet failure",
               &DrawVertexBufferRejectsConstantPacketFailure);
-    tests.Run("Affine texture coordinates are ignored with diagnostic",
-              &AffineTextureCoordinatesAreIgnoredWithDiagnostic);
+    tests.Run("Affine texture coordinates reach the shared shader",
+              &AffineTextureCoordinatesReachSharedShader);
     tests.Run("Inactive unsupported state does not reject draw",
               &InactiveUnsupportedStateDoesNotRejectDraw);
     tests.Run("Disabled texture stage ignores later unsupported state",

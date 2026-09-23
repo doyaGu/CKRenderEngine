@@ -1058,7 +1058,6 @@ void TestApproximationsKeepDrawing()
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
         {"point fill mode", CKRST_DIAG_APPROX_FILLMODE_POINT, &SetupFillPoint},
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
-        {"texture perspective off", CKRST_DIAG_IGNORE_TEXTUREPERSPECTIVE_OFF, &SetupAffineTexcoords},
         {"sampler LOD bias", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
         {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
         {"MIRRORONCE", CKRST_DIAG_APPROX_MIRROR_ONCE, &SetupMirrorOnce},

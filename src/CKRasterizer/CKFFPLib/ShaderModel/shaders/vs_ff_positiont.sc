@@ -76,6 +76,7 @@ void main()
     gl_Position = vec4(clipX * clipW, clipY * clipW, a_position.z * clipW, clipW);
     vec4 worldClipPos = vec4(a_position.xyz, 1.0);
     v_fogPos = gl_Position;
+    v_fogPos.x = clipW;
 #if CKFF_VS_CLIP_DISTANCE
     int clipCount = int(u_clipParams.x);
     v_clipDistance0.x = clipCount > 0 ? dot(worldClipPos, u_clipPlanes[0]) : 0.0;
@@ -109,6 +110,16 @@ void main()
     float fogFactor = ckffPositionTFogFactor(u_ffDrawParams[10].w > 0.5, a_color1.a);
     v_texcoord7Fog = transformTexcoord(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
     v_texcoord7Fog.z = fogFactor;
+    if (u_ffDrawParams[4].z > 0.5) {
+        v_texcoord0 *= clipW;
+        v_texcoord1 *= clipW;
+        v_texcoord2 *= clipW;
+        v_texcoord3 *= clipW;
+        v_texcoord4 *= clipW;
+        v_texcoord5 *= clipW;
+        v_texcoord6 *= clipW;
+        v_texcoord7Fog.xyw *= clipW;
+    }
     // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     ckffApplyBackendClipSpace(gl_Position);

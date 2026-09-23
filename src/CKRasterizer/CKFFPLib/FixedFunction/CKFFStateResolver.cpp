@@ -220,6 +220,8 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = state.MaterialConstants.Power;
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][1] =
         (float)drawState.GetRenderState(VXRENDERSTATE_ZBIAS) * CKFF_ZBIAS_DEPTH_UNIT;
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][2] =
+        drawState.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) ? 0.0f : 1.0f;
     float materialSource[4];
     CKFFShaderKeyMaterialSources(shaderKey.VS, materialSource);
     memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], materialSource,
