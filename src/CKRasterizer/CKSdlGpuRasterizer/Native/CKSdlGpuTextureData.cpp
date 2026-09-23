@@ -5,7 +5,11 @@ bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, XArray<unsigned char> &pixels
 {
     const auto format = VxImageDesc2PixelFormat(image);
     if (!image.Image || image.Width <= 0 || image.Height <= 0 ||
-        (format != _DXT1 && format != _DXT3 && format != _DXT5)) return false;
+        (format != _DXT1 && format != _DXT2 && format != _DXT3 &&
+         format != _DXT4 && format != _DXT5)) return false;
+    const bool explicitAlpha = format == _DXT2 || format == _DXT3;
+    const bool interpolatedAlpha = format == _DXT4 || format == _DXT5;
+    const bool premultiplied = format == _DXT2 || format == _DXT4;
     const unsigned width = image.Width, height = image.Height, blockBytes = format == _DXT1 ? 8 : 16;
     const uint64_t blocksX = (uint64_t(width) + 3) / 4, blocksY = (uint64_t(height) + 3) / 4;
     const uint64_t sourceSize = blocksX * blocksY * blockBytes, size = uint64_t(width) * height * 4;
@@ -35,7 +39,7 @@ bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, XArray<unsigned char> &pixels
         palette[2][3] = 255; palette[3][3] = transparent ? 0 : 255;
         unsigned alpha[8] = {block[0], block[1]};
         uint64_t alphaIndices = 0;
-        if (format == _DXT5) {
+        if (interpolatedAlpha) {
             const unsigned count = alpha[0] > alpha[1] ? 7 : 5;
             for (unsigned i = 1; i < count; ++i)
                 alpha[i + 1] = ((count - i) * alpha[0] + i * alpha[1]) / count;
@@ -49,8 +53,15 @@ bool CKSdlGpuDecodeDXT(const VxImageDescEx &image, XArray<unsigned char> &pixels
                 unsigned char *dest = pixels.Begin() +
                     (size_t(by * 4 + y) * width + bx * 4 + x) * 4;
                 for (unsigned c = 0; c < 4; ++c) dest[c] = color[c];
-                if (format == _DXT3) dest[3] = ((block[index / 2] >> ((index & 1) * 4)) & 15) * 17;
-                if (format == _DXT5) dest[3] = (unsigned char)alpha[(alphaIndices >> (index * 3)) & 7];
+                if (explicitAlpha) dest[3] = ((block[index / 2] >> ((index & 1) * 4)) & 15) * 17;
+                if (interpolatedAlpha) dest[3] = (unsigned char)alpha[(alphaIndices >> (index * 3)) & 7];
+                if (premultiplied) {
+                    const unsigned a = dest[3];
+                    for (unsigned c = 0; c < 3; ++c) {
+                        const unsigned straight = a ? (unsigned(dest[c]) * 255u + a / 2u) / a : 0u;
+                        dest[c] = (unsigned char)(straight > 255u ? 255u : straight);
+                    }
+                }
             }
     }
     return true;

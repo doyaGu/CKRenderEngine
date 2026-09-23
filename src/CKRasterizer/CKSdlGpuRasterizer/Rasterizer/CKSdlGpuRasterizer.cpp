@@ -75,10 +75,10 @@ private:
             CKTextureDesc desc;
             VxPixelFormat2ImageDesc(format, desc.Format);
             desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB;
-            if (desc.Format.AlphaMask || format == _DXT1 || format == _DXT3 || format == _DXT5)
+            if (desc.Format.AlphaMask || (format >= _DXT1 && format <= _DXT5))
                 desc.Flags |= CKRST_TEXTURE_ALPHA;
             m_TextureFormats.PushBack(desc);
-            if (format == _DXT1 || format == _DXT3 || format == _DXT5)
+            if (format >= _DXT1 && format <= _DXT5)
                 m_NativeCaps.Features |= CKRST_CAPS_TEXTURE_DXT;
         }
         m_CapsFinal = TRUE;

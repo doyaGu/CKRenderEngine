@@ -18,9 +18,10 @@ SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format)
     case _32_ARGB8888: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
     case _32_ABGR8888: return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     case _DXT1: return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM;
-    case _DXT2: return SDL_GPU_TEXTUREFORMAT_INVALID;
+    // DXT2/4 store premultiplied colors; decode to straight-alpha BGRA for SDL shaders and blending.
+    case _DXT2: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
     case _DXT3: return SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM;
-    case _DXT4: return SDL_GPU_TEXTUREFORMAT_INVALID;
+    case _DXT4: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
     case _DXT5: return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
     case _16_V8U8: return SDL_GPU_TEXTUREFORMAT_R8G8_SNORM;
     case _32_V16U16: return SDL_GPU_TEXTUREFORMAT_R16G16_SNORM;
@@ -327,7 +328,8 @@ CKERROR CKSdlGpuRasterizerContext::CreateTexture(const CKTextureDesc *desc, cons
          extent > 1; extent >>= 1) ++fullLevels;
     texture->AutoMips = desc->MipMapCount == CKRST_MIPMAP_GENERATE;
     if (!texture->AutoMips && desc->MipMapCount > fullLevels) return CKERR_INVALIDPARAMETER;
-    if (texture->AutoMips && (texture->PixelFormat == _DXT1 || texture->PixelFormat == _DXT3 ||
+    if (texture->AutoMips && (texture->PixelFormat == _DXT1 || texture->PixelFormat == _DXT2 ||
+                              texture->PixelFormat == _DXT3 || texture->PixelFormat == _DXT4 ||
                               texture->PixelFormat == _DXT5)) info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
     info.num_levels = texture->AutoMips ? fullLevels : std::max(1u, unsigned(desc->MipMapCount));
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
@@ -467,12 +469,12 @@ CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsig
     if (x >= width || y >= height || !w || !h || w > width - x || h > height - y ||
         unsigned(data.Width) != w || unsigned(data.Height) != h) return CKERR_INVALIDPARAMETER;
     const VX_PIXELFORMAT sourceFormat = VxImageDesc2PixelFormat(data);
-    if (sourceFormat == _DXT2 || sourceFormat == _DXT4) return CKERR_NOTIMPLEMENTED;
     const bool compressed = texture.Info.format == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM ||
         texture.Info.format == SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM || texture.Info.format == SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
     if ((texture.PixelFormat == _16_V8U8 || texture.PixelFormat == _32_V16U16) &&
         sourceFormat != texture.PixelFormat) return CKERR_NOTIMPLEMENTED;
-    if (!compressed && (sourceFormat == _DXT1 || sourceFormat == _DXT3 || sourceFormat == _DXT5)) {
+    if (!compressed && (sourceFormat == _DXT1 || sourceFormat == _DXT2 || sourceFormat == _DXT3 ||
+                        sourceFormat == _DXT4 || sourceFormat == _DXT5)) {
         XArray<unsigned char> decoded;
         if (!CKSdlGpuDecodeDXT(data, decoded)) return CKERR_INVALIDPARAMETER;
         VxImageDescEx image;
@@ -587,6 +589,7 @@ CKERROR CKSdlGpuRasterizerContext::GenerateUploadMips(CKSdlGpuTexture &texture, 
             if (slice.Size() == 0) return CK_OK;
     }
     const unsigned bytes = SDL_GPUTextureFormatTexelBlockSize(texture.Info.format);
+    const bool premultiplied = texture.PixelFormat == _DXT2 || texture.PixelFormat == _DXT4;
     const bool signed8 = texture.Info.format == SDL_GPU_TEXTUREFORMAT_R8G8_SNORM;
     const bool signed16 = texture.Info.format == SDL_GPU_TEXTUREFORMAT_R16G16_SNORM;
     const unsigned componentBytes = signed16 ? 2 : 1;
@@ -609,6 +612,22 @@ CKERROR CKSdlGpuRasterizerContext::GenerateUploadMips(CKSdlGpuTexture &texture, 
             const unsigned y0 = y * ph / nh, y1 = (y + 1) * ph / nh;
             const unsigned z0 = z * pd / nd, z1 = (z + 1) * pd / nd;
             const int count = int((x1 - x0) * (y1 - y0) * (z1 - z0));
+            if (premultiplied) {
+                // Filter in premultiplied space, then store straight-alpha BGRA.
+                unsigned alphaSum = 0, colorSums[3] = {};
+                for (unsigned sz = z0; sz < z1; ++sz) for (unsigned sy = y0; sy < y1; ++sy)
+                    for (unsigned sx = x0; sx < x1; ++sx) {
+                        const CKBYTE *source = previous[(int)sz].Begin() +
+                            (size_t(sy) * pw + sx) * bytes;
+                        alphaSum += source[3];
+                        for (unsigned c = 0; c < 3; ++c) colorSums[c] += unsigned(source[c]) * source[3];
+                    }
+                CKBYTE *destination = next[(int)z].Begin() + (size_t(y) * nw + x) * bytes;
+                for (unsigned c = 0; c < 3; ++c)
+                    destination[c] = alphaSum ? CKBYTE((colorSums[c] + alphaSum / 2) / alphaSum) : 0;
+                destination[3] = CKBYTE((alphaSum + unsigned(count) / 2) / unsigned(count));
+                continue;
+            }
             for (unsigned c = 0; c < bytes; c += componentBytes) {
                 int sum = 0;
                 for (unsigned sz = z0; sz < z1; ++sz) for (unsigned sy = y0; sy < y1; ++sy)

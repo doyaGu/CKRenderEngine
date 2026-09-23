@@ -529,10 +529,11 @@ static bool CheckGenericProgram(CKSdlGpuRasterizerContext &backend)
 
 static bool CheckCompressedMips(CKSdlGpuRasterizerContext &backend)
 {
-    const VX_PIXELFORMAT formats[] = {_DXT1, _DXT3, _DXT5};
-    const CKDWORD beforePixels[] = {0x80800000, 0x88ff0000, 0x80ff0000};
-    const CKDWORD afterPixels[] = {0x90801000, 0x90ef1000, 0x88ef1000};
-    for (unsigned format = 0; format < 3; ++format) for (bool cube : {false, true}) {
+    if (!backend.SupportsTexture2D(_DXT2) || !backend.SupportsTexture2D(_DXT4)) return false;
+    const VX_PIXELFORMAT formats[] = {_DXT1, _DXT2, _DXT3, _DXT4, _DXT5};
+    const CKDWORD beforePixels[] = {0x80800000, 0x88e70000, 0x88ff0000, 0x80f50000, 0x80ff0000};
+    const CKDWORD afterPixels[] = {0x90801000, 0x90cd1c00, 0x90ef1000, 0x88d81e00, 0x88ef1000};
+    for (unsigned format = 0; format < 5; ++format) for (bool cube : {false, true}) {
         CKTextureDesc desc;
         VxPixelFormat2ImageDesc(formats[format], desc.Format);
         desc.Format.Width = desc.Format.Height = 4;
@@ -545,8 +546,8 @@ static bool CheckCompressedMips(CKSdlGpuRasterizerContext &backend)
             block[0] = 31; block[3] = 248;
             for (unsigned y = 0; y < 4; ++y) block[4 + y] = 0xf5; // red, red, transparent, transparent
         } else {
-            block[9] = 248; // opaque red color endpoint, color indices zero
-            if (format == 1) std::memset(block, 0x88, 8);
+            block[9] = formats[format] == _DXT2 || formats[format] == _DXT4 ? 0x78 : 0xf8;
+            if (formats[format] == _DXT2 || formats[format] == _DXT3) std::memset(block, 0x88, 8);
             else block[0] = 128;
         }
         VxImageDescEx upload = desc.Format;
@@ -575,7 +576,72 @@ static bool CheckCompressedMips(CKSdlGpuRasterizerContext &backend)
             (cube && !CheckReadback(backend, other, {beforePixels[format]}, 0, "compressed untouched face"))) return false;
         backend.DestroyObject(texture, CKRST_OBJ_TEXTURE); backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
     }
-    std::puts("SDL_gpu BC1/2/3 auto mips preserve alpha, individual patches, old readbacks and cube faces");
+    for (VX_PIXELFORMAT format : {_DXT2, _DXT4}) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(format, desc.Format);
+        desc.Format.Width = desc.Format.Height = 4;
+        desc.MipMapCount = CKRST_MIPMAP_GENERATE;
+        desc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+        CKDWORD texture = 0, output = 0;
+        if (backend.CreateTexture(&desc, nullptr, &texture) != CK_OK) return false;
+        unsigned char block[16] = {};
+        block[9] = 0xf8; // red endpoint; every other texel has zero alpha
+        if (format == _DXT2) std::memset(block, 0x0f, 8);
+        else {
+            block[0] = 255;
+            uint64_t indices = 0;
+            for (unsigned i = 0; i < 16; ++i) indices |= uint64_t(i & 1) << (i * 3);
+            for (unsigned i = 0; i < 6; ++i) block[2 + i] = (unsigned char)(indices >> (i * 8));
+        }
+        VxImageDescEx upload = desc.Format;
+        upload.Image = block; upload.TotalImageSize = sizeof(block);
+        if (backend.UpdateTexture(texture, 0, 0, nullptr, &upload) != CK_OK) return false;
+        CKTextureDesc readDesc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, readDesc.Format);
+        readDesc.Format.Width = readDesc.Format.Height = 2;
+        readDesc.MipMapCount = 1; readDesc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+        if (backend.CreateTexture(&readDesc, nullptr, &output) != CK_OK ||
+            backend.Blit(output, 0, 0, 0, 0, texture, 1, 0, nullptr) != CK_OK) return false;
+        CKReadbackDesc read;
+        CKSdlGpuReadbackTicket ticket;
+        if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
+            backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
+        if (!CheckReadback(backend, ticket, {0x80ff0000, 0x80ff0000, 0x80ff0000, 0x80ff0000},
+                           0, "premultiplied alpha-weighted mip")) return false;
+        backend.DestroyObject(texture, CKRST_OBJ_TEXTURE); backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
+    }
+    for (VX_PIXELFORMAT format : {_DXT2, _DXT4}) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(format, desc.Format);
+        desc.Format.Width = desc.Format.Height = 4;
+        desc.MipMapCount = 2;
+        desc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+        CKDWORD texture = 0, output = 0;
+        if (backend.CreateTexture(&desc, nullptr, &texture) != CK_OK) return false;
+        unsigned char block[16] = {};
+        block[9] = 0x78;
+        if (format == _DXT2) std::memset(block, 0x88, 8);
+        else block[0] = 128;
+        VxImageDescEx upload = desc.Format;
+        upload.Width = upload.Height = 2;
+        upload.Image = block; upload.TotalImageSize = sizeof(block);
+        if (backend.UpdateTexture(texture, 1, 0, nullptr, &upload) != CK_OK) return false;
+        CKTextureDesc readDesc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, readDesc.Format);
+        readDesc.Format.Width = readDesc.Format.Height = 2;
+        readDesc.MipMapCount = 1; readDesc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+        if (backend.CreateTexture(&readDesc, nullptr, &output) != CK_OK ||
+            backend.Blit(output, 0, 0, 0, 0, texture, 1, 0, nullptr) != CK_OK) return false;
+        CKReadbackDesc read;
+        CKSdlGpuReadbackTicket ticket;
+        if (backend.ReadTexture(output, 0, &read, &ticket) != CK_OK ||
+            backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK) return false;
+        const CKDWORD expected = format == _DXT2 ? 0x88e70000 : 0x80f50000;
+        if (!CheckReadback(backend, ticket, {expected, expected, expected, expected}, 0,
+                           "premultiplied explicit mip")) return false;
+        backend.DestroyObject(texture, CKRST_OBJ_TEXTURE); backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
+    }
+    std::puts("SDL_gpu DXT1-5 uploads and mips preserve alpha, individual patches, old readbacks and cube faces");
     return true;
 }
 
@@ -828,18 +894,6 @@ static int Run(SDL_Window *window)
         backend.CreateTexture(&texture, nullptr, &replacement) != CK_OK || replacement == previous) return 15;
     if (backend.DestroyObject(replacement, CKRST_OBJ_TEXTURE) != CK_OK) return 16;
     std::puts("SDL_gpu owner window, device reinitialization and stale handle rejection passed");
-    CKTextureDesc unsupported = texture;
-    VxPixelFormat2ImageDesc(_DXT2, unsupported.Format);
-    CKDWORD rejected = 0, ordinary = 0;
-    CKBYTE compressedBytes[16] = {};
-    VxImageDescEx compressedUpload = unsupported.Format;
-    compressedUpload.Image = compressedBytes;
-    compressedUpload.TotalImageSize = sizeof(compressedBytes);
-    if (backend.SupportsTexture2D(_DXT2) || backend.SupportsTexture2D(_DXT4) ||
-        backend.CreateTexture(&unsupported, nullptr, &rejected) != CKERR_NOTIMPLEMENTED || rejected != 0 ||
-        backend.CreateTexture(&texture, nullptr, &ordinary) != CK_OK ||
-        backend.UpdateTexture(ordinary, 0, 0, nullptr, &compressedUpload) != CKERR_NOTIMPLEMENTED ||
-        backend.DestroyObject(ordinary, CKRST_OBJ_TEXTURE) != CK_OK) return 26;
     if (!CheckGeneratedMips(backend)) return 17;
     if (!CheckGpuWrittenMips(backend)) return 19;
     if (!CheckCompressedMips(backend)) return 20;

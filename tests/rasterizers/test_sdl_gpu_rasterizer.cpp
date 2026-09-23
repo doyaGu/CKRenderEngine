@@ -12,9 +12,9 @@ int main()
     check(CKSdlGpuTextureFormat(_DXT1) == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM &&
           CKSdlGpuTextureFormat(_DXT3) == SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM &&
           CKSdlGpuTextureFormat(_DXT5) == SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM &&
-          CKSdlGpuTextureFormat(_DXT2) == SDL_GPU_TEXTUREFORMAT_INVALID &&
-          CKSdlGpuTextureFormat(_DXT4) == SDL_GPU_TEXTUREFORMAT_INVALID,
-          "unsupported premultiplied DXT formats cannot alias BGRA");
+          CKSdlGpuTextureFormat(_DXT2) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM &&
+          CKSdlGpuTextureFormat(_DXT4) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM,
+          "premultiplied DXT formats use decoded BGRA storage");
     check(CKSdlGpuValidPresentSync(CKRST_PRESENT_UNCHANGED) &&
           CKSdlGpuValidPresentSync(CKRST_PRESENT_VSYNC) &&
           CKSdlGpuValidPresentSync(CKRST_PRESENT_IMMEDIATE) &&
@@ -279,6 +279,16 @@ int main()
         check(decode(_DXT3), "decode BC2");
         for (unsigned i = 0; i < 16; ++i)
             check(pixel(i) == ((i * 17u << 24) | 0x00aa0055), "BC2 explicit alpha and four-color palette");
+        std::memset(blocks, 0, sizeof(blocks));
+        blocks[0] = 0x08; // alpha 136, then zero
+        blocks[1] = 0x01; // alpha 17, then zero
+        blocks[9] = 0x78; // premultiplied red endpoint decodes to 123
+        check(decode(_DXT2) && pixel(0) == 0x88e70000 && pixel(1) == 0 &&
+              pixel(2) == 0x11ff0000,
+              "DXT2 unpremultiplies explicit alpha, zeroes transparent pixels and clamps color");
+        std::memset(blocks, 0, sizeof(blocks));
+        blocks[8] = 31; blocks[11] = 248;
+        for (unsigned y = 0; y < 4; ++y) blocks[12 + y] = 0xff;
         uint64_t indices = 0;
         for (unsigned i = 0; i < 16; ++i) indices |= uint64_t(i % 8) << (i * 3);
         for (unsigned i = 0; i < 6; ++i) blocks[2 + i] = (unsigned char)(indices >> (i * 8));
@@ -290,6 +300,11 @@ int main()
         check(decode(_DXT5), "decode BC3 explicit extremes");
         const unsigned alpha5[] = {0, 200, 40, 80, 120, 160, 0, 255};
         for (unsigned i = 0; i < 16; ++i) check(pixel(i) == ((alpha5[i % 8] << 24) | 0x00aa0055), "BC3 five-step alpha");
+        std::memset(blocks, 0, sizeof(blocks));
+        blocks[0] = 128; blocks[2] = 0x08; // alpha 128, then zero
+        blocks[9] = 0x78;
+        check(decode(_DXT4) && pixel(0) == 0x80f50000 && pixel(1) == 0,
+              "DXT4 unpremultiplies interpolated alpha and zeroes transparent pixels");
     }
     for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV}) {
         CKFFShaderSet set;
