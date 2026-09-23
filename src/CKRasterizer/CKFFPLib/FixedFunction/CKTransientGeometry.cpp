@@ -552,7 +552,7 @@ CKBOOL CKTransientGeometry::Prepare(
         if (srcCount < primitiveVertexCount)
             return FALSE;
 
-        XArray<CKWORD> sourceIndices;
+        XArray<CKDWORD> sourceIndices;
         if (indices && indexCount > 0) {
             sourceIndices.Resize(indexCount);
             for (int i = 0; i < indexCount; ++i)
@@ -560,10 +560,10 @@ CKBOOL CKTransientGeometry::Prepare(
         } else {
             sourceIndices.Resize(srcCount);
             for (int i = 0; i < srcCount; ++i)
-                sourceIndices[i] = (CKWORD)i;
+                sourceIndices[i] = (CKDWORD)i;
         }
 
-        XArray<CKWORD> primitiveIndices;
+        XArray<CKDWORD> primitiveIndices;
         if (primType == VX_TRIANGLELIST) {
             const int triIndexCount = (srcCount / 3) * 3;
             if (triIndexCount <= 0)
@@ -576,9 +576,20 @@ CKBOOL CKTransientGeometry::Prepare(
             if (maxTriListIndices <= 0)
                 return FALSE;
             primitiveIndices.Resize(maxTriListIndices);
-            const int outCount = ConvertPrimitiveToTriangleList(
-                primType, sourceIndices.Begin(), srcCount, primitiveIndices.Begin());
-            primitiveIndices.Resize(outCount);
+            int outCount = 0;
+            for (int i = 0; i < srcCount - 2; ++i) {
+                if (primType == VX_TRIANGLEFAN) {
+                    primitiveIndices[outCount++] = sourceIndices[0];
+                    primitiveIndices[outCount++] = sourceIndices[i + 1];
+                } else if (i & 1) {
+                    primitiveIndices[outCount++] = sourceIndices[i + 1];
+                    primitiveIndices[outCount++] = sourceIndices[i];
+                } else {
+                    primitiveIndices[outCount++] = sourceIndices[i];
+                    primitiveIndices[outCount++] = sourceIndices[i + 1];
+                }
+                primitiveIndices[outCount++] = sourceIndices[i + 2];
+            }
         } else if (primType == VX_LINELIST) {
             const int lineIndexCount = (srcCount / 2) * 2;
             if (lineIndexCount <= 0)

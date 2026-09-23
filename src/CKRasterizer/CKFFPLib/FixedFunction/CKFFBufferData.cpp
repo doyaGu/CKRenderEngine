@@ -127,19 +127,20 @@ CKERROR CKFFVertexBufferData::Initialize(const CKVertexBufferDesc &Source,
         return CKERR_INVALIDPARAMETER;
 
     InitialData.Clear();
+    const int canonicalBytes =
+        (int)(Source.m_MaxVertexCount * canonicalStride);
+    XArray<CKBYTE> &shadow = (Source.m_Flags & CKRST_VB_WRITEONLY) != 0
+        ? ShadowData : LockData;
+    shadow.Resize(canonicalBytes);
+    if (Data)
+        memcpy(shadow.Begin(), Data, canonicalBytes);
+    else
+        memset(shadow.Begin(), 0, canonicalBytes);
     if (!Data)
         return CK_OK;
 
-    const int canonicalBytes =
-        (int)(Source.m_MaxVertexCount * canonicalStride);
-    CKBYTE *vertices = (CKBYTE *)Data;
-    if ((Source.m_Flags & CKRST_VB_WRITEONLY) == 0) {
-        LockData.Resize(canonicalBytes);
-        memcpy(LockData.Begin(), Data, canonicalBytes);
-        vertices = LockData.Begin();
-    }
     InitialData.Resize((int)(Source.m_MaxVertexCount * NativeStride));
-    CKFFInterleaveVertexBuffer(*this, vertices, Source.m_MaxVertexCount,
+    CKFFInterleaveVertexBuffer(*this, shadow.Begin(), Source.m_MaxVertexCount,
                                InitialData.Begin());
     return CK_OK;
 }
@@ -184,6 +185,8 @@ CKERROR CKFFVertexBufferData::PrepareUnlock(CKFFBufferUpload &Upload)
     const CKDWORD stride = Desc.m_VertexSize;
     const CKBOOL writeOnly = (Desc.m_Flags & CKRST_VB_WRITEONLY) != 0;
     CKBYTE *source = LockData.Begin() + (writeOnly ? 0 : LockStart * stride);
+    if (writeOnly)
+        memcpy(ShadowData.Begin() + LockStart * stride, source, LockCount * stride);
     const CKDWORD nativeBytes = LockCount * NativeStride;
     ConvertedVertices.Resize((int)nativeBytes);
     CKFFInterleaveVertexBuffer(*this, source, LockCount,
@@ -194,6 +197,17 @@ CKERROR CKFFVertexBufferData::PrepareUnlock(CKFFBufferUpload &Upload)
     Upload.Size = nativeBytes;
     Upload.Data = ConvertedVertices.Begin();
     return CK_OK;
+}
+
+void CKFFVertexBufferData::SetupDrawData(VxDrawPrimitiveData &Data,
+                                        CKDWORD StartVertex, CKDWORD VertexCount) const
+{
+    const XArray<CKBYTE> &shadow = (Desc.m_Flags & CKRST_VB_WRITEONLY) != 0
+        ? ShadowData : LockData;
+    CKFFSetupVertexBufferDrawData(Data, Layout, Desc.m_VertexFormat,
+                                  const_cast<CKBYTE *>(shadow.Begin()) +
+                                      StartVertex * Desc.m_VertexSize,
+                                  Desc.m_VertexSize, VertexCount);
 }
 
 CKFFIndexBufferData::CKFFIndexBufferData()
@@ -209,10 +223,14 @@ CKERROR CKFFIndexBufferData::Initialize(const CKIndexBufferDesc &Source,
         Source.m_MaxIndexCount > 0x3FFFFFFFu)
         return CKERR_INVALIDPARAMETER;
     Desc = Source;
-    if (Data && (Source.m_Flags & CKRST_VB_WRITEONLY) == 0) {
-        LockData.Resize((int)(Source.m_MaxIndexCount * 2));
-        memcpy(LockData.Begin(), Data, Source.m_MaxIndexCount * 2);
-    }
+    XArray<CKBYTE> &shadow = (Source.m_Flags & CKRST_VB_WRITEONLY) != 0
+        ? ShadowData : LockData;
+    const int bytes = (int)(Source.m_MaxIndexCount * 2);
+    shadow.Resize(bytes);
+    if (Data)
+        memcpy(shadow.Begin(), Data, bytes);
+    else
+        memset(shadow.Begin(), 0, bytes);
     return CK_OK;
 }
 
@@ -252,9 +270,18 @@ CKERROR CKFFIndexBufferData::PrepareUnlock(CKFFBufferUpload &Upload)
         return CKERR_INVALIDPARAMETER;
     Locked = FALSE;
     const CKBOOL writeOnly = (Desc.m_Flags & CKRST_VB_WRITEONLY) != 0;
+    if (writeOnly)
+        memcpy(ShadowData.Begin() + LockStart * 2, LockData.Begin(), LockCount * 2);
     Upload.Mode = CKFFGetBufferUpdateMode(LockFlags);
     Upload.Offset = LockStart * 2;
     Upload.Size = LockCount * 2;
     Upload.Data = LockData.Begin() + (writeOnly ? 0 : LockStart * 2);
     return CK_OK;
+}
+
+const CKWORD *CKFFIndexBufferData::DrawIndices(CKDWORD StartIndex) const
+{
+    const XArray<CKBYTE> &shadow = (Desc.m_Flags & CKRST_VB_WRITEONLY) != 0
+        ? ShadowData : LockData;
+    return reinterpret_cast<const CKWORD *>(shadow.Begin() + StartIndex * 2);
 }

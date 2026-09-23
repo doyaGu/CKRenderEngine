@@ -930,6 +930,88 @@ void CheckPaddedTextureUpload(Backend &b)
     printf("  padded image rows preserve the declared pitch: passed\n");
 }
 
+void CheckVertexBufferWrapPixels(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    CKTextureDesc textureDesc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, textureDesc.Format);
+    textureDesc.Format.Width = 4;
+    textureDesc.Format.Height = 1;
+    textureDesc.Format.BytesPerLine = 16;
+    textureDesc.MipMapCount = 1;
+    textureDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+    CKDWORD texture = 0;
+    TestCheck(ctx->CreateTexture(&textureDesc, &texture), "create wrap test texture");
+    CKDWORD texels[4] = {0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffff00u};
+    VxImageDescEx image = textureDesc.Format;
+    image.Image = reinterpret_cast<CKBYTE *>(texels);
+    TestCheck(ctx->LoadTexture(texture, image, 0, CKRST_CUBEFACE_XPOS, NULL),
+              "upload wrap test colors");
+
+    const CKDWORD format = CKRST_DP_TR_CL_VCT;
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    XArray<CKBYTE> vertices;
+    vertices.Resize(stride * 3);
+    memset(vertices.Begin(), 0, vertices.Size());
+    for (int i = 0; i < 3; ++i) {
+        CKBYTE *vertex = vertices.Begin() + i * stride;
+        const float uv[2] = {i == 0 ? 0.9f : 0.1f, 0.0f};
+        const CKDWORD white = 0xffffffffu;
+        memcpy(vertex + layout.PositionOffset, &kCenterTriangle[i], sizeof(VxVector));
+        memcpy(vertex + layout.TexcoordOffset[0], uv, sizeof(uv));
+        memcpy(vertex + layout.DiffuseOffset, &white, sizeof(white));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 3;
+    vbDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.Begin(), &vb),
+              "create write-only wrap test VB");
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 3;
+    ibDesc.m_Flags = CKRST_VB_WRITEONLY;
+    const CKWORD triangle[3] = {0, 1, 2};
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, triangle, &ib),
+              "create write-only wrap test IB");
+
+    SetDiffuseState(ctx);
+    TestCheck(ctx->SetTexture(texture, 0), "bind wrap test texture");
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0),
+                  "draw unwrapped VB reference");
+    }, pixels);
+    ExpectCenter(pixels, 0, 255, 0, "unwrapped VB interpolates through green texel");
+
+    ctx->SetRenderState(VXRENDERSTATE_WRAP0, VXWRAP_U);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0),
+                  "draw wrapped VB");
+    }, pixels);
+    ExpectCenter(pixels, 255, 0, 0, "wrapped VB interpolates across red seam");
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3),
+                  "draw wrapped VBIB");
+    }, pixels);
+    ExpectCenter(pixels, 255, 0, 0, "wrapped VBIB interpolates across red seam");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_WRAP] == 0,
+              "VB and VBIB wrap do not report ignored state");
+
+    ctx->SetRenderState(VXRENDERSTATE_WRAP0, 0);
+    TestCheck(ctx->SetTexture(0, 0), "unbind wrap test texture");
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete wrap test IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete wrap test VB");
+    TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete wrap test texture");
+    printf("  VB and VBIB WRAP0 interpolate across the texture seam: passed\n");
+}
+
 void CheckOrderedBufferUpdates(Backend &b)
 {
     auto *ctx = b.Context;
@@ -1832,6 +1914,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckOrderedTextureUpdates(backend);
         CheckPaddedTextureUpload(backend);
         CheckOrderedBufferUpdates(backend);
+        CheckVertexBufferWrapPixels(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);

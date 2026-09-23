@@ -58,6 +58,7 @@ public:
     // === State tracking ===
     void SetRenderState(VXRENDERSTATETYPE state, CKDWORD value);
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
+    CKBOOL NeedsVertexBufferWrap(CKDWORD texcoordCount) const;
     CKDWORD QueryRenderState(VXRENDERSTATETYPE state) const { return m_State.DrawState.QueryRenderState(state); }
     void InitDefaultStates();
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);

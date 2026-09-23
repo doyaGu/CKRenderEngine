@@ -598,6 +598,15 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD 
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
+    if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount)) {
+        VxDrawPrimitiveData data;
+        vb->SetupDrawData(data, StartVertex, VertexCount);
+        for (int stage = 0; stage < vb->Layout.TexcoordCount; ++stage)
+            m_FFP.SetTexcoordComponentCount(stage, vb->Layout.TexcoordDims[stage]);
+        const CKBOOL result = DrawPrimitive(Type, Indices, IndexCount, &data);
+        m_FFP.ResetTexcoordComponentCounts();
+        return result;
+    }
     if (!Indices) {
         if (!ValidatePrimitive(Type, (int)VertexCount))
             return FALSE;
@@ -639,6 +648,17 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWOR
         (CKDWORD)IndexCount > ib->Desc.m_MaxIndexCount - StartIndex) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
+    }
+    if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount)) {
+        VxDrawPrimitiveData data;
+        vb->SetupDrawData(data, 0, vb->Desc.m_MaxVertexCount);
+        for (int stage = 0; stage < vb->Layout.TexcoordCount; ++stage)
+            m_FFP.SetTexcoordComponentCount(stage, vb->Layout.TexcoordDims[stage]);
+        const CKBOOL result = DrawPrimitive(
+            Type, const_cast<CKWORD *>(ib->DrawIndices(StartIndex)),
+            IndexCount, &data);
+        m_FFP.ResetTexcoordComponentCounts();
+        return result;
     }
     // D3D7 semantics: indices address the whole vertex buffer, MinVertexIndex
     // and VertexCount only describe the range they touch.

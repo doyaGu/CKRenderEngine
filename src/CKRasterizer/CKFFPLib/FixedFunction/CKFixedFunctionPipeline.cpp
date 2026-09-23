@@ -8,6 +8,7 @@
 #include "CKRenderFrameCostStats.h"
 #include "CKFFStateResolver.h"
 #include "CKVertexLayoutCache.h"
+#include "CKRasterizer.h"
 
 #include <math.h>
 #include <string.h>
@@ -529,6 +530,16 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
     return TRUE;
 }
 
+CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferWrap(CKDWORD texcoordCount) const
+{
+    for (CKDWORD stage = 0; stage < texcoordCount && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if ((m_State.DrawState.GetRenderState(
+                 (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & VXWRAP_MASK) != 0)
+            return TRUE;
+    }
+    return FALSE;
+}
+
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     const VxDrawPrimitiveData *data,
     CKDWORD formatFlags)
@@ -928,14 +939,12 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         // them to the palette (spec appendix C).
         RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE);
     }
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if ((m_State.DrawState.GetRenderState(
-                 (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & VXWRAP_MASK) != 0) {
-            // Texture wrap only applies to CPU-interleaved primitives.
-            RecordDrawApproximation(CKRST_DIAG_IGNORE_WRAP);
-            break;
-        }
-    }
+    // Callers with WRAPn route through the transient primitive path, which
+    // can adjust coordinates independently for each primitive.
+    CKRSTVertexLayout vertexLayoutDesc;
+    if (CKRSTGetVertexLayout(dpFlags, NULL, &vertexLayoutDesc) != 0 &&
+        NeedsVertexBufferWrap(vertexLayoutDesc.TexcoordCount))
+        return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     if (type == VX_POINTLIST) {
         // Device-buffer points render as plain points of the clamped constant
         // size; sprites, scaling and per-vertex sizes are not applied.

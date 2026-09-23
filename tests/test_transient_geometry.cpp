@@ -418,6 +418,42 @@ static void LineWrapHandlesLargeCoordinateSpans()
     }
 }
 
+static void WrapPreservesLargeNonIndexedVertexNumbers()
+{
+    const int vertexCount = 65538;
+    std::vector<float> positions(vertexCount * 3, 0.0f);
+    std::vector<float> texcoords(vertexCount * 2, 0.0f);
+    for (int i = 0; i < 3; ++i) {
+        positions[(vertexCount - 3 + i) * 3] = 123.0f + float(i);
+        texcoords[(vertexCount - 3 + i) * 2] =
+            i == 0 ? 0.9f : (i == 1 ? 0.1f : 0.2f);
+    }
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = vertexCount;
+    data.Flags = CKRST_DP_CL_V | CKRST_DP_STAGES0;
+    data.PositionPtr = positions.data();
+    data.PositionStride = 3 * sizeof(float);
+    data.TexCoordPtr = texcoords.data();
+    data.TexCoordStride = 2 * sizeof(float);
+
+    TransientGeometryHarness harness;
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data,
+                                       VXWRAP_U),
+              "wrap prepares more than 65536 non-indexed vertices");
+    const CKDWORD stride = CKFFVertexLayout::ComputeStride(
+        CKFFVertexLayout::DrawPrimitiveDataToFormatFlags(&data));
+    const std::vector<CKBYTE> &bytes = harness.VertexBytes();
+    TestCheck(bytes.size() == size_t(vertexCount) * stride,
+              "large wrapped draw keeps every vertex");
+    if (bytes.size() == size_t(vertexCount) * stride) {
+        const CKBYTE *lastTriangle = bytes.data() + (vertexCount - 3) * stride;
+        TestCheck(ReadFloat(lastTriangle) == 123.0f &&
+                  ReadFloat(lastTriangle + stride) == 124.0f &&
+                  ReadFloat(lastTriangle + 2 * stride) == 125.0f,
+                  "large wrapped draw keeps vertex numbers above 65535");
+    }
+}
+
 static void LargePointSpriteBatchUses32BitIndices()
 {
     TransientGeometryHarness harness;
@@ -890,6 +926,8 @@ int main()
               &MultipleTextureStagesApplyIndependentWrapModes);
     tests.Run("line wrap handles large coordinate spans",
               &LineWrapHandlesLargeCoordinateSpans);
+    tests.Run("wrap preserves large non-indexed vertex numbers",
+              &WrapPreservesLargeNonIndexedVertexNumbers);
     tests.Run("large point sprite batch uses 32-bit indices",
               &LargePointSpriteBatchUses32BitIndices);
     tests.Run("indexed point sprites use selected vertices",

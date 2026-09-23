@@ -1156,9 +1156,130 @@ void TestApproximationsKeepDrawing()
         TestCheck(ctx->EndScene(), "EndScene");
         TestCheck(CountDraws(f) == 1, "point VB draw submitted");
         TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_POINT_SIZE) == 1, "fractional point size counts one approximation");
-        TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_WRAP) == 1, "WRAP0 on a device-buffer draw counts one ignored state");
+        TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_WRAP) == 0,
+                  "WRAP0 without texture coordinates needs no adjustment");
         TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete VB");
     }
+}
+
+void TestVertexBufferWrapUsesPrimitiveCoordinates()
+{
+    Fixture f;
+    CKRasterizerContext *ctx = f.Context;
+    const CKDWORD format = CKRST_DP_TR_CL_VCT;
+    CKRSTVertexLayout layout;
+    const CKDWORD canonicalStride = CKRSTGetVertexLayout(format, NULL, &layout);
+    std::vector<CKBYTE> vertices(canonicalStride * 4, 0);
+    const float u[4] = {0.9f, 0.1f, 0.2f, 0.3f};
+    for (CKDWORD i = 0; i < 4; ++i) {
+        const float position[3] = {float(i & 1), float(i >> 1), 0.5f};
+        const float uv[2] = {u[i], 0.0f};
+        const CKDWORD white = 0xffffffffu;
+        CKBYTE *vertex = vertices.data() + i * canonicalStride;
+        memcpy(vertex + layout.PositionOffset, position, sizeof(position));
+        memcpy(vertex + layout.TexcoordOffset[0], uv, sizeof(uv));
+        memcpy(vertex + layout.DiffuseOffset, &white, sizeof(white));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 4;
+    vbDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.data(), &vb),
+              "create write-only textured VB");
+    void *fourth = ctx->LockVertexBuffer(vb, 3, 1, CKRST_LOCK_NOOVERWRITE);
+    TestCheck(fourth != NULL, "lock fourth write-only vertex");
+    if (fourth) {
+        const float updatedU = 0.4f;
+        memcpy(reinterpret_cast<CKBYTE *>(fourth) + layout.TexcoordOffset[0],
+               &updatedU, sizeof(float));
+        TestCheck(ctx->UnlockVertexBuffer(vb), "update fourth write-only vertex");
+    }
+
+    ctx->SetRenderState(VXRENDERSTATE_WRAP0, VXWRAP_U);
+    TestCheck(ctx->BeginScene(), "begin wrapped VB scene");
+    TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0),
+              "draw wrapped non-indexed VB");
+    const CKDWORD nativeStride = CKFFVertexLayout::ComputeStride(
+        CKFFVertexLayout::DPFlagsToFormatFlags(format, false, true));
+    auto checkCoordinates = [&](float secondU, const char *message) {
+        const std::vector<CKBYTE> &bytes = f.Backend->Log.LastVertexBytes;
+        TestCheck(bytes.size() == nativeStride * 3, "wrapped VB uses transient vertices");
+        if (bytes.size() != nativeStride * 3)
+            return;
+        float actual[3] = {};
+        for (int i = 0; i < 3; ++i)
+            memcpy(&actual[i], bytes.data() + i * nativeStride + 12, sizeof(float));
+        TestCheck(fabsf(actual[0] - 0.9f) < 0.0001f &&
+                  fabsf(actual[1] - secondU) < 0.0001f &&
+                  fabsf(actual[2] - 1.2f) < 0.0001f, message);
+    };
+    checkCoordinates(1.1f, "WRAP0 adjusts each non-indexed triangle vertex");
+
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 3;
+    ibDesc.m_Flags = CKRST_VB_WRITEONLY;
+    const CKWORD initialIndices[3] = {0, 1, 2};
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, initialIndices, &ib),
+              "create write-only triangle IB");
+    CKWORD *second = static_cast<CKWORD *>(ctx->LockIndexBuffer(ib, 1, 1, CKRST_LOCK_NOOVERWRITE));
+    TestCheck(second != NULL, "lock second write-only index");
+    if (second) {
+        *second = 3;
+        TestCheck(ctx->UnlockIndexBuffer(ib), "update second write-only index");
+    }
+    TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 4, 0, 3),
+              "draw wrapped indexed VB");
+    checkCoordinates(1.4f, "WRAP0 uses updated VB and IB shadow coordinates");
+
+    for (CKBYTE dimensions : {CKBYTE(1), CKBYTE(4)}) {
+        CKRSTVertexLayout dimensionLayout;
+        CKBYTE texcoordDims[CKRST_MAX_TEXTURE_STAGES] = {};
+        texcoordDims[0] = dimensions;
+        const CKDWORD dimensionStride = CKRSTGetVertexLayout(
+            format, texcoordDims, &dimensionLayout);
+        std::vector<CKBYTE> dimensionVertices(dimensionStride * 3, 0);
+        for (int i = 0; i < 3; ++i) {
+            CKBYTE *vertex = dimensionVertices.data() + i * dimensionStride;
+            const float position[3] = {float(i & 1), float(i >> 1), 0.5f};
+            const float coords[4] = {i == 0 ? 0.9f : (i == 1 ? 0.1f : 0.2f),
+                                     0.25f, 0.75f, 1.0f};
+            const CKDWORD white = 0xffffffffu;
+            memcpy(vertex + dimensionLayout.PositionOffset, position, sizeof(position));
+            memcpy(vertex + dimensionLayout.TexcoordOffset[0], coords,
+                   dimensions * sizeof(float));
+            memcpy(vertex + dimensionLayout.DiffuseOffset, &white, sizeof(white));
+        }
+        CKVertexBufferDesc dimensionDesc;
+        dimensionDesc.m_VertexFormat = format;
+        dimensionDesc.m_MaxVertexCount = 3;
+        dimensionDesc.m_Flags = CKRST_VB_WRITEONLY;
+        dimensionDesc.m_TexcoordDims[0] = dimensions;
+        CKDWORD dimensionVB = 0;
+        TestCheck(ctx->CreateVertexBuffer(&dimensionDesc,
+                                          dimensionVertices.data(), &dimensionVB),
+                  "create variable-dimension texture coordinate VB");
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, dimensionVB, 0, 3, NULL, 0),
+                  "draw wrapped variable-dimension VB");
+        checkCoordinates(1.1f, "WRAP0 adjusts variable-dimension coordinates");
+        const std::vector<CKBYTE> &bytes = f.Backend->Log.LastVertexBytes;
+        if (bytes.size() == nativeStride * 3) {
+            float actual[4] = {};
+            memcpy(actual, bytes.data() + 2 * nativeStride + 12, sizeof(actual));
+            TestCheck(fabsf(actual[1] - (dimensions == 4 ? 0.25f : 0.0f)) < 0.0001f &&
+                      fabsf(actual[2] - (dimensions == 4 ? 0.75f : 0.0f)) < 0.0001f &&
+                      fabsf(actual[3] - (dimensions == 4 ? 1.0f : 0.0f)) < 0.0001f,
+                      "WRAP0 preserves the declared texture coordinate dimensions");
+        }
+        TestCheck(ctx->DeleteObject(dimensionVB, CKRST_OBJ_VERTEXBUFFER),
+                  "delete variable-dimension texture coordinate VB");
+    }
+    TestCheck(ctx->EndScene(), "end wrapped VB scene");
+    TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_WRAP) == 0,
+              "wrapped VB draws do not ignore WRAP0");
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete wrapped IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete wrapped VB");
 }
 
 // ---------------------------------------------------------------------------
@@ -1753,6 +1874,7 @@ int main()
     framework.Run("buffers", TestBuffers);
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
     framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
+    framework.Run("vertex buffer wrap uses primitive coordinates", TestVertexBufferWrapUsesPrimitiveCoordinates);
     framework.Run("draw order and markers", TestDrawOrderAndMarkers);
     framework.Run("statistics are copied", TestStatsAreCopied);
     framework.Run("clear rect semantics", TestClearRectSemantics);

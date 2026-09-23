@@ -30,6 +30,7 @@ struct CKFFVertexBufferData {
     CKDWORD FormatFlags;
     CKDWORD NativeStride;
     XArray<CKBYTE> LockData;
+    XArray<CKBYTE> ShadowData;
     XArray<CKBYTE> ConvertedVertices;
     CKBOOL Locked;
     CKRST_LOCKFLAGS LockFlags;
@@ -44,11 +45,14 @@ struct CKFFVertexBufferData {
     void *Lock(CKDWORD StartVertex, CKDWORD VertexCount,
                CKRST_LOCKFLAGS Flags, CKERROR &Error);
     CKERROR PrepareUnlock(CKFFBufferUpload &Upload);
+    void SetupDrawData(VxDrawPrimitiveData &Data,
+                       CKDWORD StartVertex, CKDWORD VertexCount) const;
 };
 
 struct CKFFIndexBufferData {
     CKIndexBufferDesc Desc;
     XArray<CKBYTE> LockData;
+    XArray<CKBYTE> ShadowData;
     CKBOOL Locked;
     CKRST_LOCKFLAGS LockFlags;
     CKDWORD LockStart;
@@ -60,6 +64,7 @@ struct CKFFIndexBufferData {
     void *Lock(CKDWORD StartIndex, CKDWORD IndexCount,
                CKRST_LOCKFLAGS Flags, CKERROR &Error);
     CKERROR PrepareUnlock(CKFFBufferUpload &Upload);
+    const CKWORD *DrawIndices(CKDWORD StartIndex) const;
 };
 
 #endif
