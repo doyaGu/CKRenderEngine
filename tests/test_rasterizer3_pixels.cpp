@@ -1567,6 +1567,10 @@ void CheckPresentation(Backend &b)
     TestCheck(ctx->GetCaps(&available), "MSAA capabilities");
     printf("  reported max samples: %u\n", unsigned(available.MaxMSAASamples));
     CKRasterizerOptions options;
+    options.MSAASamples = 3;
+    TestCheck(!ctx->SetOptions(&options), "nonrepresentable MSAA sample count rejected");
+    options.MSAASamples = 32;
+    TestCheck(!ctx->SetOptions(&options), "MSAA sample count above device limit rejected");
     options.MSAASamples = 4;
     TestCheck(ctx->SetOptions(&options), "SetOptions(MSAA 4)");
     Pixels msaa;
@@ -1578,11 +1582,8 @@ void CheckPresentation(Backend &b)
         ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_MSAA];
     TestCheckf(msaa.Width == plain.Width && msaa.Height == plain.Height, "MSAA readback keeps the window size");
     TestCheckf(PixelNear(msaa, 40, 80, 0, 255, 0), "inside of the MSAA triangle must be green");
-#ifdef CKRE_PIXEL_SDL_GPU
-    TestCheckf(msaaApproximated == 0, "SDL MSAA 4 must be implemented (reported max=%u)", unsigned(available.MaxMSAASamples));
-#endif
-    TestCheckf(msaaApproximated != 0 || msaaBlended >= plainBlended + 16,
-               "MSAA 4 must blend the diagonal edge (plain=%d msaa=%d approximated=%u)",
+    TestCheckf(msaaApproximated == 0 && msaaBlended >= plainBlended + 16,
+               "MSAA 4 must blend the diagonal edge without fallback (plain=%d msaa=%d approximated=%u)",
                plainBlended, msaaBlended, (unsigned)msaaApproximated);
     printf("  msaa: blended pixels plain=%d msaa=%d approximated=%u\n", plainBlended, msaaBlended,
            (unsigned)msaaApproximated);

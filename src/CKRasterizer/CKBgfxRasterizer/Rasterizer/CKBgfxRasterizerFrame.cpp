@@ -90,20 +90,21 @@ CKRECT CKBgfxRasterizerContext::CurrentPassRect() const
 // postprocessing, scene and overlay draws share the native target and skip the
 // identity resolve. Other configurations render through the scaled/MSAA scene
 // target before resolving to native size. The final blit remains the only pass
-// that touches the swap chain. Falls back to drawing straight into the swap
-// chain when the backend does not require and cannot provide internal targets.
+// that touches the swap chain. Without MSAA, an optional internal target may
+// fall back to the swap chain. A requested sample count must be preserved.
 CKBOOL CKBgfxRasterizerContext::PrepareFrameTarget()
 {
     const bool required = GetCaps().RequiresIntermediateTarget && !m_Target.IsActive();
+    const bool msaaRequired = m_Options.MSAASamples > 1 && !m_Target.IsActive();
     if (m_Frame.TargetDecided)
-        return !required || m_Frame.InternalTargets;
+        return (!required && !msaaRequired) || m_Frame.InternalTargets;
     m_Frame.TargetDecided = TRUE;
     m_Frame.InternalTargets = FALSE;
     m_Frame.SceneUsesNative = FALSE;
     m_Frame.Composited = FALSE;
     const CKRasterizerDeviceCaps &caps = GetCaps();
     if (caps.MaxTextureSize == 0)
-        return !required;
+        return !required && !msaaRequired;
     const CKDWORD width = CKFFScaledDimension(m_Width, m_Options.RenderScale, caps.MaxTextureSize);
     const CKDWORD height = CKFFScaledDimension(m_Height, m_Options.RenderScale, caps.MaxTextureSize);
     const CKDWORD nativeWidth = CKFFScaledDimension(m_Width, 1.0f, caps.MaxTextureSize);
@@ -111,12 +112,8 @@ CKBOOL CKBgfxRasterizerContext::PrepareFrameTarget()
     const bool sceneUsesNative = m_Options.MSAASamples == 0 && !m_Options.FXAA &&
                                  m_Options.Sharpness == 0.0f &&
                                  width == nativeWidth && height == nativeHeight;
-    CKBOOL sceneReady = sceneUsesNative ? TRUE : m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
-    if (!sceneUsesNative && !sceneReady && m_Options.MSAASamples > 1) {
-        // The backend has no multisampled targets: render single sampled.
-        Diag(CKRST_DIAG_APPROX_MSAA);
-        sceneReady = m_Present.EnsureSceneTarget(width, height, 0);
-    }
+    const CKBOOL sceneReady = sceneUsesNative ? TRUE :
+        m_Present.EnsureSceneTarget(width, height, m_Options.MSAASamples);
     const CKDWORD nativeBefore = m_Present.NativeTarget().ColorTexture;
     if (sceneReady && m_Present.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Present.EnsureResources()) {
         m_Frame.InternalTargets = TRUE;
@@ -124,12 +121,14 @@ CKBOOL CKBgfxRasterizerContext::PrepareFrameTarget()
     } else {
         m_Present.DestroyTargets();
     }
+    if (msaaRequired && !m_Frame.InternalTargets)
+        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
     if (m_Present.NativeTarget().ColorTexture != nativeBefore)
         m_Frame.NativePresented = FALSE;
     m_FFP.SetMultisampledTarget(m_Frame.InternalTargets && !m_Frame.SceneUsesNative &&
                                 m_Present.SceneTarget().Samples > 0);
     UpdateTargetExtents();
-    return !required || m_Frame.InternalTargets;
+    return (!required && !msaaRequired) || m_Frame.InternalTargets;
 }
 
 CKBOOL CKBgfxRasterizerContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,

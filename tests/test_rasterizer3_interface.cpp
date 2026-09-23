@@ -1508,6 +1508,39 @@ void TestRequiredIntermediateTargetFailure()
     }
 }
 
+void TestMSAARequestNeverFallsBack()
+{
+    Fixture f;
+    CKRasterizerOptions options;
+    options.MSAASamples = 3;
+    TestCheck(!f.Context->SetOptions(&options), "nonrepresentable MSAA sample count rejected");
+    TestCheck(f.Context->GetOptionsForTests().MSAASamples == 0,
+              "rejected sample count leaves presentation options unchanged");
+    options.MSAASamples = 32;
+    TestCheck(!f.Context->SetOptions(&options), "sample count above device capability rejected");
+    TestCheck(f.Context->GetOptionsForTests().MSAASamples == 0,
+              "unsupported sample count leaves presentation options unchanged");
+
+    options.MSAASamples = 4;
+    TestCheck(f.Context->SetOptions(&options), "supported sample count accepted");
+    f.Backend->FailCreateTexture = TRUE;
+    TestCheck(!f.Context->BeginScene(), "MSAA target creation failure rejects the frame");
+    TestCheck(!f.Context->BeginScene(), "failed MSAA target remains rejected on retry");
+    TestCheck(CountPasses(f) == 0 && CountDraws(f) == 0,
+              "failed MSAA request cannot draw into the single-sample swapchain");
+    TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_MSAA) == 0,
+              "MSAA request is never reported as a single-sample approximation");
+    TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_UNSUPPORTED_STATE) == 3,
+              "invalid sample counts and unavailable MSAA target are reported");
+
+    f.Backend->FailCreateTexture = FALSE;
+    options.MSAASamples = 0;
+    TestCheck(f.Context->SetOptions(&options), "disable MSAA after target failure");
+    TestCheck(f.Context->BeginScene(), "normal scene recovers after failed MSAA request");
+    TestCheck(f.Context->EndScene() && f.Context->BackToFront(FALSE),
+              "recovered scene presents");
+}
+
 void TestReadbackAndCopies()
 {
     Fixture f;
@@ -1728,6 +1761,7 @@ int main()
     framework.Run("present requires EndScene", TestPresentRequiresEndScene);
     framework.Run("render targets", TestRenderTargets);
     framework.Run("mandatory intermediate target failure", TestRequiredIntermediateTargetFailure);
+    framework.Run("MSAA request never falls back", TestMSAARequestNeverFallsBack);
     framework.Run("readback and copies", TestReadbackAndCopies);
     framework.Run("scaled copy keeps scene", TestScaledCopyKeepsScene);
     framework.Run("shutdown rejects readback callback work", TestShutdownRejectsReadbackCallbackWork);

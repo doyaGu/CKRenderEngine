@@ -54,6 +54,12 @@ CKRECT CKFFMakeRect(int Width, int Height);
 CKRECT CKFFScaleRect(const CKRECT &Rect, const CKRECT &Logical,
                      const CKRECT &Physical);
 CKDWORD CKFFScaledDimension(CKDWORD Value, float Scale, CKDWORD Maximum);
+inline CKBOOL CKFFSupportedMSAASamples(CKDWORD Samples, CKDWORD Maximum)
+{
+    return Samples <= 1 ||
+           ((Samples == 2 || Samples == 4 || Samples == 8 || Samples == 16) &&
+            Samples <= Maximum);
+}
 CKBOOL CKFFCanContinuePass(const CKFFFrameState &Frame,
                            CKDWORD OpenRenderTarget,
                            CKDWORD RenderTarget, const CKRECT &Rect);

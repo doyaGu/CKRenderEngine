@@ -314,7 +314,7 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_APPROX_SAMPLER_SLOTS,        // more than four cube or volume stages: the extra stages sample as unbound
 
     // Presentation
-    CKRST_DIAG_APPROX_MSAA,                 // no multisampled targets on this device: the scene rendered single sampled
+    CKRST_DIAG_APPROX_MSAA,                 // reserved for diagnostic ABI compatibility; no single-sample fallback
 
     CKRST_DIAG_COUNT
 } CKRST_DIAGNOSTIC;

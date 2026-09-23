@@ -139,6 +139,11 @@ CKBOOL FFPRecordingContext::SetOptions(const CKRasterizerOptions *Options)
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
+    if (m_Created && !CKFFSupportedMSAASamples(Options->MSAASamples,
+                                               m_Backend->GetCaps().MaxMSAASamples)) {
+        Diag(CKRST_DIAG_REJECT_UNSUPPORTED_STATE);
+        return FALSE;
+    }
     // Accepted at any time (render callbacks may change the options inside
     // the scene); the internal targets follow the options at the next frame
     // (PrepareFrameTarget).
