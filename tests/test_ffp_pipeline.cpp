@@ -478,6 +478,8 @@ void IgnoredRenderStatesReportDiagnostics() {
     CKBOOL allDrawn = TRUE;
     CKBOOL allReported = TRUE;
     for (CKDWORD i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        if (cases[i].State == VXRENDERSTATE_LINEPATTERN)
+            ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
         ffp.SetRenderState(cases[i].State, cases[i].Value);
         const CKBOOL drawn = ffp.DrawVertexBuffer(
             VX_TRIANGLELIST,
@@ -488,6 +490,8 @@ void IgnoredRenderStatesReportDiagnostics() {
             ffp.GetLastDrawApproximationMask() == (1ull << cases[i].Diagnostic) &&
             ffp.GetApproximatedDrawCount(cases[i].Diagnostic) == 1;
         ffp.SetRenderState(cases[i].State, cases[i].ResetValue);
+        if (cases[i].State == VXRENDERSTATE_LINEPATTERN)
+            ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
     }
 
     TestCheck(allDrawn && context.Log.DrawCount == sizeof(cases) / sizeof(cases[0]),
@@ -501,6 +505,25 @@ void IgnoredRenderStatesReportDiagnostics() {
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     TestCheck(clean && ffp.GetLastDrawApproximationMask() == 0,
               "A draw with default states must report no approximation");
+
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "A solid triangle must not report an ignored line pattern");
+    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_IGNORE_LINEPATTERN),
+              "A line must report the ignored line pattern after a solid triangle");
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
+
+    ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  ((ffp.GetDraw().Pipeline.State.Lo >> 12) & 3u) == 0u,
+              "An explicit line must ignore polygon edge AA and point fill");
 
     ffp.Shutdown();
 }

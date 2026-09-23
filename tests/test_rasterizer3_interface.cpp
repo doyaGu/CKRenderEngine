@@ -1003,7 +1003,11 @@ void DrawTexturedTriangle(CKRasterizerContext *ctx)
 
 void SetupDither(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE); }
 void SetupZBias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 4); }
-void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u); }
+void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD)
+{
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u);
+}
 void SetupEdgeAntialias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE); }
 void SetupClippingOff(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE); }
 void SetupSoftwareVP(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE); }

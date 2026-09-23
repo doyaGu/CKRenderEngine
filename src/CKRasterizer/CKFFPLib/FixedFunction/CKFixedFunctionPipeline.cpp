@@ -23,6 +23,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_UniformEmitter(m_State, m_State.DrawState, m_ShaderTargetFlags, m_Probes),
       m_StaticUniformRevision(1),
       m_DrawValidationCacheValid(FALSE),
+      m_DrawValidationCacheTopology(VX_TRIANGLELIST),
       m_DrawValidationCacheFormatFlags(0),
       m_DrawValidationCacheActiveTextureCount(0),
       m_DrawValidationCacheApproximationMask(0),
@@ -345,10 +346,12 @@ CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
     return FALSE;
 }
 
-CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
+CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
+                                                   CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
     if (m_DrawValidationCacheValid &&
+        m_DrawValidationCacheTopology == topology &&
         m_DrawValidationCacheFormatFlags == formatFlags &&
         m_DrawValidationCacheActiveTextureCount == activeTextureCount) {
         for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i) {
@@ -363,21 +366,28 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
     }
 
-    // Render states the backends cannot express are ignored or approximated
-    // (spec appendix C) and reported once per draw.
+    const CKBOOL triangles = topology == VX_TRIANGLELIST ||
+                             topology == VX_TRIANGLESTRIP ||
+                             topology == VX_TRIANGLEFAN;
+    const CKBOOL lines = topology == VX_LINELIST ||
+                         topology == VX_LINESTRIP ||
+                         (triangles && m_State.DrawState.GetRenderState(
+                             VXRENDERSTATE_FILLMODE) == VXFILL_WIREFRAME);
+    // Render states the backends cannot express are reported only when they
+    // affect the primitives actually submitted by this draw.
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_DITHERENABLE))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_DITHER);
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
         RecordDrawApproximation(CKRST_DIAG_APPROX_ZBIAS);
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN) != 0)
+    if (lines && m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN) != 0)
         RecordDrawApproximation(CKRST_DIAG_IGNORE_LINEPATTERN);
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
+    if (triangles && m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
     if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING);
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT)
+    if (triangles && m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT)
         RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
 
     CKBOOL forceKeepStencilOps = FALSE;
@@ -512,6 +522,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         previousColorOp = colorOp;
         previousAlphaOp = shaderStage.AlphaOp;
     }
+    m_DrawValidationCacheTopology = topology;
     m_DrawValidationCacheFormatFlags = formatFlags;
     m_DrawValidationCacheActiveTextureCount = activeTextureCount;
     m_DrawValidationCacheApproximationMask = m_LastDrawApproximationMask;
@@ -808,7 +819,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
 
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
         m_State.TextureHandles, m_State.StageStates);
-    if (!ValidateDrawState(formatFlags, activeTextureCount))
+    if (!ValidateDrawState(type, formatFlags, activeTextureCount))
         return FALSE;
     if (!ValidateVertexBlendWeights(data->Flags, formatFlags))
         return FALSE;
@@ -955,7 +966,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
         m_State.TextureHandles, m_State.StageStates);
-    if (!ValidateDrawState(formatFlags, activeTextureCount))
+    if (!ValidateDrawState(type, formatFlags, activeTextureCount))
         return FALSE;
     if (!ValidateVertexBlendWeights(dpFlags, formatFlags))
         return FALSE;

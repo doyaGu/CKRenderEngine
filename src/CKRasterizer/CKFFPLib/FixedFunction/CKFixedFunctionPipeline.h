@@ -214,6 +214,7 @@ private:
     CKFFUniformEmitter m_UniformEmitter;
     uint64_t m_StaticUniformRevision;
     CKBOOL m_DrawValidationCacheValid;
+    VXPRIMITIVETYPE m_DrawValidationCacheTopology;
     CKDWORD m_DrawValidationCacheFormatFlags;
     CKDWORD m_DrawValidationCacheActiveTextureCount;
     uint64_t m_DrawValidationCacheApproximationMask;
@@ -253,7 +254,8 @@ private:
                                                     CKDWORD formatFlags,
                                                     const CKBYTE *texcoordComponentCounts,
                                                     CKBOOL pointSprite);
-    CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
+    CKBOOL ValidateDrawState(VXPRIMITIVETYPE topology, CKDWORD formatFlags,
+                             CKDWORD activeTextureCount);
     CKBOOL ValidateVertexBlendWeights(CKDWORD dpFlags, CKDWORD formatFlags);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
                                       CKDWORD formatFlags,

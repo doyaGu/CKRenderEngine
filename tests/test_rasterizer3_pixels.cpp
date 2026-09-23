@@ -1004,6 +1004,37 @@ void CheckPaddedTextureUpload(Backend &b)
     printf("  padded image rows preserve the declared pitch: passed\n");
 }
 
+void CheckLineTopologyWithPointFill(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    const VxVector positions[2] = {
+        VxVector(-0.8f, 0.0f, 0.5f), VxVector(0.8f, 0.0f, 0.5f)};
+    const CKDWORD colors[2] = {0xff00ff00u, 0xff00ff00u};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 2;
+    data.Flags = CKRST_DP_TR_VC;
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "line with point polygon fill submits");
+    }, pixels);
+    int greenPixels = 0;
+    for (int y = 30; y <= 34; ++y)
+        for (int x = 8; x <= 56; ++x)
+            if (PixelNear(pixels, x, y, 0, 255, 0))
+                ++greenPixels;
+    TestCheckf(greenPixels > 20,
+               "point polygon fill must preserve the line segment (%d green pixels)",
+               greenPixels);
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+}
+
 void CheckVertexBufferWrapPixels(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
@@ -2045,6 +2076,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckOrderedBufferUpdates(backend);
         CheckVertexBufferWrapPixels(backend);
         CheckVertexBufferPointSizePixels(backend);
+        CheckLineTopologyWithPointFill(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);
