@@ -1745,7 +1745,7 @@ void UnknownTextureOpRejectsDraw() {
     ffp.Shutdown();
 }
 
-void AlphaBumpOpApproximatesToSelectArg1() {
+void AlphaBumpOpIsRejected() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1760,13 +1760,11 @@ void AlphaBumpOpApproximatesToSelectArg1() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(drawn && context.Log.DrawCount == 1,
-              "A bump op on the alpha channel must still draw");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_ALPHA_OP) == CKRST_TOP_SELECTARG1,
-              "The alpha bump op approximates to SELECTARG1 in the specialization data");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_ALPHA_BUMP_OP),
-              "The alpha bump op must report its approximation");
+    TestCheck(!drawn && context.Log.DrawCount == 0,
+              "a bump op on the alpha channel must not draw");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "invalid alpha bump operation is rejected without approximation");
 
     ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
@@ -2934,12 +2932,13 @@ void UnsupportedBumpInputsApproximateWithDiagnostics() {
         ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
         ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
         ffp.SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_BUMPENVMAP);
-        TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+        TestCheck(!ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                                        1, 0, 0, 3, 0, 0,
                                        CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
-                  "BUMPENVMAP on the alpha channel draws with SELECTARG1");
-        TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_ALPHA_BUMP_OP),
-                  "alpha bump mapping must report the alpha bump approximation");
+                  "BUMPENVMAP on the alpha channel is rejected");
+        TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_TEXTURE_OP &&
+                      ffp.GetLastDrawApproximationMask() == 0,
+                  "alpha bump mapping has no silent substitute");
         ffp.Shutdown();
     }
 }
@@ -3647,8 +3646,8 @@ int main() {
               &TextureStageSnapshotPreservesExplicitZeroArgument);
     tests.Run("Unknown texture op rejects draw",
               &UnknownTextureOpRejectsDraw);
-    tests.Run("Alpha bump op approximates to SELECTARG1",
-              &AlphaBumpOpApproximatesToSelectArg1);
+    tests.Run("Alpha bump op is rejected",
+              &AlphaBumpOpIsRejected);
     tests.Run("Bottom-left render targets sample without flip",
               &BottomLeftRenderTargetsSampleWithoutFlip);
     tests.Run("Render target origin flips projection, viewport and winding",

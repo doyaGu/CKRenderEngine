@@ -441,10 +441,9 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         const CKBOOL alphaBumpOp = alphaOp == CKRST_TOP_BUMPENVMAP ||
                                    alphaOp == CKRST_TOP_BUMPENVMAPLUMINANCE;
-        if (alphaBumpOp) {
-            // Invalid in D3D; the resolver substitutes SELECTARG1 (spec appendix D).
-            RecordDrawApproximation(CKRST_DIAG_APPROX_ALPHA_BUMP_OP);
-        } else if (CKFFClassifyTextureOpCoverage(alphaOp) != CKFF_COVERAGE_EXACT) {
+        if (alphaBumpOp ||
+            CKFFClassifyTextureOpCoverage(alphaOp) != CKFF_COVERAGE_EXACT) {
+            // Bump operations are defined only for the color channel.
             return RecordDrawReject(CKFF_DRAW_REJECT_TEXTURE_OP);
         }
         if ((colorOp == CKRST_TOP_BUMPENVMAP ||
@@ -465,7 +464,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             m_State.StageStates[stage], textureBound, stateSetMask);
         shaderStage.ColorArg2 = CKFFResolveStageColorArg2(
             m_State.StageStates[stage], stateSetMask);
-        shaderStage.AlphaOp = alphaBumpOp ? (CKDWORD)CKRST_TOP_SELECTARG1 : alphaOp;
+        shaderStage.AlphaOp = alphaOp;
         shaderStage.AlphaArg0 = CKFFResolveStageAlphaArg0(
             m_State.StageStates[stage], stateSetMask);
         shaderStage.AlphaArg1 = CKFFResolveStageAlphaArg1(
