@@ -32,7 +32,6 @@ void CKFFStateStore::Reset()
         Vx3DMatrixIdentity(VertexBlendMatrices[i]);
         VertexBlendMatrixSet[i] = FALSE;
     }
-    VertexBlendPaletteOverflow = FALSE;
     RenderTargetActive = FALSE;
 
     memset(&MaterialConstants, 0, sizeof(MaterialConstants));

@@ -256,7 +256,9 @@ private:
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
     CKBOOL ValidateVertexBlendWeights(CKDWORD dpFlags, CKDWORD formatFlags);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
-                                      CKDWORD formatFlags);
+                                      CKDWORD formatFlags,
+                                      const CKWORD *drawIndices,
+                                      int drawIndexCount);
     CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);
     void RecordDrawApproximation(CKRST_DIAGNOSTIC code);
     void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }

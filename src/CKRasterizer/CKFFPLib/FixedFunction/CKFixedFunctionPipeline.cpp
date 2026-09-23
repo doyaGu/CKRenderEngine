@@ -401,9 +401,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
             return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
         }
     }
-    if (vertexBlend.Indexed && m_State.VertexBlendPaletteOverflow)
-        RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE);
-
     if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
         activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
     CKDWORD previousColorOp = 0;
@@ -565,7 +562,9 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferBlendValidation(CKDWORD formatF
 
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     const VxDrawPrimitiveData *data,
-    CKDWORD formatFlags)
+    CKDWORD formatFlags,
+    const CKWORD *drawIndices,
+    int drawIndexCount)
 {
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
@@ -577,15 +576,21 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     }
     if (!data || !data->PositionPtr || data->VertexCount <= 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
+    if (drawIndices && drawIndexCount <= 0)
+        return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
 
     const CKDWORD indexOffset = CKFFVertexLayout::DPFlagsToBlendIndexOffset(data->Flags);
     if (data->PositionStride < indexOffset + sizeof(CKDWORD))
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
 
-    // Indices beyond the palette clamp to the last matrix in the shader
-    // (spec appendix C); scan only to report the approximation.
+    // The public device advertises four matrices. Validate only vertices used
+    // by this draw so unused buffer contents cannot invalidate it.
     const CKDWORD usedIndexCount = vertexBlend.Count + 1;
-    for (int vertex = 0; vertex < data->VertexCount; ++vertex) {
+    const int vertexCount = drawIndices ? drawIndexCount : data->VertexCount;
+    for (int i = 0; i < vertexCount; ++i) {
+        const CKDWORD vertex = drawIndices ? drawIndices[i] : (CKDWORD)i;
+        if (vertex >= (CKDWORD)data->VertexCount)
+            return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
         CKDWORD packedIndices = 0;
         const CKBYTE *src = (const CKBYTE *)data->PositionPtr +
                             vertex * data->PositionStride + indexOffset;
@@ -593,8 +598,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
         for (CKDWORD slot = 0; slot < usedIndexCount; ++slot) {
             if (((packedIndices >> (slot * 8)) & 0xffu) >=
                 CKFF_VERTEX_BLEND_MATRIX_COUNT) {
-                RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE);
-                return TRUE;
+                return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
             }
         }
     }
@@ -808,7 +812,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         return FALSE;
     if (!ValidateVertexBlendWeights(data->Flags, formatFlags))
         return FALSE;
-    if (!ValidateVertexBlendIndices(data, formatFlags))
+    if (!ValidateVertexBlendIndices(data, formatFlags, indices, indexCount))
         return FALSE;
 
     // Prepare transient geometry

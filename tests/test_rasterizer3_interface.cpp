@@ -1254,11 +1254,11 @@ void TestIndexedBlendBuffersValidateShadowIndices()
                            CKRST_DP_MATRIXPAL | CKRST_DP_DIFFUSE;
     CKRSTVertexLayout layout;
     const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
-    std::vector<CKBYTE> vertices(stride * 3, 0);
-    for (CKDWORD i = 0; i < 3; ++i) {
+    std::vector<CKBYTE> vertices(stride * 4, 0);
+    for (CKDWORD i = 0; i < 4; ++i) {
         const float position[3] = {float(i == 1), float(i == 2), 0.5f};
         const float weight = 0.5f;
-        const CKDWORD packedIndices = 0x00000100u;
+        const CKDWORD packedIndices = i == 3 ? 4u : 0x00000100u;
         const CKDWORD white = 0xffffffffu;
         CKBYTE *vertex = vertices.data() + i * stride;
         memcpy(vertex + layout.PositionOffset, position, sizeof(position));
@@ -1268,7 +1268,7 @@ void TestIndexedBlendBuffersValidateShadowIndices()
     }
     CKVertexBufferDesc vbDesc;
     vbDesc.m_VertexFormat = format;
-    vbDesc.m_MaxVertexCount = 3;
+    vbDesc.m_MaxVertexCount = 4;
     vbDesc.m_Flags = CKRST_VB_WRITEONLY;
     CKDWORD vb = 0;
     TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.data(), &vb),
@@ -1288,11 +1288,14 @@ void TestIndexedBlendBuffersValidateShadowIndices()
               "indexed blend draws write-only VB without palette approximation");
     TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3),
               "indexed blend draws write-only VB and IB without palette approximation");
+    TestCheck(!ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 1, 3, NULL, 0),
+              "indexed blend rejects an out-of-range index in a selected VB range");
     TestCheck(ctx->EndScene(), "end indexed-blend buffer scene");
     TestCheck(CountDraws(f) == 2 &&
                   Diag(f.Context, CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE) == 0 &&
+                  Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 1 &&
                   !f.Backend->Log.LastVertexBytes.empty(),
-              "both indexed-blend buffer paths validate CPU shadow indices");
+              "indexed-blend buffer paths validate only selected shadow indices");
     TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete indexed-blend IB");
     TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete indexed-blend VB");
 }

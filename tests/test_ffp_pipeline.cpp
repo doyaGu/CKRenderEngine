@@ -3452,7 +3452,7 @@ void IndexedVertexBlendRequiresIndexLayout() {
     ffp.Shutdown();
 }
 
-void IndexedVertexBlendClampsPaletteOverflow() {
+void IndexedVertexBlendRejectsOutOfRangePaletteIndices() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -3473,13 +3473,18 @@ void IndexedVertexBlendClampsPaletteOverflow() {
 
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
     ffp.SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    TestCheck(!ffp.DrawPrimitive(VX_TRIANGLELIST,
+                                 nullptr, 0, &data) && context.Log.DrawCount == 0,
+              "indexed blend rejects a matrix index above the advertised palette");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_INVALID_INPUT &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "out-of-range palette index is rejected without a shader clamp");
+
+    const CKWORD validIndices[3] = {1, 2, 1};
     TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST,
-                                nullptr, 0, &data) && context.Log.DrawCount == 1,
-              "indexed blend must draw with an out-of-range matrix index");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE),
-              "indexed blend palette overflow must report the clamp approximation");
-    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
-              "indexed blend palette overflow is not a rejection");
+                                const_cast<CKWORD *>(validIndices), 3, &data) &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "unused out-of-range vertex does not invalidate an indexed draw");
 
     vertices[0].Indices = 0;
     TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST,
@@ -3492,8 +3497,9 @@ void IndexedVertexBlendClampsPaletteOverflow() {
               "setting a matrix outside the supported palette must fail");
     TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST,
                                 nullptr, 0, &data) &&
-                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE),
-              "a palette overflow recorded by SetVertexBlendMatrix reports on the next indexed draw");
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  context.Log.DrawCount == 3,
+              "a failed matrix setter leaves the valid palette and subsequent draws unchanged");
 
     ffp.Shutdown();
 }
@@ -3860,8 +3866,8 @@ int main() {
               &VertexTweenUsesAvailableStreams);
     tests.Run("Indexed vertex blend requires index layout",
               &IndexedVertexBlendRequiresIndexLayout);
-    tests.Run("Indexed vertex blend clamps palette overflow",
-              &IndexedVertexBlendClampsPaletteOverflow);
+    tests.Run("Indexed vertex blend rejects out-of-range palette indices",
+              &IndexedVertexBlendRejectsOutOfRangePaletteIndices);
     tests.Run("POSITIONT vertex blend does not upload matrix palette",
               &PositionTVertexBlendDoesNotUploadMatrixPalette);
     tests.Run("LOCALVIEWER does not split shader when lighting disabled",
