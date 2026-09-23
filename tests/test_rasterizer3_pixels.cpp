@@ -701,7 +701,7 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     ctx->SetTexture(textures.MirrorVolume, 0);
     ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
     ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
     ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE);
     ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
@@ -750,6 +750,7 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     Record(samples, SAMPLE_VOLUME_MIRROR_BORDER, pixels);
     ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSMIRRORONCE);
 
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
     float mipVolumeCoords[3][4] = {
         {-100.0f, 0.25f, 0.0f, 0.0f},
         {-200.0f, 0.25f, 0.0f, 0.0f},

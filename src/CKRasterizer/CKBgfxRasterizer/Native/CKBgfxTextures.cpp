@@ -116,8 +116,6 @@ static bool CKBgfxCanUseSamplerBaseHandle(const CKBgfxTextureRecord *rec)
         return false;
     if ((rec->Flags & CKRST_TEXTURE_CUBEMAP) != 0)
         return false;
-    if ((rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1)
-        return false;
     if (rec->Flags & (CKRST_TEXTURE_RENDERTARGET |
                       CKRST_TEXTURE_BLIT_DST |
                       CKRST_TEXTURE_COMPUTE_WRITE))
@@ -132,9 +130,13 @@ static bool CKBgfxEnsureSamplerBaseHandle(CKBgfxTextureRecord *rec)
     if (bgfx::isValid(rec->SamplerBaseHandle))
         return true;
 
-    bgfx::TextureHandle handle = bgfx::createTexture2D(
-        (uint16_t)rec->Width, (uint16_t)rec->Height, false, 1,
-        rec->Format, BGFX_TEXTURE_BLIT_DST, NULL);
+    const bool volume = (rec->Flags & CKRST_TEXTURE_VOLUMEMAP) != 0 && rec->Depth > 1;
+    bgfx::TextureHandle handle = volume
+        ? bgfx::createTexture3D((uint16_t)rec->Width, (uint16_t)rec->Height,
+                                (uint16_t)rec->Depth, false, rec->Format,
+                                BGFX_TEXTURE_BLIT_DST, NULL)
+        : bgfx::createTexture2D((uint16_t)rec->Width, (uint16_t)rec->Height,
+                                false, 1, rec->Format, BGFX_TEXTURE_BLIT_DST, NULL);
     if (!bgfx::isValid(handle))
         return false;
 
@@ -543,6 +545,19 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
             }
         }
     }
+    if (volume && hasMips && Data && Data->Image && !uploadInitialAfterCreate) {
+        bgfx::TextureInfo baseInfo;
+        bgfx::calcTextureSize(baseInfo, w, h, d, false, false, 1, fmt);
+        if (baseInfo.storageSize == 0 || baseInfo.storageSize > copiedBytes ||
+            !CKBgfxEnsureSamplerBaseHandle(rec)) {
+            CKBgfxDestroyRecord(rec);
+            return CKERR_OUTOFMEMORY;
+        }
+        const bgfx::Memory *baseMem = bgfx::copy(Data->Image, baseInfo.storageSize);
+        bgfx::updateTexture3D(rec->SamplerBaseHandle, 0, 0, 0, 0,
+                              w, h, d, baseMem);
+        rec->SamplerBaseValid = TRUE;
+    }
 
     const CKDWORD texture = m_Resources->Textures.Insert(
         rec, m_CapsDesc.MaxTextures);
@@ -833,9 +848,7 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
     const bgfx::Memory *mem = NULL;
     const bool updateSamplerBase =
         Mip == 0 &&
-        Face == 0 &&
         !isCube &&
-        !isVolume &&
         (fullMipUpdate || rec->SamplerBaseValid) &&
         CKBgfxEnsureSamplerBaseHandle(rec);
     const bgfx::Memory *samplerBaseMem = NULL;
@@ -923,7 +936,9 @@ CKERROR CKBgfxRasterizerContext::UpdateTexture(CKDWORD Texture, CKDWORD Mip,
                            fullMipUpdate ? TRUE : FALSE);
 
     if (samplerBaseMem) {
-        const CKERROR baseUpload = UploadTextureOrdered(rec->SamplerBaseHandle, rec->Format, 0, x, y, 0, w, h, samplerBaseMem);
+        const CKERROR baseUpload = UploadTextureOrdered(rec->SamplerBaseHandle, rec->Format,
+                                                        0, x, y, Face, w, h, samplerBaseMem,
+                                                        isCube, isVolume);
         if (baseUpload != CK_OK) return baseUpload;
         if (fullMipUpdate)
             rec->SamplerBaseValid = TRUE;
