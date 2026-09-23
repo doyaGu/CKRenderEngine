@@ -253,6 +253,7 @@ private:
                                                     const CKBYTE *texcoordComponentCounts,
                                                     CKBOOL pointSprite);
     CKBOOL ValidateDrawState(CKDWORD formatFlags, CKDWORD activeTextureCount);
+    CKBOOL ValidateVertexBlendWeights(CKDWORD dpFlags, CKDWORD formatFlags);
     CKBOOL ValidateVertexBlendIndices(const VxDrawPrimitiveData *data,
                                       CKDWORD formatFlags);
     CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);

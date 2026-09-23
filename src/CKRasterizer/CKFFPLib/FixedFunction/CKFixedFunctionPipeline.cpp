@@ -398,9 +398,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(CKDWORD formatFlags,
         case CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_POSITION:
             return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
         default:
-            // Missing weights / indices read as zero in the shader.
-            RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS);
-            break;
+            return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
         }
     }
     if (vertexBlend.Indexed && m_State.VertexBlendPaletteOverflow)
@@ -543,6 +541,19 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointExpansion(CKDWORD dpFlags)
            CKFFClampVertexBufferPointSize(pointSize) != pointSize;
 }
 
+CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
+    CKDWORD dpFlags, CKDWORD formatFlags)
+{
+    const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+        formatFlags);
+    if (vertexBlend.Mode == CKFF_VERTEX_BLEND_NORMAL &&
+        CKFFVertexLayout::DPFlagsToBlendWeightCount(dpFlags) < vertexBlend.Count)
+        return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
+    return TRUE;
+}
+
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     const VxDrawPrimitiveData *data,
     CKDWORD formatFlags)
@@ -558,11 +569,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     if (!data || !data->PositionPtr || data->VertexCount <= 0)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
 
-    const CKDWORD weightCount = CKFFVertexLayout::DPFlagsToBlendWeightCount(data->Flags);
-    if (weightCount < vertexBlend.Count) {
-        // Missing weights read as zero; the last weight takes the remainder.
-        RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_WEIGHTS);
-    }
     const CKDWORD indexOffset = CKFFVertexLayout::DPFlagsToBlendIndexOffset(data->Flags);
     if (data->PositionStride < indexOffset + sizeof(CKDWORD))
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
@@ -791,6 +797,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(formatFlags, activeTextureCount))
         return FALSE;
+    if (!ValidateVertexBlendWeights(data->Flags, formatFlags))
+        return FALSE;
     if (!ValidateVertexBlendIndices(data, formatFlags))
         return FALSE;
 
@@ -935,6 +943,8 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     const CKDWORD activeTextureCount = (CKDWORD)CKFFResolveActiveTextureStageCount(
         m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(formatFlags, activeTextureCount))
+        return FALSE;
+    if (!ValidateVertexBlendWeights(dpFlags, formatFlags))
         return FALSE;
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {

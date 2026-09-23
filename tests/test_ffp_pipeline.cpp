@@ -3267,7 +3267,8 @@ void VertexBlendUploadsExplicitMatrixPaletteSlot() {
     ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
-                         CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
+                         CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS1,
+                         CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT, 1);
 
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator matrices =
         context.Log.FloatUniforms.find(paletteUniform);
@@ -3329,6 +3330,46 @@ void VertexTweenRequiresSecondStream() {
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_INVALID_INPUT &&
                   ffp.GetLastDrawApproximationMask() == 0,
               "missing tween input is invalid rather than an untweened approximation");
+
+    ffp.Shutdown();
+}
+
+void VertexBlendRejectsMissingWeightsAndIndices() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    struct Vertex {
+        float Position[3];
+        float Weight;
+    } vertices[3] = {};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM;
+    data.PositionPtr = vertices;
+    data.PositionStride = sizeof(Vertex);
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    TestCheck(!ffp.DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_INVALID_INPUT &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "blend with no weight stream rejects instead of reading zero weights");
+
+    data.Flags |= CKRST_DP_WEIGHTS1;
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_2WEIGHTS);
+    TestCheck(!ffp.DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_INVALID_INPUT &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "blend requiring two weights rejects a one-weight vertex");
+
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    ffp.SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    TestCheck(!ffp.DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_INVALID_INPUT &&
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  context.Log.DrawCount == 0,
+              "indexed blend without packed matrix indices rejects");
 
     ffp.Shutdown();
 }
@@ -3811,6 +3852,8 @@ int main() {
               &VertexBlendUploadsExplicitMatrixPaletteSlot);
     tests.Run("Vertex blend weight flags create weight layout",
               &VertexBlendWeightFlagsCreateWeightLayout);
+    tests.Run("Vertex blend rejects missing weights and indices",
+              &VertexBlendRejectsMissingWeightsAndIndices);
     tests.Run("Vertex tween requires a second stream",
               &VertexTweenRequiresSecondStream);
     tests.Run("Vertex tween uses available streams",
