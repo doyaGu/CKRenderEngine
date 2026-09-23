@@ -554,6 +554,15 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
     return TRUE;
 }
 
+CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferBlendValidation(CKDWORD formatFlags) const
+{
+    const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+        formatFlags);
+    return vertexBlend.Mode == CKFF_VERTEX_BLEND_NORMAL && vertexBlend.Indexed;
+}
+
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     const VxDrawPrimitiveData *data,
     CKDWORD formatFlags)
@@ -946,12 +955,10 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         return FALSE;
     if (!ValidateVertexBlendWeights(dpFlags, formatFlags))
         return FALSE;
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) &&
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND) != VXVBLEND_DISABLE) {
-        // Indices inside a backend buffer cannot be validated; the shader clamps
-        // them to the palette (spec appendix C).
-        RecordDrawApproximation(CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE);
-    }
+    // Contexts with indexed vertex blending route through their CPU shadow so
+    // the primitive path can validate every packed matrix index before drawing.
+    if (NeedsVertexBufferBlendValidation(formatFlags))
+        return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     // Callers with WRAPn route through the transient primitive path, which
     // can adjust coordinates independently for each primitive.
     CKRSTVertexLayout vertexLayoutDesc;

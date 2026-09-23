@@ -1246,6 +1246,57 @@ void TestBlendWithoutWeightsRejected()
               "missing blend weights never draw with an approximation");
 }
 
+void TestIndexedBlendBuffersValidateShadowIndices()
+{
+    Fixture f;
+    CKRasterizerContext *ctx = f.Context;
+    const CKDWORD format = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS1 |
+                           CKRST_DP_MATRIXPAL | CKRST_DP_DIFFUSE;
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    std::vector<CKBYTE> vertices(stride * 3, 0);
+    for (CKDWORD i = 0; i < 3; ++i) {
+        const float position[3] = {float(i == 1), float(i == 2), 0.5f};
+        const float weight = 0.5f;
+        const CKDWORD packedIndices = 0x00000100u;
+        const CKDWORD white = 0xffffffffu;
+        CKBYTE *vertex = vertices.data() + i * stride;
+        memcpy(vertex + layout.PositionOffset, position, sizeof(position));
+        memcpy(vertex + layout.WeightOffset, &weight, sizeof(weight));
+        memcpy(vertex + layout.BlendIndexOffset, &packedIndices, sizeof(packedIndices));
+        memcpy(vertex + layout.DiffuseOffset, &white, sizeof(white));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 3;
+    vbDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.data(), &vb),
+              "create indexed-blend write-only VB");
+
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 3;
+    ibDesc.m_Flags = CKRST_VB_WRITEONLY;
+    const CKWORD indices[3] = {0, 1, 2};
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, indices, &ib),
+              "create indexed-blend write-only IB");
+    ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    TestCheck(ctx->BeginScene(), "begin indexed-blend buffer scene");
+    TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0),
+              "indexed blend draws write-only VB without palette approximation");
+    TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3),
+              "indexed blend draws write-only VB and IB without palette approximation");
+    TestCheck(ctx->EndScene(), "end indexed-blend buffer scene");
+    TestCheck(CountDraws(f) == 2 &&
+                  Diag(f.Context, CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE) == 0 &&
+                  !f.Backend->Log.LastVertexBytes.empty(),
+              "both indexed-blend buffer paths validate CPU shadow indices");
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete indexed-blend IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete indexed-blend VB");
+}
+
 void TestVertexBufferWrapUsesPrimitiveCoordinates()
 {
     Fixture f;
@@ -2037,6 +2088,7 @@ int main()
     framework.Run("invalid bump inputs rejected", TestInvalidBumpInputsRejected);
     framework.Run("tween without second stream rejected", TestTweenWithoutSecondStreamRejected);
     framework.Run("blend without weights rejected", TestBlendWithoutWeightsRejected);
+    framework.Run("indexed blend buffers validate shadow indices", TestIndexedBlendBuffersValidateShadowIndices);
     framework.Run("vertex buffer wrap uses primitive coordinates", TestVertexBufferWrapUsesPrimitiveCoordinates);
     framework.Run("vertex buffer point expansion uses per-vertex size", TestVertexBufferPointExpansionUsesPerVertexSize);
     framework.Run("draw order and markers", TestDrawOrderAndMarkers);

@@ -598,6 +598,7 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD VB
         return FALSE;
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
+        m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;
@@ -655,6 +656,7 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWORD 
         return FALSE;
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
+        m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;

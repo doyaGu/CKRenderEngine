@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
 
 // Static plugin entry; both executables run the same public rasterizer cases.
 #ifdef CKRE_PIXEL_SDL_GPU
@@ -799,6 +800,56 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     }, pixels);
     snprintf(what, sizeof(what), "[%s] normal-only tween preserves position", mode);
     ExpectCenter(pixels, 255, 0, 0, what);
+
+    SetDiffuseState(ctx);
+    const CKDWORD blendFormat = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS1 |
+                                CKRST_DP_MATRIXPAL | CKRST_DP_DIFFUSE;
+    CKRSTVertexLayout blendLayout;
+    const CKDWORD blendStride = CKRSTGetVertexLayout(blendFormat, NULL, &blendLayout);
+    std::vector<CKBYTE> blendVertices(blendStride * 3, 0);
+    for (CKDWORD i = 0; i < 3; ++i) {
+        const float weight = 0.5f;
+        const CKDWORD matrixIndices = 0x00000100u;
+        CKBYTE *vertex = blendVertices.data() + i * blendStride;
+        memcpy(vertex + blendLayout.PositionOffset, &kCenterTriangle[i], sizeof(VxVector));
+        memcpy(vertex + blendLayout.WeightOffset, &weight, sizeof(weight));
+        memcpy(vertex + blendLayout.BlendIndexOffset, &matrixIndices, sizeof(matrixIndices));
+        memcpy(vertex + blendLayout.DiffuseOffset, &kRed[i], sizeof(CKDWORD));
+    }
+    CKVertexBufferDesc blendVBDesc;
+    blendVBDesc.m_VertexFormat = blendFormat;
+    blendVBDesc.m_MaxVertexCount = 3;
+    blendVBDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKDWORD blendVB = 0;
+    TestCheck(ctx->CreateVertexBuffer(&blendVBDesc, blendVertices.data(), &blendVB),
+              "create indexed-blend write-only VB");
+    CKIndexBufferDesc blendIBDesc;
+    blendIBDesc.m_MaxIndexCount = 3;
+    blendIBDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKWORD blendIndices[3] = {0, 1, 2};
+    CKDWORD blendIB = 0;
+    TestCheck(ctx->CreateIndexBuffer(&blendIBDesc, blendIndices, &blendIB),
+              "create indexed-blend write-only IB");
+    ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, blendVB, 0, 3, NULL, 0),
+                  "indexed-blend VB draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] indexed-blend VB uses validated palette", mode);
+    ExpectCenter(pixels, 255, 0, 0, what);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, blendVB, blendIB, 0, 3, 0, 3),
+                  "indexed-blend VBIB draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] indexed-blend VBIB uses validated palette", mode);
+    ExpectCenter(pixels, 255, 0, 0, what);
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_VERTEX_BLEND_PALETTE] == 0,
+              "validated indexed-blend buffers need no palette approximation");
+    TestCheck(ctx->DeleteObject(blendIB, CKRST_OBJ_INDEXBUFFER),
+              "delete indexed-blend IB");
+    TestCheck(ctx->DeleteObject(blendVB, CKRST_OBJ_VERTEXBUFFER),
+              "delete indexed-blend VB");
 
     // Table fog consumes eye-space depth; projection-space z/w would leave this nearly white.
     SetDiffuseState(ctx);

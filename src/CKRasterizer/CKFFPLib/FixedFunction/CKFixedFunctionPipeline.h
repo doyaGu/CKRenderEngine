@@ -60,6 +60,7 @@ public:
     CKDWORD GetRenderState(VXRENDERSTATETYPE state) const;
     CKBOOL NeedsVertexBufferWrap(CKDWORD texcoordCount) const;
     CKBOOL NeedsVertexBufferPointExpansion(CKDWORD dpFlags) const;
+    CKBOOL NeedsVertexBufferBlendValidation(CKDWORD formatFlags) const;
     CKDWORD QueryRenderState(VXRENDERSTATETYPE state) const { return m_State.DrawState.QueryRenderState(state); }
     void InitDefaultStates();
     void SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a);
