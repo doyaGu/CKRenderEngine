@@ -43,17 +43,6 @@ static CKDWORD CKFFCurrentTextureMatrixUploadCount(
     return count;
 }
 
-static bool CKFFProgramUsesBumpEnv(const CKFFShaderKey &shaderKey)
-{
-    const CKDWORD lastStage = shaderKey.FS.LastActiveTextureStage;
-    for (CKDWORD stage = 0; stage <= lastStage && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKDWORD op = shaderKey.FS.Stages[stage].ColorOp;
-        if (op == CKRST_TOP_BUMPENVMAP || op == CKRST_TOP_BUMPENVMAPLUMINANCE)
-            return true;
-    }
-    return false;
-}
-
 static void CKFFInitUniformSink(CKFFUniformSink *sink,
                                 CKFFConstantSet *constants,
                                 CKBOOL emitStatic,
@@ -226,12 +215,12 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         return;
 
     CKFFUniformSink *sink = context->Uniforms;
-    if (CKFFProgramUsesBumpEnv(context->ShaderKey)) {
-        float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
-        CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
-        Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
-             CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
-    }
+    // Every texture lookup reads this block for its LOD bias. Upload zeros
+    // when a bias is reset so cached uniforms cannot retain the previous draw.
+    float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
+    CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
+    Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
+         CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
 
     if (context->PositionT) {
         float viewport[4];

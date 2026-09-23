@@ -1025,11 +1025,8 @@ void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
 }
 void SetupSamplerLod(CKRasterizerContext *ctx, CKDWORD)
 {
-    const float bias = 1.0f;
-    CKDWORD bits = 0;
-    memcpy(&bits, &bias, sizeof(bits));
     ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPLINEAR);
-    ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, bits);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 1);
 }
 void SetupAnisotropy(CKRasterizerContext *ctx, CKDWORD)
 {
@@ -1062,7 +1059,7 @@ void TestApproximationsKeepDrawing()
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
         {"point fill mode", CKRST_DIAG_APPROX_FILLMODE_POINT, &SetupFillPoint},
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
-        {"sampler LOD bias", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
+        {"sampler maximum mip level", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
         {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
     };
 

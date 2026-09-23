@@ -489,14 +489,9 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
             if (!CKFFValidTextureStageValues(m_State.StageStates[stage]))
                 return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
             const CKSamplerDesc sampler = BuildSamplerDesc((int)stage);
-            const CKDWORD lodBiasBits =
-                m_State.StageStates[stage][CKRST_TSS_MIPMAPLODBIAS];
-            float lodBias = 0.0f;
-            memcpy(&lodBias, &lodBiasBits, sizeof(lodBias));
             if (sampler.MipFilter != CKRST_FILTER_NONE &&
-                (lodBias != 0.0f ||
-                 m_State.StageStates[stage][CKRST_TSS_MAXMIPMLEVEL] != 0)) {
-                // bgfx samplers have no LOD controls (spec appendix D).
+                m_State.StageStates[stage][CKRST_TSS_MAXMIPMLEVEL] != 0) {
+                // MAXMIPLEVEL still requires a per-texture mip clamp.
                 RecordDrawApproximation(CKRST_DIAG_IGNORE_SAMPLER_LOD);
             }
             const CKBOOL anisotropic =

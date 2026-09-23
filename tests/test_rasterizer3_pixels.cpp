@@ -1434,6 +1434,66 @@ void CheckMipPreservation(Backend &b)
     printf("  partial base update preserves explicit mip levels and queued samples: passed\n");
 }
 
+void CheckMipLodBias(Backend &b)
+{
+    auto *ctx = b.Context;
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = desc.Format.Height = 4;
+    desc.Flags = CKRST_TEXTURE_RGB;
+    desc.MipMapCount = 3;
+    CKDWORD texture = 0;
+    TestCheck(ctx->CreateTexture(&desc, &texture), "create LOD bias texture");
+    const CKDWORD colors[] = {0xffff0000, 0xff00ff00, 0xff0000ff};
+    CKDWORD source[16];
+    for (unsigned mip = 0; mip < 3; ++mip) {
+        for (auto &pixel : source) pixel = colors[mip];
+        VxImageDescEx image = desc.Format;
+        image.Width = image.Height = 4 >> mip;
+        image.BytesPerLine = image.Width * 4;
+        image.Image = reinterpret_cast<CKBYTE *>(source);
+        TestCheck(ctx->LoadTexture(texture, image, mip, CKRST_CUBEFACE_XPOS, NULL),
+                  "upload LOD bias mip");
+    }
+
+    SetDiffuseState(ctx);
+    ctx->SetTexture(texture, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    auto drawSample = [&](int column, float bias) {
+        CKDWORD bits = 0;
+        memcpy(&bits, &bias, sizeof(bits));
+        ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, bits);
+        VxVector positions[3] = {VxVector(-1,-1,0.5f), VxVector(-0.4f,-1,0.5f), VxVector(-0.7f,1,0.5f)};
+        for (auto &position : positions) position.x += float(column) * 0.64f;
+        float coords[3][4] = {};
+        // A nonzero footprint keeps the implicit LOD near zero, so the bias
+        // can select a different mip instead of clamping an undefined LOD.
+        coords[1][0] = 4.0f;
+        coords[2][1] = 4.0f;
+        TestCheck(DrawTexturedTriangle(ctx, positions, kWhite, coords), "sample biased mip");
+    };
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    drawSample(0, 0.0f);
+    drawSample(1, 2.0f);
+    drawSample(2, 0.0f);
+    EndFrame(ctx);
+    Pixels pixels;
+    ReadBackbuffer(ctx, pixels);
+    CKBYTE biased[4];
+    GetPixel(pixels, 30, 32, biased);
+    TestCheck(PixelNear(pixels, 10, 32, 255, 0, 0), "zero LOD bias selects base mip");
+    TestCheckf(PixelNear(pixels, 30, 32, 0, 0, 255),
+               "LOD bias selects mip two, got BGRA=(%u,%u,%u,%u)",
+               (unsigned)biased[0], (unsigned)biased[1], (unsigned)biased[2], (unsigned)biased[3]);
+    TestCheck(PixelNear(pixels, 51, 32, 255, 0, 0), "reset LOD bias selects base mip");
+    ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, 0);
+    ctx->SetTexture(0, 0);
+    TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete LOD bias texture");
+    printf("  sampler LOD bias selects and resets explicit mip levels: passed\n");
+}
+
 void CheckMemoryCopyPixelIdentity(Backend &b)
 {
     auto *ctx = b.Context;
@@ -2081,6 +2141,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);
         CheckMipPreservation(backend);
+        CheckMipLodBias(backend);
         CheckMemoryCopyPixelIdentity(backend);
         CheckScaledTextureCopies(backend);
         CheckIndependentAttachmentClears(backend);

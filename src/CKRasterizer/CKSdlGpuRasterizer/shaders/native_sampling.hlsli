@@ -42,13 +42,15 @@ float4 ckMips2D(Texture2D<float4> image, uint slot, float2 uv, float lod, uint l
     return lerp(ckLevel2D(image, slot, uv, lower, filtered, modes), ckLevel2D(image, slot, uv, upper, filtered, modes), frac(lod));
 }
 
-float4 ckSample2D(Texture2D<float4> image, SamplerState state, uint slot, float2 uv)
+float4 ckSample2DBias(Texture2D<float4> image, SamplerState state, uint slot,
+                      float2 uv, float bias)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
-    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4) return image.Sample(state, uv);
+    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
+        return image.SampleBias(state, uv, bias);
     uint width, height, levels;
     image.GetDimensions(0, width, height, levels);
-    float lod = image.CalculateLevelOfDetailUnclamped(state, uv);
+    float lod = image.CalculateLevelOfDetailUnclamped(state, uv) + bias;
     uint filter = uint(lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z);
     if (filter == 7 && lod > 0.0) {
         float2 dx = ddx(uv), dy = ddy(uv);
@@ -59,10 +61,15 @@ float4 ckSample2D(Texture2D<float4> image, SamplerState state, uint slot, float2
         float4 result = 0.0;
         [loop] for (uint i = 0; i < taps; ++i)
             result += ckMips2D(image, slot, uv + (float(i) - float(taps - 1) * 0.5) * step,
-                               log2(max(minor, 1.0)), levels, true, modes, uint(ck_samplerInfo[slot].w));
+                               log2(max(minor, 1.0)) + bias, levels, true, modes, uint(ck_samplerInfo[slot].w));
         return result / float(taps);
     }
     return ckMips2D(image, slot, uv, lod, levels, filter != 1, modes, uint(ck_samplerInfo[slot].w));
+}
+
+float4 ckSample2D(Texture2D<float4> image, SamplerState state, uint slot, float2 uv)
+{
+    return ckSample2DBias(image, state, slot, uv, 0.0);
 }
 
 float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
@@ -127,24 +134,30 @@ float4 ckSample3DAtLod(Texture3D<float4> image, uint slot, float3 uv, float lod,
     return lerp(ckLevel3D(image, slot, uv, lower, filtered, modes), ckLevel3D(image, slot, uv, upper, filtered, modes), frac(lod));
 }
 
-float4 ckSample3D(Texture3D<float4> image, SamplerState state, uint slot, float3 uv)
+float4 ckSample3DBias(Texture3D<float4> image, SamplerState state, uint slot,
+                      float3 uv, float bias)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4 && ((modes >> 8) & 15) != 4)
-        return image.Sample(state, uv);
-    float lod = image.CalculateLevelOfDetailUnclamped(state, uv);
+        return image.SampleBias(state, uv, bias);
+    float lod = image.CalculateLevelOfDetailUnclamped(state, uv) + bias;
     return ckSample3DAtLod(image, slot, uv, lod, modes);
 }
 
+float4 ckSample3D(Texture3D<float4> image, SamplerState state, uint slot, float3 uv)
+{
+    return ckSample3DBias(image, state, slot, uv, 0.0);
+}
+
 float4 ckSample3DGrad(Texture3D<float4> image, SamplerState state, uint slot,
-                      float3 uv, float3 originalUv, int mirrorOnceMask)
+                      float3 uv, float3 originalUv, int mirrorOnceMask, float bias)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     if (mirrorOnceMask == 0 && (modes & 15) != 4 && ((modes >> 4) & 15) != 4 && ((modes >> 8) & 15) != 4)
-        return image.Sample(state, uv);
+        return image.SampleBias(state, uv, bias);
     // Compute mip selection before MIRRORONCE folds the coordinates. Keep the
     // per-tap border path for axes that use BORDER instead of the native clamp.
-    float lod = image.CalculateLevelOfDetailUnclamped(state, originalUv);
+    float lod = image.CalculateLevelOfDetailUnclamped(state, originalUv) + bias;
     if ((modes & 15) == 4 || ((modes >> 4) & 15) == 4 || ((modes >> 8) & 15) == 4)
         return ckSample3DAtLod(image, slot, uv, lod, modes);
     return image.SampleLevel(state, uv, lod);

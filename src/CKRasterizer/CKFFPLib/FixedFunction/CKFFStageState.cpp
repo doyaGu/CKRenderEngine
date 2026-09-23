@@ -242,6 +242,9 @@ void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]) {
     outBumpEnv[0][3] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVMAT11]);
     outBumpEnv[1][0] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVLSCALE]);
     outBumpEnv[1][1] = StageStateAsFloat(stageState[CKRST_TSS_BUMPENVLOFFSET]);
+    // The third lane is shared with the sampler LOD bias. It is available for
+    // every stage, including those that do not use bump mapping.
+    outBumpEnv[1][2] = StageStateAsFloat(stageState[CKRST_TSS_MIPMAPLODBIAS]);
 }
 
 void CKFFPackBumpEnvUniforms(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],

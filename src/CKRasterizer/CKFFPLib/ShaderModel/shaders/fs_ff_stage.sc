@@ -53,18 +53,39 @@ vec4 applyMirrorOnceCoord(vec4 coord, int mirrorOnceMask, int samplerType)
 }
 
 #if BGFX_SHADER_LANGUAGE_GLSL
-#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror) \
-    (_mirror != 0 ? textureGrad(_sampler, _uv, _dx, _dy) : texture3D(_sampler, _uv))
+#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) textureCubeBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
+    (_mirror != 0 ? textureGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #elif !CKFF_NATIVE_SDL_GPU
+vec4 ckffTexture2DBias(BgfxSampler2D sampleState, vec2 uv, float bias)
+{
+    return sampleState.m_texture.SampleBias(sampleState.m_sampler, uv, bias);
+}
+vec4 ckffTextureCubeBias(BgfxSamplerCube sampleState, vec3 uv, float bias)
+{
+    return sampleState.m_texture.SampleBias(sampleState.m_sampler, uv, bias);
+}
+vec4 ckffTexture3DBias(BgfxSampler3D sampleState, vec3 uv, float bias)
+{
+    return sampleState.m_texture.SampleBias(sampleState.m_sampler, uv, bias);
+}
 vec4 ckffTexture3DGrad(BgfxSampler3D sampleState, vec3 uv, vec3 dx, vec3 dy)
 {
     return sampleState.m_texture.SampleGrad(sampleState.m_sampler, uv, dx, dy);
 }
-#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror) \
-    (_mirror != 0 ? ckffTexture3DGrad(_sampler, _uv, _dx, _dy) : texture3D(_sampler, _uv))
+#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) ckffTexture2DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) ckffTextureCubeBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) ckffTexture3DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
+    (_mirror != 0 ? ckffTexture3DGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #else
-#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror) \
-    texture3DGrad(_sampler, _uv, _original, _mirror)
+#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) textureCubeBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture3DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
+    texture3DGrad(_sampler, _uv, _original, _mirror, _bias)
 #endif
 
 // Ordinal of this stage among the stages sampling the same sampler type
@@ -83,6 +104,7 @@ int ckffSamplerOrdinal(int stage, int samplerType)
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
+    float lodBias = u_bumpEnv[stage * 2 + 1].z;
     // Addressing must not change the derivatives used to choose a mip level.
     // In particular, clamping the coordinate outside [0, 1] would otherwise
     // force the LOD to zero instead of preserving the source footprint.
@@ -94,14 +116,14 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
-        if (ordinal == 0) return textureCube(s_textureCube0, coord.xyz);
-        if (ordinal == 1) return textureCube(s_textureCube1, coord.xyz);
-        if (ordinal == 2) return textureCube(s_textureCube2, coord.xyz);
-        return textureCube(s_textureCube3, coord.xyz);
+        if (ordinal == 0) return CKFF_TEXTURE_CUBE_BIAS(s_textureCube0, coord.xyz, lodBias);
+        if (ordinal == 1) return CKFF_TEXTURE_CUBE_BIAS(s_textureCube1, coord.xyz, lodBias);
+        if (ordinal == 2) return CKFF_TEXTURE_CUBE_BIAS(s_textureCube2, coord.xyz, lodBias);
+        return CKFF_TEXTURE_CUBE_BIAS(s_textureCube3, coord.xyz, lodBias);
     }
     if (samplerType == 3) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
-#define CKFF_SAMPLE_3D(_sampler) CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask)
+#define CKFF_SAMPLE_3D(_sampler) CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)
         if (ordinal == 0) return CKFF_SAMPLE_3D(s_textureVolume0);
         if (ordinal == 1) return CKFF_SAMPLE_3D(s_textureVolume1);
         if (ordinal == 2) return CKFF_SAMPLE_3D(s_textureVolume2);
@@ -114,12 +136,12 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 #if BGFX_SHADER_LANGUAGE_GLSL
     // bgfx's OpenGL compatibility preamble aliases texture2DGrad to the ARB
     // extension even on core GLSL contexts; use the core entry point here.
-#define CKFF_TEXTURE_2D_GRAD(_sampler) textureGrad(_sampler, uv, originalDx, originalDy)
+#define CKFF_TEXTURE_2D_GRAD(_sampler) textureGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
 #else
-#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx, originalDy)
+#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
 #endif
 #define CKFF_SAMPLE_2D(_sampler) (mirrorOnceMask != 0 ? \
-    CKFF_TEXTURE_2D_GRAD(_sampler) : texture2D(_sampler, uv))
+    CKFF_TEXTURE_2D_GRAD(_sampler) : CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias))
     if (stage == 0) color = CKFF_SAMPLE_2D(s_texture0);
     else if (stage == 1) color = CKFF_SAMPLE_2D(s_texture1);
     else if (stage == 2) color = CKFF_SAMPLE_2D(s_texture2);
