@@ -343,11 +343,9 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
     if (Draws.Size() == 0 && (!PassOpen || !Pass.ClearFlags)) return CK_OK;
     if (!EnsureCommands()) return Error;
     if (!Target) {
-        if (!presentWindow) {
-            Draws.Clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
-            BatchVertices.Clear(); BatchIndices.Clear(); Pass.ClearFlags = 0;
-            return CK_OK;
-        }
+        // A non-presenting submission cannot execute a swapchain pass. Keep
+        // the pending draw packets so the caller can retry with presentation.
+        if (!presentWindow) return CKERR_INVALIDOPERATION;
         const CKERROR acquired = AcquireSwapchain();
         if (acquired != CK_OK) return acquired;
         // A minimized window has no swapchain image. Resource work still submits.
@@ -688,6 +686,9 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     if (!Ready()) return CKERR_INVALIDOPERATION;
     if (!CKSdlGpuValidPresentSync(sync)) return CKERR_INVALIDPARAMETER;
     if (LastSubmitId == (CKQWORD)-1)
+        return CKERR_INVALIDOPERATION;
+    if (!presentWindow && !Target &&
+        (Draws.Size() != 0 || (PassOpen && Pass.ClearFlags)))
         return CKERR_INVALIDOPERATION;
     if (sync != CKRST_PRESENT_UNCHANGED) {
         const auto mode = sync == CKRST_PRESENT_VSYNC ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;

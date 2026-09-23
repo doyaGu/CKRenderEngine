@@ -845,6 +845,13 @@ static int Run(SDL_Window *window)
     if (!CheckCompressedMips(backend)) return 20;
     if (!CheckGpuVolumeMips(backend)) return 21;
     if (!CheckGenericProgram(backend)) return 22;
+    CKRenderPassDesc swapchainPass;
+    swapchainPass.Rect = {0, 0, 640, 480};
+    swapchainPass.ClearFlags = CKRST_CTXCLEAR_COLOR;
+    swapchainPass.ClearColor = 0xff203040;
+    if (backend.BeginPass(&swapchainPass) != CK_OK ||
+        backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CKERR_INVALIDOPERATION ||
+        backend.Submit(CKRST_PRESENT_UNCHANGED, TRUE, nullptr) != CK_OK) return 25;
     CKSdlGpuPresentStage present;
     CKFFShaderSet shaders;
     if (!CKSdlGpuShaderSet(backend.GetCaps().ShaderFormat == CKRST_SHADER_FORMAT_DXIL ?
