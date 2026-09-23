@@ -25,7 +25,7 @@ public:
     XArray<CKBYTE> Data;
 
 private:
-    XUINTPTR SourceIdentity = 0;
+    CKQWORD SourceIdentity = 0;
     struct Copy {
         CKDWORD Slot, Offset, Size;
         CKQWORD Change = UINT64_MAX;

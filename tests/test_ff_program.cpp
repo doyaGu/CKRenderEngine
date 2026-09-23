@@ -4,6 +4,7 @@
 #include "TestTriangleMultiset.h"
 
 #include <cstring>
+#include <new>
 
 namespace {
 
@@ -526,6 +527,30 @@ void TestSharedSnapshotPacking()
               "switching back restores the original producer's complete values");
 }
 
+void TestReusedConstantSetAddress()
+{
+    CKFFProgramDesc desc;
+    desc.UniformBuffers.PushBack(Buffer(CKRST_SHADER_VERTEX, 16));
+    desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 3, 0));
+    CKFFProgramLayout layout;
+    layout.Init(desc);
+
+    alignas(CKFFConstantSet) unsigned char storage[sizeof(CKFFConstantSet)];
+    const CKBYTE first[16] = {1};
+    auto *source = new (storage) CKFFConstantSet();
+    TestCheck(source->Set(3, first, sizeof(first)) == CK_OK, "first constant source is writable");
+    layout.Update(*source);
+    source->~CKFFConstantSet();
+
+    const CKBYTE second[16] = {2};
+    source = new (storage) CKFFConstantSet();
+    TestCheck(source->Set(3, second, sizeof(second)) == CK_OK, "replacement constant source is writable");
+    layout.Update(*source);
+    TestCheck(std::memcmp(layout.Data.Begin(), second, sizeof(second)) == 0,
+              "a new source at the same address refreshes equal slot revisions");
+    source->~CKFFConstantSet();
+}
+
 } // namespace
 
 int main()
@@ -546,5 +571,6 @@ int main()
     framework.Run("named uniforms", TestNamedUniforms);
     framework.Run("vertex inputs", TestVertexInputs);
     framework.Run("shared snapshot packing and revisions", TestSharedSnapshotPacking);
+    framework.Run("reused constant source address", TestReusedConstantSetAddress);
     return framework.ExitCode();
 }

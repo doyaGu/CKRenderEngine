@@ -1,5 +1,12 @@
 #include "CKFFProgramLayout.h"
+#include <atomic>
 #include <cstring>
+
+CKFFConstantSet::CKFFConstantSet()
+{
+    static std::atomic<CKQWORD> nextIdentity{0};
+    m_Identity = nextIdentity.fetch_add(1, std::memory_order_relaxed) + 1;
+}
 
 CKERROR CKFFConstantSet::Set(CKDWORD slot, const void *data, CKDWORD byteSize)
 {

@@ -18,15 +18,16 @@ struct CKFFConstantValue {
 // implementation and remains valid until the next prepared draw.
 class CKFFConstantSet {
 public:
-    CKFFConstantSet() {}
+    CKFFConstantSet();
     CKFFConstantSet(const CKFFConstantSet &) = delete;
     CKFFConstantSet &operator=(const CKFFConstantSet &) = delete;
 
     CKERROR Set(CKDWORD Slot, const void *Data, CKDWORD ByteSize);
     const CKFFConstantValue &operator[](CKDWORD Slot) const { return m_Values[Slot]; }
-    XUINTPTR Identity() const { return (XUINTPTR)this; }
+    CKQWORD Identity() const { return m_Identity; }
 
 private:
+    CKQWORD m_Identity;
     CKFFConstantValue m_Values[CKFF_CONSTANT_SLOT_COUNT];
 };
 
