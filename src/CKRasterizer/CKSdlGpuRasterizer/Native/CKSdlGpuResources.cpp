@@ -18,7 +18,9 @@ SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format)
     case _32_ARGB8888: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
     case _32_ABGR8888: return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     case _DXT1: return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM;
+    case _DXT2: return SDL_GPU_TEXTUREFORMAT_INVALID;
     case _DXT3: return SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM;
+    case _DXT4: return SDL_GPU_TEXTUREFORMAT_INVALID;
     case _DXT5: return SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
     case _16_V8U8: return SDL_GPU_TEXTUREFORMAT_R8G8_SNORM;
     case _32_V16U16: return SDL_GPU_TEXTUREFORMAT_R16G16_SNORM;
@@ -314,6 +316,7 @@ CKERROR CKSdlGpuRasterizerContext::CreateTexture(const CKTextureDesc *desc, cons
     info.type = desc->Flags & CKRST_TEXTURE_CUBEMAP ? SDL_GPU_TEXTURETYPE_CUBE :
         (desc->Flags & CKRST_TEXTURE_VOLUMEMAP ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D);
     info.format = CKSdlGpuTextureFormat(texture->PixelFormat);
+    if (info.format == SDL_GPU_TEXTUREFORMAT_INVALID) return CKERR_NOTIMPLEMENTED;
     info.width = desc->Format.Width; info.height = desc->Format.Height;
     info.layer_count_or_depth = info.type == SDL_GPU_TEXTURETYPE_CUBE ? 6 :
         (info.type == SDL_GPU_TEXTURETYPE_3D ? std::max(1u, unsigned(desc->Depth)) : 1);
@@ -464,6 +467,7 @@ CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsig
     if (x >= width || y >= height || !w || !h || w > width - x || h > height - y ||
         unsigned(data.Width) != w || unsigned(data.Height) != h) return CKERR_INVALIDPARAMETER;
     const VX_PIXELFORMAT sourceFormat = VxImageDesc2PixelFormat(data);
+    if (sourceFormat == _DXT2 || sourceFormat == _DXT4) return CKERR_NOTIMPLEMENTED;
     const bool compressed = texture.Info.format == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM ||
         texture.Info.format == SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM || texture.Info.format == SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM;
     if ((texture.PixelFormat == _16_V8U8 || texture.PixelFormat == _32_V16U16) &&

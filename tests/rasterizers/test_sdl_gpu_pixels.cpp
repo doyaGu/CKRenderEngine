@@ -828,6 +828,18 @@ static int Run(SDL_Window *window)
         backend.CreateTexture(&texture, nullptr, &replacement) != CK_OK || replacement == previous) return 15;
     if (backend.DestroyObject(replacement, CKRST_OBJ_TEXTURE) != CK_OK) return 16;
     std::puts("SDL_gpu owner window, device reinitialization and stale handle rejection passed");
+    CKTextureDesc unsupported = texture;
+    VxPixelFormat2ImageDesc(_DXT2, unsupported.Format);
+    CKDWORD rejected = 0, ordinary = 0;
+    CKBYTE compressedBytes[16] = {};
+    VxImageDescEx compressedUpload = unsupported.Format;
+    compressedUpload.Image = compressedBytes;
+    compressedUpload.TotalImageSize = sizeof(compressedBytes);
+    if (backend.SupportsTexture2D(_DXT2) || backend.SupportsTexture2D(_DXT4) ||
+        backend.CreateTexture(&unsupported, nullptr, &rejected) != CKERR_NOTIMPLEMENTED || rejected != 0 ||
+        backend.CreateTexture(&texture, nullptr, &ordinary) != CK_OK ||
+        backend.UpdateTexture(ordinary, 0, 0, nullptr, &compressedUpload) != CKERR_NOTIMPLEMENTED ||
+        backend.DestroyObject(ordinary, CKRST_OBJ_TEXTURE) != CK_OK) return 26;
     if (!CheckGeneratedMips(backend)) return 17;
     if (!CheckGpuWrittenMips(backend)) return 19;
     if (!CheckCompressedMips(backend)) return 20;

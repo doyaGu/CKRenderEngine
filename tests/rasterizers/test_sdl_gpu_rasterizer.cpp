@@ -9,6 +9,12 @@ int main()
 {
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
+    check(CKSdlGpuTextureFormat(_DXT1) == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM &&
+          CKSdlGpuTextureFormat(_DXT3) == SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM &&
+          CKSdlGpuTextureFormat(_DXT5) == SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM &&
+          CKSdlGpuTextureFormat(_DXT2) == SDL_GPU_TEXTUREFORMAT_INVALID &&
+          CKSdlGpuTextureFormat(_DXT4) == SDL_GPU_TEXTUREFORMAT_INVALID,
+          "unsupported premultiplied DXT formats cannot alias BGRA");
     check(CKSdlGpuValidPresentSync(CKRST_PRESENT_UNCHANGED) &&
           CKSdlGpuValidPresentSync(CKRST_PRESENT_VSYNC) &&
           CKSdlGpuValidPresentSync(CKRST_PRESENT_IMMEDIATE) &&

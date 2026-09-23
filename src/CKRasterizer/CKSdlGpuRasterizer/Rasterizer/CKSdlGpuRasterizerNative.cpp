@@ -344,6 +344,8 @@ const XArray<CKBYTE> &CKSdlGpuRasterizerContext::GetReadbackData(
 
 CKBOOL CKSdlGpuRasterizerContext::SupportsTexture2D(VX_PIXELFORMAT format) const
 {
-    return Ready() && format >= _32_ARGB8888 && format <= _32_X8L8V8U8 &&
-        SDL_GPUTextureSupportsFormat(Device, CKSdlGpuTextureFormat(format), SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    if (!Ready() || format < _32_ARGB8888 || format > _32_X8L8V8U8) return FALSE;
+    const SDL_GPUTextureFormat nativeFormat = CKSdlGpuTextureFormat(format);
+    return nativeFormat != SDL_GPU_TEXTUREFORMAT_INVALID &&
+        SDL_GPUTextureSupportsFormat(Device, nativeFormat, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER);
 }
