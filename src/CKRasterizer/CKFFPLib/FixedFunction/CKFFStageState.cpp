@@ -245,6 +245,11 @@ void CKFFPackBumpEnvUniform(const CKDWORD *stageState, float outBumpEnv[2][4]) {
     // The third lane is shared with the sampler LOD bias. It is available for
     // every stage, including those that do not use bump mapping.
     outBumpEnv[1][2] = StageStateAsFloat(stageState[CKRST_TSS_MIPMAPLODBIAS]);
+    // D3D's MAXMIPLEVEL is the index of the most detailed mip that may be
+    // sampled. Keep the shader exponent finite for invalid oversized values;
+    // hardware clamps the requested level to the texture's last mip.
+    const CKDWORD minMip = stageState[CKRST_TSS_MAXMIPMLEVEL];
+    outBumpEnv[1][3] = (float)(minMip > 30u ? 30u : minMip);
 }
 
 void CKFFPackBumpEnvUniforms(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
@@ -441,6 +446,9 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
 
     desc.BorderColor = stageState[CKRST_TSS_BORDERCOLOR];
     desc.CompareFunc = CKRST_COMPARE_NONE;
+    const CKDWORD minMip = stageState[CKRST_TSS_MAXMIPMLEVEL];
+    desc.MinMipLevel = desc.MipFilter == CKRST_FILTER_NONE
+        ? 0 : (minMip > 30u ? 30u : minMip);
 
     return desc;
 }
@@ -461,6 +469,10 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState,
         desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
         desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
     }
+    const CKDWORD requestedMinMip = stageState
+        ? stageState[CKRST_TSS_MAXMIPMLEVEL] : 0;
+    desc.MinMipLevel = desc.MipFilter == CKRST_FILTER_NONE
+        ? 0 : (requestedMinMip > 30u ? 30u : requestedMinMip);
     return desc;
 }
 

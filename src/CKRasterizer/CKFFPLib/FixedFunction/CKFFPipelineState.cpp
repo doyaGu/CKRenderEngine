@@ -45,7 +45,8 @@ void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, C
                                                CKBOOL ForceAnisotropicFiltering) {
     if (m_TextureBinder.SetRenderOptions(DisableTextureFiltering, DisableMipmaps,
                                          ForceAnisotropicFiltering))
-        OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION);
+        OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION |
+                                    CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {

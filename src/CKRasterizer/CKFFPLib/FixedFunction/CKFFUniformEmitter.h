@@ -6,11 +6,13 @@
 #include "CKFFStateStore.h"
 
 class CKDrawStateCache;
+class CKFFTextureBinder;
 
 class CKFFUniformEmitter {
 public:
     CKFFUniformEmitter(CKFFStateStore &state,
                        const CKDrawStateCache &drawState,
+                       const CKFFTextureBinder &textureBinder,
                        const CKDWORD &shaderTargetFlags,
                        CKFFDrawProbes &probes);
 
@@ -39,6 +41,7 @@ private:
 
     CKFFStateStore &m_State;
     const CKDrawStateCache &m_DrawState;
+    const CKFFTextureBinder &m_TextureBinder;
     const CKDWORD &m_ShaderTargetFlags;
     CKFFDrawProbes &m_Probes;
     CKBOOL m_StaticUniformCacheValid;

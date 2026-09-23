@@ -1023,11 +1023,6 @@ void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
 {
     ctx->SetTextureStageState(0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_SRCCOLOR, VXBLEND_DESTALPHA));
 }
-void SetupSamplerLod(CKRasterizerContext *ctx, CKDWORD)
-{
-    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPLINEAR);
-    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 1);
-}
 void SetupAnisotropy(CKRasterizerContext *ctx, CKDWORD)
 {
     ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
@@ -1059,7 +1054,6 @@ void TestApproximationsKeepDrawing()
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
         {"point fill mode", CKRST_DIAG_APPROX_FILLMODE_POINT, &SetupFillPoint},
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
-        {"sampler maximum mip level", CKRST_DIAG_IGNORE_SAMPLER_LOD, &SetupSamplerLod},
         {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
     };
 

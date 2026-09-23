@@ -1461,10 +1461,11 @@ void CheckMipLodBias(Backend &b)
     ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
     ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
-    auto drawSample = [&](int column, float bias) {
+    auto drawSample = [&](int column, float bias, CKDWORD minMip) {
         CKDWORD bits = 0;
         memcpy(&bits, &bias, sizeof(bits));
         ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, bits);
+        ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, minMip);
         VxVector positions[3] = {VxVector(-1,-1,0.5f), VxVector(-0.4f,-1,0.5f), VxVector(-0.7f,1,0.5f)};
         for (auto &position : positions) position.x += float(column) * 0.64f;
         float coords[3][4] = {};
@@ -1475,9 +1476,9 @@ void CheckMipLodBias(Backend &b)
         TestCheck(DrawTexturedTriangle(ctx, positions, kWhite, coords), "sample biased mip");
     };
     BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
-    drawSample(0, 0.0f);
-    drawSample(1, 2.0f);
-    drawSample(2, 0.0f);
+    drawSample(0, 0.0f, 0);
+    drawSample(1, 2.0f, 0);
+    drawSample(2, 0.0f, 0);
     EndFrame(ctx);
     Pixels pixels;
     ReadBackbuffer(ctx, pixels);
@@ -1488,10 +1489,100 @@ void CheckMipLodBias(Backend &b)
                "LOD bias selects mip two, got BGRA=(%u,%u,%u,%u)",
                (unsigned)biased[0], (unsigned)biased[1], (unsigned)biased[2], (unsigned)biased[3]);
     TestCheck(PixelNear(pixels, 51, 32, 255, 0, 0), "reset LOD bias selects base mip");
+
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    drawSample(0, 0.0f, 1);
+    drawSample(1, 0.0f, 2);
+    drawSample(2, 0.0f, 0);
+    EndFrame(ctx);
+    ReadBackbuffer(ctx, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 255, 0), "minimum mip one selects mip one");
+    TestCheck(PixelNear(pixels, 30, 32, 0, 0, 255), "minimum mip two selects mip two");
+    TestCheck(PixelNear(pixels, 51, 32, 255, 0, 0), "reset minimum mip selects base mip");
+
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 2);
+    float borderCoords[3][4] = {};
+    for (auto &coord : borderCoords) coord[0] = coord[1] = 0.625f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, borderCoords),
+                  "draw border sampler with minimum mip");
+    }, pixels);
+    ExpectCenter(pixels, 0, 0, 255, "border sampler minimum mip");
     ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSWRAP);
     ctx->SetTexture(0, 0);
     TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete LOD bias texture");
-    printf("  sampler LOD bias selects and resets explicit mip levels: passed\n");
+    printf("  sampler LOD bias and minimum mip select and reset explicit levels: passed\n");
+}
+
+void CheckLayeredMinimumMip(Backend &b)
+{
+    auto *ctx = b.Context;
+    for (bool volume : {false, true}) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+        desc.Format.Width = desc.Format.Height = 2;
+        desc.Flags = CKRST_TEXTURE_RGB |
+                     (volume ? CKRST_TEXTURE_VOLUMEMAP : CKRST_TEXTURE_CUBEMAP);
+        desc.Depth = volume ? 2 : 1;
+        desc.MipMapCount = 2;
+        CKDWORD texture = 0;
+        TestCheck(ctx->CreateTexture(&desc, &texture), "create layered minimum mip texture");
+        for (unsigned mip = 0; mip < 2; ++mip) {
+            CKDWORD source[4];
+            for (auto &pixel : source) pixel = mip ? 0xff0000ff : 0xffff0000;
+            VxImageDescEx image = desc.Format;
+            image.Width = image.Height = 2 >> mip;
+            image.BytesPerLine = image.Width * 4;
+            image.Image = reinterpret_cast<CKBYTE *>(source);
+            const unsigned layers = volume ? (2u >> mip) : 6u;
+            for (unsigned layer = 0; layer < layers; ++layer)
+                TestCheck(ctx->LoadTexture(texture, image, mip,
+                                           (CKRST_CUBEFACE)layer, NULL),
+                          "upload layered minimum mip");
+        }
+        SetDiffuseState(ctx);
+        ctx->SetTexture(texture, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER,
+                                  VXTEXTUREFILTER_MIPNEAREST);
+        ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER,
+                                  VXTEXTUREFILTER_NEAREST);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                                  VXTEXTURE_ADDRESSCLAMP);
+        if (volume)
+            ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV,
+                                      VXTEXTURE_ADDRESSBORDER);
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                  CKRST_TTF_COUNT3);
+        float coords[3][4] = {};
+        for (auto &coord : coords) {
+            coord[0] = volume ? 0.625f : 1.0f;
+            coord[1] = volume ? 0.625f : 0.0f;
+            coord[2] = volume ? 0.25f : 0.0f;
+        }
+        Pixels pixels;
+        for (CKDWORD minMip : {0u, 1u, 0u}) {
+            ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, minMip);
+            RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coords),
+                          "draw layered minimum mip");
+            }, pixels);
+            if (minMip)
+                ExpectCenter(pixels, 0, 0, 255,
+                             volume ? "volume minimum mip" : "cube minimum mip");
+            else
+                ExpectCenter(pixels, 255, 0, 0,
+                             volume ? "volume base mip" : "cube base mip");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 0);
+        ctx->SetTexture(0, 0);
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
+                  "delete layered minimum mip texture");
+    }
+    printf("  cube and volume minimum mip sampling and reset: passed\n");
 }
 
 void CheckMemoryCopyPixelIdentity(Backend &b)
@@ -2142,6 +2233,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckLayeredTextureUpdates(backend);
         CheckMipPreservation(backend);
         CheckMipLodBias(backend);
+        CheckLayeredMinimumMip(backend);
         CheckMemoryCopyPixelIdentity(backend);
         CheckScaledTextureCopies(backend);
         CheckIndependentAttachmentClears(backend);

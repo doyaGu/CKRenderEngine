@@ -618,9 +618,20 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
     drawn = ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                                 1, 0, 0, 3, 0, 0,
                                 CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(drawn && ffp.GetLastDrawApproximationMask() ==
-                  (1ull << CKRST_DIAG_IGNORE_SAMPLER_LOD),
-              "MAXMIPLEVEL remains diagnosed until its clamp is implemented");
+    const std::vector<float> &minMipParams = context.Log.FloatUniforms[lodUniform];
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
+                  minMipParams.size() >= 8 && minMipParams[7] == 1.0f &&
+                  context.Log.LastTextureSampler.MinMipLevel == 1,
+              "MAXMIPLEVEL reaches the shared sampler shader without approximation");
+    ffp.SetRenderOptions(FALSE, TRUE, FALSE);
+    drawn = ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                1, 0, 0, 3, 0, 0,
+                                CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
+    const std::vector<float> &disabledMipParams = context.Log.FloatUniforms[lodUniform];
+    TestCheck(drawn && disabledMipParams.size() >= 8 && disabledMipParams[7] == 0.0f &&
+                  context.Log.LastTextureSampler.MinMipLevel == 0,
+              "disabling mipmaps also disables the sampler's minimum mip");
+    ffp.SetRenderOptions(FALSE, FALSE, FALSE);
     ffp.SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 0);
 
     ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);

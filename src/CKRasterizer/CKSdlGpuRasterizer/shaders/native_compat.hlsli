@@ -29,10 +29,10 @@
 #define SAMPLERCUBE(name, slot) CK_COMBINED TextureCube<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define texture2D(name, uv) ckSample2D(name, name##Sampler, name##Slot, uv)
-#define texture2DBias(name, uv, bias) ckSample2DBias(name, name##Sampler, name##Slot, uv, bias)
-#define texture2DGrad(name, uv, dx, dy) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy)
+#define texture2DBias(name, uv, bias, minMip) ckSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
+#define texture2DGrad(name, uv, dx, dy, minMip) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip)
 #define textureCube(name, uv) name.Sample(name##Sampler, uv)
 #define textureCubeBias(name, uv, bias) name.SampleBias(name##Sampler, uv, bias)
 #define texture3D(name, uv) ckSample3D(name, name##Sampler, name##Slot, uv)
-#define texture3DBias(name, uv, bias) ckSample3DBias(name, name##Sampler, name##Slot, uv, bias)
-#define texture3DGrad(name, uv, original, mirror, bias) ckSample3DGrad(name, name##Sampler, name##Slot, uv, original, mirror, bias)
+#define texture3DBias(name, uv, bias, minMip) ckSample3DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
+#define texture3DGrad(name, uv, original, mirror, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, original, mirror, bias, minMip)

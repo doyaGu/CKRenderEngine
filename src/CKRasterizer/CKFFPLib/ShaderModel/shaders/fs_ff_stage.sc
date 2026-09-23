@@ -52,10 +52,57 @@ vec4 applyMirrorOnceCoord(vec4 coord, int mirrorOnceMask, int samplerType)
     return coord;
 }
 
+float ckffClampedLod2D(vec2 dx, vec2 dy, vec2 size, float bias, float minMip)
+{
+    vec2 footprintX = dx * size;
+    vec2 footprintY = dy * size;
+    float footprint2 = max(dot(footprintX, footprintX), dot(footprintY, footprintY));
+    return max(0.5 * log2(max(footprint2, 1.0e-20)) + bias, minMip);
+}
+
+float ckffClampedLod3D(vec3 dx, vec3 dy, vec3 size, float bias, float minMip)
+{
+    vec3 footprintX = dx * size;
+    vec3 footprintY = dy * size;
+    float footprint2 = max(dot(footprintX, footprintX), dot(footprintY, footprintY));
+    return max(0.5 * log2(max(footprint2, 1.0e-20)) + bias, minMip);
+}
+
+float ckffClampedCubeLod(vec3 dir, vec3 dx, vec3 dy, float size,
+                         float bias, float minMip)
+{
+    vec3 axis = abs(dir);
+    float major, dxMajor, dyMajor;
+    vec2 other, dxOther, dyOther;
+    if (axis.x >= axis.y && axis.x >= axis.z) {
+        major = dir.x; dxMajor = dx.x; dyMajor = dy.x;
+        other = dir.yz; dxOther = dx.yz; dyOther = dy.yz;
+    } else if (axis.y >= axis.z) {
+        major = dir.y; dxMajor = dx.y; dyMajor = dy.y;
+        other = dir.xz; dxOther = dx.xz; dyOther = dy.xz;
+    } else {
+        major = dir.z; dxMajor = dx.z; dyMajor = dy.z;
+        other = dir.xy; dxOther = dx.xy; dyOther = dy.xy;
+    }
+    float denominator = max(abs(major), 1.0e-10);
+    float signMajor = major < 0.0 ? -1.0 : 1.0;
+    vec2 faceDx = (dxOther - other * (signMajor * dxMajor / denominator)) /
+                  denominator;
+    vec2 faceDy = (dyOther - other * (signMajor * dyMajor / denominator)) /
+                  denominator;
+    return ckffClampedLod2D(faceDx, faceDy, vec2_splat(size * 0.5), bias, minMip);
+}
+
 #if BGFX_SHADER_LANGUAGE_GLSL
 #define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias)
 #define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) textureCubeBias(_sampler, _uv, _bias)
 #define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_2D_MIN_MIP(_sampler, _uv, _dx, _dy, _bias, _min) \
+    textureLod(_sampler, _uv, ckffClampedLod2D(_dx, _dy, vec2(textureSize(_sampler, 0)), _bias, _min))
+#define CKFF_TEXTURE_CUBE_MIN_MIP(_sampler, _uv, _dx, _dy, _bias, _min) \
+    textureLod(_sampler, _uv, ckffClampedCubeLod(_uv, _dx, _dy, float(textureSize(_sampler, 0).x), _bias, _min))
+#define CKFF_TEXTURE_3D_MIN_MIP(_sampler, _uv, _dx, _dy, _bias, _min) \
+    textureLod(_sampler, _uv, ckffClampedLod3D(_dx, _dy, vec3(textureSize(_sampler, 0)), _bias, _min))
 #define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
     (_mirror != 0 ? textureGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #elif !CKFF_NATIVE_SDL_GPU
@@ -75,17 +122,47 @@ vec4 ckffTexture3DGrad(BgfxSampler3D sampleState, vec3 uv, vec3 dx, vec3 dy)
 {
     return sampleState.m_texture.SampleGrad(sampleState.m_sampler, uv, dx, dy);
 }
+vec4 ckffTexture2DMinMip(BgfxSampler2D sampleState, vec2 uv, vec2 dx, vec2 dy,
+                         float bias, float minMip)
+{
+    uint width, height, levels;
+    sampleState.m_texture.GetDimensions(0, width, height, levels);
+    float lod = ckffClampedLod2D(dx, dy, vec2(width, height), bias, minMip);
+    return sampleState.m_texture.SampleLevel(sampleState.m_sampler, uv, lod);
+}
+vec4 ckffTextureCubeMinMip(BgfxSamplerCube sampleState, vec3 uv, vec3 dx, vec3 dy,
+                           float bias, float minMip)
+{
+    uint width, height, levels;
+    sampleState.m_texture.GetDimensions(0, width, height, levels);
+    float lod = ckffClampedCubeLod(uv, dx, dy, float(width), bias, minMip);
+    return sampleState.m_texture.SampleLevel(sampleState.m_sampler, uv, lod);
+}
+vec4 ckffTexture3DMinMip(BgfxSampler3D sampleState, vec3 uv, vec3 dx, vec3 dy,
+                         float bias, float minMip)
+{
+    uint width, height, depth, levels;
+    sampleState.m_texture.GetDimensions(0, width, height, depth, levels);
+    float lod = ckffClampedLod3D(dx, dy, vec3(width, height, depth), bias, minMip);
+    return sampleState.m_texture.SampleLevel(sampleState.m_sampler, uv, lod);
+}
 #define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) ckffTexture2DBias(_sampler, _uv, _bias)
 #define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) ckffTextureCubeBias(_sampler, _uv, _bias)
 #define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) ckffTexture3DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_2D_MIN_MIP(_sampler, _uv, _dx, _dy, _bias, _min) \
+    ckffTexture2DMinMip(_sampler, _uv, _dx, _dy, _bias, _min)
+#define CKFF_TEXTURE_CUBE_MIN_MIP(_sampler, _uv, _dx, _dy, _bias, _min) \
+    ckffTextureCubeMinMip(_sampler, _uv, _dx, _dy, _bias, _min)
+#define CKFF_TEXTURE_3D_MIN_MIP(_sampler, _uv, _dx, _dy, _bias, _min) \
+    ckffTexture3DMinMip(_sampler, _uv, _dx, _dy, _bias, _min)
 #define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
     (_mirror != 0 ? ckffTexture3DGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #else
-#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias, minMip)
 #define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) textureCubeBias(_sampler, _uv, _bias)
-#define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture3DBias(_sampler, _uv, _bias)
+#define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture3DBias(_sampler, _uv, _bias, minMip)
 #define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
-    texture3DGrad(_sampler, _uv, _original, _mirror, _bias)
+    texture3DGrad(_sampler, _uv, _original, _mirror, _bias, minMip)
 #endif
 
 // Ordinal of this stage among the stages sampling the same sampler type
@@ -105,6 +182,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
     float lodBias = u_bumpEnv[stage * 2 + 1].z;
+    float minMip = u_bumpEnv[stage * 2 + 1].w;
     // Addressing must not change the derivatives used to choose a mip level.
     // In particular, clamping the coordinate outside [0, 1] would otherwise
     // force the LOD to zero instead of preserving the source footprint.
@@ -116,14 +194,28 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
     if (samplerType == 1) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
-        if (ordinal == 0) return CKFF_TEXTURE_CUBE_BIAS(s_textureCube0, coord.xyz, lodBias);
-        if (ordinal == 1) return CKFF_TEXTURE_CUBE_BIAS(s_textureCube1, coord.xyz, lodBias);
-        if (ordinal == 2) return CKFF_TEXTURE_CUBE_BIAS(s_textureCube2, coord.xyz, lodBias);
-        return CKFF_TEXTURE_CUBE_BIAS(s_textureCube3, coord.xyz, lodBias);
+#if CKFF_NATIVE_SDL_GPU
+#define CKFF_SAMPLE_CUBE(_sampler) CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)
+#else
+#define CKFF_SAMPLE_CUBE(_sampler) (minMip > 0.0 ? \
+    CKFF_TEXTURE_CUBE_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
+    CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias))
+#endif
+        if (ordinal == 0) return CKFF_SAMPLE_CUBE(s_textureCube0);
+        if (ordinal == 1) return CKFF_SAMPLE_CUBE(s_textureCube1);
+        if (ordinal == 2) return CKFF_SAMPLE_CUBE(s_textureCube2);
+        return CKFF_SAMPLE_CUBE(s_textureCube3);
+#undef CKFF_SAMPLE_CUBE
     }
     if (samplerType == 3) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
+#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_3D(_sampler) CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)
+#else
+#define CKFF_SAMPLE_3D(_sampler) (minMip > 0.0 ? \
+    CKFF_TEXTURE_3D_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
+    CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias))
+#endif
         if (ordinal == 0) return CKFF_SAMPLE_3D(s_textureVolume0);
         if (ordinal == 1) return CKFF_SAMPLE_3D(s_textureVolume1);
         if (ordinal == 2) return CKFF_SAMPLE_3D(s_textureVolume2);
@@ -133,15 +225,24 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 
     vec2 uv = coord.xy;
     vec4 color;
-#if BGFX_SHADER_LANGUAGE_GLSL
+#if CKFF_NATIVE_SDL_GPU
+#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias), minMip)
+#elif BGFX_SHADER_LANGUAGE_GLSL
     // bgfx's OpenGL compatibility preamble aliases texture2DGrad to the ARB
     // extension even on core GLSL contexts; use the core entry point here.
 #define CKFF_TEXTURE_2D_GRAD(_sampler) textureGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
 #else
 #define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
 #endif
+#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_2D(_sampler) (mirrorOnceMask != 0 ? \
     CKFF_TEXTURE_2D_GRAD(_sampler) : CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias))
+#else
+#define CKFF_SAMPLE_2D(_sampler) (minMip > 0.0 ? \
+    CKFF_TEXTURE_2D_MIN_MIP(_sampler, uv, originalDx, originalDy, lodBias, minMip) : \
+    (mirrorOnceMask != 0 ? CKFF_TEXTURE_2D_GRAD(_sampler) : \
+    CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias)))
+#endif
     if (stage == 0) color = CKFF_SAMPLE_2D(s_texture0);
     else if (stage == 1) color = CKFF_SAMPLE_2D(s_texture1);
     else if (stage == 2) color = CKFF_SAMPLE_2D(s_texture2);

@@ -43,7 +43,8 @@ inline CKERROR CKRasterizerValidateSampler(const CKSamplerDesc *Sampler)
     const bool compareValid = Sampler->CompareFunc >= CKRST_COMPARE_NONE &&
                               Sampler->CompareFunc <= CKRST_COMPARE_ALWAYS;
 
-    return minValid && magValid && mipValid && addressValid && compareValid
+    return minValid && magValid && mipValid && addressValid && compareValid &&
+           Sampler->MinMipLevel <= 30u
         ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 

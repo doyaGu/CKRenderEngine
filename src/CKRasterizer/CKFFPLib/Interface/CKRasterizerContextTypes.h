@@ -97,6 +97,7 @@ struct CKSamplerDesc {
     CK_ADDRESS_MODE AddressW;
     CKDWORD BorderColor;
     CK_COMPARE_MODE CompareFunc;
+    CKDWORD MinMipLevel = 0;
 };
 
 #endif // CKRASTERIZERCONTEXTTYPES_H

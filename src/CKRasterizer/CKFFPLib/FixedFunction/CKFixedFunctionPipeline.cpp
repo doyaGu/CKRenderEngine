@@ -20,7 +20,8 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_FrameNumber(0),
       m_ShaderTargetFlags(0),
       m_TextureBinder(m_State, m_Probes),
-      m_UniformEmitter(m_State, m_State.DrawState, m_ShaderTargetFlags, m_Probes),
+      m_UniformEmitter(m_State, m_State.DrawState, m_TextureBinder,
+                       m_ShaderTargetFlags, m_Probes),
       m_StaticUniformRevision(1),
       m_DrawValidationCacheValid(FALSE),
       m_DrawValidationCacheTopology(VX_TRIANGLELIST),
@@ -489,11 +490,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
             if (!CKFFValidTextureStageValues(m_State.StageStates[stage]))
                 return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
             const CKSamplerDesc sampler = BuildSamplerDesc((int)stage);
-            if (sampler.MipFilter != CKRST_FILTER_NONE &&
-                m_State.StageStates[stage][CKRST_TSS_MAXMIPMLEVEL] != 0) {
-                // MAXMIPLEVEL still requires a per-texture mip clamp.
-                RecordDrawApproximation(CKRST_DIAG_IGNORE_SAMPLER_LOD);
-            }
             const CKBOOL anisotropic =
                 sampler.MinFilter == CKRST_FILTER_ANISOTROPIC ||
                 sampler.MagFilter == CKRST_FILTER_ANISOTROPIC ||

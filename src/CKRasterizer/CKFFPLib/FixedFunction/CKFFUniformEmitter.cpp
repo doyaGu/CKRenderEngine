@@ -1,4 +1,5 @@
 #include "CKFFUniformEmitter.h"
+#include "CKFFTextureBinder.h"
 
 #include "CKDrawStateCache.h"
 #include "CKFFShaderABI.h"
@@ -78,10 +79,12 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
 
 CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
                                        const CKDrawStateCache &drawState,
+                                       const CKFFTextureBinder &textureBinder,
                                        const CKDWORD &shaderTargetFlags,
                                        CKFFDrawProbes &probes)
     : m_State(state),
       m_DrawState(drawState),
+      m_TextureBinder(textureBinder),
       m_ShaderTargetFlags(shaderTargetFlags),
       m_Probes(probes),
       m_StaticUniformCacheValid(FALSE),
@@ -219,6 +222,10 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     // when a bias is reset so cached uniforms cannot retain the previous draw.
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (m_TextureBinder.BuildSamplerDesc((int)stage).MipFilter == CKRST_FILTER_NONE)
+            bumpEnv[stage * 2 + 1][3] = 0.0f;
+    }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
          CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
 
