@@ -47,6 +47,9 @@ struct CKFFVertexBufferData {
     CKERROR PrepareUnlock(CKFFBufferUpload &Upload);
     void SetupDrawData(VxDrawPrimitiveData &Data,
                        CKDWORD StartVertex, CKDWORD VertexCount) const;
+    void SetupPointDrawData(VxDrawPrimitiveData &Data,
+                            CKDWORD StartVertex, CKDWORD VertexCount,
+                            XArray<CKBYTE> &PositionData) const;
 };
 
 struct CKFFIndexBufferData {

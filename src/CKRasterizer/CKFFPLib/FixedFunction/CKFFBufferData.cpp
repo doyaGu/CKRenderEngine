@@ -210,6 +210,34 @@ void CKFFVertexBufferData::SetupDrawData(VxDrawPrimitiveData &Data,
                                   Desc.m_VertexSize, VertexCount);
 }
 
+void CKFFVertexBufferData::SetupPointDrawData(
+    VxDrawPrimitiveData &Data, CKDWORD StartVertex, CKDWORD VertexCount,
+    XArray<CKBYTE> &PositionData) const
+{
+    SetupDrawData(Data, StartVertex, VertexCount);
+    if ((Desc.m_VertexFormat & CKRST_DP_PSIZE) == 0)
+        return;
+
+    // DrawPrimitive reads a point size immediately after its position/blend
+    // record. A canonical VB places it after optional normal/tween streams.
+    const CKDWORD positionBytes = (Desc.m_VertexFormat & CKRST_DP_TRANSFORM)
+        ? CKRSTGetBlendVertexSize(Desc.m_VertexFormat) : 16u;
+    if (Layout.PointSizeOffset == (int)positionBytes)
+        return;
+    const CKDWORD pointStride = positionBytes + sizeof(float);
+    PositionData.Resize((int)(VertexCount * pointStride));
+    CKBYTE *source = static_cast<CKBYTE *>(Data.PositionPtr);
+    for (CKDWORD vertex = 0; vertex < VertexCount; ++vertex) {
+        CKBYTE *target = PositionData.Begin() + vertex * pointStride;
+        memcpy(target, source + vertex * Desc.m_VertexSize, positionBytes);
+        memcpy(target + positionBytes,
+               source + vertex * Desc.m_VertexSize + Layout.PointSizeOffset,
+               sizeof(float));
+    }
+    Data.PositionPtr = PositionData.Begin();
+    Data.PositionStride = pointStride;
+}
+
 CKFFIndexBufferData::CKFFIndexBufferData()
     : Locked(FALSE), LockFlags(CKRST_LOCK_DEFAULT), LockStart(0),
       LockCount(0)

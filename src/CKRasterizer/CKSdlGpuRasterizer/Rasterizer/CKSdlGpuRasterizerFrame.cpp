@@ -598,9 +598,15 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD 
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount)) {
+    if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
+        (Type == VX_POINTLIST &&
+         m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;
-        vb->SetupDrawData(data, StartVertex, VertexCount);
+        XArray<CKBYTE> pointPositions;
+        if (Type == VX_POINTLIST)
+            vb->SetupPointDrawData(data, StartVertex, VertexCount, pointPositions);
+        else
+            vb->SetupDrawData(data, StartVertex, VertexCount);
         for (int stage = 0; stage < vb->Layout.TexcoordCount; ++stage)
             m_FFP.SetTexcoordComponentCount(stage, vb->Layout.TexcoordDims[stage]);
         const CKBOOL result = DrawPrimitive(Type, Indices, IndexCount, &data);
@@ -649,9 +655,16 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWOR
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount)) {
+    if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
+        (Type == VX_POINTLIST &&
+         m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;
-        vb->SetupDrawData(data, 0, vb->Desc.m_MaxVertexCount);
+        XArray<CKBYTE> pointPositions;
+        if (Type == VX_POINTLIST)
+            vb->SetupPointDrawData(data, 0, vb->Desc.m_MaxVertexCount,
+                                   pointPositions);
+        else
+            vb->SetupDrawData(data, 0, vb->Desc.m_MaxVertexCount);
         for (int stage = 0; stage < vb->Layout.TexcoordCount; ++stage)
             m_FFP.SetTexcoordComponentCount(stage, vb->Layout.TexcoordDims[stage]);
         const CKBOOL result = DrawPrimitive(

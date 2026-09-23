@@ -1012,6 +1012,61 @@ void CheckVertexBufferWrapPixels(Backend &b)
     printf("  VB and VBIB WRAP0 interpolate across the texture seam: passed\n");
 }
 
+void CheckVertexBufferPointSizePixels(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    const CKDWORD format = CKRST_DP_TR_CL_VCT;
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    XArray<CKBYTE> vertex;
+    vertex.Resize(stride);
+    memset(vertex.Begin(), 0, stride);
+    const VxVector position(0.0f, 0.0f, 0.5f);
+    const CKDWORD red = 0xffff0000u;
+    memcpy(vertex.Begin() + layout.PositionOffset, &position, sizeof(position));
+    memcpy(vertex.Begin() + layout.DiffuseOffset, &red, sizeof(red));
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 1;
+    vbDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertex.Begin(), &vb),
+              "create point-size test VB");
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 1;
+    ibDesc.m_Flags = CKRST_VB_WRITEONLY;
+    const CKWORD pointIndex = 0;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, &pointIndex, &ib),
+              "create point-size test IB");
+
+    SetDiffuseState(ctx);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(24.0f));
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 1, NULL, 0),
+                  "draw 24-pixel VB point");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 255, 0, 0) &&
+              PixelNear(pixels, 42, 32, 255, 0, 0) &&
+              PixelNear(pixels, 47, 32, 0, 0, 0),
+              "VB point size reaches beyond the native 15-pixel limit");
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_POINTLIST, vb, ib, 0, 1, 0, 1),
+                  "draw 24-pixel VBIB point");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 42, 32, 255, 0, 0) &&
+              PixelNear(pixels, 47, 32, 0, 0, 0),
+              "VBIB point size reaches beyond the native 15-pixel limit");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_POINT_SIZE] == 0,
+              "VB and VBIB points have no size approximation");
+
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete point IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete point VB");
+    printf("  VB and VBIB point sizes beyond native limits: passed\n");
+}
+
 void CheckOrderedBufferUpdates(Backend &b)
 {
     auto *ctx = b.Context;
@@ -1915,6 +1970,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckPaddedTextureUpload(backend);
         CheckOrderedBufferUpdates(backend);
         CheckVertexBufferWrapPixels(backend);
+        CheckVertexBufferPointSizePixels(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);

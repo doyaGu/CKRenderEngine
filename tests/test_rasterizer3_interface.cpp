@@ -1136,7 +1136,7 @@ void TestApproximationsKeepDrawing()
         TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 1, "the fifth cube stage counts one approximation");
     }
 
-    // Backend-buffer points with a fractional size clamp instead of failing.
+    // Backend-buffer points with fractional size expand to transient quads.
     {
         Fixture f;
         CKRasterizerContext *ctx = f.Context;
@@ -1155,7 +1155,11 @@ void TestApproximationsKeepDrawing()
         TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 4, NULL, 0), "point VB draw");
         TestCheck(ctx->EndScene(), "EndScene");
         TestCheck(CountDraws(f) == 1, "point VB draw submitted");
-        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_POINT_SIZE) == 1, "fractional point size counts one approximation");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_POINT_SIZE) == 0,
+                  "fractional point size expands without approximation");
+        TestCheck(((f.Backend->Log.LastState.Mid >> 6) & 0x7u) == VX_TRIANGLELIST &&
+                  !f.Backend->Log.LastVertexBytes.empty(),
+                  "fractional point VB submits expanded quads");
         TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_WRAP) == 0,
                   "WRAP0 without texture coordinates needs no adjustment");
         TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete VB");
@@ -1280,6 +1284,82 @@ void TestVertexBufferWrapUsesPrimitiveCoordinates()
               "wrapped VB draws do not ignore WRAP0");
     TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete wrapped IB");
     TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete wrapped VB");
+}
+
+void TestVertexBufferPointExpansionUsesPerVertexSize()
+{
+    Fixture f;
+    CKRasterizerContext *ctx = f.Context;
+    const CKDWORD format = CKRST_DP_TR_CL_VCT | CKRST_DP_LIGHT | CKRST_DP_PSIZE;
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    std::vector<CKBYTE> vertices(stride * 2, 0);
+    for (int i = 0; i < 2; ++i) {
+        CKBYTE *vertex = vertices.data() + i * stride;
+        const float size = i == 0 ? 4.0f : 10.0f;
+        const CKDWORD white = 0xffffffffu;
+        memcpy(vertex + layout.PointSizeOffset, &size, sizeof(size));
+        memcpy(vertex + layout.DiffuseOffset, &white, sizeof(white));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 2;
+    vbDesc.m_Flags = CKRST_VB_WRITEONLY;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.data(), &vb),
+              "create point-size VB with normal stream");
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 1;
+    ibDesc.m_Flags = CKRST_VB_WRITEONLY;
+    const CKWORD secondVertex = 1;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, &secondVertex, &ib),
+              "create indexed point selector");
+    ctx->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    TestCheck(ctx->BeginScene(), "begin point expansion scene");
+
+    const CKDWORD nativeStride = CKFFVertexLayout::ComputeStride(
+        CKFFVertexLayout::DPFlagsToFormatFlags(format, true, true));
+    auto expandedWidth = [&]() {
+        const std::vector<CKBYTE> &bytes = f.Backend->Log.LastVertexBytes;
+        TestCheck(bytes.size() == nativeStride * 4,
+                  "per-vertex point size expands to four vertices");
+        if (bytes.size() != nativeStride * 4)
+            return 0.0f;
+        float left = 0.0f;
+        float right = 0.0f;
+        memcpy(&left, bytes.data(), sizeof(float));
+        memcpy(&right, bytes.data() + nativeStride, sizeof(float));
+        return right - left;
+    };
+    TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 1, NULL, 0),
+              "draw first per-vertex-size point");
+    const float narrow = expandedWidth();
+    TestCheck(ctx->DrawPrimitiveVBIB(VX_POINTLIST, vb, ib, 0, 2, 0, 1),
+              "draw indexed per-vertex-size point");
+    const float wide = expandedWidth();
+    TestCheck(narrow > 0.0f && wide > narrow * 2.0f,
+              "indexed point uses the selected vertex's size after the normal stream");
+
+    ctx->SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
+    TestCheck(ctx->DrawPrimitiveVBIB(VX_POINTLIST, vb, ib, 0, 2, 0, 1),
+              "draw indexed point sprite");
+    TestCheck(expandedWidth() > narrow * 2.0f,
+              "indexed point sprite preserves per-vertex size");
+    ctx->SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSCALEENABLE, TRUE);
+    TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 1, NULL, 0),
+              "draw scaled point from VB");
+    TestCheck(!f.Backend->Log.LastVertexBytes.empty(),
+              "point scaling uses transient expansion");
+    ctx->SetRenderState(VXRENDERSTATE_POINTSCALEENABLE, FALSE);
+    TestCheck(ctx->EndScene(), "end point expansion scene");
+    TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_POINT_SIZE) == 0,
+              "VB and VBIB point modes have no size approximation");
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER),
+              "delete point selector");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER),
+              "delete point-size VB");
 }
 
 // ---------------------------------------------------------------------------
@@ -1875,6 +1955,7 @@ int main()
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
     framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
     framework.Run("vertex buffer wrap uses primitive coordinates", TestVertexBufferWrapUsesPrimitiveCoordinates);
+    framework.Run("vertex buffer point expansion uses per-vertex size", TestVertexBufferPointExpansionUsesPerVertexSize);
     framework.Run("draw order and markers", TestDrawOrderAndMarkers);
     framework.Run("statistics are copied", TestStatsAreCopied);
     framework.Run("clear rect semantics", TestClearRectSemantics);

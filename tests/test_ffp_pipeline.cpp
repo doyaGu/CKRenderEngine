@@ -2621,7 +2621,7 @@ void PointSizeExpandsWithoutSpriteTexcoordReplacement() {
     ffp.Shutdown();
 }
 
-void PersistentPointBuffersApproximateUnsupportedModesAndClampSize() {
+void PersistentPointBuffersRequireTransientExpansionForComplexSizes() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2640,28 +2640,25 @@ void PersistentPointBuffersApproximateUnsupportedModesAndClampSize() {
     ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
     TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,
                                    1, 0, 0, 1, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE,
-              "persistent point sprites draw as plain points");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_POINT_SIZE),
-              "persistent point sprites must report the point approximation");
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE,
+              "direct backend-buffer point sprite draw requires transient expansion");
+    TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PREPARE_FAILED,
+              "direct point sprite path must reject instead of approximating");
 
     ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, FALSE);
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(1.5f));
     TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,
                                    1, 0, 0, 1, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE &&
-                  context.Log.LastPointSize == 2.0f,
-              "fractional persistent point size rounds to the nearest integer");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_POINT_SIZE),
-              "fractional point size must report the point approximation");
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PREPARE_FAILED,
+              "fractional direct point size requires transient expansion");
 
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(40.0f));
     TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,
                                    1, 0, 0, 1, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE &&
-                  context.Log.LastPointSize == 15.0f &&
-                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_POINT_SIZE),
-              "oversized persistent point size clamps to the backend maximum");
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PREPARE_FAILED,
+              "oversized direct point size requires transient expansion");
 
     ffp.Shutdown();
 }
@@ -3734,8 +3731,8 @@ int main() {
               &PointSpriteDrawPrimitiveExpandsToTriangleList);
     tests.Run("Point size expands without sprite texcoord replacement",
               &PointSizeExpandsWithoutSpriteTexcoordReplacement);
-    tests.Run("Persistent point buffers approximate unsupported modes and clamp size",
-              &PersistentPointBuffersApproximateUnsupportedModesAndClampSize);
+    tests.Run("Persistent point buffers require transient expansion for complex sizes",
+              &PersistentPointBuffersRequireTransientExpansionForComplexSizes);
     tests.Run("Wrapped line strip submits as line list",
               &WrappedLineStripSubmitsAsLineList);
     tests.Run("Point sprite uses per-vertex point size",

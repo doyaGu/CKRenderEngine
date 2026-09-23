@@ -540,6 +540,15 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferWrap(CKDWORD texcoordCount) con
     return FALSE;
 }
 
+CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointExpansion(CKDWORD dpFlags) const
+{
+    const float pointSize = CKFFResolveConstantPointSize(m_State.DrawState);
+    return m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
+           m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
+           (dpFlags & CKRST_DP_PSIZE) != 0 ||
+           CKFFClampVertexBufferPointSize(pointSize) != pointSize;
+}
+
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     const VxDrawPrimitiveData *data,
     CKDWORD formatFlags)
@@ -946,15 +955,9 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         NeedsVertexBufferWrap(vertexLayoutDesc.TexcoordCount))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     if (type == VX_POINTLIST) {
-        // Device-buffer points render as plain points of the clamped constant
-        // size; sprites, scaling and per-vertex sizes are not applied.
-        const float pointSize = CKFFResolveConstantPointSize(m_State.DrawState);
-        if (m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
-            (dpFlags & CKRST_DP_PSIZE) != 0 ||
-            CKFFClampVertexBufferPointSize(pointSize) != pointSize) {
-            RecordDrawApproximation(CKRST_DIAG_APPROX_POINT_SIZE);
-        }
+        // Backend contexts expand these points through PreparePrimitive.
+        if (NeedsVertexBufferPointExpansion(dpFlags))
+            return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     }
     CKFFProgramPreparation preparation;
     const CKFFProgramPrepareStatus prepareStatus =
