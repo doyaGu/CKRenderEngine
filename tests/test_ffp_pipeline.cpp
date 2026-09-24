@@ -386,9 +386,42 @@ void DrawVertexBufferApproximatesStencilWriteMasks() {
                              CKRST_STENCIL_PASS(VXSTENCILOP_KEEP)) &&
                   (context.Log.LastState.Mid & CKRST_STENCIL_ENABLE) != 0,
               "A zero stencil write mask approximates to KEEP operations with the test still enabled");
-    TestCheck(ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 2,
-              "Zero stencil write mask approximation must be counted");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 1,
+              "Zero stencil write mask is exact with KEEP operations");
 
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferPreservesSupportedStencilWriteMasks() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    context.AdditionalFeatures = CKRST_DEVCAPS_STENCIL_WRITE_MASK;
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+    ffp.SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+    ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
+
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "DrawVertexBuffer with supported partial stencil mask");
+    TestCheck(context.Log.LastStencilWriteMask == 0x0F &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "supported partial mask reaches the backend unchanged");
+
+    ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "DrawVertexBuffer with supported zero stencil mask");
+    TestCheck(context.Log.LastStencilWriteMask == 0 &&
+                  (context.Log.LastState.Mid & CKRST_STENCIL_PASS(0xF)) ==
+                      CKRST_STENCIL_PASS(VXSTENCILOP_REPLACE) &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "native zero mask keeps its requested stencil operation");
     ffp.Shutdown();
 }
 
@@ -3824,6 +3857,8 @@ int main() {
               &MissingShaderPayloadFamilyFailsInitialization);
     tests.Run("DrawVertexBuffer approximates stencil write masks",
               &DrawVertexBufferApproximatesStencilWriteMasks);
+    tests.Run("DrawVertexBuffer preserves supported stencil write masks",
+              &DrawVertexBufferPreservesSupportedStencilWriteMasks);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
     tests.Run("Ignored render states report diagnostics",

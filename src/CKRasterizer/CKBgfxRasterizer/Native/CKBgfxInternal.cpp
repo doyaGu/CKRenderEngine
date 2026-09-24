@@ -1030,9 +1030,8 @@ uint32_t CKBgfxBuildFrontStencil(CKDrawState State, CKDWORD ref, CKDWORD readMas
     CKDWORD failOp = (mid >> 14) & 0xF;
     CKDWORD zfailOp = (mid >> 18) & 0xF;
     CKDWORD passOp = (mid >> 22) & 0xF;
-    // bgfx exposes the compare read mask but not the D3D stencil write mask.
-    // Preserve test semantics and approximate masked writes only where the
-    // public stencil state can do so without changing the compare mask.
+    // The front mask controls comparisons; bgfx uses the back mask as the
+    // write mask, even when front state is applied to both faces.
     if ((writeMask & 0xFF) == 0)
     {
         failOp = VXSTENCILOP_KEEP;
@@ -1068,7 +1067,7 @@ uint32_t CKBgfxBuildBackStencil(CKDrawState State, CKDWORD ref, CKDWORD readMask
     CKDWORD passOp  = (hi >> 12) & 0xF;
 
     if (func == 0 && failOp == 0 && zfailOp == 0 && passOp == 0)
-        return BGFX_STENCIL_NONE;
+        return BGFX_STENCIL_FUNC_RMASK(writeMask);
     if ((writeMask & 0xFF) == 0)
     {
         failOp = VXSTENCILOP_KEEP;
@@ -1082,7 +1081,7 @@ uint32_t CKBgfxBuildBackStencil(CKDrawState State, CKDWORD ref, CKDWORD readMask
     stencil |= CKBgfxStencilFailZ(zfailOp);
     stencil |= CKBgfxStencilPassZ(passOp);
     stencil |= BGFX_STENCIL_FUNC_REF(ref);
-    stencil |= BGFX_STENCIL_FUNC_RMASK(readMask);
+    stencil |= BGFX_STENCIL_FUNC_RMASK(writeMask);
 
     return stencil;
 }

@@ -294,8 +294,8 @@ void CKFixedFunctionPipeline::RecordDrawApproximation(CKRST_DIAGNOSTIC code)
     }
 }
 
-// bgfx has no stencil write mask. A write mask of 0 with writing operations
-// becomes KEEP operations; a partial mask writes every bit (spec appendix C).
+// A backend without stencil write-mask support can preserve a zero mask with
+// KEEP operations. Only partial masks require an approximation on that path.
 CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
                                                     CKDWORD *effectiveWriteMask) const
 {
@@ -316,8 +316,10 @@ CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
         m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILPASS) != VXSTENCILOP_KEEP;
     if (!stencilWrites || writeMask == 0xffu)
         return FALSE;
-    if (writeMask == 0x00u)
+    if (writeMask == 0x00u) {
         *forceKeepOps = TRUE;
+        return FALSE;
+    }
     return TRUE;
 }
 

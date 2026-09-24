@@ -271,6 +271,8 @@ static void TestBgfxStencilWriteMaskEncoding()
     TEST_ASSERT(full != BGFX_STENCIL_NONE, "enabled stencil produces bgfx stencil state");
     TEST_ASSERT(ExtractStencilRef(full) == 0xAB, "full write mask keeps low 8-bit ref");
     TEST_ASSERT(ExtractStencilRMask(full) == 0xFF, "read mask is encoded separately");
+    TEST_ASSERT(CKBgfxBuildBackStencil(enabled, 0xAB, 0xFF, 0xFF) == BGFX_STENCIL_NONE,
+                "full write mask uses the default back stencil state");
 
     uint32_t disabled = CKBgfxBuildFrontStencil(CKDrawState(), 0xAB, 0xFF, 0xFF);
     TEST_ASSERT(disabled == BGFX_STENCIL_NONE, "disabled stencil clears bgfx stencil state");
@@ -299,12 +301,18 @@ static void TestBgfxStencilWriteMaskEncoding()
                 "matching read/write mask constrains ref to writable bits");
     TEST_ASSERT(ExtractStencilRMask(masked) == 0x0F,
                 "matching read/write mask keeps compare mask");
+    TEST_ASSERT(ExtractStencilRMask(CKBgfxBuildBackStencil(enabled, 0xAB, 0x0F, 0x0F)) == 0x0F,
+                "back mask encodes the stencil write mask");
 
     uint32_t partial = CKBgfxBuildFrontStencil(enabled, 0xAB, 0xF0, 0x0F);
     TEST_ASSERT(ExtractStencilRef(partial) == 0xAB,
                 "partial write mask with distinct read mask keeps compare ref");
     TEST_ASSERT(ExtractStencilRMask(partial) == 0xF0,
                 "partial write mask with distinct read mask keeps read mask");
+    TEST_ASSERT(ExtractStencilRMask(CKBgfxBuildBackStencil(enabled, 0xAB, 0xF0, 0x0F)) == 0x0F,
+                "write mask remains independent of the read mask");
+    TEST_ASSERT(ExtractStencilRMask(CKBgfxBuildBackStencil(enabled, 0xAB, 0xFF, 0x00)) == 0x00,
+                "zero write mask suppresses all stencil writes");
 }
 
 static void TestTextureVolumeDescriptorDefaults()

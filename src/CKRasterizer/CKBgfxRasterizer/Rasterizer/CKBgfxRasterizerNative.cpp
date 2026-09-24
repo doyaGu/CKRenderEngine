@@ -440,6 +440,7 @@ CKERROR CKBgfxRasterizerContext::Init(const CKRasterizerInitParameters *Desc)
                               CKRST_DEVCAPS_BUFFER_UPDATE |
                               CKRST_DEVCAPS_TEXTURE_UPDATE |
                               CKRST_DEVCAPS_BLEND_EQUATION |
+                              CKRST_DEVCAPS_STENCIL_WRITE_MASK |
                               CKRST_DEVCAPS_TEXTURE_CUBE;
         if (caps->supported & BGFX_CAPS_TEXTURE_READ_BACK)
             m_CapsDesc.Features |= CKRST_DEVCAPS_TEXTURE_READBACK;

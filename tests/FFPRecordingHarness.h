@@ -165,9 +165,11 @@ public:
     CKBOOL FailDestroyObject = FALSE;
     CKDWORD FailDestroyObjectAfter = 0;
     CKBOOL RequireIntermediateTarget = FALSE;
+    uint64_t AdditionalFeatures = 0;
     mutable CKRasterizerDeviceCaps ReportedCaps;
     const CKRasterizerDeviceCaps &GetCaps() const override {
         ReportedCaps = CKRecordingBackend::GetCaps();
+        ReportedCaps.Features |= AdditionalFeatures;
         ReportedCaps.RequiresIntermediateTarget = RequireIntermediateTarget;
         if (RequireIntermediateTarget && !ReportedCaps.MaxTextureSize) ReportedCaps.MaxTextureSize = 4096;
         return ReportedCaps;

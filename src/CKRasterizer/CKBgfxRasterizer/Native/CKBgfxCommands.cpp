@@ -220,10 +220,6 @@ CKERROR CKBgfxRasterizerContext::ApplyPipelineState(const CKFFPipelineState &sta
     const CKDWORD stencilRef = state.StencilRef & 0xFF;
     const CKDWORD stencilReadMask = state.StencilReadMask & 0xFF;
     const CKDWORD stencilWriteMask = state.StencilWriteMask & 0xFF;
-    // bgfx has no stencil write mask (appendix C): the pipeline approximates
-    // partial masks before the draw reaches the backend.
-    if ((state.State.Mid & CKRST_STENCIL_ENABLE) && stencilWriteMask != 0x00 && stencilWriteMask != 0xFF)
-        return CKERR_NOTIMPLEMENTED;
     m_PointSize = (CKDWORD)(state.PointSize + 0.5f);
     m_CachedDrawState = state.State;
     m_CachedBgfxState = bgfxState;

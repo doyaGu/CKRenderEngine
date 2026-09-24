@@ -2445,6 +2445,63 @@ void CheckIndependentAttachmentClears(Backend &b)
     printf("  independent rectangular depth/stencil clears: passed single-sample and MSAA\n");
 }
 
+void CheckStencilWriteMasks(Backend &b)
+{
+    auto *ctx = b.Context;
+    const CKDWORD approximationsBefore =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_STENCIL_WRITE_MASK];
+    SetDiffuseState(ctx);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILMASK, 0xFF);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILFAIL, VXSTENCILOP_KEEP);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILZFAIL, VXSTENCILOP_KEEP);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 0xA5);
+
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kRed), "seed all stencil bits");
+    ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 0xF0);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kBlue), "write low stencil nibble only");
+    ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 0xA0);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_KEEP);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen),
+              "compare preserved high stencil nibble");
+    EndFrame(ctx);
+    Pixels pixels;
+    ReadBackbuffer(ctx, pixels);
+    ExpectCenter(pixels, 0, 255, 0, "partial stencil write mask preserves unselected bits");
+
+    ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_ALWAYS);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 0xA0);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH | CKRST_CTXCLEAR_STENCIL);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kRed), "seed stencil before zero mask");
+    ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 0xFF);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kBlue), "draw with zero stencil write mask");
+    ctx->SetRenderState(VXRENDERSTATE_STENCILFUNC, VXCMP_EQUAL);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILREF, 0xA0);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_KEEP);
+    TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen),
+              "compare stencil after zero write mask");
+    EndFrame(ctx);
+    ReadBackbuffer(ctx, pixels);
+    ExpectCenter(pixels, 0, 255, 0, "zero stencil write mask preserves all bits");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_STENCIL_WRITE_MASK] ==
+                  approximationsBefore,
+              "both backends submit stencil masks without approximation diagnostics");
+
+    ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0xFF);
+    printf("  partial and zero stencil write masks preserve stencil bits: passed\n");
+}
+
 // ---------------------------------------------------------------------------
 // Caps, resize and asynchronous readback
 // ---------------------------------------------------------------------------
@@ -2915,6 +2972,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckMemoryCopyPixelIdentity(backend);
         CheckScaledTextureCopies(backend);
         CheckIndependentAttachmentClears(backend);
+        CheckStencilWriteMasks(backend);
         CheckOrderedReadbacks(backend);
         CheckResizeAndReadback(backend);
         CheckPresentation(backend);
