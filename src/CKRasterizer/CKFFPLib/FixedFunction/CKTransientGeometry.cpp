@@ -3,9 +3,11 @@
 #include "CKRasterizer.h"
 #include "CKVertexLayoutCache.h"
 #include "CKFFConstants.h"
+#include "CKFFStateDesc.h"
 #include "CKRenderFrameCostStats.h"
 
 #include <math.h>
+#include <cmath>
 
 static bool SupportsWrapTopology(VXPRIMITIVETYPE primType) {
     return primType == VX_TRIANGLELIST ||
@@ -312,6 +314,168 @@ CKTransientGeometry::CKTransientGeometry()
 
 CKTransientGeometry::~CKTransientGeometry() {
     Clear();
+}
+
+static void PointFillTransform(const VxMatrix &matrix, const float input[4], float output[4]) {
+    for (int column = 0; column < 4; ++column) {
+        output[column] = input[0] * matrix[0][column] +
+                         input[1] * matrix[1][column] +
+                         input[2] * matrix[2][column] +
+                         input[3] * matrix[3][column];
+    }
+}
+
+static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
+                                    const CKFFPointFillCullParams &params,
+                                    double &x, double &y, bool &outsideClip)
+{
+    outsideClip = false;
+    float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    memcpy(position, vertex, (formatFlags & CKFF_VF_POSITIONT) ? 16 : 12);
+    if (formatFlags & CKFF_VF_POSITIONT) {
+        if (!(position[3] > 0.0f) || !std::isfinite(position[0]) ||
+            !std::isfinite(position[1]))
+            return false;
+        x = position[0];
+        y = position[1];
+        return true;
+    }
+
+    CKDWORD offset = 12;
+    if (formatFlags & CKFF_VF_NORMAL)
+        offset += 12;
+    if (formatFlags & CKFF_VF_TWEENPOSITION) {
+        if (params.BlendMode == CKFF_VERTEX_BLEND_TWEEN) {
+            float tween[3];
+            memcpy(tween, vertex + offset, sizeof(tween));
+            for (int i = 0; i < 3; ++i)
+                position[i] += (tween[i] - position[i]) * params.TweenFactor;
+        }
+        offset += 12;
+    }
+    if (formatFlags & CKFF_VF_TWEENNORMAL)
+        offset += 12;
+
+    float worldPosition[4];
+    if (params.BlendMode == CKFF_VERTEX_BLEND_NORMAL) {
+        float weights[3] = {};
+        if (formatFlags & CKFF_VF_BLENDWEIGHT) {
+            memcpy(weights, vertex + offset, sizeof(weights));
+            offset += 12;
+        }
+        const CKBYTE *indices = (formatFlags & CKFF_VF_BLENDINDEX)
+            ? vertex + offset : nullptr;
+        memset(worldPosition, 0, sizeof(worldPosition));
+        float remaining = 1.0f;
+        for (CKDWORD slot = 0; slot <= params.BlendCount; ++slot) {
+            float weight = remaining;
+            if (slot != params.BlendCount) {
+                weight = weights[slot];
+                remaining -= weight;
+            }
+            CKDWORD matrixIndex = params.IndexedBlend && indices ? indices[slot] : slot;
+            if (matrixIndex >= 4)
+                matrixIndex = 3;
+            float transformed[4];
+            PointFillTransform(params.BlendMatrices[matrixIndex], position, transformed);
+            for (int component = 0; component < 4; ++component)
+                worldPosition[component] += transformed[component] * weight;
+        }
+    } else {
+        PointFillTransform(params.World, position, worldPosition);
+    }
+
+    float clip[4];
+    PointFillTransform(params.ViewProjection, worldPosition, clip);
+    if (!(clip[3] > 0.0f) || !std::isfinite(clip[0]) ||
+        !std::isfinite(clip[1]) || !std::isfinite(clip[2]) ||
+        !std::isfinite(clip[3]))
+        return false;
+    outsideClip = clip[0] < -clip[3] || clip[0] > clip[3] ||
+                  clip[1] < -clip[3] || clip[1] > clip[3] ||
+                  clip[2] < 0.0f || clip[2] > clip[3];
+    x = double(clip[0]) / clip[3];
+    y = double(clip[1]) / clip[3];
+    return std::isfinite(x) && std::isfinite(y);
+}
+
+void CKTransientGeometry::CullPointFilledTriangles(
+    const CKFFPointFillCullParams &params, CKBOOL *approximate)
+{
+    if (approximate)
+        *approximate = FALSE;
+    if (params.CullMode == VXCULL_NONE || m_VertexData.IsEmpty())
+        return;
+
+    const CKDWORD elementCount = m_IndexCount ? m_IndexCount : m_VertexCount;
+    if (elementCount > 0x7fffffffu / m_VertexStride) {
+        if (approximate)
+            *approximate = TRUE;
+        return;
+    }
+    XArray<CKBYTE> kept;
+    kept.Resize((int)(elementCount * m_VertexStride));
+    CKDWORD keptCount = 0;
+    for (CKDWORD first = 0; first + 2 < elementCount; first += 3) {
+        CKDWORD source[3];
+        double x[3], y[3];
+        bool projected = true;
+        bool outsideClip = false;
+        for (int corner = 0; corner < 3; ++corner) {
+            source[corner] = m_IndexCount
+                ? (m_Index32 ? ((const CKDWORD *)m_IndexData.Begin())[first + corner]
+                             : ((const CKWORD *)m_IndexData.Begin())[first + corner])
+                : first + corner;
+            if (source[corner] >= m_VertexCount) {
+                if (approximate)
+                    *approximate = TRUE;
+                return;
+            } else {
+                bool vertexOutsideClip = false;
+                if (!PointFillScreenPosition(m_VertexData.Begin() +
+                    source[corner] * m_VertexStride, m_FormatFlags, params,
+                    x[corner], y[corner], vertexOutsideClip)) {
+                    projected = false;
+                }
+                outsideClip = outsideClip || vertexOutsideClip;
+            }
+        }
+
+        bool culled = false;
+        if (!projected || outsideClip) {
+            if (approximate)
+                *approximate = TRUE;
+        }
+        if (projected && !outsideClip) {
+            const double area = (x[1] - x[0]) * (y[2] - y[0]) -
+                                (y[1] - y[0]) * (x[2] - x[0]);
+            if (area != 0.0 && std::isfinite(area)) {
+                bool clockwise = (m_FormatFlags & CKFF_VF_POSITIONT)
+                    ? area > 0.0 : area < 0.0;
+                if (params.InverseWinding)
+                    clockwise = !clockwise;
+                culled = params.CullMode == VXCULL_CW ? clockwise : !clockwise;
+            } else if (approximate) {
+                *approximate = TRUE;
+            }
+        }
+        if (culled)
+            continue;
+        for (int corner = 0; corner < 3; ++corner) {
+            memcpy(kept.Begin() + keptCount * m_VertexStride,
+                   m_VertexData.Begin() + source[corner] * m_VertexStride,
+                   m_VertexStride);
+            ++keptCount;
+        }
+    }
+    kept.Resize((int)(keptCount * m_VertexStride));
+    m_VertexData.Swap(kept);
+    m_VertexCount = keptCount;
+    m_LastVertexBytes = keptCount * m_VertexStride;
+    m_IndexData.Resize(0);
+    m_IndexCount = 0;
+    m_LastIndexBytes = 0;
+    m_Index32 = FALSE;
 }
 
 void CKTransientGeometry::Clear() {

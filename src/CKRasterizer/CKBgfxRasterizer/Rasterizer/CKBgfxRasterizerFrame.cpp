@@ -464,6 +464,8 @@ void CKBgfxRasterizerContext::ClearNativeFFPrograms()
 CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
 {
     const CKFFDraw &draw = m_FFP.GetDraw();
+    if (draw.SkipSubmit)
+        return TRUE;
     const CKFFProgramBinding binding = ResolveNativeFFProgram(draw.ShaderKey);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
     if (!binding.Program || !vertexLayout)
@@ -599,8 +601,7 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD VB
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
-        ((Type == VX_TRIANGLESTRIP || Type == VX_TRIANGLEFAN) &&
-         m_FFP.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT) ||
+        m_FFP.NeedsVertexBufferPointFillExpansion(Type) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;
@@ -659,8 +660,7 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWORD 
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
-        ((Type == VX_TRIANGLESTRIP || Type == VX_TRIANGLEFAN) &&
-         m_FFP.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT) ||
+        m_FFP.NeedsVertexBufferPointFillExpansion(Type) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;

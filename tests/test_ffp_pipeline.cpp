@@ -467,7 +467,6 @@ void IgnoredRenderStatesReportDiagnostics() {
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
         {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
         {VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE, FALSE, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING},
-        {VXRENDERSTATE_FILLMODE, VXFILL_POINT, VXFILL_SOLID, CKRST_DIAG_APPROX_FILLMODE_POINT},
     };
 
     FFPRecordingDriver driver;
@@ -498,6 +497,25 @@ void IgnoredRenderStatesReportDiagnostics() {
               "Ignored or approximated render states must keep submitting draws");
     TestCheck(allReported,
               "Each ignored or approximated render state must report exactly its own diagnostic");
+
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "Point-filled triangles without culling use exact point topology");
+    const float largePoint = 2.0f;
+    CKDWORD largePointBits = 0;
+    memcpy(&largePointBits, &largePoint, sizeof(largePointBits));
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, largePointBits);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawApproximationMask() ==
+                      (1ull << CKRST_DIAG_APPROX_FILLMODE_POINT),
+              "Larger point-filled triangles retain the point-size diagnostic");
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, 0x3f800000u);
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
 
     const CKBOOL clean = ffp.DrawVertexBuffer(
         VX_TRIANGLELIST,

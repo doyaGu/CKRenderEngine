@@ -21,6 +21,18 @@ struct CKFFPointSpriteParams {
     float ViewportHeight;
 };
 
+struct CKFFPointFillCullParams {
+    VxMatrix World;
+    VxMatrix ViewProjection;
+    VxMatrix BlendMatrices[4];
+    CKDWORD BlendMode;
+    CKDWORD BlendCount;
+    CKBOOL IndexedBlend;
+    float TweenFactor;
+    CKDWORD CullMode;
+    CKBOOL InverseWinding;
+};
+
 class CKTransientGeometry {
 public:
     CKTransientGeometry();
@@ -41,6 +53,12 @@ public:
         const CKFFPointSpriteParams *pointParams = nullptr,
         const CKBYTE *texcoordComponentCounts = nullptr,
         const CKDWORD *wrapModes = nullptr);
+
+    // Point fill uses point topology, which has no hardware face culling.
+    // Cull the source triangles before that topology conversion. The output
+    // flag reports triangles that cross clip planes or cannot be classified.
+    void CullPointFilledTriangles(const CKFFPointFillCullParams &params,
+                                  CKBOOL *approximate);
 
     CKDWORD GetFormatFlags() const { return m_FormatFlags; }
     CKDWORD GetVertexCount() const { return m_VertexCount; }

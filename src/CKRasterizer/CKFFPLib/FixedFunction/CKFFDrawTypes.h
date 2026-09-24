@@ -85,13 +85,14 @@ struct CKFFDraw {
     CKDWORD IndexCount;
     CKDWORD SortKey;
     CKFFDrawSource Source;
+    CKBOOL SkipSubmit;
 
     CKFFDraw()
         : Constants(NULL), Marker(NULL), VertexFormat(0),
           VertexBuffer(0), Vertices(NULL),
           VertexStride(0), StartVertex(0), VertexCount(0), IndexBuffer(0),
           Indices(NULL), Index32(FALSE), StartIndex(0), IndexCount(0),
-          SortKey(0), Source(CKFF_DRAW_PRIMITIVE) {}
+          SortKey(0), Source(CKFF_DRAW_PRIMITIVE), SkipSubmit(FALSE) {}
 };
 
 struct CKFFUniformEmissionContext {

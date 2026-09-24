@@ -1047,7 +1047,6 @@ void TestApproximationsKeepDrawing()
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
         {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
-        {"point fill mode", CKRST_DIAG_APPROX_FILLMODE_POINT, &SetupFillPoint},
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
     };
 
@@ -1148,6 +1147,36 @@ void TestApproximationsKeepDrawing()
         TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_WRAP) == 0,
                   "WRAP0 without texture coordinates needs no adjustment");
         TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete VB");
+    }
+
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        SetupFillPoint(ctx, 0);
+        TestCheck(ctx->BeginScene(), "begin point-fill culling scene");
+        DrawTexturedTriangle(ctx);
+        TestCheck(CountDraws(f) == 0,
+                  "A culled point-filled triangle must not submit points");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_FILLMODE_POINT) == 0,
+                  "In-frustum point-fill culling must be exact");
+        ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+        DrawTexturedTriangle(ctx);
+        TestCheck(CountDraws(f) == 1,
+                  "Point fill without culling must submit the triangle vertices");
+        ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
+        VxVector clippedPositions[3] = {
+            VxVector(0, 0, 0), VxVector(1, 0, 0), VxVector(0, 2, 0)};
+        VxDrawPrimitiveData clipped = {};
+        clipped.VertexCount = 3;
+        clipped.Flags = CKRST_DP_TR_V;
+        clipped.PositionPtr = clippedPositions;
+        clipped.PositionStride = sizeof(VxVector);
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &clipped),
+                  "draw triangle crossing a point-fill clip plane");
+        TestCheck(CountDraws(f) == 2 &&
+                  Diag(f.Context, CKRST_DIAG_APPROX_FILLMODE_POINT) == 1,
+                  "clip-plane crossing stays drawable and reports approximation");
+        TestCheck(ctx->EndScene(), "end point-fill culling scene");
     }
 }
 

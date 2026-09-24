@@ -1123,6 +1123,214 @@ void CheckVertexBufferPointFilledStripsAndFans(Backend &b)
     printf("  point-filled VB strips and fans preserve per-triangle vertices: passed\n");
 }
 
+void CheckPointFillTriangleCulling(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    const CKDWORD format = CKRST_DP_TR_VC;
+    const VxVector positions[3] = {
+        VxVector(-0.5f, -0.5f, 0.5f), VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(-0.5f, 0.5f, 0.5f)};
+    const CKDWORD colors[3] = {0xffff0000u, 0xffff0000u, 0xffff0000u};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = format;
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    XArray<CKBYTE> vertices;
+    vertices.Resize(stride * 3);
+    memset(vertices.Begin(), 0, vertices.Size());
+    for (int i = 0; i < 3; ++i) {
+        CKBYTE *vertex = vertices.Begin() + i * stride;
+        memcpy(vertex + layout.PositionOffset, &positions[i], sizeof(VxVector));
+        memcpy(vertex + layout.DiffuseOffset, &colors[i], sizeof(CKDWORD));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 3;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.Begin(), &vb),
+              "create point-fill culling VB");
+    const CKWORD triangleIndices[3] = {0, 1, 2};
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 3;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, triangleIndices, &ib),
+              "create point-fill culling IB");
+
+    auto redCount = [](const Pixels &pixels) {
+        int count = 0;
+        for (int y = 0; y < pixels.Height; ++y) {
+            for (int x = 0; x < pixels.Width; ++x) {
+                CKBYTE bgra[4];
+                GetPixel(pixels, x, y, bgra);
+                if (bgra[2] > 180 && bgra[1] < 50 && bgra[0] < 50)
+                    ++count;
+            }
+        }
+        return count;
+    };
+    auto render = [&](CKDWORD fill, CKDWORD cull, CKBOOL inverse,
+                      int source, Pixels &pixels) {
+        ctx->SetRenderState(VXRENDERSTATE_FILLMODE, fill);
+        ctx->SetRenderState(VXRENDERSTATE_CULLMODE, cull);
+        ctx->SetRenderState(VXRENDERSTATE_INVERSEWINDING, inverse);
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            if (source == 1)
+                TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0),
+                          "draw point-fill culling VB");
+            else if (source == 2)
+                TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3),
+                          "draw point-fill culling VBIB");
+            else
+                TestCheckf(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                           "draw point-fill culling primitive fill=%u cull=%u",
+                           (unsigned)fill, (unsigned)cull);
+        }, pixels);
+    };
+    Pixels none;
+    render(VXFILL_POINT, VXCULL_NONE, FALSE, 0, none);
+    TestCheck(redCount(none) >= 3, "unculled point fill draws all triangle vertices");
+    int visibleFaces = 0;
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point, inverted, vbPixels, ibPixels;
+        render(VXFILL_SOLID, cull, FALSE, 0, solid);
+        render(VXFILL_POINT, cull, FALSE, 0, point);
+        const bool visible = redCount(solid) > 0;
+        visibleFaces += visible ? 1 : 0;
+        TestCheck((redCount(point) > 0) == visible,
+                  "point fill culls the same face as solid triangles");
+        render(VXFILL_POINT, cull, TRUE, 0, inverted);
+        TestCheck((redCount(inverted) > 0) != visible,
+                  "inverse winding reverses point-fill face culling");
+        render(VXFILL_POINT, cull, FALSE, 1, vbPixels);
+        render(VXFILL_POINT, cull, FALSE, 2, ibPixels);
+        TestCheck(vbPixels.Data.Size() == point.Data.Size() &&
+                  memcmp(vbPixels.Data.Begin(), point.Data.Begin(), point.Data.Size()) == 0,
+                  "point-filled VB triangles match transient face culling");
+        TestCheck(ibPixels.Data.Size() == point.Data.Size() &&
+                  memcmp(ibPixels.Data.Begin(), point.Data.Begin(), point.Data.Size()) == 0,
+                  "point-filled VBIB triangles match transient face culling");
+    }
+    TestCheck(visibleFaces == 1, "opposite cull modes select opposite triangle faces");
+
+    float screenPositions[3][4] = {
+        {16.0f, 48.0f, 0.5f, 1.0f}, {48.0f, 48.0f, 0.5f, 1.0f},
+        {16.0f, 16.0f, 0.5f, 1.0f}};
+    VxDrawPrimitiveData screenData = {};
+    screenData.VertexCount = 3;
+    screenData.Flags = CKRST_DP_CL_VCT;
+    screenData.PositionPtr = screenPositions;
+    screenData.PositionStride = sizeof(screenPositions[0]);
+    screenData.ColorPtr = const_cast<CKDWORD *>(colors);
+    screenData.ColorStride = sizeof(CKDWORD);
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point;
+        for (int fill = 0; fill < 2; ++fill) {
+            ctx->SetRenderState(VXRENDERSTATE_FILLMODE,
+                                fill ? VXFILL_POINT : VXFILL_SOLID);
+            ctx->SetRenderState(VXRENDERSTATE_CULLMODE, cull);
+            ctx->SetRenderState(VXRENDERSTATE_INVERSEWINDING, FALSE);
+            RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &screenData),
+                          "draw POSITIONT point-fill culling primitive");
+            }, fill ? point : solid);
+        }
+        TestCheck((redCount(point) > 0) == (redCount(solid) > 0),
+                  "POSITIONT point fill culls the same face as solid triangles");
+    }
+
+    VxMatrix mirror;
+    Vx3DMatrixIdentity(mirror);
+    mirror[0][0] = -1.0f;
+    TestCheck(ctx->SetTransformMatrix(VXMATRIX_WORLD, mirror), "set matrix-blend world 0");
+    TestCheck(ctx->SetTransformMatrix(VXMATRIX_WORLDMATRIX(1), mirror),
+              "set matrix-blend world 1");
+    struct BlendPosition {
+        VxVector Position;
+        float Weight;
+        CKDWORD Indices;
+    } blendPositions[3];
+    for (int i = 0; i < 3; ++i) {
+        blendPositions[i].Position = positions[i];
+        blendPositions[i].Weight = 0.5f;
+        blendPositions[i].Indices = 0x00000100u;
+    }
+    VxDrawPrimitiveData blendData = {};
+    blendData.VertexCount = 3;
+    blendData.Flags = CKRST_DP_TR_VC | CKRST_DP_WEIGHTS1 | CKRST_DP_MATRIXPAL;
+    blendData.PositionPtr = blendPositions;
+    blendData.PositionStride = sizeof(BlendPosition);
+    blendData.ColorPtr = const_cast<CKDWORD *>(colors);
+    blendData.ColorStride = sizeof(CKDWORD);
+    ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+    Pixels blendUnculled;
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &blendData),
+                  "draw unculled matrix-blended triangle");
+    }, blendUnculled);
+    TestCheck(redCount(blendUnculled) > 0 &&
+                  PixelNear(blendUnculled, 44, 20, 255, 0, 0),
+              "indexed matrix blend uses palette slot one");
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point;
+        for (int fill = 0; fill < 2; ++fill) {
+            ctx->SetRenderState(VXRENDERSTATE_FILLMODE,
+                                fill ? VXFILL_POINT : VXFILL_SOLID);
+            ctx->SetRenderState(VXRENDERSTATE_CULLMODE, cull);
+            RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &blendData),
+                          "draw matrix-blended point-fill culling primitive");
+            }, fill ? point : solid);
+        }
+        TestCheckf((redCount(point) > 0) == (redCount(solid) > 0),
+                   "matrix-blended point fill culls transformed face cull=%u solid=%d point=%d",
+                   (unsigned)cull, redCount(solid), redCount(point));
+    }
+    Vx3DMatrixIdentity(mirror);
+    ctx->SetTransformMatrix(VXMATRIX_WORLD, mirror);
+    ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, FALSE);
+
+    VxVector tweenPositions[3] = {
+        VxVector(-positions[0].x, positions[0].y, positions[0].z),
+        VxVector(-positions[1].x, positions[1].y, positions[1].z),
+        VxVector(-positions[2].x, positions[2].y, positions[2].z)};
+    ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    ctx->SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatBits(1.0f));
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point;
+        for (int fill = 0; fill < 2; ++fill) {
+            ctx->SetRenderState(VXRENDERSTATE_FILLMODE,
+                                fill ? VXFILL_POINT : VXFILL_SOLID);
+            ctx->SetRenderState(VXRENDERSTATE_CULLMODE, cull);
+            RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                TestCheck(DrawTweenTriangle(ctx, positions, tweenPositions, colors),
+                          "draw tweened point-fill culling primitive");
+            }, fill ? point : solid);
+        }
+        TestCheck((redCount(point) > 0) == (redCount(solid) > 0),
+                  "tweened point fill culls the interpolated face");
+    }
+
+    ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_DISABLE);
+    ctx->SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatBits(0.0f));
+    ctx->SetRenderState(VXRENDERSTATE_INVERSEWINDING, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete point-fill culling IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete point-fill culling VB");
+    printf("  point-filled triangle face culling matches solid triangles and VB paths: passed\n");
+}
+
 void CheckVertexBufferWrapPixels(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
@@ -2624,6 +2832,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckVertexBufferPointSizePixels(backend);
         CheckLineTopologyWithPointFill(backend);
         CheckVertexBufferPointFilledStripsAndFans(backend);
+        CheckPointFillTriangleCulling(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);

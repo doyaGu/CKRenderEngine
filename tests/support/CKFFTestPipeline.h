@@ -211,6 +211,8 @@ private:
         if (!m_Device)
             return FinishDraw(CKERR_INVALIDOPERATION, 0);
         const CKFFDraw &draw = GetDraw();
+        if (draw.SkipSubmit)
+            return TRUE;
         const CKFFProgramBinding binding = m_Shaders.GetProgram(m_Device, draw.ShaderKey);
         const CKDWORD layout = GetLayout(draw.VertexFormat);
         if (!binding.Program || !layout)
