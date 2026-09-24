@@ -31,6 +31,8 @@ The default rasterizer is SDL GPU. bgfx is available only when explicitly enable
 
 Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance.
 
+The [fixed-function approximation checklist](docs/CKRasterizer-fixed-function-coverage.md) tracks the remaining legacy render states across SDL GPU and bgfx.
+
 ## Support scope
 
 The instructions in this document describe CKRenderEngine's `sdl` branch. That branch is continuously built through [Ballanced](https://github.com/doyaGu/Ballanced) on Windows, Linux, and macOS, including backend runtime gates for Direct3D, OpenGL/OpenGL ES, Vulkan, and Metal where applicable.
