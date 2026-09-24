@@ -1382,6 +1382,24 @@ void CheckBorderFiltering(Backend &b)
     }, pixels);
     ExpectCenter(pixels, 138, 90, 125,
                  "seventeenth linear border color blends with the edge texel");
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEARMIPLINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 3);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv),
+                      "sample a distinct one-level mip border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv),
+                  "sample seventeenth one-level mip border color");
+    }, pixels);
+    ExpectCenter(pixels, 138, 90, 125,
+                 "one-level texture clamps its mip selection before border filtering");
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 0);
     ctx->SetTexture(textures.MirrorVolume, 0);
     ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
     VxMatrix volumeTransform;
@@ -1403,6 +1421,54 @@ void CheckBorderFiltering(Backend &b)
     }, pixels);
     ExpectCenter(pixels, 138, 90, 125,
                  "seventeenth linear volume border color blends with the edge texel");
+    ctx->SetTexture(textures.Transform, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 4);
+    float anisoUv[3][4] = {
+        {-100.0f,0.5f,0,0}, {-80.0f,0.5f,0,0}, {-90.0f,0.5f,0,0}
+    };
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, anisoUv),
+                      "sample a distinct anisotropic border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, anisoUv),
+                  "sample seventeenth anisotropic border color");
+    }, pixels);
+    ExpectCenter(pixels, 20, 180, 250,
+                 "seventeenth anisotropic border color remains exact");
+    ctx->SetTexture(textures.MirrorVolume, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
+    ctx->SetTransformMatrix(VXMATRIX_TEXTURE0, volumeTransform);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEARMIPLINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESW, VXTEXTURE_ADDRESSCLAMP);
+    for (auto &coord : volumeUv) {
+        coord[0] = 0.5f;
+        coord[1] = 0.0f;
+    }
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, volumeUv),
+                      "sample a distinct volume mip border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, volumeUv),
+                  "sample seventeenth volume mip border color");
+    }, pixels);
+    ExpectCenter(pixels, 10, 90, 252,
+                 "seventeenth volume mip border color blends with blue");
     DestroyTextures(ctx, textures);
     SetDiffuseState(ctx);
     printf("  border filtering: edge purple / outside blue\n");
@@ -1651,9 +1717,33 @@ void CheckMipLodBias(Backend &b)
                   "draw border sampler with minimum mip");
     }, pixels);
     ExpectCenter(pixels, 0, 0, 255, "border sampler minimum mip");
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEARMIPLINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSCLAMP);
+    for (auto &coord : borderCoords) {
+        coord[0] = 0.0f;
+        coord[1] = 0.5f;
+    }
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, borderCoords),
+                      "sample a distinct mip border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, borderCoords),
+                  "sample seventeenth mip border color");
+    }, pixels);
+    ExpectCenter(pixels, 10, 90, 252,
+                 "seventeenth mip border color blends with the selected blue level");
     ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, 0);
     ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 0);
     ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSWRAP);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, 0);
     ctx->SetTexture(0, 0);
     TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete LOD bias texture");
     printf("  sampler LOD bias and minimum mip select and reset explicit levels: passed\n");

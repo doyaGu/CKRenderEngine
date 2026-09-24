@@ -229,8 +229,9 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
             ? sampler.MaxAnisotropy : 0;
         CKDWORD borderMask = 0;
         if ((m_ShaderTargetFlags & CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM) != 0 &&
-            sampler.MipFilter == CKRST_FILTER_NONE &&
-            !sampler.ShaderAnisotropy) {
+            (sampler.AddressU == CKRST_ADDRESS_BORDER ||
+             sampler.AddressV == CKRST_ADDRESS_BORDER ||
+             sampler.AddressW == CKRST_ADDRESS_BORDER)) {
             borderMask = (sampler.AddressU == CKRST_ADDRESS_BORDER ? 1u : 0u) |
                          (sampler.AddressV == CKRST_ADDRESS_BORDER ? 2u : 0u) |
                          (sampler.AddressW == CKRST_ADDRESS_BORDER ? 4u : 0u);

@@ -386,7 +386,8 @@ std::shared_ptr<bgfx::TextureHandle> CKBgfxRasterizerContext::GetDefaultTexture(
 }
 
 CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Binding, bgfx::UniformHandle Uniform,
-                                      bgfx::TextureHandle DefaultTexture, CKDWORD Texture, const CKSamplerDesc *Sampler)
+                                      bgfx::TextureHandle DefaultTexture, CKDWORD Texture,
+                                      const CKSamplerDesc *Sampler, bool FixedFunctionBorderSampling)
 {
     static int s_SetTextureLogCount = 0;
     const CKDWORD Stage = Binding.NativeSlot, Slot = Binding.Slot;
@@ -409,9 +410,7 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
         const bool hasBorder = Sampler->AddressU == CKRST_ADDRESS_BORDER ||
             Sampler->AddressV == CKRST_ADDRESS_BORDER ||
             Sampler->AddressW == CKRST_ADDRESS_BORDER;
-        const bool manualBorder = hasBorder &&
-            Sampler->MipFilter == CKRST_FILTER_NONE &&
-            !Sampler->ShaderAnisotropy;
+        const bool manualBorder = hasBorder && FixedFunctionBorderSampling;
         if (manualBorder) {
             if (nativeSampler.AddressU == CKRST_ADDRESS_BORDER)
                 nativeSampler.AddressU = CKRST_ADDRESS_CLAMP;
@@ -419,6 +418,13 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
                 nativeSampler.AddressV = CKRST_ADDRESS_CLAMP;
             if (nativeSampler.AddressW == CKRST_ADDRESS_BORDER)
                 nativeSampler.AddressW = CKRST_ADDRESS_CLAMP;
+            // Explicit shader levels need a linear clamp sample. The shader
+            // snaps nearest lookups to texel centers before applying the
+            // original min/mag and mip filter choices.
+            if (Sampler->MipFilter != CKRST_FILTER_NONE || Sampler->ShaderAnisotropy) {
+                nativeSampler.MinFilter = CKRST_FILTER_LINEAR;
+                nativeSampler.MagFilter = CKRST_FILTER_LINEAR;
+            }
         } else if (hasBorder) {
             const auto entry = m_BorderPalette.Resolve(Sampler->BorderColor);
             nativeSampler.BorderColor = entry.Index;
@@ -510,11 +516,17 @@ CKERROR CKBgfxRasterizerContext::Draw(const CKDrawCommand *Draw)
     if (err != CK_OK)
         return DrawFailed(err, "Draw.geometry");
 
+    float borderSamplers[CKFF_SAMPLER_SLOT_COUNT][4] = {};
     for (int i = 0; i < rec->Samplers.Size(); ++i) {
         const CKBgfxProgramRecord::SamplerBinding &sampler = rec->Samplers[i];
         const CKFFTextureSlot binding = Draw->Textures ? (*Draw->Textures)[sampler.Desc.Slot] : CKFFTextureSlot();
+        if (sampler.Desc.NativeSlot < CKFF_SAMPLER_SLOT_COUNT) {
+            const CKBgfxTextureRecord *texture = GetTexture(binding.Texture);
+            borderSamplers[sampler.Desc.NativeSlot][0] = float(texture ? texture->MipCount : 1u);
+            borderSamplers[sampler.Desc.NativeSlot][1] = float(binding.Sampler.MipFilter);
+        }
         err = BindTextureSlot(sampler.Desc, sampler.Handle, *sampler.DefaultTexture,
-            binding.Texture, &binding.Sampler);
+            binding.Texture, &binding.Sampler, rec->FixedFunctionBorderSampling);
         if (err != CK_OK)
             return DrawFailed(err, "Draw.texture");
     }
@@ -523,6 +535,12 @@ CKERROR CKBgfxRasterizerContext::Draw(const CKDrawCommand *Draw)
     // per-draw path allocation-free while restoring bgfx encoder state.
     for (int i = 0; i < rec->Uniforms.Size(); ++i) {
         const CKBgfxProgramRecord::UniformBinding &uniform = rec->Uniforms[i];
+        if (rec->FixedFunctionBorderSampling &&
+            uniform.Slot == CKRST_BLOCK_BORDER_SAMPLERS &&
+            uniform.Count == CKFF_SAMPLER_SLOT_COUNT) {
+            bgfx::setUniform(uniform.Handle, borderSamplers, (uint16_t)uniform.Count);
+            continue;
+        }
         const auto *source = Draw->Constants ? &(*Draw->Constants)[uniform.Slot].Bytes : nullptr;
         auto &scratch = m_ConstantData[uniform.Slot]; // declaration-sized, allocated at program creation
         const void *bytes = source && source->Size() >= scratch.Size()

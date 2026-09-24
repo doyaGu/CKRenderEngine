@@ -31,6 +31,7 @@ struct CKBgfxProgramRecord {
     bgfx::ProgramHandle Handle = BGFX_INVALID_HANDLE;
     CKDWORD VertexShader = 0;
     CKDWORD PixelShader = 0;
+    bool FixedFunctionBorderSampling = false;
     CKFFProgramDesc Interface;
     XClassArray<UniformBinding> Uniforms;
     XClassArray<SamplerBinding> Samplers;

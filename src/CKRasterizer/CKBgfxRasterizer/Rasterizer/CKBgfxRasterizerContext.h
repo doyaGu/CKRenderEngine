@@ -494,7 +494,8 @@ private:
     CKERROR BindTextureSlot(const CKFFSamplerBinding &Binding,
                             bgfx::UniformHandle Uniform,
                             bgfx::TextureHandle DefaultTexture,
-                            CKDWORD Texture, const CKSamplerDesc *Sampler);
+                            CKDWORD Texture, const CKSamplerDesc *Sampler,
+                            bool FixedFunctionBorderSampling);
     void ResetDebugBindings();
     void TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle,
                      CKDWORD Depth, const CKFFPipelineState &State);

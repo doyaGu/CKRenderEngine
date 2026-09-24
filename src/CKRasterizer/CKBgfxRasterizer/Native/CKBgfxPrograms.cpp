@@ -273,6 +273,20 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(const CKFFProgramDesc *Desc, CKDW
     rec->VertexShader = VertexShader;
     rec->PixelShader = PixelShader;
     rec->Interface = *Desc;
+    bool hasBorderColors = false, hasBorderSamplers = false;
+    for (int i = 0; i < Desc->Uniforms.Size(); ++i) {
+        const CKFFUniformBinding &binding = Desc->Uniforms[i];
+        if (binding.Stage != CKRST_SHADER_PIXEL) continue;
+        if (binding.Slot == CKRST_BLOCK_BORDER_COLORS &&
+            binding.Count == CKFF_MAX_TEXTURE_STAGES &&
+            strcmp(binding.Name.CStr(), "u_borderColor") == 0)
+            hasBorderColors = true;
+        if (binding.Slot == CKRST_BLOCK_BORDER_SAMPLERS &&
+            binding.Count == CKFF_SAMPLER_SLOT_COUNT &&
+            strcmp(binding.Name.CStr(), "u_borderSampler") == 0)
+            hasBorderSamplers = true;
+    }
+    rec->FixedFunctionBorderSampling = hasBorderColors && hasBorderSamplers;
     rec->Uniforms.Reserve(uniforms.Size());
     rec->Samplers.Reserve(samplers.Size());
     for (UniformTable::Iterator entry = uniforms.Begin();
