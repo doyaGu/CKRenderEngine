@@ -390,12 +390,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
         RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING);
-    if (triangles && m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT &&
-        (CKFFResolveConstantPointSize(m_State.DrawState) != 1.0f ||
-         m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
-         m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE))) {
-        RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
-    }
     CKBOOL forceKeepStencilOps = FALSE;
     CKDWORD effectiveStencilWriteMask = 0;
     if (ResolveStencilWrite(&forceKeepStencilOps, &effectiveStencilWriteMask))
@@ -536,14 +530,20 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointExpansion(CKDWORD dpFlags)
            CKFFClampVertexBufferPointSize(pointSize) != pointSize;
 }
 
-CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointFillExpansion(VXPRIMITIVETYPE type) const
+CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointFillExpansion(
+    VXPRIMITIVETYPE type, CKDWORD dpFlags) const
 {
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) != VXFILL_POINT)
         return FALSE;
-    if (type == VX_TRIANGLESTRIP || type == VX_TRIANGLEFAN)
-        return TRUE;
-    return type == VX_TRIANGLELIST &&
-           m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE) != VXCULL_NONE;
+    if (type != VX_TRIANGLELIST && type != VX_TRIANGLESTRIP &&
+        type != VX_TRIANGLEFAN)
+        return FALSE;
+    return type != VX_TRIANGLELIST ||
+           m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE) != VXCULL_NONE ||
+           CKFFResolveConstantPointSize(m_State.DrawState) != 1.0f ||
+           m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
+           m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
+           (dpFlags & CKRST_DP_PSIZE) != 0;
 }
 
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
@@ -793,7 +793,20 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
 
     const CKDWORD formatFlags =
         CKFFVertexLayout::DrawPrimitiveDataToFormatFlags(data);
-    const CKBOOL pointSprites = type == VX_POINTLIST &&
+    const CKBOOL pointFill = (type == VX_TRIANGLELIST ||
+                              type == VX_TRIANGLESTRIP ||
+                              type == VX_TRIANGLEFAN) &&
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT;
+    const CKBOOL pointFillExpansion = pointFill &&
+        (CKFFResolveConstantPointSize(m_State.DrawState) != 1.0f ||
+         m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
+         m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
+         (data->Flags & CKRST_DP_PSIZE) != 0);
+    const CKBOOL canExpandPointFill =
+        (formatFlags & (CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX |
+                        CKFF_VF_TWEENPOSITION)) == 0;
+    const CKBOOL pointSprites =
+        (type == VX_POINTLIST || (pointFillExpansion && canExpandPointFill)) &&
         m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
@@ -818,11 +831,6 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(type, formatFlags, activeTextureCount))
         return FALSE;
-    if ((type == VX_TRIANGLELIST || type == VX_TRIANGLESTRIP ||
-         type == VX_TRIANGLEFAN) &&
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT &&
-        (data->Flags & CKRST_DP_PSIZE) != 0)
-        RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
     if (!ValidateVertexBlendWeights(data->Flags, formatFlags))
         return FALSE;
     if (!ValidateVertexBlendIndices(data, formatFlags, indices, indexCount))
@@ -925,7 +933,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         prepared = m_TransientGeometry.Prepare(
             type, indices, indexCount, data, wrapModes[0],
             pointSprites, &pointParams,
-            m_State.TexcoordComponentCounts, wrapModes);
+            m_State.TexcoordComponentCounts, wrapModes,
+            pointFillExpansion);
     }
     if (!prepared) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -935,10 +944,6 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         CKFF_PROBE(m_Probes, OnPrepareFailure());
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     }
-    const CKBOOL pointFill = (type == VX_TRIANGLELIST ||
-                              type == VX_TRIANGLESTRIP ||
-                              type == VX_TRIANGLEFAN) &&
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT;
     if (pointFill && m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE) != VXCULL_NONE) {
         CKFFPointFillCullParams cull = {};
         cull.World = m_State.World;
@@ -971,6 +976,43 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
             return TRUE;
         }
     }
+    CKBOOL expandedPointFill = FALSE;
+    if (pointFillExpansion) {
+        CKBOOL approximate = FALSE;
+        expandedPointFill = m_TransientGeometry.ExpandPointFilledTriangles(
+            pointParams, pointSprites, data, &approximate);
+        if (!expandedPointFill && canExpandPointFill)
+            return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
+        if (expandedPointFill &&
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_LIGHTING) &&
+            m_State.ActiveLightCount > 0 &&
+            (formatFlags & CKFF_VF_NORMAL) != 0)
+            approximate = TRUE; // moved corners would be lit separately
+        if (expandedPointFill &&
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_FOGENABLE) &&
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE))
+            approximate = TRUE; // each corner has a different eye distance
+        if (expandedPointFill &&
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE))
+            approximate = TRUE; // scaled-point clip planes are device dependent
+        if (expandedPointFill && !pointSprites) {
+            for (CKDWORD stage = 0; stage < preparedState.ActiveTextureCount; ++stage) {
+                if (m_State.TextureHandles[stage] != 0 &&
+                    (m_State.StageStates[stage][CKRST_TSS_TEXCOORDINDEX] >> 16) != 0) {
+                    approximate = TRUE; // generated coordinates see moved corners
+                    break;
+                }
+            }
+        }
+        if (!expandedPointFill || approximate)
+            RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
+        if (expandedPointFill && m_TransientGeometry.GetVertexCount() == 0) {
+            m_Draw = CKFFDraw();
+            m_Draw.SkipSubmit = TRUE;
+            m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
+            return TRUE;
+        }
+    }
     CKFF_PROBE(m_Probes, OnTransientGeometry(m_TransientGeometry.GetLastVertexBytes(),
                                              m_TransientGeometry.GetLastIndexBytes()));
 
@@ -983,6 +1025,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     }
     CKFFDrawSubmission submission = {};
     submission.DrawStateType = drawStateType;
+    submission.ForceSolidFill = expandedPointFill || type == VX_POINTLIST;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
     submission.VertexFormat = formatFlags;
@@ -1006,11 +1049,6 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(type, formatFlags, activeTextureCount))
         return FALSE;
-    if ((type == VX_TRIANGLELIST || type == VX_TRIANGLESTRIP ||
-         type == VX_TRIANGLEFAN) &&
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT &&
-        (dpFlags & CKRST_DP_PSIZE) != 0)
-        RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
     if (!ValidateVertexBlendWeights(dpFlags, formatFlags))
         return FALSE;
     // Contexts with indexed vertex blending route through their CPU shadow so
@@ -1020,7 +1058,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     // Point-filled strips and fans need one point for each vertex of every
     // triangle. The direct VB path would submit the original strip/fan stream
     // as a point list and omit repeated vertices.
-    if (NeedsVertexBufferPointFillExpansion(type))
+    if (NeedsVertexBufferPointFillExpansion(type, dpFlags))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     // Callers with WRAPn route through the transient primitive path, which
     // can adjust coordinates independently for each primitive.
@@ -1075,6 +1113,11 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     {
         CKFF_SCOPE_TIME(m_Probes, DrawStateBuildUs);
         pipeline.State = m_State.DrawState.BuildDrawState(submission.DrawStateType);
+        if (submission.ForceSolidFill) {
+            // The source triangle's face cull has already run in transient
+            // geometry. Expanded point quads must be solid and unculled.
+            pipeline.State.Lo &= ~(CKRST_STATE_FILLMODE(3) | CKRST_STATE_CULL(3));
+        }
     }
     CKFF_PROBE(m_Probes, OnDrawState(pipeline.State));
     // Stencil reference and masks are DWORD render states of which the 8-bit

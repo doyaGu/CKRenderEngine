@@ -541,11 +541,10 @@ void IgnoredRenderStatesReportDiagnostics() {
     CKDWORD largePointBits = 0;
     memcpy(&largePointBits, &largePoint, sizeof(largePointBits));
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, largePointBits);
-    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
-                  ffp.GetLastDrawApproximationMask() ==
-                      (1ull << CKRST_DIAG_APPROX_FILLMODE_POINT),
-              "Larger point-filled triangles retain the point-size diagnostic");
+    TestCheck(!ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PREPARE_FAILED,
+              "A direct vertex-buffer draw requiring point expansion must use its CPU shadow");
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, 0x3f800000u);
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);

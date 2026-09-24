@@ -454,6 +454,57 @@ static void WrapPreservesLargeNonIndexedVertexNumbers()
     }
 }
 
+static void PointFilledWrapPreservesVertexSizes()
+{
+    struct PointRecord { float X, Y, Z, Size; } positions[3] = {
+        {-0.5f, -0.5f, 0.5f, 10.0f},
+        { 0.5f, -0.5f, 0.5f,  2.0f},
+        {-0.5f,  0.5f, 0.5f,  4.0f}
+    };
+    float texcoords[3][2] = {{0.9f, 0.0f}, {0.1f, 0.0f}, {0.2f, 0.0f}};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TR_VC | CKRST_DP_STAGES0 | CKRST_DP_PSIZE;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(PointRecord);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(texcoords[0]);
+
+    CKFFPointSpriteParams params = {};
+    params.Size = 1.0f;
+    params.MinSize = 1.0f;
+    params.MaxSize = 64.0f;
+    params.ScaleA = 1.0f;
+    params.World = VxMatrix::Identity();
+    params.View = VxMatrix::Identity();
+    params.Projection = VxMatrix::Identity();
+    params.ViewportWidth = 64.0f;
+    params.ViewportHeight = 64.0f;
+
+    TransientGeometryHarness harness;
+    TestCheck(harness.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data,
+                                       VXWRAP_U, FALSE, &params, NULL, NULL,
+                                       TRUE),
+              "point-filled wrapped triangle retains source vertex indices");
+    CKBOOL approximate = FALSE;
+    TestCheck(harness.Geometry.ExpandPointFilledTriangles(params, FALSE, &data,
+                                                          &approximate) &&
+              !approximate,
+              "point-filled wrapped triangle expands without approximation");
+    TestCheck(harness.Geometry.GetVertexCount() == 12 &&
+              harness.Geometry.GetIndexCount() == 18,
+              "three point-filled vertices emit three quads");
+    const CKBYTE *vertices = harness.Geometry.GetVertices();
+    const CKDWORD stride = harness.Geometry.GetVertexStride();
+    if (vertices && harness.Geometry.GetVertexCount() == 12) {
+        TestCheck(fabs(ReadFloat(vertices) - (-0.65625f)) < 0.0001f &&
+                  fabs(ReadFloat(vertices + 4 * stride) - 0.46875f) < 0.0001f,
+                  "point-filled quads use each vertex's PSIZE after wrap expansion");
+        TestCheck(fabs(ReadFloat(vertices + 4 * stride + 12) - 1.1f) < 0.0001f,
+                  "point-filled quads retain the adjusted wrapped texture coordinate");
+    }
+}
+
 static void LargePointSpriteBatchUses32BitIndices()
 {
     TransientGeometryHarness harness;
@@ -928,6 +979,8 @@ int main()
               &LineWrapHandlesLargeCoordinateSpans);
     tests.Run("wrap preserves large non-indexed vertex numbers",
               &WrapPreservesLargeNonIndexedVertexNumbers);
+    tests.Run("point-filled wrap preserves per-vertex sizes",
+              &PointFilledWrapPreservesVertexSizes);
     tests.Run("large point sprite batch uses 32-bit indices",
               &LargePointSpriteBatchUses32BitIndices);
     tests.Run("indexed point sprites use selected vertices",

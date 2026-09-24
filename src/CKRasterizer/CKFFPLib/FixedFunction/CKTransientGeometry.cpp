@@ -93,7 +93,7 @@ static CKDWORD PointSpriteSizeOffset(CKDWORD flags, CKDWORD formatFlags) {
 }
 
 static CKFFPointSpriteParams PointSpriteParamsForVertex(
-    VxDrawPrimitiveData *data,
+    const VxDrawPrimitiveData *data,
     CKDWORD srcIndex,
     CKDWORD formatFlags,
     const CKFFPointSpriteParams &baseParams)
@@ -415,6 +415,10 @@ void CKTransientGeometry::CullPointFilledTriangles(
     }
     XArray<CKBYTE> kept;
     kept.Resize((int)(elementCount * m_VertexStride));
+    const bool trackSources = !m_SourceVertexIndices.IsEmpty();
+    XArray<CKDWORD> keptSources;
+    if (trackSources)
+        keptSources.Resize((int)elementCount);
     CKDWORD keptCount = 0;
     for (CKDWORD first = 0; first + 2 < elementCount; first += 3) {
         CKDWORD source[3];
@@ -465,11 +469,17 @@ void CKTransientGeometry::CullPointFilledTriangles(
             memcpy(kept.Begin() + keptCount * m_VertexStride,
                    m_VertexData.Begin() + source[corner] * m_VertexStride,
                    m_VertexStride);
+            if (trackSources)
+                keptSources[keptCount] = m_SourceVertexIndices[source[corner]];
             ++keptCount;
         }
     }
     kept.Resize((int)(keptCount * m_VertexStride));
     m_VertexData.Swap(kept);
+    if (trackSources) {
+        keptSources.Resize((int)keptCount);
+        m_SourceVertexIndices.Swap(keptSources);
+    }
     m_VertexCount = keptCount;
     m_LastVertexBytes = keptCount * m_VertexStride;
     m_IndexData.Resize(0);
@@ -478,9 +488,180 @@ void CKTransientGeometry::CullPointFilledTriangles(
     m_Index32 = FALSE;
 }
 
+CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
+    const CKFFPointSpriteParams &params, CKBOOL pointSprites,
+    const VxDrawPrimitiveData *sourceData, CKBOOL *approximate)
+{
+    if (approximate)
+        *approximate = FALSE;
+    if (!sourceData || m_VertexData.IsEmpty() || m_VertexStride == 0 ||
+        // These layouts need their final position after vertex blending. A
+        // source-space quad would receive a different blend at each corner.
+        (m_FormatFlags & (CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX |
+                          CKFF_VF_TWEENPOSITION)) != 0)
+        return FALSE;
+    if ((sourceData->Flags & CKRST_DP_PSIZE) != 0 &&
+        m_SourceVertexIndices.Size() != (int)m_VertexCount)
+        return FALSE;
+
+    const CKDWORD elementCount = m_IndexCount ? m_IndexCount : m_VertexCount;
+    const CKDWORD pointCount = elementCount / 3 * 3;
+    if (pointCount == 0 || pointCount > 0x2aaaaaaau ||
+        pointCount > 0x7fffffffu / 4 / m_VertexStride)
+        return FALSE;
+    const CKDWORD vertexCapacity = pointCount * 4;
+    const CKBOOL index32 = vertexCapacity > 0x10000u ? TRUE : FALSE;
+    const CKDWORD indexSize = index32 ? 4u : 2u;
+    if (pointCount > 0x7fffffffu / 6 / indexSize)
+        return FALSE;
+
+    XArray<CKBYTE> quads;
+    XArray<CKBYTE> quadIndices;
+    quads.Resize((int)(vertexCapacity * m_VertexStride));
+    quadIndices.Resize((int)(pointCount * 6 * indexSize));
+
+    VxMatrix invWorld, invView;
+    Vx3DInverseMatrix(invWorld, params.World);
+    Vx3DInverseMatrix(invView, params.View);
+    const VxVector cameraRightWorld(invView[0][0], invView[0][1], invView[0][2]);
+    const VxVector cameraUpWorld(invView[1][0], invView[1][1], invView[1][2]);
+    const VxVector cameraRightLocal = TransformDirection(cameraRightWorld, invWorld);
+    const VxVector cameraUpLocal = TransformDirection(cameraUpWorld, invWorld);
+    const bool positionT = (m_FormatFlags & CKFF_VF_POSITIONT) != 0;
+    CKDWORD texcoordOffset = positionT ? 16u : 12u;
+    if (m_FormatFlags & CKFF_VF_NORMAL)
+        texcoordOffset += 12;
+    if (m_FormatFlags & CKFF_VF_TWEENPOSITION)
+        texcoordOffset += 12;
+    if (m_FormatFlags & CKFF_VF_TWEENNORMAL)
+        texcoordOffset += 12;
+    if (m_FormatFlags & CKFF_VF_BLENDWEIGHT)
+        texcoordOffset += 12;
+    if (m_FormatFlags & CKFF_VF_BLENDINDEX)
+        texcoordOffset += 4;
+    static const float pointUV[4][2] = {
+        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}
+    };
+
+    CKDWORD emitted = 0;
+    for (CKDWORD point = 0; point < pointCount; ++point) {
+        const CKDWORD vertexIndex = m_IndexCount
+            ? (m_Index32 ? ((const CKDWORD *)m_IndexData.Begin())[point]
+                         : ((const CKWORD *)m_IndexData.Begin())[point])
+            : point;
+        if (vertexIndex >= m_VertexCount)
+            return FALSE;
+        const CKBYTE *source = m_VertexData.Begin() + vertexIndex * m_VertexStride;
+        const CKDWORD originalIndex = m_SourceVertexIndices.IsEmpty()
+            ? vertexIndex : m_SourceVertexIndices[vertexIndex];
+        if (originalIndex >= (CKDWORD)sourceData->VertexCount)
+            return FALSE;
+        const CKFFPointSpriteParams vertexParams = PointSpriteParamsForVertex(
+            sourceData, originalIndex, m_FormatFlags, params);
+
+        float center[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        memcpy(center, source, positionT ? 16 : 12);
+        float corners[4][4] = {};
+        if (positionT) {
+            if (!(center[3] > 0.0f) || center[2] < 0.0f || center[2] > 1.0f) {
+                if (approximate)
+                    *approximate = TRUE;
+                continue;
+            }
+            const float half = ComputePointSpriteSizeForDistance(
+                vertexParams.Size, vertexParams.MinSize, vertexParams.MaxSize,
+                FALSE, vertexParams.ScaleA, vertexParams.ScaleB,
+                vertexParams.ScaleC, 0.0f) * 0.5f;
+            for (int corner = 0; corner < 4; ++corner) {
+                memcpy(corners[corner], center, sizeof(center));
+                corners[corner][0] += (corner == 0 || corner == 3) ? -half : half;
+                corners[corner][1] += corner < 2 ? -half : half;
+            }
+        } else {
+            const VxVector local(center[0], center[1], center[2]);
+            const VxVector world = TransformPoint(local, vertexParams.World);
+            const VxVector view = TransformPoint(world, vertexParams.View);
+            float clip[4];
+            const float viewPosition[4] = {view.x, view.y, view.z, 1.0f};
+            PointFillTransform(vertexParams.Projection, viewPosition, clip);
+            if (!(clip[3] > 0.0f) || clip[2] < 0.0f || clip[2] > clip[3]) {
+                if (approximate)
+                    *approximate = TRUE;
+                continue;
+            }
+            if (approximate && (clip[0] < -clip[3] || clip[0] > clip[3] ||
+                                clip[1] < -clip[3] || clip[1] > clip[3]))
+                *approximate = TRUE;
+            const float pixelSize = ComputePointSpritePixelSize(view, vertexParams);
+            const float projectionX = fabsf(vertexParams.Projection[0][0]);
+            const float projectionY = fabsf(vertexParams.Projection[1][1]);
+            const float viewportWidth = vertexParams.ViewportWidth > 0.0f
+                ? vertexParams.ViewportWidth : 1.0f;
+            const float viewportHeight = vertexParams.ViewportHeight > 0.0f
+                ? vertexParams.ViewportHeight : 1.0f;
+            const float halfX = projectionX > 0.000001f
+                ? pixelSize * clip[3] / (viewportWidth * projectionX)
+                : pixelSize * 0.5f;
+            const float halfY = projectionY > 0.000001f
+                ? pixelSize * clip[3] / (viewportHeight * projectionY)
+                : pixelSize * 0.5f;
+            const VxVector right = cameraRightLocal * halfX;
+            const VxVector up = cameraUpLocal * halfY;
+            const VxVector positions[4] = {
+                local - right - up, local + right - up,
+                local + right + up, local - right + up
+            };
+            for (int corner = 0; corner < 4; ++corner) {
+                corners[corner][0] = positions[corner].x;
+                corners[corner][1] = positions[corner].y;
+                corners[corner][2] = positions[corner].z;
+            }
+        }
+
+        const CKDWORD base = emitted * 4;
+        for (int corner = 0; corner < 4; ++corner) {
+            CKBYTE *dst = quads.Begin() + (base + corner) * m_VertexStride;
+            memcpy(dst, source, m_VertexStride);
+            memcpy(dst, corners[corner], positionT ? 16 : 12);
+            if (pointSprites) {
+                CKDWORD offset = texcoordOffset;
+                for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+                    if ((m_FormatFlags & CKFF_VF_TEXCOORD(stage)) == 0)
+                        continue;
+                    memcpy(dst + offset, pointUV[corner], sizeof(pointUV[corner]));
+                    offset += 16;
+                }
+            }
+        }
+        if (index32) {
+            CKDWORD *dst = (CKDWORD *)quadIndices.Begin() + emitted * 6;
+            dst[0] = base; dst[1] = base + 1; dst[2] = base + 2;
+            dst[3] = base; dst[4] = base + 2; dst[5] = base + 3;
+        } else {
+            CKWORD *dst = (CKWORD *)quadIndices.Begin() + emitted * 6;
+            dst[0] = (CKWORD)base; dst[1] = (CKWORD)(base + 1);
+            dst[2] = (CKWORD)(base + 2); dst[3] = (CKWORD)base;
+            dst[4] = (CKWORD)(base + 2); dst[5] = (CKWORD)(base + 3);
+        }
+        ++emitted;
+    }
+    quads.Resize((int)(emitted * 4 * m_VertexStride));
+    quadIndices.Resize((int)(emitted * 6 * indexSize));
+    m_VertexData.Swap(quads);
+    m_IndexData.Swap(quadIndices);
+    m_SourceVertexIndices.Resize(0);
+    m_VertexCount = emitted * 4;
+    m_IndexCount = emitted * 6;
+    m_Index32 = index32;
+    m_LastVertexBytes = m_VertexCount * m_VertexStride;
+    m_LastIndexBytes = m_IndexCount * indexSize;
+    return TRUE;
+}
+
 void CKTransientGeometry::Clear() {
     m_VertexData.Resize(0);
     m_IndexData.Resize(0);
+    m_SourceVertexIndices.Resize(0);
     m_FormatFlags = 0;
     m_VertexCount = 0;
     m_VertexStride = 0;
@@ -499,7 +680,8 @@ CKBOOL CKTransientGeometry::Prepare(
     CKBOOL pointSprites,
     const CKFFPointSpriteParams *pointParams,
     const CKBYTE *texcoordComponentCounts,
-    const CKDWORD *wrapModes)
+    const CKDWORD *wrapModes,
+    CKBOOL trackSourceIndices)
 {
     if (!data || data->VertexCount <= 0)
         return FALSE;
@@ -779,6 +961,8 @@ CKBOOL CKTransientGeometry::Prepare(
         m_VertexCount = expandedVertexCount;
         m_LastVertexBytes = expandedVertexCount * stride;
         m_VertexData.Resize((int)m_LastVertexBytes);
+        if (trackSourceIndices)
+            m_SourceVertexIndices.Resize((int)expandedVertexCount);
         CKBYTE *vertexData = m_VertexData.Begin();
 
         for (int i = 0; i < primitiveIndices.Size(); i += primitiveVertexCount) {
@@ -800,8 +984,10 @@ CKBOOL CKTransientGeometry::Prepare(
             }
             for (int j = 0; j < primitiveVertexCount; ++j) {
                 InterleaveVertex(vertexData, stride, (CKDWORD)(i + j), primitiveIndices[i + j],
-                                 formatFlags, data, nullptr, nullptr, texcoordComponentCounts,
-                                 &texcoords[j][0][0]);
+                                  formatFlags, data, nullptr, nullptr, texcoordComponentCounts,
+                                  &texcoords[j][0][0]);
+                if (trackSourceIndices)
+                    m_SourceVertexIndices[i + j] = primitiveIndices[i + j];
             }
         }
 
@@ -829,6 +1015,11 @@ CKBOOL CKTransientGeometry::Prepare(
     m_VertexCount = vertexCount;
     m_LastVertexBytes = vertexCount * stride;
     m_VertexData.Resize((int)m_LastVertexBytes);
+    if (trackSourceIndices) {
+        m_SourceVertexIndices.Resize((int)vertexCount);
+        for (CKDWORD i = 0; i < vertexCount; ++i)
+            m_SourceVertexIndices[i] = i;
+    }
 
     InterleaveVertices(m_VertexData.Begin(), stride, vertexCount, formatFlags,
                        data, texcoordComponentCounts);

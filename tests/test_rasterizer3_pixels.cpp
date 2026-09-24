@@ -1219,6 +1219,16 @@ void CheckPointFillTriangleCulling(Backend &b)
     }
     TestCheck(visibleFaces == 1, "opposite cull modes select opposite triangle faces");
 
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(20.0f));
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point;
+        render(VXFILL_SOLID, cull, FALSE, 0, solid);
+        render(VXFILL_POINT, cull, FALSE, 0, point);
+        TestCheck((redCount(point) > 0) == (redCount(solid) > 0),
+                  "expanded point quads preserve source triangle face culling");
+    }
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
+
     float screenPositions[3][4] = {
         {16.0f, 48.0f, 0.5f, 1.0f}, {48.0f, 48.0f, 0.5f, 1.0f},
         {16.0f, 16.0f, 0.5f, 1.0f}};
@@ -1329,6 +1339,186 @@ void CheckPointFillTriangleCulling(Backend &b)
     TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete point-fill culling IB");
     TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete point-fill culling VB");
     printf("  point-filled triangle face culling matches solid triangles and VB paths: passed\n");
+}
+
+void CheckPointFilledTriangleSizes(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    struct SizedPosition {
+        VxVector Position;
+        float Size;
+    } positions[3] = {
+        {VxVector(-0.5f, -0.5f, 0.5f), 20.0f},
+        {VxVector( 0.5f, -0.5f, 0.5f),  1.0f},
+        {VxVector(-0.5f,  0.5f, 0.5f),  1.0f}
+    };
+    const CKDWORD colors[3] = {0xffff0000u, 0xffff0000u, 0xffff0000u};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TR_VC;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(SizedPosition);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+
+    Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                  "draw one-pixel filled triangle");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 22, 48, 0, 0, 0),
+              "default point-filled triangles stay one pixel wide");
+
+    const CKDWORD before = ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT];
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(20.0f));
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                  "draw 20-pixel filled triangle");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 22, 48, 255, 0, 0) &&
+              PixelNear(pixels, 28, 48, 0, 0, 0),
+              "point-filled triangles honor the constant point size");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] == before,
+              "constant-size point fill has no approximation");
+
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
+    data.Flags |= CKRST_DP_PSIZE;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                  "draw per-vertex-sized filled triangle");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 22, 48, 255, 0, 0) &&
+              PixelNear(pixels, 42, 48, 0, 0, 0),
+              "point-filled triangles honor per-vertex PSIZE");
+
+    const CKDWORD format = CKRST_DP_TR_VC | CKRST_DP_PSIZE;
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    XArray<CKBYTE> vertices;
+    vertices.Resize(stride * 3);
+    memset(vertices.Begin(), 0, vertices.Size());
+    for (int i = 0; i < 3; ++i) {
+        CKBYTE *vertex = vertices.Begin() + i * stride;
+        memcpy(vertex + layout.PositionOffset, &positions[i].Position, sizeof(VxVector));
+        memcpy(vertex + layout.PointSizeOffset, &positions[i].Size, sizeof(float));
+        memcpy(vertex + layout.DiffuseOffset, &colors[i], sizeof(CKDWORD));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 3;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.Begin(), &vb),
+              "create point-sized triangle VB");
+    Pixels vbPixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_TRIANGLELIST, vb, 0, 3, NULL, 0),
+                  "draw point-sized triangle VB");
+    }, vbPixels);
+    TestCheck(vbPixels.Data.Size() == pixels.Data.Size() &&
+              memcmp(vbPixels.Data.Begin(), pixels.Data.Begin(), pixels.Data.Size()) == 0,
+              "point-sized triangle VB matches transient geometry");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] == before,
+              "PSIZE point fill has no approximation on either draw path");
+
+    const CKWORD triangleIndices[3] = {0, 1, 2};
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 3;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, triangleIndices, &ib),
+              "create point-sized triangle IB");
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVBIB(VX_TRIANGLELIST, vb, ib, 0, 3, 0, 3),
+                  "draw point-sized triangle VBIB");
+    }, vbPixels);
+    TestCheck(vbPixels.Data.Size() == pixels.Data.Size() &&
+              memcmp(vbPixels.Data.Begin(), pixels.Data.Begin(), pixels.Data.Size()) == 0,
+              "point-sized triangle VBIB matches transient geometry");
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER),
+              "delete point-sized triangle IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER),
+              "delete point-sized triangle VB");
+
+    data.Flags = CKRST_DP_TR_VC;
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(0.25f));
+    ctx->SetRenderState(VXRENDERSTATE_POINTSCALEENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSCALE_A, FloatBits(1.0f));
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                  "draw distance-scaled point-filled triangle");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 22, 48, 255, 0, 0) &&
+              PixelNear(pixels, 26, 48, 0, 0, 0),
+              "point-filled triangles apply viewport-height point scaling");
+    ctx->SetRenderState(VXRENDERSTATE_POINTSCALEENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(20.0f));
+
+    float screenPositions[3][4] = {
+        {16.0f, 48.0f, 0.5f, 1.0f},
+        {48.0f, 48.0f, 0.5f, 1.0f},
+        {16.0f, 16.0f, 0.5f, 1.0f}
+    };
+    VxDrawPrimitiveData screenData = {};
+    screenData.VertexCount = 3;
+    screenData.Flags = CKRST_DP_CL_VCT;
+    screenData.PositionPtr = screenPositions;
+    screenData.PositionStride = sizeof(screenPositions[0]);
+    screenData.ColorPtr = const_cast<CKDWORD *>(colors);
+    screenData.ColorStride = sizeof(CKDWORD);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &screenData),
+                  "draw pretransformed point-filled triangle");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 22, 48, 255, 0, 0),
+              "pretransformed point fill uses pixel-space point size");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] == before,
+              "scaled and pretransformed point fill have no approximation");
+
+    CKTextureDesc spriteDesc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, spriteDesc.Format);
+    spriteDesc.Format.Width = 2;
+    spriteDesc.Format.Height = 1;
+    spriteDesc.Format.BytesPerLine = 8;
+    spriteDesc.MipMapCount = 1;
+    spriteDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+    CKDWORD spriteTexture = 0;
+    TestCheck(ctx->CreateTexture(&spriteDesc, &spriteTexture),
+              "create point-fill sprite texture");
+    CKDWORD spriteTexels[2] = {0xffff0000u, 0xff0000ffu};
+    VxImageDescEx spriteImage = spriteDesc.Format;
+    spriteImage.Image = reinterpret_cast<CKBYTE *>(spriteTexels);
+    TestCheck(ctx->LoadTexture(spriteTexture, spriteImage, 0, CKRST_CUBEFACE_XPOS, NULL),
+              "upload point-fill sprite texture");
+    float sourceUV[3][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}, {0.0f, 0.0f}};
+    data.Flags = CKRST_DP_TR_CL_VCT;
+    data.TexCoordPtr = sourceUV;
+    data.TexCoordStride = sizeof(sourceUV[0]);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
+    TestCheck(ctx->SetTexture(spriteTexture, 0), "bind point-fill sprite texture");
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                  "draw textured point-filled triangle sprites");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 10, 48, 255, 0, 0) &&
+              PixelNear(pixels, 22, 48, 0, 0, 255),
+              "point-filled triangle sprites replace source UV across each point");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] == before,
+              "textured point fill has no approximation");
+    ctx->SetTexture(0, 0);
+    TestCheck(ctx->DeleteObject(spriteTexture, CKRST_OBJ_TEXTURE),
+              "delete point-fill sprite texture");
+
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_CCW);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
+    ctx->SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, FALSE);
+    ResetStage(ctx, 0);
+    printf("  point-filled triangles preserve constant, vertex, scaled and sprite sizes: passed\n");
 }
 
 void CheckClippingDisablesUserPlanes(Backend &b)
@@ -1531,6 +1721,15 @@ void CheckVertexBufferPointSizePixels(Backend &b)
               "VBIB point size reaches beyond the native 15-pixel limit");
     TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_POINT_SIZE] == 0,
               "VB and VBIB points have no size approximation");
+
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 1, NULL, 0),
+                  "draw 24-pixel VB point with polygon point fill selected");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 42, 32, 255, 0, 0),
+              "polygon point fill does not change an explicit point sprite");
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
 
     ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
     TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete point IB");
@@ -2960,6 +3159,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckLineTopologyWithPointFill(backend);
         CheckVertexBufferPointFilledStripsAndFans(backend);
         CheckPointFillTriangleCulling(backend);
+        CheckPointFilledTriangleSizes(backend);
         CheckClippingDisablesUserPlanes(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);

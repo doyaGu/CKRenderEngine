@@ -52,13 +52,23 @@ public:
         CKBOOL pointSprites = FALSE,
         const CKFFPointSpriteParams *pointParams = nullptr,
         const CKBYTE *texcoordComponentCounts = nullptr,
-        const CKDWORD *wrapModes = nullptr);
+        const CKDWORD *wrapModes = nullptr,
+        CKBOOL trackSourceIndices = FALSE);
 
     // Point fill uses point topology, which has no hardware face culling.
     // Cull the source triangles before that topology conversion. The output
     // flag reports triangles that cross clip planes or cannot be classified.
     void CullPointFilledTriangles(const CKFFPointFillCullParams &params,
                                   CKBOOL *approximate);
+
+    // Expand the vertices of point-filled triangles to screen-sized quads.
+    // The source data supplies per-vertex PSIZE, which is not part of the
+    // backend's interleaved vertex layout. Returns FALSE for vertex blending,
+    // which needs a post-transform expansion instead.
+    CKBOOL ExpandPointFilledTriangles(const CKFFPointSpriteParams &params,
+                                      CKBOOL pointSprites,
+                                      const VxDrawPrimitiveData *sourceData,
+                                      CKBOOL *approximate);
 
     CKDWORD GetFormatFlags() const { return m_FormatFlags; }
     CKDWORD GetVertexCount() const { return m_VertexCount; }
@@ -110,6 +120,7 @@ private:
     CKDWORD m_LastVertexBytes;
     CKDWORD m_LastIndexBytes;
     XArray<CKWORD> m_TempIndices;
+    XArray<CKDWORD> m_SourceVertexIndices;
 
     int ConvertToTriangleList(VXPRIMITIVETYPE srcType,
                               CKWORD *srcIndices, int srcCount,
