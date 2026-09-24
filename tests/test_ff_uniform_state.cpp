@@ -594,7 +594,7 @@ void VertexBlendResolverMatchesDxvkWeightCounts() {
               "VXVBLEND_3WEIGHTS must mean three explicit weights");
 }
 
-void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
+void VertexBlendResolverHandlesMissingIndexedInputAndPositionT() {
     CKFFVertexBlendState missingIndices = CKFFResolveVertexBlendState(
         VXVBLEND_2WEIGHTS, TRUE, CKFF_VF_POSITION | CKFF_VF_BLENDWEIGHT);
     TestCheck(!missingIndices.Supported && missingIndices.Mode == CKFF_VERTEX_BLEND_DISABLED &&
@@ -617,10 +617,11 @@ void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
     CKFFVertexBlendState missingTweenNormal = CKFFResolveVertexBlendState(
         VXVBLEND_TWEENING, FALSE,
         CKFF_VF_POSITION | CKFF_VF_NORMAL | CKFF_VF_TWEENPOSITION);
-    TestCheck(!missingTweenNormal.Supported &&
+    TestCheck(missingTweenNormal.Supported &&
+                  missingTweenNormal.Mode == CKFF_VERTEX_BLEND_TWEEN &&
                   missingTweenNormal.UnsupportedReason ==
-                      CKFF_VERTEX_BLEND_UNSUPPORTED_MISSING_TWEEN_NORMAL,
-              "Lit tweening must reject a missing second normal");
+                      CKFF_VERTEX_BLEND_UNSUPPORTED_NONE,
+              "Lit tweening can retain the original normal without a second normal");
 
     CKFFVertexBlendState tween = CKFFResolveVertexBlendState(
         VXVBLEND_TWEENING, FALSE,
@@ -633,10 +634,10 @@ void VertexBlendResolverRejectsMissingIndexedInputAndPositionT() {
     CKFFVertexBlendState indexedTween = CKFFResolveVertexBlendState(
         VXVBLEND_TWEENING, TRUE,
         CKFF_VF_POSITION | CKFF_VF_TWEENPOSITION);
-    TestCheck(!indexedTween.Supported &&
-                  indexedTween.UnsupportedReason ==
-                      CKFF_VERTEX_BLEND_UNSUPPORTED_INDEXED_TWEEN,
-              "Tweening and indexed matrix blending must remain mutually exclusive");
+    TestCheck(indexedTween.Supported &&
+                  indexedTween.Mode == CKFF_VERTEX_BLEND_TWEEN &&
+                  indexedTween.UnsupportedReason == CKFF_VERTEX_BLEND_UNSUPPORTED_NONE,
+              "Tweening ignores matrix-index enable without weighted blending");
 }
 
 void TweeningInputsAndShaderAreWired() {
@@ -1199,8 +1200,8 @@ int main() {
               &DepthTextureCompareUsesSamplerCompareOrdering);
     tests.Run("Vertex blend resolver matches dxvk weight counts",
               &VertexBlendResolverMatchesDxvkWeightCounts);
-    tests.Run("Vertex blend resolver rejects missing indexed input and POSITIONT",
-              &VertexBlendResolverRejectsMissingIndexedInputAndPositionT);
+    tests.Run("Vertex blend resolver handles missing indexed input and POSITIONT",
+              &VertexBlendResolverHandlesMissingIndexedInputAndPositionT);
     tests.Run("TWEENING inputs and shader are wired",
               &TweeningInputsAndShaderAreWired);
     tests.Run("DP weight flags add blend layout flags",
