@@ -159,9 +159,9 @@ static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
 
 std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSamplerDesc &desc)
 {
-    const CKDWORD keyValues[8] = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
+    const CKDWORD keyValues[9] = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
         unsigned(desc.AddressU), unsigned(desc.AddressV), unsigned(desc.AddressW), unsigned(desc.CompareFunc),
-        desc.MinMipLevel};
+        desc.MinMipLevel, desc.MaxAnisotropy};
     CKSdlGpuSamplerKey key;
     std::memcpy(key.Values, keyValues, sizeof(keyValues));
     std::shared_ptr<SDL_GPUSampler> *found = Samplers.FindPtr(key);
@@ -169,10 +169,13 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
     SDL_GPUSamplerCreateInfo info = {};
     info.min_filter = desc.MinFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
     info.mag_filter = desc.MagFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
-    info.mipmap_mode = desc.MipFilter == CKRST_FILTER_LINEAR ? SDL_GPU_SAMPLERMIPMAPMODE_LINEAR : SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    info.mipmap_mode = desc.MipFilter == CKRST_FILTER_LINEAR ||
+                       desc.MipFilter == CKRST_FILTER_ANISOTROPIC
+        ? SDL_GPU_SAMPLERMIPMAPMODE_LINEAR : SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
     info.address_mode_u = AddressMode(desc.AddressU); info.address_mode_v = AddressMode(desc.AddressV); info.address_mode_w = AddressMode(desc.AddressW);
     info.enable_anisotropy = desc.MinFilter == CKRST_FILTER_ANISOTROPIC || desc.MagFilter == CKRST_FILTER_ANISOTROPIC;
-    info.max_anisotropy = info.enable_anisotropy ? 16.0f : 1.0f;
+    info.max_anisotropy = info.enable_anisotropy
+        ? float(desc.MaxAnisotropy ? desc.MaxAnisotropy : 16u) : 1.0f;
     info.min_lod = desc.MipFilter == CKRST_FILTER_NONE ? 0.0f : float(desc.MinMipLevel);
     info.max_lod = desc.MipFilter == CKRST_FILTER_NONE ? 0.0f : 1000.0f;
     static const SDL_GPUCompareOp compare[] = {SDL_GPU_COMPAREOP_ALWAYS, SDL_GPU_COMPAREOP_LESS, SDL_GPU_COMPAREOP_LESS_OR_EQUAL,

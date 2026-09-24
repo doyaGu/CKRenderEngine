@@ -640,9 +640,13 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_ANISOTROPY) &&
-                  context.Log.LastTextureSampler.MinFilter == CKRST_FILTER_ANISOTROPIC,
-              "Anisotropy levels above one approximate to the anisotropic switch with a diagnostic");
+    const std::vector<float> &anisoParams = context.Log.FloatUniforms[lodUniform];
+    TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
+                  context.Log.LastTextureSampler.MinFilter == CKRST_FILTER_ANISOTROPIC &&
+                  context.Log.LastTextureSampler.MaxAnisotropy == 4 &&
+                  context.Log.LastTextureSampler.ShaderAnisotropy == 1 &&
+                  anisoParams.size() >= 8 && anisoParams[7] == 128.0f,
+              "MAXANISOTROPY reaches the sampler and fixed-function shader");
 
     ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
     drawn = ffp.DrawVertexBuffer(
@@ -651,7 +655,8 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
                   context.Log.LastTextureSampler.MinFilter == CKRST_FILTER_LINEAR &&
-                  context.Log.LastTextureSampler.MipFilter == CKRST_FILTER_LINEAR,
+                  context.Log.LastTextureSampler.MipFilter == CKRST_FILTER_LINEAR &&
+                  context.Log.LastTextureSampler.MaxAnisotropy == 1,
               "MAXANISOTROPY one must reduce anisotropic filtering to linear filtering");
 
     ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE);

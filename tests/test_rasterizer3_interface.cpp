@@ -1023,11 +1023,6 @@ void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
 {
     ctx->SetTextureStageState(0, CKRST_TSS_STAGEBLEND, STAGEBLEND(VXBLEND_SRCCOLOR, VXBLEND_DESTALPHA));
 }
-void SetupAnisotropy(CKRasterizerContext *ctx, CKDWORD)
-{
-    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_ANISOTROPIC);
-    ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 8);
-}
 void SetupMirrorOnce(CKRasterizerContext *ctx, CKDWORD) { ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSMIRRORONCE); }
 void SetupAlphaBumpOp(CKRasterizerContext *ctx, CKDWORD)
 {
@@ -1054,7 +1049,6 @@ void TestApproximationsKeepDrawing()
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
         {"point fill mode", CKRST_DIAG_APPROX_FILLMODE_POINT, &SetupFillPoint},
         {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
-        {"anisotropy level", CKRST_DIAG_APPROX_ANISOTROPY, &SetupAnisotropy},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {

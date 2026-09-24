@@ -9,6 +9,8 @@
 // Internal fixed-function shader ABI. These values define the logical C++
 // data consumed by the shared shader calculations. CKFFShaderInterface maps
 // it to named uniforms or native stage buffers for each artifact family.
+// u_bumpEnv[stage * 2 + 1].w packs minimum mip in bits 0..4 and the
+// fixed-function anisotropy tap cap in bits 5..9 (zero disables manual taps).
 
 // VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space
 // depth of the draw towards the viewer by this fraction of the depth range

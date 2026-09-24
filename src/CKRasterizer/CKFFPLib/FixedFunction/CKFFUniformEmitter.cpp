@@ -223,8 +223,10 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if (m_TextureBinder.BuildSamplerDesc((int)stage).MipFilter == CKRST_FILTER_NONE)
-            bumpEnv[stage * 2 + 1][3] = 0.0f;
+        const CKSamplerDesc sampler = m_TextureBinder.BuildSamplerDesc((int)stage);
+        const CKDWORD anisotropy = sampler.ShaderAnisotropy
+            ? sampler.MaxAnisotropy : 0;
+        bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel + anisotropy * 32u);
     }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
          CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);

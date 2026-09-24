@@ -37,7 +37,7 @@ float4 ckLevel2D(Texture2D<float4> image, uint slot, float2 uv, uint mip, bool f
 float4 ckMips2D(Texture2D<float4> image, uint slot, float2 uv, float lod, uint levels, bool filtered, uint modes, uint mipFilter)
 {
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
-    if (mipFilter != 2) return ckLevel2D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
+    if (mipFilter != 2 && mipFilter != 7) return ckLevel2D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
     uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
     return lerp(ckLevel2D(image, slot, uv, lower, filtered, modes), ckLevel2D(image, slot, uv, upper, filtered, modes), frac(lod));
 }
@@ -131,9 +131,50 @@ float4 ckSample3DAtLod(Texture3D<float4> image, uint slot, float3 uv, float lod,
     bool filtered = (lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z) != 1.0;
     uint mipFilter = uint(ck_samplerInfo[slot].w);
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
-    if (mipFilter != 2) return ckLevel3D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
+    if (mipFilter != 2 && mipFilter != 7) return ckLevel3D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
     uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
     return lerp(ckLevel3D(image, slot, uv, lower, filtered, modes), ckLevel3D(image, slot, uv, upper, filtered, modes), frac(lod));
+}
+
+float ckBorderAxisCoverage(float uv, uint extent, uint mode, bool filtered)
+{
+    if (mode != 4) return 1.0;
+    if (!filtered) return uv >= 0.0 && uv < 1.0 ? 1.0 : 0.0;
+    float coord = uv * float(extent) - 0.5;
+    int base = int(floor(coord));
+    float fraction = frac(coord);
+    return (base >= 0 && base < int(extent) ? 1.0 - fraction : 0.0) +
+           (base + 1 >= 0 && base + 1 < int(extent) ? fraction : 0.0);
+}
+
+float4 ckSample3DBorderLevel(Texture3D<float4> image, SamplerState state,
+                             uint slot, float3 uv, uint mip, uint modes,
+                             bool filtered)
+{
+    uint width, height, depth, levels;
+    image.GetDimensions(mip, width, height, depth, levels);
+    float coverage = ckBorderAxisCoverage(uv.x, width, modes & 15, filtered) *
+                     ckBorderAxisCoverage(uv.y, height, (modes >> 4) & 15, filtered) *
+                     ckBorderAxisCoverage(uv.z, depth, (modes >> 8) & 15, filtered);
+    return lerp(ck_borderColor[slot], image.SampleLevel(state, uv, float(mip)),
+                coverage);
+}
+
+float4 ckSample3DBorderLod(Texture3D<float4> image, SamplerState state,
+                           uint slot, float3 uv, float lod, uint modes)
+{
+    uint width, height, depth, levels;
+    image.GetDimensions(0, width, height, depth, levels);
+    uint mipFilter = uint(ck_samplerInfo[slot].w);
+    lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
+    bool filtered = (lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z) != 1.0;
+    if (mipFilter != 2 && mipFilter != 7)
+        return ckSample3DBorderLevel(image, state, slot, uv,
+                                     uint(floor(lod + 0.5)), modes, filtered);
+    uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
+    return lerp(ckSample3DBorderLevel(image, state, slot, uv, lower, modes, filtered),
+                ckSample3DBorderLevel(image, state, slot, uv, upper, modes, filtered),
+                frac(lod));
 }
 
 float4 ckSample3DBias(Texture3D<float4> image, SamplerState state, uint slot,

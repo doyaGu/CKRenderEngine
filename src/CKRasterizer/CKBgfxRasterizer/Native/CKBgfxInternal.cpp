@@ -721,14 +721,19 @@ CKBOOL CKBgfxTrySamplerFlags(const CKSamplerDesc *s, uint32_t &flags)
     switch (s->MinFilter)
     {
     case CKRST_FILTER_NEAREST:     flags |= BGFX_SAMPLER_MIN_POINT; break;
-    case CKRST_FILTER_ANISOTROPIC: flags |= BGFX_SAMPLER_MIN_ANISOTROPIC; break;
+    case CKRST_FILTER_ANISOTROPIC:
+        // Fixed-function draws enforce the requested cap in the shader.
+        if (!s->ShaderAnisotropy) flags |= BGFX_SAMPLER_MIN_ANISOTROPIC;
+        break;
     default: break;
     }
 
     switch (s->MagFilter)
     {
     case CKRST_FILTER_NEAREST:     flags |= BGFX_SAMPLER_MAG_POINT; break;
-    case CKRST_FILTER_ANISOTROPIC: flags |= BGFX_SAMPLER_MAG_ANISOTROPIC; break;
+    case CKRST_FILTER_ANISOTROPIC:
+        if (!s->ShaderAnisotropy) flags |= BGFX_SAMPLER_MAG_ANISOTROPIC;
+        break;
     default: break;
     }
 

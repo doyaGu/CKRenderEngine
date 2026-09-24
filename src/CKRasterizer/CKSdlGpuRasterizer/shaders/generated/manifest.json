@@ -1,5 +1,5 @@
 {
-  "abi_version": 6,
+  "abi_version": 7,
   "interface_hash": 2784058577,
   "shaders": [
     {
@@ -98,8 +98,8 @@
       "uniform_buffers": 1,
       "reflected": true,
       "uniform_bytes": 1424,
-      "source_sha256": "de4cec23396b8dc1f67ba5a728032f53aee4af2560a1807e3f1be95343e02ceb",
-      "sha256": "7f02827d90785d788d35dfe0f2a1f836a373deef23a8ac57470ad0cef7bc86e9"
+      "source_sha256": "ee8c67a83af278b2f394aecf9c149ef6feaface5bd0e829feff9879b0f1555e8",
+      "sha256": "4fbe36d63976ac4bb4fe12495ebb724c838a7ff7f640993854f2ee887e17d01f"
     },
     {
       "name": "fs_ff_stage",
@@ -109,8 +109,8 @@
       "uniform_buffers": 1,
       "reflected": true,
       "uniform_bytes": 1424,
-      "source_sha256": "de4cec23396b8dc1f67ba5a728032f53aee4af2560a1807e3f1be95343e02ceb",
-      "sha256": "a22926e345c1ac4a466bf47c9cbdc65fc4522b16eebfd020bbd1f37c79afdd18"
+      "source_sha256": "ee8c67a83af278b2f394aecf9c149ef6feaface5bd0e829feff9879b0f1555e8",
+      "sha256": "f914144ef65abd003c57edae05c5a6268d90179ec5b6f822b5b0158202186be2"
     },
     {
       "name": "vs_postprocess",
@@ -142,8 +142,8 @@
       "uniform_buffers": 1,
       "reflected": true,
       "uniform_bytes": 48,
-      "source_sha256": "dbc73b18ef27f0f92ad4eaa021ce31b10dd815c9df74a101e2479adc487b2d55",
-      "sha256": "416808a4ff4f7eec2dfae7956b5e17b1fb79fe3b18ae75d33c6e5adeab7d105f"
+      "source_sha256": "2690bf10b658512e48135ad03a61a256c9d697186344f6d4a7a5185131875262",
+      "sha256": "fcab8b64165d6287504678800d38108e18ce1e9f41e8b1e45655419e3b9d63da"
     },
     {
       "name": "fs_postprocess",
@@ -153,8 +153,8 @@
       "uniform_buffers": 1,
       "reflected": true,
       "uniform_bytes": 48,
-      "source_sha256": "dbc73b18ef27f0f92ad4eaa021ce31b10dd815c9df74a101e2479adc487b2d55",
-      "sha256": "96d820d38a10c717f5d5659a80453a17ad6a7bb4c36a06d1e556bfb262b28c09"
+      "source_sha256": "2690bf10b658512e48135ad03a61a256c9d697186344f6d4a7a5185131875262",
+      "sha256": "1398723a5e1ae76021e9f3a060ec8ea4d95de599fbd0c432e1796a042f6d51a2"
     },
     {
       "name": "vs_clear",

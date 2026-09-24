@@ -261,10 +261,6 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         static const CKFFTextureSlot emptyBinding;
         const auto &binding = desc->Textures ? (*desc->Textures)[decl.Slot] : emptyBinding;
         auto &cached = SamplerBindings[decl.Slot];
-        if (std::memcmp(&cached.Sampler, &binding.Sampler, sizeof(binding.Sampler)) != 0) {
-            cached.Sampler = binding.Sampler;
-            cached.NativeSampler.reset();
-        }
         if (decl.MetadataBufferSlot == UINT32_MAX && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
             return CKERR_NOTIMPLEMENTED;
@@ -273,7 +269,25 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
             (Target && texture == Target->Color))
             return CKERR_INVALIDPARAMETER;
-        if (!cached.NativeSampler) cached.NativeSampler = Sampler(binding.Sampler);
+        CKSamplerDesc hardwareSampler = binding.Sampler;
+        if (texture->Info.type == SDL_GPU_TEXTURETYPE_3D &&
+            hardwareSampler.ShaderAnisotropy) {
+            // The fixed-function 3D shader controls the anisotropic taps.
+            // Keep the native sampler linear for each explicit-LOD lookup.
+            if (hardwareSampler.MinFilter == CKRST_FILTER_ANISOTROPIC)
+                hardwareSampler.MinFilter = CKRST_FILTER_LINEAR;
+            if (hardwareSampler.MagFilter == CKRST_FILTER_ANISOTROPIC)
+                hardwareSampler.MagFilter = CKRST_FILTER_LINEAR;
+            if (hardwareSampler.MipFilter == CKRST_FILTER_ANISOTROPIC)
+                hardwareSampler.MipFilter = CKRST_FILTER_LINEAR;
+            hardwareSampler.MaxAnisotropy = 1;
+            hardwareSampler.ShaderAnisotropy = 0;
+        }
+        if (std::memcmp(&cached.Sampler, &hardwareSampler, sizeof(hardwareSampler)) != 0) {
+            cached.Sampler = hardwareSampler;
+            cached.NativeSampler.reset();
+        }
+        if (!cached.NativeSampler) cached.NativeSampler = Sampler(hardwareSampler);
         if (!cached.NativeSampler) return Error;
         bindingInputs.Textures[slot] = texture.get();
         bindingInputs.Samplers[slot] = cached.NativeSampler.get();

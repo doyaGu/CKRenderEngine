@@ -44,7 +44,8 @@ inline CKERROR CKRasterizerValidateSampler(const CKSamplerDesc *Sampler)
                               Sampler->CompareFunc <= CKRST_COMPARE_ALWAYS;
 
     return minValid && magValid && mipValid && addressValid && compareValid &&
-           Sampler->MinMipLevel <= 30u
+           Sampler->MinMipLevel <= 30u && Sampler->MaxAnisotropy <= 16u &&
+           Sampler->ShaderAnisotropy <= 1u
         ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 

@@ -46,7 +46,7 @@ struct CKSdlGpuQwordHash {
 };
 
 typedef CKSdlGpuFixedKey<10> CKSdlGpuPipelineKey;
-typedef CKSdlGpuFixedKey<8> CKSdlGpuSamplerKey;
+typedef CKSdlGpuFixedKey<9> CKSdlGpuSamplerKey;
 typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
 typedef XSHashTable<std::shared_ptr<SDL_GPUGraphicsPipeline>,
                     CKSdlGpuPipelineKey,
@@ -56,7 +56,7 @@ typedef XSHashTable<std::weak_ptr<SDL_GPUBuffer>,
                     CKSdlGpuFixedKeyHash<64>> CKSdlGpuDefaultVertexTable;
 typedef XSHashTable<std::shared_ptr<SDL_GPUSampler>,
                     CKSdlGpuSamplerKey,
-                    CKSdlGpuFixedKeyHash<8>> CKSdlGpuSamplerTable;
+                    CKSdlGpuFixedKeyHash<9>> CKSdlGpuSamplerTable;
 
 // Public handles identify logical resources, never SDL pointers. Generations
 // do not wrap: exhausted slots are retired for the life of the device.

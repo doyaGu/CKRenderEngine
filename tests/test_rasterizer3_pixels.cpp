@@ -1585,6 +1585,169 @@ void CheckLayeredMinimumMip(Backend &b)
     printf("  cube and volume minimum mip sampling and reset: passed\n");
 }
 
+void CheckAnisotropyLimit(Backend &b)
+{
+    auto *ctx = b.Context;
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = desc.Format.Height = 64;
+    desc.Flags = CKRST_TEXTURE_RGB;
+    desc.MipMapCount = 7;
+    CKDWORD texture = 0;
+    TestCheck(ctx->CreateTexture(&desc, &texture), "create anisotropy mip chain");
+    const CKDWORD mipColors[] = {0xffff0000, 0xff00ff00, 0xff0000ff};
+    for (unsigned mip = 0; mip < 7; ++mip) {
+        const unsigned side = 64u >> mip;
+        std::vector<CKDWORD> source(side * side, mipColors[mip < 2 ? mip : 2]);
+        VxImageDescEx image = desc.Format;
+        image.Width = image.Height = side;
+        image.BytesPerLine = side * 4;
+        image.Image = reinterpret_cast<CKBYTE *>(source.data());
+        TestCheck(ctx->LoadTexture(texture, image, mip, CKRST_CUBEFACE_XPOS, NULL),
+                  "upload anisotropy mip");
+    }
+
+    SetDiffuseState(ctx);
+    ctx->SetTexture(texture, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER,
+                              VXTEXTUREFILTER_ANISOTROPIC);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER,
+                              VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                              VXTEXTURE_ADDRESSWRAP);
+    float coords[3][4] = {};
+    coords[0][0] = 0.0f;
+    coords[1][0] = 7.2f;
+    coords[2][0] = 3.6f;
+    for (auto &coord : coords) coord[1] = 0.5f;
+    auto sample = [&](CKDWORD maxAnisotropy, Pixels &pixels) {
+        ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, maxAnisotropy);
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coords),
+                      "draw anisotropy limit");
+        }, pixels);
+    };
+    Pixels pixels;
+    sample(2, pixels);
+    ExpectCenter(pixels, 0, 0, 255, "two-tap anisotropy selects coarse mip");
+    sample(8, pixels);
+    ExpectCenter(pixels, 255, 0, 0, "eight-tap anisotropy preserves base mip");
+    sample(1, pixels);
+    ExpectCenter(pixels, 0, 0, 255, "one-tap anisotropy resets to linear minification");
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER,
+                              VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
+    ctx->SetTexture(0, 0);
+    TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
+              "delete anisotropy mip chain");
+    printf("  requested anisotropy levels select distinct mip footprints: passed\n");
+}
+
+void CheckLayeredAnisotropyLimit(Backend &b)
+{
+    auto *ctx = b.Context;
+    for (bool volume : {false, true}) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+        desc.Format.Width = desc.Format.Height = 64;
+        desc.Flags = CKRST_TEXTURE_RGB |
+                     (volume ? CKRST_TEXTURE_VOLUMEMAP : CKRST_TEXTURE_CUBEMAP);
+        desc.Depth = volume ? 2 : 1;
+        desc.MipMapCount = 7;
+        CKDWORD texture = 0;
+        TestCheck(ctx->CreateTexture(&desc, &texture),
+                  "create layered anisotropy mip chain");
+        for (unsigned mip = 0; mip < 7; ++mip) {
+            const unsigned side = 64u >> mip;
+            std::vector<CKDWORD> source(side * side,
+                                        mip ? 0xff0000ff : 0xffff0000);
+            VxImageDescEx image = desc.Format;
+            image.Width = image.Height = side;
+            image.BytesPerLine = side * 4;
+            image.Image = reinterpret_cast<CKBYTE *>(source.data());
+            const unsigned layers = volume ? (mip == 0 ? 2u : 1u) : 6u;
+            for (unsigned layer = 0; layer < layers; ++layer)
+                TestCheck(ctx->LoadTexture(texture, image, mip,
+                                           (CKRST_CUBEFACE)layer, NULL),
+                          "upload layered anisotropy mip");
+        }
+        SetDiffuseState(ctx);
+        ctx->SetTexture(texture, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER,
+                                  VXTEXTUREFILTER_ANISOTROPIC);
+        ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER,
+                                  VXTEXTUREFILTER_LINEAR);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                                  VXTEXTURE_ADDRESSWRAP);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_ADDRESW, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                  CKRST_TTF_COUNT3);
+        VxVector positions[3] = {
+            VxVector(-0.18f, -0.9f, 0.5f),
+            VxVector(0.18f, -0.9f, 0.5f),
+            VxVector(0.0f, 0.9f, 0.5f),
+        };
+        float coords[3][4] = {};
+        for (auto &coord : coords) {
+            coord[1] = volume ? 0.5f : 0.0f;
+            coord[2] = volume ? 0.25f : 0.0f;
+        }
+        if (volume) {
+            coords[0][0] = 0.0f;
+            coords[1][0] = 1.4f;
+            coords[2][0] = 0.7f;
+        } else {
+            for (auto &coord : coords) coord[0] = 1.0f;
+            coords[0][1] = -0.75f;
+            coords[1][1] = 0.75f;
+        }
+        Pixels pixels;
+        auto sample = [&](CKDWORD maxAnisotropy, CKDWORD minMip) {
+            ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY,
+                                      maxAnisotropy);
+            ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, minMip);
+            RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                TestCheck(DrawTexturedTriangle(ctx, positions, kWhite, coords),
+                          "draw layered anisotropy limit");
+            }, pixels);
+        };
+        sample(2, 0);
+        ExpectCenter(pixels, 0, 0, 255,
+                     volume ? "volume two-tap anisotropy" : "cube two-tap anisotropy");
+        sample(8, 0);
+        ExpectCenter(pixels, 255, 0, 0,
+                     volume ? "volume eight-tap anisotropy" : "cube eight-tap anisotropy");
+        sample(8, 1);
+        ExpectCenter(pixels, 0, 0, 255,
+                     volume ? "volume anisotropy minimum mip" : "cube anisotropy minimum mip");
+        if (volume) {
+            ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV,
+                                      VXTEXTURE_ADDRESSBORDER);
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff00ff00);
+            for (auto &coord : coords) coord[1] = 0.0f;
+            sample(8, 0);
+            ExpectCenter(pixels, 128, 128, 0,
+                         "volume anisotropy blends the border per tap");
+            ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, 0);
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0);
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER,
+                                  VXTEXTUREFILTER_LINEAR);
+        ctx->SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
+        ctx->SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 0);
+        ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                  0);
+        ctx->SetTexture(0, 0);
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
+                  "delete layered anisotropy mip chain");
+    }
+    printf("  cube and volume anisotropy levels and minimum mip: passed\n");
+}
+
 void CheckMemoryCopyPixelIdentity(Backend &b)
 {
     auto *ctx = b.Context;
@@ -2234,6 +2397,8 @@ void BackendRendersFixedFunctionSemantics()
         CheckMipPreservation(backend);
         CheckMipLodBias(backend);
         CheckLayeredMinimumMip(backend);
+        CheckAnisotropyLimit(backend);
+        CheckLayeredAnisotropyLimit(backend);
         CheckMemoryCopyPixelIdentity(backend);
         CheckScaledTextureCopies(backend);
         CheckIndependentAttachmentClears(backend);

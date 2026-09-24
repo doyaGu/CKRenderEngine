@@ -490,15 +490,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
             if (!CKFFValidTextureStageValues(m_State.StageStates[stage]))
                 return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
             const CKSamplerDesc sampler = BuildSamplerDesc((int)stage);
-            const CKBOOL anisotropic =
-                sampler.MinFilter == CKRST_FILTER_ANISOTROPIC ||
-                sampler.MagFilter == CKRST_FILTER_ANISOTROPIC ||
-                sampler.MipFilter == CKRST_FILTER_ANISOTROPIC;
-            if (anisotropic &&
-                m_State.StageStates[stage][CKRST_TSS_MAXANISOTROPY] > 1) {
-                // bgfx anisotropy is a switch: any level above one is "on".
-                RecordDrawApproximation(CKRST_DIAG_APPROX_ANISOTROPY);
-            }
             if ((m_State.TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
                 m_State.StageStates[stage][CKRST_TSS_COMPAREFUNC] != CKRST_COMPARE_NONE &&
                 (sampler.MinFilter != CKRST_FILTER_NEAREST ||

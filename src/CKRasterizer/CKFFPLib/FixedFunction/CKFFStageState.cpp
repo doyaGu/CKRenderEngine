@@ -389,12 +389,14 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
     const CKDWORD addrW = stageState[CKRST_TSS_ADDRESW];
 
     const CKDWORD maxAnisotropy = stageState[CKRST_TSS_MAXANISOTROPY];
+    desc.MaxAnisotropy = maxAnisotropy < 1u ? 1u :
+                         (maxAnisotropy > 16u ? 16u : maxAnisotropy);
     switch (mag) {
     case VXTEXTUREFILTER_NEAREST:
         desc.MagFilter = CKRST_FILTER_NEAREST;
         break;
     case VXTEXTUREFILTER_ANISOTROPIC:
-        desc.MagFilter = maxAnisotropy == 1
+        desc.MagFilter = desc.MaxAnisotropy == 1
             ? CKRST_FILTER_LINEAR
             : CKRST_FILTER_ANISOTROPIC;
         break;
@@ -425,10 +427,10 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
         desc.MipFilter = CKRST_FILTER_LINEAR;
         break;
     case VXTEXTUREFILTER_ANISOTROPIC:
-        desc.MinFilter = maxAnisotropy == 1
+        desc.MinFilter = desc.MaxAnisotropy == 1
             ? CKRST_FILTER_LINEAR
             : CKRST_FILTER_ANISOTROPIC;
-        desc.MipFilter = maxAnisotropy == 1
+        desc.MipFilter = desc.MaxAnisotropy == 1
             ? CKRST_FILTER_LINEAR
             : CKRST_FILTER_ANISOTROPIC;
         break;
@@ -449,6 +451,11 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
     const CKDWORD minMip = stageState[CKRST_TSS_MAXMIPMLEVEL];
     desc.MinMipLevel = desc.MipFilter == CKRST_FILTER_NONE
         ? 0 : (minMip > 30u ? 30u : minMip);
+    desc.ShaderAnisotropy =
+        (desc.MinFilter == CKRST_FILTER_ANISOTROPIC ||
+         desc.MagFilter == CKRST_FILTER_ANISOTROPIC ||
+         desc.MipFilter == CKRST_FILTER_ANISOTROPIC) &&
+        desc.MaxAnisotropy > 1 ? 1u : 0u;
 
     return desc;
 }
@@ -468,11 +475,18 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState,
         desc.MinFilter = CKRST_FILTER_ANISOTROPIC;
         desc.MagFilter = CKRST_FILTER_ANISOTROPIC;
         desc.MipFilter = CKRST_FILTER_ANISOTROPIC;
+        if (desc.MaxAnisotropy <= 1)
+            desc.MaxAnisotropy = 16;
     }
     const CKDWORD requestedMinMip = stageState
         ? stageState[CKRST_TSS_MAXMIPMLEVEL] : 0;
     desc.MinMipLevel = desc.MipFilter == CKRST_FILTER_NONE
         ? 0 : (requestedMinMip > 30u ? 30u : requestedMinMip);
+    desc.ShaderAnisotropy =
+        (desc.MinFilter == CKRST_FILTER_ANISOTROPIC ||
+         desc.MagFilter == CKRST_FILTER_ANISOTROPIC ||
+         desc.MipFilter == CKRST_FILTER_ANISOTROPIC) &&
+        desc.MaxAnisotropy > 1 ? 1u : 0u;
     return desc;
 }
 
