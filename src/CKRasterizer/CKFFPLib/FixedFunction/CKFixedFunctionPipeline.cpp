@@ -246,6 +246,26 @@ static float CKFFResolveConstantPointSize(const CKDrawStateCache &drawState)
         FALSE, 1.0f, 0.0f, 0.0f, 0.0f);
 }
 
+static bool CKFFUsesLineRasterization(VXPRIMITIVETYPE topology,
+                                     const CKDrawStateCache &drawState)
+{
+    if (topology == VX_LINELIST || topology == VX_LINESTRIP)
+        return true;
+    return (topology == VX_TRIANGLELIST || topology == VX_TRIANGLESTRIP ||
+            topology == VX_TRIANGLEFAN) &&
+           drawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_WIREFRAME;
+}
+
+static bool CKFFLinePatternSuppressesDraw(VXPRIMITIVETYPE topology,
+                                         const CKDrawStateCache &drawState)
+{
+    const CKDWORD packed = drawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
+    // D3DLINEPATTERN packs wRepeatFactor in the low word and wLinePattern
+    // in the high word. A zero DWORD is the disabled/default state.
+    return packed != 0 && (packed >> 16) == 0 &&
+           CKFFUsesLineRasterization(topology, drawState);
+}
+
 const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code)
 {
     switch (code) {
@@ -372,17 +392,17 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
     const CKBOOL triangles = topology == VX_TRIANGLELIST ||
                              topology == VX_TRIANGLESTRIP ||
                              topology == VX_TRIANGLEFAN;
-    const CKBOOL lines = topology == VX_LINELIST ||
-                         topology == VX_LINESTRIP ||
-                         (triangles && m_State.DrawState.GetRenderState(
-                             VXRENDERSTATE_FILLMODE) == VXFILL_WIREFRAME);
+    const CKBOOL lines = CKFFUsesLineRasterization(topology, m_State.DrawState);
     // Render states the backends cannot express are reported only when they
     // affect the primitives actually submitted by this draw.
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_DITHERENABLE))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_DITHER);
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
         RecordDrawApproximation(CKRST_DIAG_APPROX_ZBIAS);
-    if (lines && m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN) != 0)
+    const CKDWORD linePattern =
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
+    if (lines && linePattern != 0 && (linePattern >> 16) != 0 &&
+        (linePattern >> 16) != 0xffffu)
         RecordDrawApproximation(CKRST_DIAG_IGNORE_LINEPATTERN);
     if (triangles && m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
@@ -944,6 +964,12 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         CKFF_PROBE(m_Probes, OnPrepareFailure());
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     }
+    if (CKFFLinePatternSuppressesDraw(type, m_State.DrawState)) {
+        m_Draw = CKFFDraw();
+        m_Draw.SkipSubmit = TRUE;
+        m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
+        return TRUE;
+    }
     if (pointFill && m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE) != VXCULL_NONE) {
         CKFFPointFillCullParams cull = {};
         cull.World = m_State.World;
@@ -1049,6 +1075,12 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         m_State.TextureHandles, m_State.StageStates);
     if (!ValidateDrawState(type, formatFlags, activeTextureCount))
         return FALSE;
+    if (CKFFLinePatternSuppressesDraw(type, m_State.DrawState)) {
+        m_Draw = CKFFDraw();
+        m_Draw.SkipSubmit = TRUE;
+        m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
+        return TRUE;
+    }
     if (!ValidateVertexBlendWeights(dpFlags, formatFlags))
         return FALSE;
     // Contexts with indexed vertex blending route through their CPU shadow so

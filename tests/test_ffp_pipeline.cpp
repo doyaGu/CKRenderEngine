@@ -496,7 +496,7 @@ void IgnoredRenderStatesReportDiagnostics() {
     const IgnoredStateCase cases[] = {
         {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKRST_DIAG_IGNORE_DITHER},
         {VXRENDERSTATE_ZBIAS, 1, 0, CKRST_DIAG_APPROX_ZBIAS},
-        {VXRENDERSTATE_LINEPATTERN, 0xFFFFu, 0, CKRST_DIAG_IGNORE_LINEPATTERN},
+        {VXRENDERSTATE_LINEPATTERN, 0x00FF0001u, 0, CKRST_DIAG_IGNORE_LINEPATTERN},
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
         {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
         {VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE, FALSE, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING},
@@ -565,6 +565,27 @@ void IgnoredRenderStatesReportDiagnostics() {
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
                   ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_IGNORE_LINEPATTERN),
               "A line must report the ignored line pattern after a solid triangle");
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
+
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00000001u);
+    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+              ffp.GetDraw().SkipSubmit &&
+              ffp.GetLastDrawApproximationMask() == 0,
+              "a zero line pattern suppresses the whole line draw");
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+              ffp.GetDraw().SkipSubmit &&
+              ffp.GetLastDrawApproximationMask() == 0,
+              "a zero line pattern suppresses wireframe triangles");
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xffff0001u);
+    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+              !ffp.GetDraw().SkipSubmit &&
+              ffp.GetLastDrawApproximationMask() == 0,
+              "an all-ones line pattern draws a solid line");
     ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
 
     ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);

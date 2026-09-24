@@ -1030,8 +1030,23 @@ void CheckLineTopologyWithPointFill(Backend &b)
             if (PixelNear(pixels, x, y, 0, 255, 0))
                 ++greenPixels;
     TestCheckf(greenPixels > 20,
-               "point polygon fill must preserve the line segment (%d green pixels)",
-               greenPixels);
+              "point polygon fill must preserve the line segment (%d green pixels)",
+              greenPixels);
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00000001u);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw line with an all-zero pattern");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 0, 0, 0),
+              "an all-zero pattern suppresses the line");
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xffff0001u);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw line with an all-one pattern");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 0, 255, 0),
+              "an all-one pattern preserves the solid line");
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
 }
 
