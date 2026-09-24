@@ -159,7 +159,11 @@ CKBOOL CKBgfxRasterizerContext::CopyToTexture(CKDWORD Texture, const VxRect *Src
                                          texture->Format.Height,
                                          !destinationBottomLeft) == CK_OK &&
                     OpenPass(scratch.Target, patchRect, 0, 0, 1, 0, "copy-scale-patch") &&
-                    m_Present.SubmitCopy(scratch.Source, sw, sh, sourceBottomLeft) == CK_OK &&
+                    // The snapshot retains the source orientation; the
+                    // render-target origin determines whether its V axis
+                    // must be reversed for the patch draw.
+                    m_Present.SubmitCopy(scratch.Source, sw, sh,
+                                         sourceBottomLeft == GetCaps().OriginBottomLeft) == CK_OK &&
                     Blit(Texture, 0, Face, 0, 0, scratch.Output, 0, 0,
                          &outputRect) == CK_OK;
             }
