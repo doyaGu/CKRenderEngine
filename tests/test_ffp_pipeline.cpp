@@ -2116,6 +2116,13 @@ void BorderColorsAreNotQuantizedByTranslation() {
                       (CKDWORD)bump[7] == 1024u,
                   "nearest border color and address mask reach the fragment shader");
     }
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKRST_DP_CL_V, 1), "Linear border draw succeeds");
+    const std::vector<float> &linearBump = context.Log.FloatUniforms[bumpUniform];
+    TestCheck(linearBump.size() >= 8 && (CKDWORD)linearBump[7] == 25600u,
+              "linear minification and magnification retain the exact border mask");
     ffp.Shutdown();
 }
 

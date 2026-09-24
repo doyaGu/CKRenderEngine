@@ -229,15 +229,18 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
             ? sampler.MaxAnisotropy : 0;
         CKDWORD borderMask = 0;
         if ((m_ShaderTargetFlags & CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM) != 0 &&
-            sampler.MinFilter == CKRST_FILTER_NEAREST &&
-            sampler.MagFilter == CKRST_FILTER_NEAREST &&
+            sampler.MipFilter == CKRST_FILTER_NONE &&
             !sampler.ShaderAnisotropy) {
             borderMask = (sampler.AddressU == CKRST_ADDRESS_BORDER ? 1u : 0u) |
                          (sampler.AddressV == CKRST_ADDRESS_BORDER ? 2u : 0u) |
                          (sampler.AddressW == CKRST_ADDRESS_BORDER ? 4u : 0u);
         }
+        const CKDWORD minLinear = sampler.MinFilter != CKRST_FILTER_NEAREST ? 1u : 0u;
+        const CKDWORD magLinear = sampler.MagFilter != CKRST_FILTER_NEAREST ? 1u : 0u;
         bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel +
-            anisotropy * 32u + borderMask * 1024u);
+            anisotropy * 32u + borderMask * 1024u +
+            (borderMask != 0
+                 ? minLinear * 8192u + magLinear * 16384u : 0u));
         CKFFPackColorARGB(sampler.BorderColor, borderColors[stage]);
     }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,

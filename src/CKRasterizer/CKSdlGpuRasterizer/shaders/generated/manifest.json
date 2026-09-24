@@ -1,5 +1,5 @@
 {
-  "abi_version": 8,
+  "abi_version": 9,
   "interface_hash": 2784058577,
   "shaders": [
     {
@@ -98,7 +98,7 @@
       "uniform_buffers": 1,
       "reflected": true,
       "uniform_bytes": 1424,
-      "source_sha256": "ee8c67a83af278b2f394aecf9c149ef6feaface5bd0e829feff9879b0f1555e8",
+      "source_sha256": "75df7d7a98642f759ebe303659746bca206c2fd8093e873a42d2cdb695a5c94d",
       "sha256": "4fbe36d63976ac4bb4fe12495ebb724c838a7ff7f640993854f2ee887e17d01f"
     },
     {
@@ -109,7 +109,7 @@
       "uniform_buffers": 1,
       "reflected": true,
       "uniform_bytes": 1424,
-      "source_sha256": "ee8c67a83af278b2f394aecf9c149ef6feaface5bd0e829feff9879b0f1555e8",
+      "source_sha256": "75df7d7a98642f759ebe303659746bca206c2fd8093e873a42d2cdb695a5c94d",
       "sha256": "f914144ef65abd003c57edae05c5a6268d90179ec5b6f822b5b0158202186be2"
     },
     {

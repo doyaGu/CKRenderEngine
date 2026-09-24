@@ -409,11 +409,10 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
         const bool hasBorder = Sampler->AddressU == CKRST_ADDRESS_BORDER ||
             Sampler->AddressV == CKRST_ADDRESS_BORDER ||
             Sampler->AddressW == CKRST_ADDRESS_BORDER;
-        const bool manualNearestBorder = hasBorder &&
-            Sampler->MinFilter == CKRST_FILTER_NEAREST &&
-            Sampler->MagFilter == CKRST_FILTER_NEAREST &&
+        const bool manualBorder = hasBorder &&
+            Sampler->MipFilter == CKRST_FILTER_NONE &&
             !Sampler->ShaderAnisotropy;
-        if (manualNearestBorder) {
+        if (manualBorder) {
             if (nativeSampler.AddressU == CKRST_ADDRESS_BORDER)
                 nativeSampler.AddressU = CKRST_ADDRESS_CLAMP;
             if (nativeSampler.AddressV == CKRST_ADDRESS_BORDER)

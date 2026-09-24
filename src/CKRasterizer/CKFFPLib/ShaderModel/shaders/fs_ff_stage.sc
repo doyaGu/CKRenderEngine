@@ -314,6 +314,53 @@ int ckffSamplerOrdinal(int stage, int samplerType)
     return ordinal;
 }
 
+// CKFF_BGFX_ONLY_BEGIN
+#if !CKFF_NATIVE_SDL_GPU
+float ckffBorderAxisCoverage(float uv, float extent, bool border, bool filtered)
+{
+    if (!border) return 1.0;
+    if (!filtered) return uv >= 0.0 && uv < 1.0 ? 1.0 : 0.0;
+    float coordinate = uv * extent - 0.5;
+    float base = floor(coordinate);
+    float fraction = coordinate - base;
+    return (base >= 0.0 && base < extent ? 1.0 - fraction : 0.0) +
+           (base + 1.0 >= 0.0 && base + 1.0 < extent ? fraction : 0.0);
+}
+
+float ckffBorderCoverage2D(vec2 uv, vec2 size, int mask, bool filtered)
+{
+    return ckffBorderAxisCoverage(uv.x, size.x, (mask & 1) != 0, filtered) *
+           ckffBorderAxisCoverage(uv.y, size.y, (mask & 2) != 0, filtered);
+}
+
+float ckffBorderCoverage3D(vec3 uv, vec3 size, int mask, bool filtered)
+{
+    return ckffBorderCoverage2D(uv.xy, size.xy, mask, filtered) *
+           ckffBorderAxisCoverage(uv.z, size.z, (mask & 4) != 0, filtered);
+}
+
+#if BGFX_SHADER_LANGUAGE_GLSL
+#define CKFF_BORDER_SIZE_2D(_sampler) vec2(textureSize(_sampler, 0))
+#define CKFF_BORDER_SIZE_3D(_sampler) vec3(textureSize(_sampler, 0))
+#else
+vec2 ckffBorderSize2D(BgfxSampler2D sampleState)
+{
+    uint width, height, levels;
+    sampleState.m_texture.GetDimensions(0, width, height, levels);
+    return vec2(width, height);
+}
+vec3 ckffBorderSize3D(BgfxSampler3D sampleState)
+{
+    uint width, height, depth, levels;
+    sampleState.m_texture.GetDimensions(0, width, height, depth, levels);
+    return vec3(width, height, depth);
+}
+#define CKFF_BORDER_SIZE_2D(_sampler) ckffBorderSize2D(_sampler)
+#define CKFF_BORDER_SIZE_3D(_sampler) ckffBorderSize3D(_sampler)
+#endif
+#endif
+// CKFF_BGFX_ONLY_END
+
 vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
@@ -338,24 +385,10 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 // CKFF_BGFX_ONLY_BEGIN
 #if !CKFF_NATIVE_SDL_GPU
     // bgfx has only sixteen border palette entries for the whole frame.
-    // Nearest filtering needs one border decision per pixel, so the exact
-    // stage color can be used without consuming a palette entry.
+    // The shader computes the coverage of texels inside each border axis.
     int borderMask = (packedSamplerLod >> 10) & 7;
-    if (samplerType != 1 && borderMask != 0) {
-        bool outside = ((borderMask & 1) != 0 && (coord.x < 0.0 || coord.x >= 1.0)) ||
-                       ((borderMask & 2) != 0 && (coord.y < 0.0 || coord.y >= 1.0)) ||
-                       (samplerType == 3 && (borderMask & 4) != 0 &&
-                        (coord.z < 0.0 || coord.z >= 1.0));
-        if (outside) {
-            vec4 border = u_borderColor[stage];
-            if (samplerType == 2) {
-                if (compareFunc != 0)
-                    return vec4_splat(compareDepth(border.r, coord.z, compareFunc));
-                return border.rrrr;
-            }
-            return border;
-        }
-    }
+    bool minLinear = ((packedSamplerLod >> 13) & 1) != 0;
+    bool magLinear = ((packedSamplerLod >> 14) & 1) != 0;
 #endif
 // CKFF_BGFX_ONLY_END
     if (samplerType == 1) {
@@ -386,10 +419,32 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     (minMip > 0.0 ? CKFF_TEXTURE_3D_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)))
 #endif
+#if CKFF_NATIVE_SDL_GPU
         if (ordinal == 0) return CKFF_SAMPLE_3D(s_textureVolume0);
         if (ordinal == 1) return CKFF_SAMPLE_3D(s_textureVolume1);
         if (ordinal == 2) return CKFF_SAMPLE_3D(s_textureVolume2);
         return CKFF_SAMPLE_3D(s_textureVolume3);
+#else
+// CKFF_BGFX_ONLY_BEGIN
+        vec4 volumeColor;
+        if (ordinal == 0) volumeColor = CKFF_SAMPLE_3D(s_textureVolume0);
+        else if (ordinal == 1) volumeColor = CKFF_SAMPLE_3D(s_textureVolume1);
+        else if (ordinal == 2) volumeColor = CKFF_SAMPLE_3D(s_textureVolume2);
+        else volumeColor = CKFF_SAMPLE_3D(s_textureVolume3);
+        if (borderMask != 0) {
+            vec3 size;
+            if (ordinal == 0) size = CKFF_BORDER_SIZE_3D(s_textureVolume0);
+            else if (ordinal == 1) size = CKFF_BORDER_SIZE_3D(s_textureVolume1);
+            else if (ordinal == 2) size = CKFF_BORDER_SIZE_3D(s_textureVolume2);
+            else size = CKFF_BORDER_SIZE_3D(s_textureVolume3);
+            float lod = ckffClampedLod3D(originalDx3, originalDy3, size, lodBias, 0.0);
+            bool filtered = lod > 0.0 ? minLinear : magLinear;
+            volumeColor = mix(u_borderColor[stage], volumeColor,
+                ckffBorderCoverage3D(coord.xyz, size, borderMask, filtered));
+        }
+        return volumeColor;
+// CKFF_BGFX_ONLY_END
+#endif
 #undef CKFF_SAMPLE_3D
     }
 
@@ -424,6 +479,25 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     else color = CKFF_SAMPLE_2D(s_texture7);
 #undef CKFF_SAMPLE_2D
 #undef CKFF_TEXTURE_2D_GRAD
+// CKFF_BGFX_ONLY_BEGIN
+#if !CKFF_NATIVE_SDL_GPU
+    if (borderMask != 0) {
+        vec2 size;
+        if (stage == 0) size = CKFF_BORDER_SIZE_2D(s_texture0);
+        else if (stage == 1) size = CKFF_BORDER_SIZE_2D(s_texture1);
+        else if (stage == 2) size = CKFF_BORDER_SIZE_2D(s_texture2);
+        else if (stage == 3) size = CKFF_BORDER_SIZE_2D(s_texture3);
+        else if (stage == 4) size = CKFF_BORDER_SIZE_2D(s_texture4);
+        else if (stage == 5) size = CKFF_BORDER_SIZE_2D(s_texture5);
+        else if (stage == 6) size = CKFF_BORDER_SIZE_2D(s_texture6);
+        else size = CKFF_BORDER_SIZE_2D(s_texture7);
+        float lod = ckffClampedLod2D(originalDx, originalDy, size, lodBias, 0.0);
+        bool filtered = lod > 0.0 ? minLinear : magLinear;
+        color = mix(u_borderColor[stage], color,
+            ckffBorderCoverage2D(uv, size, borderMask, filtered));
+    }
+#endif
+// CKFF_BGFX_ONLY_END
     if (samplerType == 2) {
         float depth = color.r;
         if (compareFunc != 0) return vec4_splat(compareDepth(depth, coord.z, compareFunc));

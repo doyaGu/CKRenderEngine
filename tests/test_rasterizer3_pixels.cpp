@@ -1365,6 +1365,44 @@ void CheckBorderFiltering(Backend &b)
     }, pixels);
     ExpectCenter(pixels, 20, 180, 250,
                  "seventeenth nearest border color remains exact in one frame");
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    for (auto &coord : uv) coord[0] = 0;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv),
+                      "sample a distinct linear border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv),
+                  "sample seventeenth linear border color");
+    }, pixels);
+    ExpectCenter(pixels, 138, 90, 125,
+                 "seventeenth linear border color blends with the edge texel");
+    ctx->SetTexture(textures.MirrorVolume, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_COUNT3);
+    VxMatrix volumeTransform;
+    Vx3DMatrixIdentity(volumeTransform);
+    volumeTransform[3][2] = 0.25f;
+    ctx->SetTransformMatrix(VXMATRIX_TEXTURE0, volumeTransform);
+    float volumeUv[3][4] = {{0,0.5f,0,0},{0,0.5f,0,0},{0,0.5f,0,0}};
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, volumeUv),
+                      "sample a distinct linear volume border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, volumeUv),
+                  "sample seventeenth linear volume border color");
+    }, pixels);
+    ExpectCenter(pixels, 138, 90, 125,
+                 "seventeenth linear volume border color blends with the edge texel");
     DestroyTextures(ctx, textures);
     SetDiffuseState(ctx);
     printf("  border filtering: edge purple / outside blue\n");
