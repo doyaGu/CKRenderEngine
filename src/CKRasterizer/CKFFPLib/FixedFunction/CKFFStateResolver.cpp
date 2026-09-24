@@ -203,7 +203,9 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
         stateDesc.FS.SetAlphaTestEnabled(true);
         stateDesc.FS.SetAlphaFunc(drawState.GetRenderState(VXRENDERSTATE_ALPHAFUNC));
     }
-    stateDesc.VS.SetVertexClipping(drawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
+    stateDesc.VS.SetVertexClipping(
+        drawState.GetRenderState(VXRENDERSTATE_CLIPPING) != 0 &&
+        drawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) != 0);
 }
 
 CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,

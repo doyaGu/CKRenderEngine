@@ -1026,6 +1026,31 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
                   planes->second[6] == 7.0f && planes->second[7] == 8.0f,
               "Second uploaded clip plane must be the next enabled index");
 
+    context.Log.FloatUniforms.clear();
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPING, FALSE);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "DrawVertexBuffer with clipping disabled");
+    TestCheck(!ffp.GetDraw().ShaderKey.VS.GetVertexClipping(),
+              "Clipping off must select the shader without user clip planes");
+    params = context.Log.FloatUniforms.find(paramsUniform);
+    TestCheck(params != context.Log.FloatUniforms.end() &&
+                  params->second[0] == 0.0f,
+              "Clipping off must clear the previous clip-plane count");
+
+    context.Log.FloatUniforms.clear();
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPING, TRUE);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "DrawVertexBuffer with clipping restored");
+    params = context.Log.FloatUniforms.find(paramsUniform);
+    TestCheck(ffp.GetDraw().ShaderKey.VS.GetVertexClipping() &&
+                  params != context.Log.FloatUniforms.end() &&
+                  params->second[0] == 2.0f,
+              "Restoring clipping must reactivate the selected user planes");
+
     ffp.Shutdown();
 }
 

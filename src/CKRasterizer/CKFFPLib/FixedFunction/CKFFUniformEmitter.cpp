@@ -305,7 +305,8 @@ void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext 
 
     CKFFUniformSink *sink = context->Uniforms;
     CKFFClipPlaneUniform clip;
-    const CKDWORD clipMask = m_DrawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE);
+    const CKDWORD clipMask = m_DrawState.GetRenderState(VXRENDERSTATE_CLIPPING)
+        ? m_DrawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE) : 0;
     if (clipMask != 0) {
         CKFFPackClipPlaneUniforms(m_State.UserClipPlanes, clipMask, clip);
         Emit(sink, CKRST_BLOCK_CLIP_PLANES, clip.Planes, 6, 6, FALSE);

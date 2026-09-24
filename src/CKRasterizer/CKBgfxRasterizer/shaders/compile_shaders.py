@@ -173,6 +173,22 @@ def write_header(path: Path, var_name: str, data: bytes) -> None:
         f.write("};\n")
 
 
+def validate_ff_varyings(compiled: dict[str, bytes], backend_name: str) -> None:
+    # bgfx shader blobs store the fragment input hash at byte 4 and the
+    # vertex output hash at byte 8; createProgram requires them to match.
+    fragment = compiled["fs_ff_stage"]
+    if fragment[:4] != b"FSH\x0b":
+        raise ValueError(f"{backend_name}: invalid fixed-function fragment shader blob")
+    input_hash = fragment[4:8]
+    for name in ("vs_ff_3d", "vs_ff_3d_clip",
+                 "vs_ff_positiont", "vs_ff_positiont_clip"):
+        vertex = compiled[name]
+        if vertex[:4] != b"VSH\x0b" or vertex[8:12] != input_hash:
+            raise ValueError(
+                f"{backend_name}: {name} output varyings do not match fs_ff_stage input"
+            )
+
+
 def read_shader_identity(interface_dir: Path) -> tuple[int, int]:
     text = (interface_dir / "CKBuiltinShaderIdentity.h").read_text(encoding="utf-8")
     version = int(re.search(r"CKFF_SHADER_ABI_VERSION = (\d+)", text)[1])
@@ -341,13 +357,17 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="ck2_3d_shaders_") as tmp:
         tmp_dir = Path(tmp)
         for backend in selected:
+            compiled: dict[str, bytes] = {}
             for shader in SHADERS:
                 bin_path = tmp_dir / backend["name"] / (shader["name"] + ".bin")
                 bin_path.parent.mkdir(parents=True, exist_ok=True)
                 run_shaderc(shaderc, source_dir, shader, backend, bin_path, args.bgfx_source)
+                compiled[shader["name"]] = bin_path.read_bytes()
+            validate_ff_varyings(compiled, backend["name"])
+            for shader in SHADERS:
                 var_name = f"s_{backend['name']}_{shader['name']}"
                 header = generated_dir / backend["name"] / (shader["name"] + ".bin.h")
-                write_header(header, var_name, bin_path.read_bytes())
+                write_header(header, var_name, compiled[shader["name"]])
     clean_stale_headers(generated_dir, selected)
     shader_abi_version, shader_interface_hash = read_shader_identity(interface_dir)
     write_abi_header(generated_dir, shader_abi_version, shader_interface_hash)

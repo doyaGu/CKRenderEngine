@@ -2,11 +2,7 @@
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
 $input a_position, a_normal, a_tangent, a_bitangent, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-#if CKFF_VS_CLIP_DISTANCE
 $output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
-#else
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos
-#endif
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -206,6 +202,9 @@ void main()
     v_clipDistance1.x = clipCount > 4 ? dot(worldClipPos, u_clipPlanes[4]) : 0.0;
     v_clipDistance1.y = clipCount > 5 ? dot(worldClipPos, u_clipPlanes[5]) : 0.0;
     v_clipDistance1.zw = vec2(0.0, 0.0);
+#elif !CKFF_NATIVE_SDL_GPU
+    v_clipDistance0 = vec4_splat(0.0);
+    v_clipDistance1 = vec4_splat(0.0);
 #endif
     if (u_ffDrawParams[7].y > 0.5) {
         viewNormal = normalize(viewNormal);

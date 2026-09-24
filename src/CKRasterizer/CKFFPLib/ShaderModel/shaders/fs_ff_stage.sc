@@ -1,4 +1,4 @@
-$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos
+$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -791,6 +791,13 @@ vec2 ckffDecodeBump(vec2 bump, bool unormEncoded)
 
 void main()
 {
+// CKFF_BGFX_ONLY_BEGIN
+    // Fragment clipping also covers bgfx profiles without native clip-distance state.
+    if (v_clipDistance0.x < 0.0 || v_clipDistance0.y < 0.0 ||
+        v_clipDistance0.z < 0.0 || v_clipDistance0.w < 0.0 ||
+        v_clipDistance1.x < 0.0 || v_clipDistance1.y < 0.0)
+        discard;
+// CKFF_BGFX_ONLY_END
     bool flatShade = ckffSpec_FLAT_SHADE() != 0;
     int lastActiveStage = ckffSpec_LAST_ACTIVE_TEXTURE_STAGE();
     vec4 diffuse = flatShade ? v_flatColor0 : v_color0;

@@ -1331,6 +1331,76 @@ void CheckPointFillTriangleCulling(Backend &b)
     printf("  point-filled triangle face culling matches solid triangles and VB paths: passed\n");
 }
 
+void CheckClippingDisablesUserPlanes(Backend &b)
+{
+    auto *ctx = b.Context;
+    SetDiffuseState(ctx);
+    VxPlane plane;
+    plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
+    plane.m_D = -2.0f;
+    TestCheck(ctx->SetUserClipPlane(0, plane), "set user plane outside the triangle");
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1);
+    Pixels clipped, unclipped;
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        ctx->SetRenderState(VXRENDERSTATE_CLIPPING, enabled ? FALSE : TRUE);
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            CKBOOL drawn = DrawColorTriangle(ctx, kCenterTriangle, kRed);
+            TestCheckf(drawn,
+                       "draw with user clipping toggled, clippingOff=%d", enabled);
+        }, enabled ? unclipped : clipped);
+    }
+    TestCheck(!PixelNear(clipped, 32, 32, 255, 0, 0) &&
+                  PixelNear(unclipped, 32, 32, 255, 0, 0),
+              "CLIPPING off disables user planes on the actual backend");
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPING, TRUE);
+    plane.m_D = 0.0f;
+    TestCheck(ctx->SetUserClipPlane(0, plane), "set plane across the triangle");
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kRed),
+                  "draw triangle crossing a user plane");
+    }, clipped);
+    TestCheck(!PixelNear(clipped, 20, 32, 255, 0, 0) &&
+                  PixelNear(clipped, 44, 32, 255, 0, 0),
+              "user plane cuts the triangle at the interpolated boundary");
+
+    VxPlane rightPlane;
+    rightPlane.m_Normal = VxVector(-1.0f, 0.0f, 0.0f);
+    rightPlane.m_D = 0.25f;
+    TestCheck(ctx->SetUserClipPlane(1, rightPlane), "set second user plane");
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 3);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kRed),
+                  "draw triangle between two user planes");
+    }, clipped);
+    TestCheck(PixelNear(clipped, 37, 32, 255, 0, 0) &&
+                  !PixelNear(clipped, 44, 32, 255, 0, 0),
+              "two user planes preserve only their intersection");
+
+    float screenPositions[3][4] = {
+        {8.0f, 48.0f, 0.5f, 1.0f}, {56.0f, 48.0f, 0.5f, 1.0f},
+        {32.0f, 8.0f, 0.5f, 1.0f}};
+    VxDrawPrimitiveData screenData = {};
+    screenData.VertexCount = 3;
+    screenData.Flags = CKRST_DP_CL_VCT;
+    screenData.PositionPtr = screenPositions;
+    screenData.PositionStride = sizeof(screenPositions[0]);
+    screenData.ColorPtr = const_cast<CKDWORD *>(kRed);
+    screenData.ColorStride = sizeof(CKDWORD);
+    plane.m_D = -32.0f;
+    TestCheck(ctx->SetUserClipPlane(0, plane), "set POSITIONT user plane");
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &screenData),
+                  "draw POSITIONT triangle across a user plane");
+    }, clipped);
+    TestCheck(!PixelNear(clipped, 24, 32, 255, 0, 0) &&
+                  PixelNear(clipped, 40, 32, 255, 0, 0),
+              "POSITIONT user plane cuts the triangle at screen x=32");
+
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
+    printf("  CLIPPING and user planes cut 3D and POSITIONT triangles: passed\n");
+}
+
 void CheckVertexBufferWrapPixels(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
@@ -2833,6 +2903,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckLineTopologyWithPointFill(backend);
         CheckVertexBufferPointFilledStripsAndFans(backend);
         CheckPointFillTriangleCulling(backend);
+        CheckClippingDisablesUserPlanes(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);
