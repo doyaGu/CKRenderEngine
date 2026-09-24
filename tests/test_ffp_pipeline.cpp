@@ -592,9 +592,10 @@ void IgnoredRenderStatesReportDiagnostics() {
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
     TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
-                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetLastDrawApproximationMask() ==
+                      (1ull << CKRST_DIAG_IGNORE_ANTIALIAS) &&
                   ((ffp.GetDraw().Pipeline.State.Lo >> 12) & 3u) == 0u,
-              "An explicit line must ignore polygon edge AA and point fill");
+              "An explicit line reports unsupported edge AA but ignores polygon point fill");
 
     ffp.Shutdown();
 }

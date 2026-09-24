@@ -404,7 +404,8 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
     if (lines && linePattern != 0 && (linePattern >> 16) != 0 &&
         (linePattern >> 16) != 0xffffu)
         RecordDrawApproximation(CKRST_DIAG_IGNORE_LINEPATTERN);
-    if (triangles && m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
+    if ((triangles || lines) &&
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
     if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
