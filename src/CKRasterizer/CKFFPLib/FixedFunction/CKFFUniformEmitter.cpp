@@ -221,15 +221,29 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     // Every texture lookup reads this block for its LOD bias. Upload zeros
     // when a bias is reset so cached uniforms cannot retain the previous draw.
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
+    float borderColors[CKFF_MAX_TEXTURE_STAGES][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKSamplerDesc sampler = m_TextureBinder.BuildSamplerDesc((int)stage);
         const CKDWORD anisotropy = sampler.ShaderAnisotropy
             ? sampler.MaxAnisotropy : 0;
-        bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel + anisotropy * 32u);
+        CKDWORD borderMask = 0;
+        if ((m_ShaderTargetFlags & CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM) != 0 &&
+            sampler.MinFilter == CKRST_FILTER_NEAREST &&
+            sampler.MagFilter == CKRST_FILTER_NEAREST &&
+            !sampler.ShaderAnisotropy) {
+            borderMask = (sampler.AddressU == CKRST_ADDRESS_BORDER ? 1u : 0u) |
+                         (sampler.AddressV == CKRST_ADDRESS_BORDER ? 2u : 0u) |
+                         (sampler.AddressW == CKRST_ADDRESS_BORDER ? 4u : 0u);
+        }
+        bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel +
+            anisotropy * 32u + borderMask * 1024u);
+        CKFFPackColorARGB(sampler.BorderColor, borderColors[stage]);
     }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
          CKFF_MAX_TEXTURE_STAGES * 2, CKFF_MAX_TEXTURE_STAGES * 2, FALSE);
+    Emit(sink, CKRST_BLOCK_BORDER_COLORS, borderColors,
+         CKFF_MAX_TEXTURE_STAGES, CKFF_MAX_TEXTURE_STAGES, FALSE);
 
     if (context->PositionT) {
         float viewport[4];

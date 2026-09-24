@@ -406,8 +406,21 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
     if (Sampler) {
         nativeSampler = *Sampler;
         nativeSampler.BorderColor = 0;
-        if (Sampler->AddressU == CKRST_ADDRESS_BORDER || Sampler->AddressV == CKRST_ADDRESS_BORDER ||
-            Sampler->AddressW == CKRST_ADDRESS_BORDER) {
+        const bool hasBorder = Sampler->AddressU == CKRST_ADDRESS_BORDER ||
+            Sampler->AddressV == CKRST_ADDRESS_BORDER ||
+            Sampler->AddressW == CKRST_ADDRESS_BORDER;
+        const bool manualNearestBorder = hasBorder &&
+            Sampler->MinFilter == CKRST_FILTER_NEAREST &&
+            Sampler->MagFilter == CKRST_FILTER_NEAREST &&
+            !Sampler->ShaderAnisotropy;
+        if (manualNearestBorder) {
+            if (nativeSampler.AddressU == CKRST_ADDRESS_BORDER)
+                nativeSampler.AddressU = CKRST_ADDRESS_CLAMP;
+            if (nativeSampler.AddressV == CKRST_ADDRESS_BORDER)
+                nativeSampler.AddressV = CKRST_ADDRESS_CLAMP;
+            if (nativeSampler.AddressW == CKRST_ADDRESS_BORDER)
+                nativeSampler.AddressW = CKRST_ADDRESS_CLAMP;
+        } else if (hasBorder) {
             const auto entry = m_BorderPalette.Resolve(Sampler->BorderColor);
             nativeSampler.BorderColor = entry.Index;
             if (entry.Added) {

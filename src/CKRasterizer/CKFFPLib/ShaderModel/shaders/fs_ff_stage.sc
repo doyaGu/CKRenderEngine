@@ -6,6 +6,7 @@ $input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1,
 uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[16];
+uniform vec4 u_borderColor[8];
 uniform vec4 u_ffSpec[5];
 
 // Fixed sampler layout shared by every draw (spec 5.3): one 2D sampler per
@@ -320,6 +321,11 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     int packedSamplerLod = int(u_bumpEnv[stage * 2 + 1].w);
     float minMip = float(packedSamplerLod & 31);
     float maxAnisotropy = float(packedSamplerLod >> 5);
+// CKFF_BGFX_ONLY_BEGIN
+#if !CKFF_NATIVE_SDL_GPU
+    maxAnisotropy = float((packedSamplerLod >> 5) & 31);
+#endif
+// CKFF_BGFX_ONLY_END
     // Addressing must not change the derivatives used to choose a mip level.
     // In particular, clamping the coordinate outside [0, 1] would otherwise
     // force the LOD to zero instead of preserving the source footprint.
@@ -329,6 +335,29 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     vec3 originalDx3 = dFdx(coord.xyz);
     vec3 originalDy3 = dFdy(coord.xyz);
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
+// CKFF_BGFX_ONLY_BEGIN
+#if !CKFF_NATIVE_SDL_GPU
+    // bgfx has only sixteen border palette entries for the whole frame.
+    // Nearest filtering needs one border decision per pixel, so the exact
+    // stage color can be used without consuming a palette entry.
+    int borderMask = (packedSamplerLod >> 10) & 7;
+    if (samplerType != 1 && borderMask != 0) {
+        bool outside = ((borderMask & 1) != 0 && (coord.x < 0.0 || coord.x >= 1.0)) ||
+                       ((borderMask & 2) != 0 && (coord.y < 0.0 || coord.y >= 1.0)) ||
+                       (samplerType == 3 && (borderMask & 4) != 0 &&
+                        (coord.z < 0.0 || coord.z >= 1.0));
+        if (outside) {
+            vec4 border = u_borderColor[stage];
+            if (samplerType == 2) {
+                if (compareFunc != 0)
+                    return vec4_splat(compareDepth(border.r, coord.z, compareFunc));
+                return border.rrrr;
+            }
+            return border;
+        }
+    }
+#endif
+// CKFF_BGFX_ONLY_END
     if (samplerType == 1) {
         int ordinal = ckffSamplerOrdinal(stage, samplerType);
 #if CKFF_NATIVE_SDL_GPU

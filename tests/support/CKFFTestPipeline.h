@@ -121,7 +121,9 @@ public:
         m_Layouts.Clear();
         if (!CKFixedFunctionPipeline::Init(
                 caps.Features, caps.MaxTextureBindings,
-                m_Shaders.GetTargetFlags())) {
+                m_Shaders.GetTargetFlags() |
+                    (caps.ShaderFormat == CKRST_SHADER_FORMAT_BGFX
+                         ? CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM : 0u))) {
             ClearLayouts();
             m_Shaders.Shutdown(device);
             return false;

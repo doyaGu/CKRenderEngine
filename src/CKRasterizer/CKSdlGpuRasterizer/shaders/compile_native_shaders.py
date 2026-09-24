@@ -39,6 +39,7 @@ BLOCKS = [
     ("float4", "u_bumpEnv", 16),
     ("float4", "u_viewport", 1),
     ("float4", "u_stageParams", 16),
+    ("float4", "u_borderColor", 8),
     ("float4", "u_ffSpec", 5),
     ("float4", "u_clipPlanes", 6),
     ("float4", "u_clipParams", 1),
@@ -56,7 +57,21 @@ VARYINGS = ["v_color0", "v_color1", "v_flatColor0", "v_flatColor1"] + [
 
 def source_body(path: Path) -> str:
     result = []
+    bgfx_only = False
+    # Strip bgfx-only branches before DXC sees the source. The native FFP
+    # shader is already near the D3D12 driver's pipeline complexity limit;
+    # leaving even a dead border branch in that source prevents pipeline creation.
     for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "// CKFF_BGFX_ONLY_BEGIN":
+            assert not bgfx_only
+            bgfx_only = True
+            continue
+        if line.strip() == "// CKFF_BGFX_ONLY_END":
+            assert bgfx_only
+            bgfx_only = False
+            continue
+        if bgfx_only:
+            continue
         if line.startswith("$") or re.match(r"^uniform\s", line):
             continue
         include = re.fullmatch(r'#include "([^"]+)"', line)
@@ -65,6 +80,7 @@ def source_body(path: Path) -> str:
                 result.append(source_body(path.parent / include[1]))
         else:
             result.append(line)
+    assert not bgfx_only
     return "\n".join(result).replace("void main()", "void ckffEvaluate()")
 
 

@@ -2091,7 +2091,11 @@ void BorderColorsAreNotQuantizedByTranslation() {
     ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
     ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
     ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
+    const CKDWORD borderUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BORDER_COLORS);
+    const CKDWORD bumpUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
     for (CKDWORD i = 0; i < 32; ++i) {
         const CKDWORD color = 0x80402000u | i;
         ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, color);
@@ -2100,6 +2104,17 @@ void BorderColorsAreNotQuantizedByTranslation() {
         TestCheck(context.Log.LastTextureSampler.BorderColor == color &&
                       ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_BORDER_COLOR) == 0,
                   "The core preserves more than sixteen distinct border colors");
+        float expected[4];
+        CKFFPackColorARGB(color, expected);
+        const std::vector<float> &border = context.Log.FloatUniforms[borderUniform];
+        const std::vector<float> &bump = context.Log.FloatUniforms[bumpUniform];
+        TestCheck(border.size() >= 4 && bump.size() >= 8 &&
+                      fabsf(border[0] - expected[0]) < 0.00001f &&
+                      fabsf(border[1] - expected[1]) < 0.00001f &&
+                      fabsf(border[2] - expected[2]) < 0.00001f &&
+                      fabsf(border[3] - expected[3]) < 0.00001f &&
+                      (CKDWORD)bump[7] == 1024u,
+                  "nearest border color and address mask reach the fragment shader");
     }
     ffp.Shutdown();
 }

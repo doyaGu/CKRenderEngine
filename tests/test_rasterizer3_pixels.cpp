@@ -1349,6 +1349,22 @@ void CheckBorderFiltering(Backend &b)
         TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv), "sample outside border");
     }, pixels);
     ExpectCenter(pixels, 0, 0, 255, "outside border keeps actual blue color");
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        for (CKDWORD i = 0; i < 16; ++i) {
+            const CKDWORD shade = i * 13u;
+            ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR,
+                                      0xff000000u | (shade << 16) | (shade << 8) | shade);
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv),
+                      "sample a distinct nearest border color");
+        }
+        ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff14b4fau);
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, uv),
+                  "sample seventeenth nearest border color");
+    }, pixels);
+    ExpectCenter(pixels, 20, 180, 250,
+                 "seventeenth nearest border color remains exact in one frame");
     DestroyTextures(ctx, textures);
     SetDiffuseState(ctx);
     printf("  border filtering: edge purple / outside blue\n");
