@@ -388,6 +388,11 @@ CKERROR CKSdlGpuRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *
     info.width = desc->Width; info.height = desc->Height; info.num_levels = info.layer_count_or_depth = 1;
     info.sample_count = CKSdlGpuSampleCount(texture->Samples);
     info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    // Single-sample depth textures can be used by a later comparison draw.
+    // Keep attachment-only formats available for the internal backbuffer.
+    if (texture->Samples == 1 && SDL_GPUTextureSupportsFormat(Device, info.format,
+        info.type, info.usage | SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        info.usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
     texture->Image = CKSdlGpuOwn(Device, SDL_CreateGPUTexture(Device, &info), SDL_ReleaseGPUTexture);
     if (!texture->Image) return Fail("CreateGPUTexture.depth");
     *out = Textures.Add(texture);

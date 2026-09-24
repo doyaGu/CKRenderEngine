@@ -265,9 +265,10 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
             return CKERR_NOTIMPLEMENTED;
         const auto &texture = binding.Texture ? Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
-        if (!texture || texture->Depth ||
+        if (!texture || (texture->Depth &&
+            (texture->Info.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) == 0) ||
             texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
-            (Target && texture == Target->Color))
+            (Target && (texture == Target->Color || texture == Target->Depth)))
             return CKERR_INVALIDPARAMETER;
         CKSamplerDesc hardwareSampler = binding.Sampler;
         if (texture->Info.type == SDL_GPU_TEXTURETYPE_3D &&

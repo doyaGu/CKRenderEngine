@@ -912,6 +912,41 @@ static int Run(SDL_Window *window)
         SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV, shaders)) return 23;
     present.Init(&backend, shaders);
     if (!present.EnsureSceneTarget(640, 480, 0) || !present.EnsureNativeTarget(640, 480) || !present.EnsureResources()) return 2;
+    CKDepthTextureDesc sampledDepthDesc;
+    sampledDepthDesc.Width = 640; sampledDepthDesc.Height = 480;
+    sampledDepthDesc.Format = CKRST_DEPTHFMT_D16;
+    CKDWORD sampledDepth = 0, sampledDepthTarget = 0;
+    if (backend.CreateDepthTexture(&sampledDepthDesc, &sampledDepth) != CK_OK) return 28;
+    CKRenderTargetDesc sampledTargetDesc;
+    sampledTargetDesc.ColorTexture = present.SceneTarget().ColorTexture;
+    sampledTargetDesc.DepthTexture = sampledDepth;
+    if (backend.CreateRenderTarget(&sampledTargetDesc, &sampledDepthTarget) != CK_OK) return 28;
+    CKRenderPassDesc depthPass;
+    depthPass.Rect = {0, 0, 640, 480}; depthPass.RenderTarget = sampledDepthTarget;
+    depthPass.ClearFlags = CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH;
+    depthPass.ClearZ = 0.25f;
+    if (backend.BeginPass(&depthPass) != CK_OK) return 28;
+    depthPass.RenderTarget = present.NativeTarget().FrameBuffer;
+    depthPass.ClearFlags = CKRST_CTXCLEAR_COLOR;
+    if (backend.BeginPass(&depthPass) != CK_OK ||
+        present.SubmitCopy(sampledDepth, 640, 480) != CK_OK) return 28;
+    CKSdlGpuReadbackTicket depthTicket;
+    CKReadbackDesc depthRead;
+    if (backend.ReadTexture(present.NativeTarget().ColorTexture, 0,
+                            &depthRead, &depthTicket) != CK_OK ||
+        backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr) != CK_OK ||
+        backend.PollReadback(depthTicket, TRUE) != CKRST_READBACK_READY) return 28;
+    CKDWORD depthPixel = 0;
+    std::memcpy(&depthPixel, backend.GetReadbackData(depthTicket).Begin() +
+                             240 * depthRead.RowPitch + 320 * 4, 4);
+    const unsigned depthRed = (depthPixel >> 16) & 255;
+    if (depthRed < 62 || depthRed > 66) {
+        std::fprintf(stderr, "sampled D16 depth pixel: %08x expected red=64\n", unsigned(depthPixel));
+        return 28;
+    }
+    backend.DestroyObject(sampledDepthTarget, CKRST_OBJ_RENDERTARGET);
+    backend.DestroyObject(sampledDepth, CKRST_OBJ_TEXTURE);
+    std::puts("SDL_gpu D16 render target can be sampled in a later pass");
     CKRenderPassDesc pass;
     pass.Rect = {0, 0, 640, 480}; pass.RenderTarget = present.SceneTarget().FrameBuffer;
     pass.ClearFlags = CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH; pass.ClearColor = 0xff20b060;
