@@ -956,6 +956,12 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     // the primitive path can validate every packed matrix index before drawing.
     if (NeedsVertexBufferBlendValidation(formatFlags))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
+    // Point-filled strips and fans need one point for each vertex of every
+    // triangle. The direct VB path would submit the original strip/fan stream
+    // as a point list and omit repeated vertices.
+    if ((type == VX_TRIANGLESTRIP || type == VX_TRIANGLEFAN) &&
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT)
+        return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     // Callers with WRAPn route through the transient primitive path, which
     // can adjust coordinates independently for each primitive.
     CKRSTVertexLayout vertexLayoutDesc;

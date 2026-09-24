@@ -599,6 +599,8 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD VB
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
+        ((Type == VX_TRIANGLESTRIP || Type == VX_TRIANGLEFAN) &&
+         m_FFP.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;
@@ -657,6 +659,8 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWORD 
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
+        ((Type == VX_TRIANGLESTRIP || Type == VX_TRIANGLEFAN) &&
+         m_FFP.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_POINT) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
         VxDrawPrimitiveData data;

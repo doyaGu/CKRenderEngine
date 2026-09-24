@@ -1035,6 +1035,94 @@ void CheckLineTopologyWithPointFill(Backend &b)
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
 }
 
+void CheckVertexBufferPointFilledStripsAndFans(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    const CKDWORD format = CKRST_DP_TR_VC;
+    CKRSTVertexLayout layout;
+    const CKDWORD stride = CKRSTGetVertexLayout(format, NULL, &layout);
+    const VxVector positions[4] = {
+        VxVector(-0.75f, -0.75f, 0.5f), VxVector(0.75f, -0.75f, 0.5f),
+        VxVector(-0.75f, 0.75f, 0.5f), VxVector(0.75f, 0.75f, 0.5f)};
+    const CKDWORD colors[4] = {0xff400000u, 0xff400000u,
+                               0xff400000u, 0xff400000u};
+    XArray<CKBYTE> vertices;
+    vertices.Resize(stride * 4);
+    memset(vertices.Begin(), 0, vertices.Size());
+    for (int i = 0; i < 4; ++i) {
+        CKBYTE *vertex = vertices.Begin() + i * stride;
+        memcpy(vertex + layout.PositionOffset, &positions[i], sizeof(VxVector));
+        memcpy(vertex + layout.DiffuseOffset, &colors[i], sizeof(CKDWORD));
+    }
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = format;
+    vbDesc.m_MaxVertexCount = 4;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices.Begin(), &vb),
+              "create point-filled strip/fan VB");
+    const CKWORD indices[4] = {0, 1, 2, 3};
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 4;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, indices, &ib),
+              "create point-filled strip/fan IB");
+
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 4;
+    data.Flags = format;
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_ONE);
+    ctx->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_ONE);
+
+    for (VXPRIMITIVETYPE type : {VX_TRIANGLESTRIP, VX_TRIANGLEFAN}) {
+        Pixels reference, candidate;
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(ctx->DrawPrimitive(type, NULL, 0, &data),
+                      "draw point-filled strip/fan reference");
+        }, reference);
+        int redPixels = 0;
+        for (int i = 2; i < reference.Data.Size(); i += 4)
+            redPixels += reference.Data[i] != 0;
+        TestCheck(redPixels >= 4, "point-filled strip/fan reference covers vertices");
+
+        auto matchesReference = [&]() {
+            return candidate.Width == reference.Width &&
+                   candidate.Height == reference.Height &&
+                   candidate.Data.Size() == reference.Data.Size() &&
+                   memcmp(candidate.Data.Begin(), reference.Data.Begin(),
+                          reference.Data.Size()) == 0;
+        };
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(ctx->DrawPrimitiveVB(type, vb, 0, 4, NULL, 0),
+                      "draw point-filled strip/fan VB");
+        }, candidate);
+        TestCheck(matchesReference(), "point-filled strip/fan VB matches transient draw");
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(ctx->DrawPrimitiveVB(type, vb, 0, 4,
+                                           const_cast<CKWORD *>(indices), 4),
+                      "draw indexed point-filled strip/fan VB");
+        }, candidate);
+        TestCheck(matchesReference(), "indexed point-filled strip/fan VB matches transient draw");
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(ctx->DrawPrimitiveVBIB(type, vb, ib, 0, 4, 0, 4),
+                      "draw point-filled strip/fan VBIB");
+        }, candidate);
+        TestCheck(matchesReference(), "point-filled strip/fan VBIB matches transient draw");
+    }
+
+    ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete point-fill IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete point-fill VB");
+    printf("  point-filled VB strips and fans preserve per-triangle vertices: passed\n");
+}
+
 void CheckVertexBufferWrapPixels(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
@@ -2391,6 +2479,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckVertexBufferWrapPixels(backend);
         CheckVertexBufferPointSizePixels(backend);
         CheckLineTopologyWithPointFill(backend);
+        CheckVertexBufferPointFilledStripsAndFans(backend);
         CheckBorderFiltering(backend);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);
