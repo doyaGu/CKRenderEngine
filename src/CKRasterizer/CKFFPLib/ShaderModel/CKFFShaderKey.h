@@ -21,6 +21,7 @@ struct CKFFShaderKeyVS {
     bool GetHasPositionT() const { return (Bits & (1ull << 12)) != 0; }
     bool GetVertexClipping() const { return (Bits & (1ull << 34)) != 0; }
     bool GetPointSprite() const { return (Bits & (1ull << 40)) != 0; }
+    bool GetPointOffset() const { return (Bits & (1ull << 41)) != 0; }
     bool operator==(const CKFFShaderKeyVS &other) const;
     bool operator!=(const CKFFShaderKeyVS &other) const { return !(*this == other); }
 };

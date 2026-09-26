@@ -63,8 +63,10 @@ public:
 
     // Expand the vertices of point-filled triangles to screen-sized quads.
     // The source data supplies per-vertex PSIZE, which is not part of the
-    // backend's interleaved vertex layout. Returns FALSE for vertex blending,
-    // which needs a post-transform expansion instead.
+    // backend's interleaved vertex layout. Each duplicate retains the point
+    // centre and carries an internal pixel offset applied after vertex work.
+    // Returns FALSE for vertex blending and tweening until their centre
+    // distance calculation is available here.
     CKBOOL ExpandPointFilledTriangles(const CKFFPointSpriteParams &params,
                                       CKBOOL pointSprites,
                                       const VxDrawPrimitiveData *sourceData,

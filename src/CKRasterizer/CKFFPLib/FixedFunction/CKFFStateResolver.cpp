@@ -63,6 +63,8 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     const bool positionT = hasFormat ? ((formatFlags & CKFF_VF_POSITIONT) != 0) : ((dpFlags & CKRST_DP_TRANSFORM) == 0);
     out->PositionT = positionT ? TRUE : FALSE;
     stateDesc.VS.SetPointSprite(pointSprite != FALSE);
+    stateDesc.VS.SetPointOffset(
+        hasFormat && (formatFlags & CKFF_VF_POINTOFFSET) != 0);
 
     // Vertex state description
     stateDesc.VS.SetHasPosition(!positionT);
@@ -228,6 +230,8 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
         (float)drawState.GetRenderState(VXRENDERSTATE_ZBIAS) * CKFF_ZBIAS_DEPTH_UNIT;
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][2] =
         drawState.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) ? 0.0f : 1.0f;
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][3] =
+        shaderKey.VS.GetPointOffset() ? 1.0f : 0.0f;
     float materialSource[4];
     CKFFShaderKeyMaterialSources(shaderKey.VS, materialSource);
     memcpy(drawParams[CKFF_DRAW_PARAM_MATERIAL_SOURCES], materialSource,

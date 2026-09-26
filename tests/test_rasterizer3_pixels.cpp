@@ -1399,6 +1399,23 @@ void CheckPointFilledTriangleSizes(Backend &b)
     TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] == before,
               "constant-size point fill has no approximation");
 
+    VxPlane pointPlane;
+    pointPlane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
+    pointPlane.m_D = 0.55f;
+    TestCheck(ctx->SetUserClipPlane(0, pointPlane),
+              "set point-fill center clip plane");
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1u);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data),
+                  "draw point fill crossing a user clip plane");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 8, 48, 255, 0, 0) &&
+                  PixelNear(pixels, 22, 48, 255, 0, 0),
+              "user clipping keeps the whole expanded point when its center passes");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] == before,
+              "center-based point-fill clipping has no approximation");
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
+
     ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
     data.Flags |= CKRST_DP_PSIZE;
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {

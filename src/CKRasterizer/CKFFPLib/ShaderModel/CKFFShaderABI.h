@@ -25,7 +25,7 @@ enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_AMBIENT = 1,
     CKFF_DRAW_PARAM_MATERIAL_SPECULAR = 2,
     CKFF_DRAW_PARAM_MATERIAL_EMISSIVE = 3,
-    CKFF_DRAW_PARAM_MATERIAL_POWER = 4, // x = specular power, y = ZBIAS, z = affine texture interpolation
+    CKFF_DRAW_PARAM_MATERIAL_POWER = 4, // x = specular power, y = ZBIAS, z = affine interpolation, w = point offset
     CKFF_DRAW_PARAM_MATERIAL_SOURCES = 5,
     CKFF_DRAW_PARAM_LIGHTING = 6,
     CKFF_DRAW_PARAM_LIGHT_FLAGS = 7,

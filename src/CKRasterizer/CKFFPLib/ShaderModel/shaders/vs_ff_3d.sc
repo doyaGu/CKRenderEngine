@@ -24,6 +24,7 @@ uniform mat4 u_texMatrix[8];
 uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_lights[56];
 uniform vec4 u_stageParams[16];
+uniform vec4 u_viewport;
 #if CKFF_VS_CLIP_DISTANCE
 uniform vec4 u_clipPlanes[6];
 uniform vec4 u_clipParams;
@@ -334,5 +335,10 @@ void main()
     }
     // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
+    // Expanded point-filled triangles retain the source point for lighting,
+    // fog, texgen and user clipping. The internal tangent/bitangent scalars
+    // move only the final raster position by a pixel-space corner offset.
+    if (u_ffDrawParams[4].w > 0.5)
+        gl_Position.xy += vec2(a_tangent.x, a_bitangent.x) * u_viewport.xy * gl_Position.w;
     ckffApplyBackendClipSpace(gl_Position);
 }

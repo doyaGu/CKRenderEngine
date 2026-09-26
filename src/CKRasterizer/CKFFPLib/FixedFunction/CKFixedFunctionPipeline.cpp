@@ -887,8 +887,10 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     pointParams.ViewportHeight = m_State.Viewport[1] != 0.0f
         ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
     CKFFProgramPreparation programPreparation;
+    const CKDWORD programFormatFlags = formatFlags |
+        (pointFillExpansion && canExpandPointFill ? CKFF_VF_POINTOFFSET : 0);
     const CKFFProgramPrepareStatus prepareStatus = PrepareSoftwareProgram(
-        &programPreparation, data->Flags, activeTextureCount, formatFlags,
+        &programPreparation, data->Flags, activeTextureCount, programFormatFlags,
         m_State.TexcoordComponentCounts, pointSprites);
     if (prepareStatus != CKFF_PROGRAM_PREPARE_OK) {
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -1010,27 +1012,6 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
             pointParams, pointSprites, data, &approximate);
         if (!expandedPointFill && canExpandPointFill)
             return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
-        if (expandedPointFill &&
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_LIGHTING) &&
-            m_State.ActiveLightCount > 0 &&
-            (formatFlags & CKFF_VF_NORMAL) != 0)
-            approximate = TRUE; // moved corners would be lit separately
-        if (expandedPointFill &&
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_FOGENABLE) &&
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_RANGEFOGENABLE))
-            approximate = TRUE; // each corner has a different eye distance
-        if (expandedPointFill &&
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPLANEENABLE))
-            approximate = TRUE; // scaled-point clip planes are device dependent
-        if (expandedPointFill && !pointSprites) {
-            for (CKDWORD stage = 0; stage < preparedState.ActiveTextureCount; ++stage) {
-                if (m_State.TextureHandles[stage] != 0 &&
-                    (m_State.StageStates[stage][CKRST_TSS_TEXCOORDINDEX] >> 16) != 0) {
-                    approximate = TRUE; // generated coordinates see moved corners
-                    break;
-                }
-            }
-        }
         if (!expandedPointFill || approximate)
             RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
         if (expandedPointFill && m_TransientGeometry.GetVertexCount() == 0) {
@@ -1055,7 +1036,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     submission.ForceSolidFill = expandedPointFill || type == VX_POINTLIST;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
-    submission.VertexFormat = formatFlags;
+    submission.VertexFormat = m_TransientGeometry.GetFormatFlags();
     submission.Source = CKFF_DRAW_PRIMITIVE;
     return PrepareDraw(submission);
 }

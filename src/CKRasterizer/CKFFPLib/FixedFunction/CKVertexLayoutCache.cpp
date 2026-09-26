@@ -31,6 +31,7 @@ CKDWORD CKFFVertexLayout::ComputeStride(CKDWORD formatFlags) {
     }
     if (formatFlags & CKFF_VF_COLOR0)    stride += 4;  // uint8x4 normalized
     if (formatFlags & CKFF_VF_COLOR1)    stride += 4;  // uint8x4 normalized
+    if (formatFlags & CKFF_VF_POINTOFFSET) stride += 8; // two float pixel offsets
     return stride;
 }
 
@@ -216,6 +217,28 @@ CKBOOL CKFFVertexLayout::BuildLayout(
         elements[count].Type = CKRST_ATTRIBTYPE_UINT8;
         elements[count].Count = 4;
         elements[count].Normalized = TRUE;
+        elements[count].AsInt = FALSE;
+        elements[count].Offset = offset;
+        count++;
+        offset += 4;
+    }
+    if (formatFlags & CKFF_VF_POINTOFFSET) {
+        // Point-filled triangle quads keep the source vertex at the point
+        // centre. Two otherwise-unused scalar attributes move only the final
+        // clip position in the vertex shader.
+        elements[count].Attrib = CKRST_ATTRIB_TANGENT;
+        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+        elements[count].Count = 1;
+        elements[count].Normalized = FALSE;
+        elements[count].AsInt = FALSE;
+        elements[count].Offset = offset;
+        count++;
+        offset += 4;
+
+        elements[count].Attrib = CKRST_ATTRIB_BITANGENT;
+        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+        elements[count].Count = 1;
+        elements[count].Normalized = FALSE;
         elements[count].AsInt = FALSE;
         elements[count].Offset = offset;
         count++;

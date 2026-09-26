@@ -249,23 +249,24 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     Emit(sink, CKRST_BLOCK_BORDER_COLORS, borderColors,
          CKFF_MAX_TEXTURE_STAGES, CKFF_MAX_TEXTURE_STAGES, FALSE);
 
-    if (context->PositionT) {
-        float viewport[4];
-        memcpy(viewport, m_State.Viewport, sizeof(viewport));
-        if (!m_State.ViewportRemapIdentity) {
-            // Same remap as the projection: scale, then offset (times w in the shader).
-            viewport[0] *= m_State.ViewportRemap[0];
-            viewport[2] = viewport[2] * m_State.ViewportRemap[0] + m_State.ViewportRemap[2];
-            viewport[1] *= m_State.ViewportRemap[1];
-            viewport[3] = viewport[3] * m_State.ViewportRemap[1] + m_State.ViewportRemap[3];
-        }
-        if (RenderTargetOriginFlip()) {
-            // Pre-transformed vertices: mirror the screen-to-clip Y mapping.
-            viewport[1] = -viewport[1];
-            viewport[3] = -viewport[3];
-        }
-        Emit(sink, CKRST_BLOCK_VIEWPORT, viewport, 1, 1, FALSE);
+    // POSITIONT maps absolute pixels through this vector. The 3D shader also
+    // consumes its scale for the internal point-fill corner offset, so keep it
+    // initialized for every vertex variant.
+    float viewport[4];
+    memcpy(viewport, m_State.Viewport, sizeof(viewport));
+    if (!m_State.ViewportRemapIdentity) {
+        // Same remap as the projection: scale, then offset (times w in the shader).
+        viewport[0] *= m_State.ViewportRemap[0];
+        viewport[2] = viewport[2] * m_State.ViewportRemap[0] + m_State.ViewportRemap[2];
+        viewport[1] *= m_State.ViewportRemap[1];
+        viewport[3] = viewport[3] * m_State.ViewportRemap[1] + m_State.ViewportRemap[3];
     }
+    if (RenderTargetOriginFlip()) {
+        // Mirror both pre-transformed positions and point-fill pixel offsets.
+        viewport[1] = -viewport[1];
+        viewport[3] = -viewport[3];
+    }
+    Emit(sink, CKRST_BLOCK_VIEWPORT, viewport, 1, 1, FALSE);
 
     CKFFStageParamsUniform stageParams;
     CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,

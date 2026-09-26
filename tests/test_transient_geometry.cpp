@@ -497,11 +497,17 @@ static void PointFilledWrapPreservesVertexSizes()
     const CKBYTE *vertices = harness.Geometry.GetVertices();
     const CKDWORD stride = harness.Geometry.GetVertexStride();
     if (vertices && harness.Geometry.GetVertexCount() == 12) {
-        TestCheck(fabs(ReadFloat(vertices) - (-0.65625f)) < 0.0001f &&
-                  fabs(ReadFloat(vertices + 4 * stride) - 0.46875f) < 0.0001f,
-                  "point-filled quads use each vertex's PSIZE after wrap expansion");
+        TestCheck(fabs(ReadFloat(vertices) - (-0.5f)) < 0.0001f &&
+                  fabs(ReadFloat(vertices + 4 * stride) - 0.5f) < 0.0001f,
+                  "point-filled quads preserve their source point centres");
+        TestCheck(fabs(ReadFloat(vertices + stride - 8) - (-5.0f)) < 0.0001f &&
+                  fabs(ReadFloat(vertices + stride - 4) - (-5.0f)) < 0.0001f &&
+                  fabs(ReadFloat(vertices + 4 * stride + stride - 8) - (-1.0f)) < 0.0001f,
+                  "point-filled quads carry each vertex's PSIZE as pixel offsets");
         TestCheck(fabs(ReadFloat(vertices + 4 * stride + 12) - 1.1f) < 0.0001f,
                   "point-filled quads retain the adjusted wrapped texture coordinate");
+        TestCheck((harness.Geometry.GetFormatFlags() & CKFF_VF_POINTOFFSET) != 0,
+                  "point-filled quads select the point-offset vertex layout");
     }
 }
 

@@ -600,6 +600,98 @@ void IgnoredRenderStatesReportDiagnostics() {
     ffp.Shutdown();
 }
 
+void ExpandedPointFillPreservesPointCenterSemantics() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    VxVector positions[3] = {
+        VxVector(-0.5f, -0.5f, 0.5f),
+        VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(-0.5f, 0.5f, 0.5f)
+    };
+    VxVector normals[3] = {
+        VxVector(0.0f, 0.0f, -1.0f),
+        VxVector(0.0f, 0.0f, -1.0f),
+        VxVector(0.0f, 0.0f, -1.0f)
+    };
+    Vx2DVector texcoords[3] = {
+        Vx2DVector(0.0f, 0.0f),
+        Vx2DVector(1.0f, 0.0f),
+        Vx2DVector(0.0f, 1.0f)
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_CL_V;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.NormalPtr = normals;
+    data.NormalStride = sizeof(VxVector);
+    data.TexCoordPtr = texcoords;
+    data.TexCoordStride = sizeof(Vx2DVector);
+
+    CKLightData light = {};
+    light.Type = VX_LIGHTDIREC;
+    light.Direction = VxVector(0.0f, 0.0f, 1.0f);
+    light.Diffuse = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
+    ffp.SetLight(0, &light);
+    ffp.EnableLight(0, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_RANGEFOGENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(8.0f));
+
+    VxPlane plane;
+    plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
+    plane.m_D = 0.55f;
+    ffp.SetUserClipPlane(0, plane);
+    ffp.SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 1u);
+
+    ffp.SetTexture(0, 100);
+    ffp.SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ffp.SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ffp.SetTextureStageState(
+        0, CKRST_TSS_TEXCOORDINDEX,
+        CKFFPackTexcoordIndex(0, CKFF_TEXGEN_CAMERASPACEPOSITION));
+
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
+              "point fill with center-dependent fixed-function state must submit");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0,
+              "lighting, range fog, texgen and clip planes must use the exact point center");
+    TestCheck((ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET) != 0 &&
+                  ffp.GetDraw().ShaderKey.VS.GetPointOffset(),
+              "expanded point fill must enable the internal final-position offset path");
+    bool hasPointOffsetX = false;
+    bool hasPointOffsetY = false;
+    for (size_t i = 0; i < context.LastVertexLayoutElements.size(); ++i) {
+        hasPointOffsetX = hasPointOffsetX ||
+            context.LastVertexLayoutElements[i].Attrib == CKRST_ATTRIB_TANGENT;
+        hasPointOffsetY = hasPointOffsetY ||
+            context.LastVertexLayoutElements[i].Attrib == CKRST_ATTRIB_BITANGENT;
+    }
+    TestCheck(hasPointOffsetX && hasPointOffsetY,
+              "expanded point layout must carry both pixel-space corner offsets");
+
+    const CKDWORD stride = CKFFVertexLayout::ComputeStride(ffp.GetDraw().VertexFormat);
+    TestCheck(context.Log.LastVertexBytes.size() == stride * 12,
+              "three point-filled triangle vertices must expand to three indexed quads");
+    if (context.Log.LastVertexBytes.size() == stride * 12) {
+        for (CKDWORD corner = 0; corner < 4; ++corner) {
+            float center[3] = {};
+            memcpy(center, &context.Log.LastVertexBytes[corner * stride], sizeof(center));
+            TestCheck(center[0] == positions[0].x &&
+                          center[1] == positions[0].y &&
+                          center[2] == positions[0].z,
+                      "every expanded corner must retain the original point center");
+        }
+    }
+
+    ffp.Shutdown();
+}
+
 void InvalidStateValuesRejectBeforeBackendEncoding() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
@@ -3884,6 +3976,8 @@ int main() {
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
     tests.Run("Ignored render states report diagnostics",
               &IgnoredRenderStatesReportDiagnostics);
+    tests.Run("Expanded point fill preserves point center semantics",
+              &ExpandedPointFillPreservesPointCenterSemantics);
     tests.Run("Invalid state values reject before backend encoding",
               &InvalidStateValuesRejectBeforeBackendEncoding);
     tests.Run("Draw validation cache invalidates on state changes",
