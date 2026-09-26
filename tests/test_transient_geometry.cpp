@@ -8,6 +8,7 @@
 #include "TestTriangleMultiset.h"
 
 #include <cstring>
+#include <limits>
 
 struct TransientGeometryHarness {
     CKTransientGeometry Geometry;
@@ -486,10 +487,7 @@ static void PointFilledWrapPreservesVertexSizes()
                                        VXWRAP_U, FALSE, &params, NULL, NULL,
                                        TRUE),
               "point-filled wrapped triangle retains source vertex indices");
-    CKBOOL approximate = FALSE;
-    TestCheck(harness.Geometry.ExpandPointFilledTriangles(params, FALSE, &data,
-                                                          &approximate) &&
-              !approximate,
+    TestCheck(harness.Geometry.ExpandPointFilledTriangles(params, FALSE, &data),
               "point-filled wrapped triangle expands without approximation");
     TestCheck(harness.Geometry.GetVertexCount() == 12 &&
               harness.Geometry.GetIndexCount() == 18,
@@ -548,9 +546,8 @@ static void PointFillScalingUsesBlendedAndTweenedCenters()
                   VX_TRIANGLELIST, NULL, 0, &data, 0, FALSE, &params,
                   NULL, NULL, TRUE),
               "scaled matrix-blended point fill prepares source vertices");
-    CKBOOL approximate = FALSE;
     TestCheck(blendHarness.Geometry.ExpandPointFilledTriangles(
-                  params, FALSE, &data, &approximate) && !approximate,
+                  params, FALSE, &data),
               "scaled matrix-blended point fill expands exactly");
     const CKBYTE *vertices = blendHarness.Geometry.GetVertices();
     CKDWORD stride = blendHarness.Geometry.GetVertexStride();
@@ -581,9 +578,8 @@ static void PointFillScalingUsesBlendedAndTweenedCenters()
                   VX_TRIANGLELIST, NULL, 0, &data, 0, FALSE, &params,
                   NULL, NULL, TRUE),
               "scaled tweened point fill prepares source vertices");
-    approximate = FALSE;
     TestCheck(tweenHarness.Geometry.ExpandPointFilledTriangles(
-                  params, FALSE, &data, &approximate) && !approximate,
+                  params, FALSE, &data),
               "scaled tweened point fill expands exactly");
     vertices = tweenHarness.Geometry.GetVertices();
     stride = tweenHarness.Geometry.GetVertexStride();
@@ -591,6 +587,94 @@ static void PointFillScalingUsesBlendedAndTweenedCenters()
     TestCheck(vertices &&
                   fabs(ReadFloat(vertices + stride - 8) + expectedHalfSize) < 0.0001f,
               "point scaling must use the tweened center distance");
+}
+
+static void PointFillCullingUsesHomogeneousOrientation()
+{
+    const VxVector crossingPositions[3] = {
+        VxVector(-2.0f, -0.5f, 0.5f),
+        VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(-2.0f, 0.5f, 0.5f)
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM;
+    data.PositionPtr = const_cast<VxVector *>(crossingPositions);
+    data.PositionStride = sizeof(VxVector);
+
+    CKFFPointFillCullParams params = {};
+    params.World = VxMatrix::Identity();
+    params.ViewProjection = VxMatrix::Identity();
+    params.CullMode = VXCULL_CW;
+
+    TransientGeometryHarness crossing;
+    TestCheck(crossing.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data),
+              "point-fill culling prepares a triangle crossing the clip volume");
+    TestCheck(crossing.Geometry.CullPointFilledTriangles(params) &&
+                  crossing.Geometry.GetVertexCount() == 3,
+              "homogeneous culling keeps the visible winding across a clip plane");
+
+    CKWORD reversedIndices[3] = {0, 2, 1};
+    TransientGeometryHarness reversed;
+    TestCheck(reversed.Geometry.Prepare(VX_TRIANGLELIST, reversedIndices, 3, &data),
+              "point-fill culling prepares reversed indexed geometry");
+    TestCheck(reversed.Geometry.CullPointFilledTriangles(params) &&
+                  reversed.Geometry.GetVertexCount() == 0,
+              "homogeneous culling removes the opposite indexed winding");
+
+    const VxVector eyePlanePositions[3] = {
+        VxVector(-2.0f, -0.5f, 0.5f),
+        VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(0.5f, 0.5f, 0.5f)
+    };
+    data.PositionPtr = const_cast<VxVector *>(eyePlanePositions);
+    params.ViewProjection[0][3] = 1.0f;
+    TransientGeometryHarness behindEye;
+    TestCheck(behindEye.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data),
+              "point-fill culling prepares a triangle crossing the eye plane");
+    TestCheck(behindEye.Geometry.CullPointFilledTriangles(params) &&
+                  behindEye.Geometry.GetVertexCount() == 3,
+              "homogeneous culling classifies a triangle with a negative source w");
+
+    const VxVector degeneratePositions[3] = {
+        VxVector(-0.5f, 0.0f, 0.5f),
+        VxVector(0.0f, 0.0f, 0.5f),
+        VxVector(0.5f, 0.0f, 0.5f)
+    };
+    data.PositionPtr = const_cast<VxVector *>(degeneratePositions);
+    params.ViewProjection = VxMatrix::Identity();
+    TransientGeometryHarness degenerate;
+    TestCheck(degenerate.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data),
+              "point-fill culling prepares a degenerate triangle");
+    TestCheck(degenerate.Geometry.CullPointFilledTriangles(params) &&
+                  degenerate.Geometry.GetVertexCount() == 0,
+              "point-fill culling removes a zero-area triangle exactly");
+
+    VxVector invalidPositions[3] = {
+        crossingPositions[0], crossingPositions[1], crossingPositions[2]
+    };
+    invalidPositions[1].x = std::numeric_limits<float>::quiet_NaN();
+    data.PositionPtr = invalidPositions;
+    TransientGeometryHarness invalid;
+    TestCheck(invalid.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data),
+              "point-fill culling prepares non-finite source data");
+    TestCheck(!invalid.Geometry.CullPointFilledTriangles(params),
+              "point-fill culling rejects a non-finite projection");
+
+    float screenPositions[3][4] = {
+        {16.0f, 48.0f, 0.5f, 0.0f},
+        {48.0f, 48.0f, 0.5f, 0.0f},
+        {16.0f, 16.0f, 0.5f, 0.0f}
+    };
+    data.Flags = CKRST_DP_CL_VCT;
+    data.PositionPtr = screenPositions;
+    data.PositionStride = sizeof(screenPositions[0]);
+    TransientGeometryHarness screen;
+    TestCheck(screen.Geometry.Prepare(VX_TRIANGLELIST, NULL, 0, &data),
+              "point-fill culling prepares POSITIONT vertices with zero RHW");
+    TestCheck(screen.Geometry.CullPointFilledTriangles(params) &&
+                  screen.Geometry.GetVertexCount() == 3,
+              "POSITIONT face orientation depends only on pixel coordinates");
 }
 
 static void LargePointSpriteBatchUses32BitIndices()
@@ -1071,6 +1155,8 @@ int main()
               &PointFilledWrapPreservesVertexSizes);
     tests.Run("point-fill scaling uses blended and tweened centers",
               &PointFillScalingUsesBlendedAndTweenedCenters);
+    tests.Run("point-fill culling uses homogeneous orientation",
+              &PointFillCullingUsesHomogeneousOrientation);
     tests.Run("large point sprite batch uses 32-bit indices",
               &LargePointSpriteBatchUses32BitIndices);
     tests.Run("indexed point sprites use selected vertices",

@@ -376,19 +376,18 @@ static void PointFillWorldPosition(const CKBYTE *vertex, CKDWORD formatFlags,
     }
 }
 
-static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
-                                    const CKFFPointFillCullParams &params,
-                                    double &x, double &y, bool &outsideClip)
+static bool PointFillHomogeneousPosition(const CKBYTE *vertex, CKDWORD formatFlags,
+                                         const CKFFPointFillCullParams &params,
+                                         double &x, double &y, double &w)
 {
-    outsideClip = false;
     float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     memcpy(position, vertex, (formatFlags & CKFF_VF_POSITIONT) ? 16 : 12);
     if (formatFlags & CKFF_VF_POSITIONT) {
-        if (!(position[3] > 0.0f) || !std::isfinite(position[0]) ||
-            !std::isfinite(position[1]))
+        if (!std::isfinite(position[0]) || !std::isfinite(position[1]))
             return false;
         x = position[0];
         y = position[1];
+        w = 1.0;
         return true;
     }
 
@@ -397,32 +396,24 @@ static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
 
     float clip[4];
     PointFillTransform(params.ViewProjection, worldPosition, clip);
-    if (!(clip[3] > 0.0f) || !std::isfinite(clip[0]) ||
-        !std::isfinite(clip[1]) || !std::isfinite(clip[2]) ||
+    if (!std::isfinite(clip[0]) || !std::isfinite(clip[1]) ||
         !std::isfinite(clip[3]))
         return false;
-    outsideClip = clip[0] < -clip[3] || clip[0] > clip[3] ||
-                  clip[1] < -clip[3] || clip[1] > clip[3] ||
-                  clip[2] < 0.0f || clip[2] > clip[3];
-    x = double(clip[0]) / clip[3];
-    y = double(clip[1]) / clip[3];
-    return std::isfinite(x) && std::isfinite(y);
+    x = clip[0];
+    y = clip[1];
+    w = clip[3];
+    return true;
 }
 
-void CKTransientGeometry::CullPointFilledTriangles(
-    const CKFFPointFillCullParams &params, CKBOOL *approximate)
+CKBOOL CKTransientGeometry::CullPointFilledTriangles(
+    const CKFFPointFillCullParams &params)
 {
-    if (approximate)
-        *approximate = FALSE;
     if (params.CullMode == VXCULL_NONE || m_VertexData.IsEmpty())
-        return;
+        return TRUE;
 
     const CKDWORD elementCount = m_IndexCount ? m_IndexCount : m_VertexCount;
-    if (elementCount > 0x7fffffffu / m_VertexStride) {
-        if (approximate)
-            *approximate = TRUE;
-        return;
-    }
+    if (elementCount > 0x7fffffffu / m_VertexStride)
+        return FALSE;
     XArray<CKBYTE> kept;
     kept.Resize((int)(elementCount * m_VertexStride));
     const bool trackSources = !m_SourceVertexIndices.IsEmpty();
@@ -432,46 +423,32 @@ void CKTransientGeometry::CullPointFilledTriangles(
     CKDWORD keptCount = 0;
     for (CKDWORD first = 0; first + 2 < elementCount; first += 3) {
         CKDWORD source[3];
-        double x[3], y[3];
-        bool projected = true;
-        bool outsideClip = false;
+        double x[3], y[3], w[3];
         for (int corner = 0; corner < 3; ++corner) {
             source[corner] = m_IndexCount
                 ? (m_Index32 ? ((const CKDWORD *)m_IndexData.Begin())[first + corner]
                              : ((const CKWORD *)m_IndexData.Begin())[first + corner])
                 : first + corner;
-            if (source[corner] >= m_VertexCount) {
-                if (approximate)
-                    *approximate = TRUE;
-                return;
-            } else {
-                bool vertexOutsideClip = false;
-                if (!PointFillScreenPosition(m_VertexData.Begin() +
-                    source[corner] * m_VertexStride, m_FormatFlags, params,
-                    x[corner], y[corner], vertexOutsideClip)) {
-                    projected = false;
-                }
-                outsideClip = outsideClip || vertexOutsideClip;
-            }
+            if (source[corner] >= m_VertexCount)
+                return FALSE;
+            if (!PointFillHomogeneousPosition(m_VertexData.Begin() +
+                source[corner] * m_VertexStride, m_FormatFlags, params,
+                x[corner], y[corner], w[corner]))
+                return FALSE;
         }
 
-        bool culled = false;
-        if (!projected || outsideClip) {
-            if (approximate)
-                *approximate = TRUE;
-        }
-        if (projected && !outsideClip) {
-            const double area = (x[1] - x[0]) * (y[2] - y[0]) -
-                                (y[1] - y[0]) * (x[2] - x[0]);
-            if (area != 0.0 && std::isfinite(area)) {
-                bool clockwise = (m_FormatFlags & CKFF_VF_POSITIONT)
-                    ? area > 0.0 : area < 0.0;
-                if (params.InverseWinding)
-                    clockwise = !clockwise;
-                culled = params.CullMode == VXCULL_CW ? clockwise : !clockwise;
-            } else if (approximate) {
-                *approximate = TRUE;
-            }
+        const double area = x[0] * (y[1] * w[2] - w[1] * y[2]) -
+                            y[0] * (x[1] * w[2] - w[1] * x[2]) +
+                            w[0] * (x[1] * y[2] - y[1] * x[2]);
+        if (!std::isfinite(area))
+            return FALSE;
+        bool culled = area == 0.0;
+        if (!culled) {
+            bool clockwise = (m_FormatFlags & CKFF_VF_POSITIONT)
+                ? area > 0.0 : area < 0.0;
+            if (params.InverseWinding)
+                clockwise = !clockwise;
+            culled = params.CullMode == VXCULL_CW ? clockwise : !clockwise;
         }
         if (culled)
             continue;
@@ -496,14 +473,13 @@ void CKTransientGeometry::CullPointFilledTriangles(
     m_IndexCount = 0;
     m_LastIndexBytes = 0;
     m_Index32 = FALSE;
+    return TRUE;
 }
 
 CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
     const CKFFPointSpriteParams &params, CKBOOL pointSprites,
-    const VxDrawPrimitiveData *sourceData, CKBOOL *approximate)
+    const VxDrawPrimitiveData *sourceData)
 {
-    if (approximate)
-        *approximate = FALSE;
     if (!sourceData || m_VertexData.IsEmpty() || m_VertexStride == 0)
         return FALSE;
     if ((sourceData->Flags & CKRST_DP_PSIZE) != 0 &&

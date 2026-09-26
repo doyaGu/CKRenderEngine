@@ -1244,6 +1244,57 @@ void CheckPointFillTriangleCulling(Backend &b)
     }
     ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
 
+    const CKDWORD clippedApproxBefore =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT];
+    const VxVector clippedPositions[3] = {
+        VxVector(-2.0f, -0.5f, 0.5f), VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(-2.0f, 0.5f, 0.5f)};
+    data.PositionPtr = const_cast<VxVector *>(clippedPositions);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(8.0f));
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point;
+        render(VXFILL_SOLID, cull, FALSE, 0, solid);
+        render(VXFILL_POINT, cull, FALSE, 0, point);
+        TestCheck((redCount(point) > 0) == (redCount(solid) > 0),
+                  "point fill culls a clip-plane crossing like solid triangles");
+    }
+
+    const VxVector eyePlanePositions[3] = {
+        VxVector(-2.0f, -0.5f, 0.5f), VxVector(0.5f, -0.5f, 0.5f),
+        VxVector(0.5f, 0.5f, 0.5f)};
+    data.PositionPtr = const_cast<VxVector *>(eyePlanePositions);
+    VxMatrix eyeProjection;
+    Vx3DMatrixIdentity(eyeProjection);
+    eyeProjection[0][3] = 1.0f;
+    TestCheck(ctx->SetTransformMatrix(VXMATRIX_PROJECTION, eyeProjection),
+              "set point-fill eye-plane projection");
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels solid, point;
+        render(VXFILL_SOLID, cull, FALSE, 0, solid);
+        render(VXFILL_POINT, cull, FALSE, 0, point);
+        TestCheck((redCount(point) > 0) == (redCount(solid) > 0),
+                  "point fill culls an eye-plane crossing like solid triangles");
+    }
+    Vx3DMatrixIdentity(eyeProjection);
+    TestCheck(ctx->SetTransformMatrix(VXMATRIX_PROJECTION, eyeProjection),
+              "restore point-fill projection");
+
+    const VxVector degeneratePositions[3] = {
+        VxVector(-0.5f, 0.0f, 0.5f), VxVector(0.0f, 0.0f, 0.5f),
+        VxVector(0.5f, 0.0f, 0.5f)};
+    data.PositionPtr = const_cast<VxVector *>(degeneratePositions);
+    for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
+        Pixels point;
+        render(VXFILL_POINT, cull, FALSE, 0, point);
+        TestCheck(redCount(point) == 0,
+                  "point fill removes degenerate triangles before expansion");
+    }
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] ==
+                  clippedApproxBefore,
+              "clipped and degenerate point-fill culling is exact");
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
+
     float screenPositions[3][4] = {
         {16.0f, 48.0f, 0.5f, 1.0f}, {48.0f, 48.0f, 0.5f, 1.0f},
         {16.0f, 16.0f, 0.5f, 1.0f}};

@@ -1006,10 +1006,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         cull.InverseWinding = m_State.DrawState.GetRenderState(VXRENDERSTATE_INVERSEWINDING) != 0;
         for (int i = 0; i < 4; ++i)
             cull.BlendMatrices[i] = pointParams.BlendMatrices[i];
-        CKBOOL approximate = FALSE;
-        m_TransientGeometry.CullPointFilledTriangles(cull, &approximate);
-        if (approximate)
-            RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
+        if (!m_TransientGeometry.CullPointFilledTriangles(cull))
+            return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
         if (m_TransientGeometry.GetVertexCount() == 0) {
             m_Draw = CKFFDraw();
             m_Draw.SkipSubmit = TRUE;
@@ -1019,13 +1017,10 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     }
     CKBOOL expandedPointFill = FALSE;
     if (pointFillExpansion) {
-        CKBOOL approximate = FALSE;
         expandedPointFill = m_TransientGeometry.ExpandPointFilledTriangles(
-            pointParams, pointSprites, data, &approximate);
+            pointParams, pointSprites, data);
         if (!expandedPointFill)
             return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
-        if (approximate)
-            RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
         if (expandedPointFill && m_TransientGeometry.GetVertexCount() == 0) {
             m_Draw = CKFFDraw();
             m_Draw.SkipSubmit = TRUE;

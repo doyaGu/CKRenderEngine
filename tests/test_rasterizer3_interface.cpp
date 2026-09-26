@@ -1173,9 +1173,9 @@ void TestApproximationsKeepDrawing()
         clipped.PositionStride = sizeof(VxVector);
         TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &clipped),
                   "draw triangle crossing a point-fill clip plane");
-        TestCheck(CountDraws(f) == 2 &&
-                  Diag(f.Context, CKRST_DIAG_APPROX_FILLMODE_POINT) == 1,
-                  "clip-plane crossing stays drawable and reports approximation");
+        TestCheck(CountDraws(f) == 1 &&
+                  Diag(f.Context, CKRST_DIAG_APPROX_FILLMODE_POINT) == 0,
+                  "clip-plane crossing is culled exactly without approximation");
         TestCheck(ctx->EndScene(), "end point-fill culling scene");
     }
 }

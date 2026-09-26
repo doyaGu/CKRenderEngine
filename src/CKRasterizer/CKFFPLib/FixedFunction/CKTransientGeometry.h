@@ -61,10 +61,9 @@ public:
         CKBOOL trackSourceIndices = FALSE);
 
     // Point fill uses point topology, which has no hardware face culling.
-    // Cull the source triangles before that topology conversion. The output
-    // flag reports triangles that cross clip planes or cannot be classified.
-    void CullPointFilledTriangles(const CKFFPointFillCullParams &params,
-                                  CKBOOL *approximate);
+    // Cull the source triangles before that topology conversion. Homogeneous
+    // orientation keeps the classification valid across clip boundaries.
+    CKBOOL CullPointFilledTriangles(const CKFFPointFillCullParams &params);
 
     // Expand the vertices of point-filled triangles to screen-sized quads.
     // The source data supplies per-vertex PSIZE, which is not part of the
@@ -72,8 +71,7 @@ public:
     // centre and carries an internal pixel offset applied after vertex work.
     CKBOOL ExpandPointFilledTriangles(const CKFFPointSpriteParams &params,
                                       CKBOOL pointSprites,
-                                      const VxDrawPrimitiveData *sourceData,
-                                      CKBOOL *approximate);
+                                      const VxDrawPrimitiveData *sourceData);
 
     CKDWORD GetFormatFlags() const { return m_FormatFlags; }
     CKDWORD GetVertexCount() const { return m_VertexCount; }
