@@ -14,17 +14,17 @@
 class CKFFTestShaderCache : public CKFFShaderCache {
 public:
     CKFFTestShaderCache()
-        : m_PixelShader(0)
     {
         memset(m_Programs, 0, sizeof(m_Programs));
         memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
+        memset(m_PixelShaders, 0, sizeof(m_PixelShaders));
     }
 
     bool Init(const CKRasterizerDeviceCaps &caps, const CKFFShaderSet &shaders)
     {
         memset(m_Programs, 0, sizeof(m_Programs));
         memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
-        m_PixelShader = 0;
+        memset(m_PixelShaders, 0, sizeof(m_PixelShaders));
         CKRasterizerTargetDesc target;
         target.ShaderFormat = caps.ShaderFormat;
         target.ShaderProfile = caps.ShaderProfile;
@@ -39,17 +39,19 @@ public:
         if (device) {
             for (CKDWORD variant = 0;
                  variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
-                if (m_Programs[variant])
-                    device->DestroyObject(m_Programs[variant], CKRST_OBJ_PROGRAM);
+                for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout)
+                    if (m_Programs[variant][layout])
+                        device->DestroyObject(m_Programs[variant][layout], CKRST_OBJ_PROGRAM);
                 if (m_VertexShaders[variant])
                     device->DestroyObject(m_VertexShaders[variant], CKRST_OBJ_SHADER);
             }
-            if (m_PixelShader)
-                device->DestroyObject(m_PixelShader, CKRST_OBJ_SHADER);
+            for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout)
+                if (m_PixelShaders[layout])
+                    device->DestroyObject(m_PixelShaders[layout], CKRST_OBJ_SHADER);
         }
         memset(m_Programs, 0, sizeof(m_Programs));
         memset(m_VertexShaders, 0, sizeof(m_VertexShaders));
-        m_PixelShader = 0;
+        memset(m_PixelShaders, 0, sizeof(m_PixelShaders));
         CKFFShaderCache::Shutdown();
     }
 
@@ -61,26 +63,28 @@ public:
             return CKFFProgramBinding();
         const CKFFProgramSelection selection = ResolveProgram(key);
         const CKDWORD variant = (CKDWORD)selection.Variant;
+        const CKDWORD layout = (CKDWORD)selection.SamplerLayout;
         if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
             return CKFFProgramBinding();
-        if (!m_PixelShader &&
-            device->CreateShader(&GetPixelShader(), &m_PixelShader) != CK_OK)
+        if (!m_PixelShaders[layout] &&
+            device->CreateShader(&GetPixelShader(), &m_PixelShaders[layout]) != CK_OK)
             return CKFFProgramBinding();
         if (!m_VertexShaders[variant] &&
             device->CreateShader(&GetVertexShader(selection.Variant),
                                  &m_VertexShaders[variant]) != CK_OK)
             return CKFFProgramBinding();
-        if (!m_Programs[variant]) {
+        if (!m_Programs[variant][layout]) {
             const CKBOOL positionT =
                 selection.Variant == CKFF_PROGRAM_POSITIONT ||
                 selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP;
             const CKFFProgramDesc desc = CKFFBuildProgramInterface(
-                m_VertexShaders[variant], m_PixelShader,
-                GetShaderFormat(), FALSE, positionT);
-            if (device->CreateProgram(&desc, &m_Programs[variant]) != CK_OK)
+                m_VertexShaders[variant], m_PixelShaders[layout],
+                GetShaderFormat(), FALSE, positionT,
+                selection.SamplerLayout);
+            if (device->CreateProgram(&desc, &m_Programs[variant][layout]) != CK_OK)
                 return CKFFProgramBinding();
         }
-        return CKFFProgramBinding(m_Programs[variant],
+        return CKFFProgramBinding(m_Programs[variant][layout],
                                   selection.Specialization);
     }
 
@@ -89,16 +93,17 @@ public:
         size_t count = 0;
         for (CKDWORD variant = 0;
              variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
-            if (m_Programs[variant])
-                ++count;
+            for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout)
+                if (m_Programs[variant][layout])
+                    ++count;
         }
         return count;
     }
 
 private:
-    CKDWORD m_Programs[CKFF_PROGRAM_VARIANT_COUNT];
+    CKDWORD m_Programs[CKFF_PROGRAM_VARIANT_COUNT][CKFF_SAMPLER_LAYOUT_COUNT];
     CKDWORD m_VertexShaders[CKFF_PROGRAM_VARIANT_COUNT];
-    CKDWORD m_PixelShader;
+    CKDWORD m_PixelShaders[CKFF_SAMPLER_LAYOUT_COUNT];
 };
 
 // Test-only runner for unit tests that exercise CKFFPLib without constructing

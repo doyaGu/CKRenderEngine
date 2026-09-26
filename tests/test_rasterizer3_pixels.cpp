@@ -2168,6 +2168,173 @@ void CheckLayeredTextureUpdates(Backend &b)
     printf("  ordered cube-face and eight-slice volume patches preserve other layers: passed\n");
 }
 
+void CheckWideSamplerLayouts(Backend &b)
+{
+    auto *ctx = b.Context;
+    for (bool volume : {false, true}) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+        desc.Format.Width = desc.Format.Height = 2;
+        desc.Format.BytesPerLine = 8;
+        desc.Depth = volume ? 2 : 1;
+        desc.MipMapCount = 1;
+        desc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
+                     (volume ? CKRST_TEXTURE_VOLUMEMAP : CKRST_TEXTURE_CUBEMAP);
+
+        CKDWORD texture = 0;
+        TestCheck(ctx->CreateTexture(&desc, &texture),
+                  volume ? "create five-stage volume texture" :
+                           "create five-stage cube texture");
+        CKDWORD texels[4] = {
+            0xff202020u, 0xff202020u, 0xff202020u, 0xff202020u};
+        VxImageDescEx image = desc.Format;
+        image.Image = reinterpret_cast<CKBYTE *>(texels);
+        const unsigned layerCount = volume ? 2u : 6u;
+        for (unsigned layer = 0; layer < layerCount; ++layer)
+            TestCheck(ctx->LoadTexture(texture, image, 0,
+                                       static_cast<CKRST_CUBEFACE>(layer), NULL),
+                      volume ? "upload five-stage volume texture" :
+                               "upload five-stage cube texture");
+
+        SetDiffuseState(ctx);
+        VxMatrix identity;
+        identity.SetIdentity();
+        for (int stage = 0; stage < 5; ++stage) {
+            TestCheck(ctx->SetTexture(texture, stage),
+                      volume ? "bind five-stage volume texture" :
+                               "bind five-stage cube texture");
+            ctx->SetTextureStageState(stage, CKRST_TSS_OP,
+                                      stage == 0 ? CKRST_TOP_SELECTARG1 : CKRST_TOP_ADD);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ARG1,
+                                      stage == 0 ? CKRST_TA_TEXTURE : CKRST_TA_CURRENT);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+            ctx->SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+            ctx->SetTextureStageState(stage, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+            ctx->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, 0);
+            ctx->SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+            ctx->SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+            ctx->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                      CKRST_TTF_COUNT3);
+            ctx->SetTransformMatrix(VXMATRIX_TEXTURE(stage), identity);
+        }
+
+        float texcoords[3][4];
+        for (int vertex = 0; vertex < 3; ++vertex) {
+            texcoords[vertex][0] = volume ? 0.5f : 1.0f;
+            texcoords[vertex][1] = volume ? 0.5f : 0.0f;
+            texcoords[vertex][2] = volume ? 0.5f : 0.0f;
+            texcoords[vertex][3] = 0.0f;
+        }
+        Pixels pixels;
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, texcoords),
+                      volume ? "draw five volume stages" : "draw five cube stages");
+        }, pixels);
+        ExpectCenter(pixels, 160, 160, 160,
+                     volume ? "five volume stages use the wide sampler layout" :
+                              "five cube stages use the wide sampler layout");
+
+        for (int stage = 0; stage < 5; ++stage)
+            ctx->SetTexture(0, stage);
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
+                  volume ? "delete five-stage volume texture" :
+                           "delete five-stage cube texture");
+    }
+
+    CKDWORD mixedTextures[3] = {};
+    const CKDWORD mixedFlags[3] = {
+        CKRST_TEXTURE_CUBEMAP, 0, CKRST_TEXTURE_VOLUMEMAP};
+    const CKDWORD mixedColors[3] = {
+        0xff101010u, 0xff080808u, 0xff181818u};
+    for (int type = 0; type < 3; ++type) {
+        CKTextureDesc desc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+        desc.Format.Width = desc.Format.Height = 2;
+        desc.Format.BytesPerLine = 8;
+        desc.Depth = type == 2 ? 2 : 1;
+        desc.MipMapCount = 1;
+        desc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | mixedFlags[type];
+        TestCheck(ctx->CreateTexture(&desc, &mixedTextures[type]),
+                  "create mixed-layout texture");
+        CKDWORD texels[4] = {
+            mixedColors[type], mixedColors[type],
+            mixedColors[type], mixedColors[type]};
+        VxImageDescEx image = desc.Format;
+        image.Image = reinterpret_cast<CKBYTE *>(texels);
+        const int layerCount = type == 0 ? 6 : (type == 2 ? 2 : 1);
+        for (int layer = 0; layer < layerCount; ++layer)
+            TestCheck(ctx->LoadTexture(mixedTextures[type], image, 0,
+                                       static_cast<CKRST_CUBEFACE>(layer), NULL),
+                      "upload mixed-layout texture");
+    }
+
+    auto runMixed = [&](const CKDWORD *sequence, int count, int expected,
+                        const char *label) {
+        for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            ctx->SetTexture(0, stage);
+            ctx->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+            ctx->SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
+        }
+        SetDiffuseState(ctx);
+        VxMatrix identity;
+        identity.SetIdentity();
+        for (int stage = 0; stage < count; ++stage) {
+            TestCheck(ctx->SetTexture(sequence[stage], stage),
+                      "bind mixed-layout texture");
+            ctx->SetTextureStageState(stage, CKRST_TSS_OP,
+                                      stage == 0 ? CKRST_TOP_SELECTARG1 : CKRST_TOP_ADD);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ARG1,
+                                      stage == 0 ? CKRST_TA_TEXTURE : CKRST_TA_CURRENT);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+            ctx->SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+            ctx->SetTextureStageState(stage, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+            ctx->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, 0);
+            ctx->SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+            ctx->SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_NEAREST);
+            ctx->SetTextureStageState(stage, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+            ctx->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                      CKRST_TTF_COUNT3);
+            ctx->SetTransformMatrix(VXMATRIX_TEXTURE(stage), identity);
+        }
+        float texcoords[3][4];
+        for (int vertex = 0; vertex < 3; ++vertex) {
+            texcoords[vertex][0] = 0.5f;
+            texcoords[vertex][1] = 0.5f;
+            texcoords[vertex][2] = 0.5f;
+            texcoords[vertex][3] = 0.0f;
+        }
+        Pixels pixels;
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, texcoords),
+                      label);
+        }, pixels);
+        ExpectCenter(pixels, expected, expected, expected, label);
+    };
+
+    const CKDWORD defaultMixed[] = {
+        mixedTextures[0], mixedTextures[1], mixedTextures[2]};
+    const CKDWORD wideCubeMixed[] = {
+        mixedTextures[0], mixedTextures[0], mixedTextures[0], mixedTextures[0],
+        mixedTextures[0], mixedTextures[1], mixedTextures[2]};
+    const CKDWORD wideVolumeMixed[] = {
+        mixedTextures[2], mixedTextures[2], mixedTextures[2], mixedTextures[2],
+        mixedTextures[2], mixedTextures[1], mixedTextures[0]};
+    runMixed(defaultMixed, 3, 48, "mixed default sampler layout");
+    runMixed(wideCubeMixed, 7, 112, "mixed wide-cube sampler layout");
+    runMixed(wideVolumeMixed, 7, 144, "mixed wide-volume sampler layout");
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        ctx->SetTexture(0, stage);
+        ctx->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+        ctx->SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
+    }
+    for (CKDWORD texture : mixedTextures)
+        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
+                  "delete mixed-layout texture");
+
+    printf("  exact default, wide cube, and wide volume sampler layouts: passed\n");
+}
+
 void CheckMipPreservation(Backend &b)
 {
     auto *ctx = b.Context;
@@ -3511,6 +3678,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckFirstFrame(backend);
         CheckTypedPersistentBufferUpdates(backend);
         RunPixelCases(backend.Context, "uber", samples);
+        CheckWideSamplerLayouts(backend);
         CheckOrderedTextureUpdates(backend);
         CheckPaddedTextureUpload(backend);
         CheckOrderedBufferUpdates(backend);

@@ -1112,7 +1112,7 @@ void TestApproximationsKeepDrawing()
         TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_BORDER_COLOR) == 0, "the core preserves the seventeenth color without quantization");
     }
 
-    // A fifth cube stage samples as unbound.
+    // A fifth cube stage selects the exact wide-cube sampler layout.
     {
         Fixture f;
         CKRasterizerContext *ctx = f.Context;
@@ -1129,7 +1129,7 @@ void TestApproximationsKeepDrawing()
         DrawTexturedTriangle(ctx);
         TestCheck(ctx->EndScene(), "EndScene");
         TestCheck(CountDraws(f) == 1, "five cube stages still draw");
-        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 1, "the fifth cube stage counts one approximation");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 0, "the fifth cube stage needs no approximation");
     }
 
     // Backend-buffer points with fractional size expand to transient quads.

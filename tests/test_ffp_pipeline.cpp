@@ -64,8 +64,10 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                   CKFFConstantBlockInfo(CKRST_BLOCK_COUNT).Name == NULL,
               "specialization block and invalid logical slot");
     TestCheck(strcmp(CKFFSamplerSlotName(0), "s_texture0") == 0 &&
-                  strcmp(CKFFSamplerSlotName(CKFF_CUBE_SAMPLER_SLOT_BASE), "s_textureCube0") == 0 &&
-                  strcmp(CKFFSamplerSlotName(CKFF_VOLUME_SAMPLER_SLOT_BASE + 3), "s_textureVolume3") == 0 &&
+                  strcmp(CKFFSamplerSlotName(CKFFSamplerTypeSlotBase(CKFF_SAMPLER_CUBE)),
+                         "s_textureCube0") == 0 &&
+                  strcmp(CKFFSamplerSlotName(CKFFSamplerTypeSlotBase(CKFF_SAMPLER_VOLUME) + 3),
+                         "s_textureVolume3") == 0 &&
                   strcmp(CKFFSamplerSlotName(CKFF_SLOT_PRESENT), "s_sceneColor") == 0 &&
                   CKFFSamplerSlotName(CKFF_SLOT_COUNT) == NULL,
               "shader sampler names belong to the fixed-function interface");
@@ -1802,7 +1804,7 @@ void MultipleMixedSamplersUseTypeRankedSlots() {
     }
 }
 
-void FifthCubeStageSamplesAsUnbound() {
+void FifthCubeStageUsesWideLayout() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1822,39 +1824,37 @@ void FifthCubeStageSamplesAsUnbound() {
                                               CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
     TestCheck(drawn && context.Log.DrawCount == 1,
-              "five cube stages must still submit (approximation, not rejection)");
-    TestCheck(context.Log.TextureBindCount == 4,
-              "only four cube textures fit the fixed sampler layout");
+              "five cube stages must submit exactly");
+    TestCheck(context.Log.TextureBindCount == 5,
+              "the wide-cube layout binds every cube texture");
     const FFPRecordingBackend &u = context;
-    bool found[4] = {};
-    bool boundFifth = false;
+    bool found[5] = {};
     for (const FFPTextureBinding &binding : context.Log.TextureBindings) {
-        for (CKDWORD ordinal = 0; ordinal < 4; ++ordinal) {
-            if (binding.Stage == 8 + ordinal && binding.Uniform == u.GetSamplerUniformForTests(8 + ordinal) &&
+        for (CKDWORD ordinal = 0; ordinal < 5; ++ordinal) {
+            if (binding.Stage == 4 + ordinal &&
+                binding.Uniform == u.GetSamplerUniformForTests(4 + ordinal) &&
                 binding.Texture == 501 + ordinal)
                 found[ordinal] = true;
         }
-        if (binding.Texture == 505)
-            boundFifth = true;
     }
-    TestCheck(found[0] && found[1] && found[2] && found[3] && !boundFifth,
-              "the first four cube stages bind slots 8..11 and the fifth stays unbound");
+    TestCheck(found[0] && found[1] && found[2] && found[3] && found[4],
+              "five cube stages bind the wide layout slots 4..8");
 
     const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.GetStage(4, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
+    TestCheck(spec.GetStage(4, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE &&
                   spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 4,
-              "the overflowing stage must specialize as an untextured 2D stage that stays active");
+              "the fifth stage retains its cube sampler specialization");
     const CKDWORD stageParams = u.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Log.FloatUniforms.find(stageParams);
     TestCheck(it != context.Log.FloatUniforms.end() &&
                   it->second.size() >= CKFF_STAGE_PARAM_VEC4_COUNT * 4 &&
                   it->second[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 1.0f &&
-                  it->second[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 0.0f,
-              "stage params must mark the overflowing stage as having no texture");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_SAMPLER_SLOTS) &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 1,
-              "sampler slot overflow must be reported as an approximation");
+                  it->second[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD) * 4 + 2] == 1.0f,
+              "stage params mark every cube stage as textured");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_SAMPLER_SLOTS) == 0,
+              "exact sampler layouts produce no approximation diagnostic");
 
     ffp.Shutdown();
 }
@@ -4205,8 +4205,8 @@ int main() {
               &ArbitrarySingleVolumeCubePlacementSharesTheProgram);
     tests.Run("Multiple mixed samplers use type-ranked slots",
               &MultipleMixedSamplersUseTypeRankedSlots);
-    tests.Run("Fifth cube stage samples as unbound",
-              &FifthCubeStageSamplesAsUnbound);
+    tests.Run("Fifth cube stage uses wide layout",
+              &FifthCubeStageUsesWideLayout);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",

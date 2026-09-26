@@ -777,7 +777,7 @@ void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
               "Volume sampler mask must be derivable from active shader key stages");
 }
 
-void FragmentShaderDeclaresTheFixedSamplerLayout() {
+void FragmentShaderDeclaresAllExactSamplerLayouts() {
     const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
     const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
     const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
@@ -791,23 +791,26 @@ void FragmentShaderDeclaresTheFixedSamplerLayout() {
         TestCheck(fs.find(decl) != std::string::npos,
                   "Fragment shader must declare one 2D sampler per texture stage on slots 0..7");
     }
-    for (int ordinal = 0; ordinal < CKFF_CUBE_SAMPLER_COUNT; ++ordinal) {
+    for (int ordinal = 0; ordinal < CKFF_NARROW_SAMPLER_COUNT; ++ordinal) {
         char decl[64];
         snprintf(decl, sizeof(decl), "SAMPLERCUBE(s_textureCube%d, %d);", ordinal,
                  (int)CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal));
         TestCheck(fs.find(decl) != std::string::npos,
                   "Fragment shader must declare the cube samplers on slots 8..11");
     }
-    for (int ordinal = 0; ordinal < CKFF_VOLUME_SAMPLER_COUNT; ++ordinal) {
+    for (int ordinal = 0; ordinal < CKFF_NARROW_SAMPLER_COUNT; ++ordinal) {
         char decl[64];
         snprintf(decl, sizeof(decl), "SAMPLER3D(s_textureVolume%d, %d);", ordinal,
                  (int)CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal));
         TestCheck(fs.find(decl) != std::string::npos,
                   "Fragment shader must declare the volume samplers on slots 12..15");
     }
-    TestCheck(fs.find("SAMPLERCUBE(s_textureCube4") == std::string::npos &&
-                  fs.find("SAMPLER3D(s_textureVolume4") == std::string::npos,
-              "Fragment shader must not declare more than four cube or volume samplers");
+    TestCheck(fs.find("SAMPLERCUBE(s_textureCube4, 8);") != std::string::npos &&
+                  fs.find("SAMPLERCUBE(s_textureCube7, 11);") != std::string::npos &&
+                  fs.find("SAMPLER3D(s_textureVolume4, 12);") != std::string::npos &&
+                  fs.find("SAMPLER3D(s_textureVolume7, 15);") != std::string::npos &&
+                  fs.find("CKFF_NATIVE_SAMPLER_LAYOUT") != std::string::npos,
+              "Fragment shader must declare the wide cube and volume layouts");
     TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") != std::string::npos &&
                   fs.find("if (ckffSpecStage_SAMPLER_TYPE(previousStage) == samplerType)") != std::string::npos,
               "Fragment shader must pick cube / volume samplers by type ordinal from the specialization data");
@@ -839,18 +842,17 @@ void ShaderCodegenCompilesOneProgramFamily() {
 
     const char *shaderNames[] = {
         "\"vs_ff_3d\"", "\"vs_ff_3d_clip\"", "\"vs_ff_positiont\"", "\"vs_ff_positiont_clip\"",
-        "\"fs_ff_stage\"", "\"vs_postprocess\"", "\"fs_postprocess\"",
+        "\"fs_ff_stage\"", "\"fs_ff_stage_cube\"", "\"fs_ff_stage_volume\"",
+        "\"vs_postprocess\"", "\"fs_postprocess\"",
     };
     for (const char *name : shaderNames) {
         TestCheck(script.find(std::string("\"name\": ") + name) != std::string::npos,
                   "Shader codegen must compile every shader of the single program family");
     }
     TestCheck(script.find("ffp_specialized_variants") == std::string::npos &&
-                  script.find("sampler_layout") == std::string::npos &&
                   script.find("CKFF_FULL_SPECIALIZED") == std::string::npos &&
-                  script.find("instanced") == std::string::npos &&
-                  script.find("fs_ff_stage_volume") == std::string::npos,
-              "Shader codegen must not generate specialized, sampler-layout, instanced or volume variants");
+                  script.find("instanced") == std::string::npos,
+              "Shader codegen must keep the bounded three-layout program family");
     TestCheck(script.find("clean_stale_headers") != std::string::npos,
               "Shader codegen must remove generated headers of retired variants");
 
@@ -903,9 +905,7 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
     TestCheck(CKFFSamplerOrdinal(key, 2) == 0 && CKFFSamplerOrdinal(key, 5) == 1,
               "Volume ordinals must count only earlier sampling volume stages");
     TestCheck(CKFFSamplerOrdinal(key, 4) == 4,
-              "Without comparison samplers, 2D resources retain their stage slot");
-    TestCheck(key.SamplerSlotOverflowMask == 0,
-              "Within the fixed sampler budget no stage may overflow");
+              "The wide-2D layout preserves logical 2D stage slots");
     TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_CUBE, CKFFSamplerOrdinal(key, 3)) == 9 &&
                   CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, CKFFSamplerOrdinal(key, 5)) == 13,
               "Type ordinals must map onto the cube 8..11 and volume 12..15 slot blocks");
@@ -933,7 +933,7 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
               "Comparison depth samplers must precede ordinary 2D resources");
 }
 
-void SamplerSlotOverflowSamplesAsUnbound() {
+void SamplerLayoutsCoverAllEightStages() {
     CKFFFSStateDesc desc;
     for (CKDWORD stage = 0; stage < 6; ++stage) {
         desc.SetStageColorOp(stage, CKRST_TOP_MODULATE);
@@ -946,22 +946,23 @@ void SamplerSlotOverflowSamplesAsUnbound() {
     desc.SetStageSamplerType(5, CKFF_SAMPLER_VOLUME);
 
     const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x3Fu);
-    for (CKDWORD stage = 0; stage < 4; ++stage) {
+    for (CKDWORD stage = 0; stage < 5; ++stage) {
         TestCheck(key.Stages[stage].HasTexture && key.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE &&
                       CKFFSamplerOrdinal(key, stage) == stage,
-                  "The first four cube stages must keep their cube sampler");
+                  "Every cube stage must keep its cube sampler");
     }
-    TestCheck(!key.Stages[4].HasTexture && key.Stages[4].SamplerType == CKFF_SAMPLER_2D,
-              "The fifth cube stage must sample as unbound (spec 5.3 fixed sampler budget)");
     TestCheck(key.Stages[5].HasTexture && key.Stages[5].SamplerType == CKFF_SAMPLER_VOLUME &&
                   CKFFSamplerOrdinal(key, 5) == 0,
-              "Volume stages keep their own four-slot budget");
-    TestCheck(key.SamplerSlotOverflowMask == (1u << 4),
-              "Overflowing stages must be reported in the shader key for diagnostics");
+              "The mixed volume stage remains bound");
+    TestCheck(CKFFSamplerLayoutForKey(key) == CKFF_SAMPLER_LAYOUT_WIDE_CUBE &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_CUBE, 4,
+                                  CKFF_SAMPLER_LAYOUT_WIDE_CUBE) == 8 &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, 0,
+                                  CKFF_SAMPLER_LAYOUT_WIDE_CUBE) == 12,
+              "Five cube stages select the exact wide-cube layout");
     TestCheck(key.LastActiveTextureStage == 5,
-              "Sampler slot overflow must not truncate the active stage chain");
+              "Sampler layout selection must not truncate the active stage chain");
 
-    // The stage params mirror the fallback: colorParams.w (has texture) drops to 0.
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {1, 2, 3, 4, 5, 6, 0, 0};
     CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES] = {};
@@ -972,11 +973,54 @@ void SamplerSlotOverflowSamplesAsUnbound() {
         textureFlags[stage] = CKRST_TEXTURE_VALID | CKRST_TEXTURE_CUBEMAP;
     }
     CKFFStageParamsUniform params;
-    CKFFPackStageParams(stages, textures, textureFlags, 6, params, NULL, key.SamplerSlotOverflowMask);
+    CKFFPackStageParams(stages, textures, textureFlags, 6, params);
     TestCheck(params.Values[CKFFStageParamIndex(3, CKFF_STAGE_PARAM_COORD)][2] == 1.0f &&
-                  params.Values[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD)][2] == 0.0f &&
+                  params.Values[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD)][2] == 1.0f &&
                   params.Values[CKFFStageParamIndex(5, CKFF_STAGE_PARAM_COORD)][2] == 1.0f,
-              "Stage params must clear the has-texture flag of overflowing stages only");
+              "Stage params keep every texture visible to the shader");
+
+    CKFFFSStateDesc volumeDesc = desc;
+    for (CKDWORD stage = 0; stage < 6; ++stage)
+        volumeDesc.SetStageSamplerType(stage, stage < 5 ? CKFF_SAMPLER_VOLUME
+                                                        : CKFF_SAMPLER_CUBE);
+    const CKFFShaderKeyFS volumeKey = CKFFBuildShaderKeyFS(volumeDesc, 0x3fu);
+    TestCheck(CKFFSamplerLayoutForKey(volumeKey) == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, 4,
+                                  CKFF_SAMPLER_LAYOUT_WIDE_VOLUME) == 12 &&
+                  CKFFSamplerSlot(CKFF_SAMPLER_CUBE, 0,
+                                  CKFF_SAMPLER_LAYOUT_WIDE_VOLUME) == 4,
+              "Five volume stages select the exact wide-volume layout");
+
+    for (CKDWORD twoDCount = 0; twoDCount <= CKFF_MAX_TEXTURE_STAGES; ++twoDCount) {
+        for (CKDWORD cubeCount = 0;
+             cubeCount + twoDCount <= CKFF_MAX_TEXTURE_STAGES; ++cubeCount) {
+            const CKDWORD volumeCount = CKFF_MAX_TEXTURE_STAGES -
+                                        twoDCount - cubeCount;
+            CKFFFSStateDesc allStages;
+            CKDWORD stage = 0;
+            for (; stage < twoDCount; ++stage) {
+                allStages.SetStageColorOp(stage, CKRST_TOP_MODULATE);
+                allStages.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
+                allStages.SetStageSamplerType(stage, CKFF_SAMPLER_2D);
+            }
+            for (CKDWORD end = stage + cubeCount; stage < end; ++stage) {
+                allStages.SetStageColorOp(stage, CKRST_TOP_MODULATE);
+                allStages.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
+                allStages.SetStageSamplerType(stage, CKFF_SAMPLER_CUBE);
+            }
+            for (; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+                allStages.SetStageColorOp(stage, CKRST_TOP_MODULATE);
+                allStages.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
+                allStages.SetStageSamplerType(stage, CKFF_SAMPLER_VOLUME);
+            }
+            const CKFFShaderKeyFS allKey = CKFFBuildShaderKeyFS(allStages, 0xffu);
+            const CKFFSamplerLayout allLayout = CKFFSamplerLayoutForKey(allKey);
+            TestCheck(twoDCount <= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, allLayout) &&
+                          cubeCount <= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_CUBE, allLayout) &&
+                          volumeCount <= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_VOLUME, allLayout),
+                      "Every eight-stage dimension count has sufficient native slots");
+        }
+    }
 }
 
 void TextureStageCompareFuncReachesSamplerDesc() {
@@ -1239,16 +1283,16 @@ int main() {
               &VolumeSamplerAndCompareFuncPackIntoSpecialization);
     tests.Run("Volume sampler mask can be derived from shader key",
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
-    tests.Run("Fragment shader declares the fixed sampler layout",
-              &FragmentShaderDeclaresTheFixedSamplerLayout);
+    tests.Run("Fragment shader declares all exact sampler layouts",
+              &FragmentShaderDeclaresAllExactSamplerLayouts);
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
     tests.Run("Shader codegen compiles one program family",
               &ShaderCodegenCompilesOneProgramFamily);
 #endif
     tests.Run("Sampler ordinal counts only sampling stages of the same type",
               &SamplerOrdinalCountsOnlySamplingStagesOfTheSameType);
-    tests.Run("Sampler slot overflow samples as unbound",
-              &SamplerSlotOverflowSamplesAsUnbound);
+    tests.Run("Sampler layouts cover all eight stages",
+              &SamplerLayoutsCoverAllEightStages);
     tests.Run("Texture stage compare func reaches sampler desc",
               &TextureStageCompareFuncReachesSamplerDesc);
     tests.Run("Texture filter linear does not request mip sampling",
