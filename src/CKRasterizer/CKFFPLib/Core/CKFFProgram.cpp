@@ -110,21 +110,28 @@ struct NameSignature {
     XString Name;
     int Type = 0;
     CKDWORD Count = 0;
+    int MetadataKind = 0;
+    CKDWORD LogicalSlot = UINT32_MAX;
 };
 
 bool RegisterName(XClassArray<NameSignature> &names,
-                  const XString &name, int type, CKDWORD count)
+                  const XString &name, int type, CKDWORD count,
+                  int metadataKind = 0, CKDWORD logicalSlot = UINT32_MAX)
 {
     if (!ValidName(name))
         return false;
     for (int i = 0; i < names.Size(); ++i) {
         if (strcmp(names[i].Name.CStr(), name.CStr()) == 0)
-            return names[i].Type == type && names[i].Count == count;
+            return names[i].Type == type && names[i].Count == count &&
+                   names[i].MetadataKind == metadataKind &&
+                   (metadataKind == 0 || names[i].LogicalSlot == logicalSlot);
     }
     NameSignature signature;
     signature.Name = name;
     signature.Type = type;
     signature.Count = count;
+    signature.MetadataKind = metadataKind;
+    signature.LogicalSlot = logicalSlot;
     names.PushBack(signature);
     return true;
 }
@@ -237,7 +244,18 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
         ++samplerCounts[sampler.Stage];
         if (namedUniforms && !RegisterName(names, sampler.Name, 2 + sampler.Dimension, 1))
             return CKERR_INVALIDPARAMETER;
-        if (sampler.MetadataBufferSlot != UINT32_MAX) {
+        const bool hasBorderColorName = !sampler.BorderColorName.IsEmpty();
+        const bool hasSamplerStateName = !sampler.SamplerStateName.IsEmpty();
+        if (hasBorderColorName != hasSamplerStateName)
+            return CKERR_INVALIDPARAMETER;
+        if (hasBorderColorName) {
+            if (!namedUniforms || sampler.MetadataBufferSlot != UINT32_MAX ||
+                !RegisterName(names, sampler.BorderColorName, CKFF_UNIFORM_VEC4,
+                              1, 1, sampler.Slot) ||
+                !RegisterName(names, sampler.SamplerStateName, CKFF_UNIFORM_VEC4,
+                              1, 2, sampler.Slot))
+                return CKERR_INVALIDPARAMETER;
+        } else if (sampler.MetadataBufferSlot != UINT32_MAX) {
             if (sampler.MetadataBufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
                 return CKERR_INVALIDPARAMETER;
             auto &buffer = buffers[sampler.Stage][sampler.MetadataBufferSlot];

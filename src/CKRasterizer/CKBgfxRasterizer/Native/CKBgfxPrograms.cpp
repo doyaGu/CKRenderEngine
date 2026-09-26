@@ -15,7 +15,12 @@ static bool CKBgfxSamplerBindingsEqual(
         left.NativeSlot == right.NativeSlot &&
         left.Slot == right.Slot &&
         left.Dimension == right.Dimension &&
-        left.DefaultColor == right.DefaultColor;
+        left.DefaultColor == right.DefaultColor &&
+        left.MetadataBufferSlot == right.MetadataBufferSlot &&
+        left.BorderColorOffset == right.BorderColorOffset &&
+        left.SamplerStateOffset == right.SamplerStateOffset &&
+        left.BorderColorName == right.BorderColorName &&
+        left.SamplerStateName == right.SamplerStateName;
 }
 
 CKERROR CKBgfxRasterizerContext::CreateShader(const CKShaderDesc *Desc,
@@ -314,6 +319,23 @@ CKERROR CKBgfxRasterizerContext::CreateProgram(const CKFFProgramDesc *Desc, CKDW
         CKBgfxProgramRecord::SamplerBinding nativeBinding;
         nativeBinding.Desc = binding;
         nativeBinding.Handle = uniform;
+        if (!binding.BorderColorName.IsEmpty()) {
+            nativeBinding.BorderColorHandle = bgfx::createUniform(
+                binding.BorderColorName.CStr(), bgfx::UniformType::Vec4);
+            if (!bgfx::isValid(nativeBinding.BorderColorHandle)) {
+                bgfx::destroy(uniform);
+                CKBgfxDestroyRecord(rec);
+                return CKERR_OUTOFMEMORY;
+            }
+            nativeBinding.SamplerStateHandle = bgfx::createUniform(
+                binding.SamplerStateName.CStr(), bgfx::UniformType::Vec4);
+            if (!bgfx::isValid(nativeBinding.SamplerStateHandle)) {
+                bgfx::destroy(nativeBinding.BorderColorHandle);
+                bgfx::destroy(uniform);
+                CKBgfxDestroyRecord(rec);
+                return CKERR_OUTOFMEMORY;
+            }
+        }
         nativeBinding.DefaultTexture = texture;
         rec->Samplers.PushBack(nativeBinding);
     }

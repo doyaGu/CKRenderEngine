@@ -498,7 +498,8 @@ private:
                             bgfx::UniformHandle Uniform,
                             bgfx::TextureHandle DefaultTexture,
                             CKDWORD Texture, const CKSamplerDesc *Sampler,
-                            bool FixedFunctionBorderSampling);
+                            bool FixedFunctionBorderSampling,
+                            bool ShaderBorderSampling);
     void ResetDebugBindings();
     void TraceSubmit(CKDWORD Program, bgfx::ProgramHandle ProgramHandle,
                      CKDWORD Depth, const CKFFPipelineState &State);

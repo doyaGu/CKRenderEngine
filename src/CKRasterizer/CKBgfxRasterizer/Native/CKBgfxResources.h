@@ -25,7 +25,9 @@ struct CKBgfxProgramRecord {
     };
     struct SamplerBinding {
         CKFFSamplerBinding Desc;
-        bgfx::UniformHandle Handle;
+        bgfx::UniformHandle Handle = BGFX_INVALID_HANDLE;
+        bgfx::UniformHandle BorderColorHandle = BGFX_INVALID_HANDLE;
+        bgfx::UniformHandle SamplerStateHandle = BGFX_INVALID_HANDLE;
         std::shared_ptr<bgfx::TextureHandle> DefaultTexture;
     };
     bgfx::ProgramHandle Handle = BGFX_INVALID_HANDLE;
@@ -40,8 +42,13 @@ struct CKBgfxProgramRecord {
     {
         for (int i = 0; i < Uniforms.Size(); ++i)
             if (bgfx::isValid(Uniforms[i].Handle)) bgfx::destroy(Uniforms[i].Handle);
-        for (int i = 0; i < Samplers.Size(); ++i)
+        for (int i = 0; i < Samplers.Size(); ++i) {
             if (bgfx::isValid(Samplers[i].Handle)) bgfx::destroy(Samplers[i].Handle);
+            if (bgfx::isValid(Samplers[i].BorderColorHandle))
+                bgfx::destroy(Samplers[i].BorderColorHandle);
+            if (bgfx::isValid(Samplers[i].SamplerStateHandle))
+                bgfx::destroy(Samplers[i].SamplerStateHandle);
+        }
     }
 };
 

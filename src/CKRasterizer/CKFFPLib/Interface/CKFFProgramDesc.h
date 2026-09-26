@@ -46,6 +46,13 @@ struct CKFFSamplerBinding {
     CKDWORD MetadataBufferSlot = UINT32_MAX;
     CKDWORD BorderColorOffset = 0;
     CKDWORD SamplerStateOffset = 0;
+    // Named-uniform shaders expose the same metadata as two vec4 uniforms.
+    // Both names must be present together. BorderColorName receives RGBA.
+    // SamplerStateName is (AddressU | AddressV << 4 | AddressW << 8,
+    // MinFilter, MagFilter, MipFilter | MaxAnisotropy << 4); the anisotropy
+    // bits are present when ShaderAnisotropy is enabled.
+    XString BorderColorName;
+    XString SamplerStateName;
 };
 
 struct CKFFVertexInput {

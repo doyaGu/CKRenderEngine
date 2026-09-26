@@ -3,26 +3,20 @@
 
 #include "VxDefines.h"
 
-// bgfx palette entries cannot be changed while earlier draws in the same
-// submission reference them. Keep exact entries, then use the nearest color.
+// bgfx snapshots one 16-entry palette for the whole submitted frame. Entries
+// cannot be recycled while earlier draws still reference them. Callers either
+// receive an exact stable entry or must use shader-assisted border sampling.
 class CKBgfxBorderPalette {
 public:
-    struct Entry { CKDWORD Index; bool Added; bool Approximated; };
+    struct Entry { CKDWORD Index; bool Added; bool Available; };
     void Reset() { m_Count = 0; }
     Entry Resolve(CKDWORD argb) {
-        CKDWORD nearest = 0, distance = UINT32_MAX;
         for (CKDWORD i = 0; i < m_Count; ++i) {
-            if (m_Colors[i] == argb) return {i, false, false};
-            CKDWORD d = 0;
-            for (unsigned shift = 0; shift < 32; shift += 8) {
-                const int delta = int((argb >> shift) & 255) - int((m_Colors[i] >> shift) & 255);
-                d += delta * delta;
-            }
-            if (d < distance) { nearest = i; distance = d; }
+            if (m_Colors[i] == argb) return {i, false, true};
         }
-        if (m_Count == 16) return {nearest, false, true};
+        if (m_Count == 16) return {0, false, false};
         m_Colors[m_Count] = argb;
-        return {m_Count++, true, false};
+        return {m_Count++, true, true};
     }
 private:
     CKDWORD m_Colors[16] = {};

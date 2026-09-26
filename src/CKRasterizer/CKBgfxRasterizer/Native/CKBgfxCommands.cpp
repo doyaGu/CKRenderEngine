@@ -27,6 +27,24 @@ static void CKBgfxDestroyDefaultTexture(bgfx::TextureHandle *handle)
     delete handle;
 }
 
+void CKBgfxPackSamplerMetadata(const CKSamplerDesc &sampler,
+                               float borderColor[4], float samplerState[4])
+{
+    borderColor[0] = float((sampler.BorderColor >> 16) & 255) / 255.0f;
+    borderColor[1] = float((sampler.BorderColor >> 8) & 255) / 255.0f;
+    borderColor[2] = float(sampler.BorderColor & 255) / 255.0f;
+    borderColor[3] = float(sampler.BorderColor >> 24) / 255.0f;
+    samplerState[0] = float(unsigned(sampler.AddressU) |
+                            (unsigned(sampler.AddressV) << 4) |
+                            (unsigned(sampler.AddressW) << 8));
+    samplerState[1] = float(sampler.MinFilter);
+    samplerState[2] = float(sampler.MagFilter);
+    CKDWORD mipAndAnisotropy = unsigned(sampler.MipFilter);
+    if (sampler.ShaderAnisotropy)
+        mipAndAnisotropy |= sampler.MaxAnisotropy << 4;
+    samplerState[3] = float(mipAndAnisotropy);
+}
+
 // ---------------------------------------------------------------------------
 // Frame
 // ---------------------------------------------------------------------------
@@ -383,7 +401,8 @@ std::shared_ptr<bgfx::TextureHandle> CKBgfxRasterizerContext::GetDefaultTexture(
 
 CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Binding, bgfx::UniformHandle Uniform,
                                       bgfx::TextureHandle DefaultTexture, CKDWORD Texture,
-                                      const CKSamplerDesc *Sampler, bool FixedFunctionBorderSampling)
+                                      const CKSamplerDesc *Sampler, bool FixedFunctionBorderSampling,
+                                      bool ShaderBorderSampling)
 {
     static int s_SetTextureLogCount = 0;
     const CKDWORD Stage = Binding.NativeSlot, Slot = Binding.Slot;
@@ -411,7 +430,7 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
         const bool hasBorder = Sampler->AddressU == CKRST_ADDRESS_BORDER ||
             Sampler->AddressV == CKRST_ADDRESS_BORDER ||
             Sampler->AddressW == CKRST_ADDRESS_BORDER;
-        const bool manualBorder = hasBorder && FixedFunctionBorderSampling;
+        const bool manualBorder = hasBorder && ShaderBorderSampling;
         if (manualBorder) {
             if (nativeSampler.AddressU == CKRST_ADDRESS_BORDER)
                 nativeSampler.AddressU = CKRST_ADDRESS_CLAMP;
@@ -422,18 +441,20 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
             // Explicit shader levels need a linear clamp sample. The shader
             // snaps nearest lookups to texel centers before applying the
             // original min/mag and mip filter choices.
-            if (Sampler->MipFilter != CKRST_FILTER_NONE || Sampler->ShaderAnisotropy) {
+            if (FixedFunctionBorderSampling &&
+                (Sampler->MipFilter != CKRST_FILTER_NONE || Sampler->ShaderAnisotropy)) {
                 nativeSampler.MinFilter = CKRST_FILTER_LINEAR;
                 nativeSampler.MagFilter = CKRST_FILTER_LINEAR;
             }
         } else if (hasBorder) {
             const auto entry = m_BorderPalette.Resolve(Sampler->BorderColor);
+            if (!entry.Available)
+                return CKERR_NOTIMPLEMENTED;
             nativeSampler.BorderColor = entry.Index;
             if (entry.Added) {
                 const CKDWORD argb = Sampler->BorderColor;
                 bgfx::setPaletteColor((uint8_t)entry.Index, (argb << 8) | (argb >> 24));
             }
-            if (entry.Approximated) m_DrawApproximations |= 1ull << CKRST_DIAG_APPROX_BORDER_COLOR;
         }
     }
     uint32_t flags = BGFX_SAMPLER_NONE;
@@ -527,10 +548,20 @@ CKERROR CKBgfxRasterizerContext::Draw(const CKDrawCommand *Draw)
             borderSamplers[sampler.Desc.NativeSlot][0] = float(texture ? texture->MipCount : 1u);
             borderSamplers[sampler.Desc.NativeSlot][1] = float(binding.Sampler.MipFilter);
         }
+        const bool namedBorderSampling =
+            bgfx::isValid(sampler.BorderColorHandle) &&
+            bgfx::isValid(sampler.SamplerStateHandle);
         err = BindTextureSlot(sampler.Desc, sampler.Handle, *sampler.DefaultTexture,
-            binding.Texture, &binding.Sampler, rec->FixedFunctionBorderSampling);
+            binding.Texture, &binding.Sampler, rec->FixedFunctionBorderSampling,
+            rec->FixedFunctionBorderSampling || namedBorderSampling);
         if (err != CK_OK)
             return DrawFailed(err, "Draw.texture");
+        if (namedBorderSampling) {
+            float borderColor[4], samplerState[4];
+            CKBgfxPackSamplerMetadata(binding.Sampler, borderColor, samplerState);
+            bgfx::setUniform(sampler.BorderColorHandle, borderColor);
+            bgfx::setUniform(sampler.SamplerStateHandle, samplerState);
+        }
     }
 
     // Program creation compiles names, counts and slot mappings. Keep the

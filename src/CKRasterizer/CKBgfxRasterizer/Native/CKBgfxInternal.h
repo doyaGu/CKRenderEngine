@@ -89,6 +89,8 @@ CKBgfxAutoMipUpdateAction CKBgfxResolveAutoMipUpdateAction(CKBOOL RequestedAutoM
                                                            CKBOOL FullBaseUpdate,
                                                            CKBOOL CanGenerateFullMipChain);
 CKBOOL CKBgfxSamplerWantsMipMaps(const CKSamplerDesc *Sampler);
+void CKBgfxPackSamplerMetadata(const CKSamplerDesc &Sampler,
+                               float BorderColor[4], float SamplerState[4]);
 uint32_t CKBgfxSamplerFlags(const CKSamplerDesc *Sampler);
 CKBOOL CKBgfxTrySamplerFlags(const CKSamplerDesc *Sampler, uint32_t &Flags);
 CKERROR CKBgfxTryState(CKDrawState State, uint64_t &BgfxState);
