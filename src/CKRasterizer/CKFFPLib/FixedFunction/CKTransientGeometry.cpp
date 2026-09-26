@@ -6,6 +6,7 @@
 #include "CKFFStateDesc.h"
 #include "CKRenderFrameCostStats.h"
 
+#include <algorithm>
 #include <math.h>
 #include <cmath>
 
@@ -376,8 +377,9 @@ static void PointFillWorldPosition(const CKBYTE *vertex, CKDWORD formatFlags,
     }
 }
 
+template <typename Params>
 static bool PointFillHomogeneousPosition(const CKBYTE *vertex, CKDWORD formatFlags,
-                                         const CKFFPointFillCullParams &params,
+                                         const Params &params,
                                          double &x, double &y, double &w)
 {
     float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -403,6 +405,96 @@ static bool PointFillHomogeneousPosition(const CKBYTE *vertex, CKDWORD formatFla
     y = clip[1];
     w = clip[3];
     return true;
+}
+
+struct CKFFLineClipPosition {
+    double X, Y, Z, W;
+};
+
+static bool LinePatternClipPosition(const CKBYTE *vertex, CKDWORD formatFlags,
+                                    const CKFFLinePatternParams &params,
+                                    CKFFLineClipPosition &result)
+{
+    if (formatFlags & CKFF_VF_POSITIONT) {
+        float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        memcpy(position, vertex, sizeof(position));
+        const double rhw = position[3] == 0.0f ? 1.0 : position[3];
+        const double clipW = 1.0 / rhw;
+        result.X = ((position[0] + 0.5) * params.PositionTViewport[0] +
+                    params.PositionTViewport[2]) * clipW;
+        result.Y = ((position[1] + 0.5) * params.PositionTViewport[1] +
+                    params.PositionTViewport[3]) * clipW;
+        result.Z = position[2] * clipW;
+        result.W = clipW;
+    } else {
+        float worldPosition[4];
+        float clip[4];
+        PointFillWorldPosition(vertex, formatFlags, params, worldPosition);
+        PointFillTransform(params.ViewProjection, worldPosition, clip);
+        result.X = clip[0] * params.ClipScaleX +
+                   clip[3] * params.ClipOffsetX;
+        result.Y = clip[1] * params.ClipScaleY +
+                   clip[3] * params.ClipOffsetY;
+        result.Z = clip[2];
+        result.W = clip[3];
+    }
+    return std::isfinite(result.X) && std::isfinite(result.Y) &&
+           std::isfinite(result.Z) && std::isfinite(result.W);
+}
+
+static bool ClipLinePatternSegment(const CKFFLineClipPosition &first,
+                                   const CKFFLineClipPosition &second,
+                                   double &enter, double &leave)
+{
+    const double planes[6][2] = {
+        {first.X + first.W, second.X + second.W},
+        {first.W - first.X, second.W - second.X},
+        {first.Y + first.W, second.Y + second.W},
+        {first.W - first.Y, second.W - second.Y},
+        {first.Z, second.Z},
+        {first.W - first.Z, second.W - second.Z},
+    };
+    enter = 0.0;
+    leave = 1.0;
+    for (int plane = 0; plane < 6; ++plane) {
+        const double a = planes[plane][0];
+        const double b = planes[plane][1];
+        if (a < 0.0 && b < 0.0)
+            return false;
+        if ((a < 0.0) != (b < 0.0)) {
+            const double crossing = a / (a - b);
+            if (a < 0.0)
+                enter = (std::max)(enter, crossing);
+            else
+                leave = (std::min)(leave, crossing);
+        }
+    }
+    return enter <= leave;
+}
+
+static CKFFLineClipPosition InterpolateLineClipPosition(
+    const CKFFLineClipPosition &first,
+    const CKFFLineClipPosition &second, double t)
+{
+    CKFFLineClipPosition result;
+    result.X = first.X + (second.X - first.X) * t;
+    result.Y = first.Y + (second.Y - first.Y) * t;
+    result.Z = first.Z + (second.Z - first.Z) * t;
+    result.W = first.W + (second.W - first.W) * t;
+    return result;
+}
+
+static bool LinePatternScreenPosition(const CKFFLineClipPosition &clip,
+                                      const CKFFLinePatternParams &params,
+                                      double &screenX, double &screenY)
+{
+    if (clip.W <= 1.0e-12)
+        return false;
+    const double ndcX = clip.X / clip.W;
+    const double ndcY = clip.Y / clip.W;
+    screenX = (ndcX + 1.0) * params.TargetWidth * 0.5;
+    screenY = (1.0 - ndcY) * params.TargetHeight * 0.5;
+    return std::isfinite(screenX) && std::isfinite(screenY);
 }
 
 CKBOOL CKTransientGeometry::CullPointFilledTriangles(
@@ -620,10 +712,207 @@ CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
     return TRUE;
 }
 
+CKBOOL CKTransientGeometry::ExpandPatternedLines(
+    VXPRIMITIVETYPE sourceType, CKBOOL wireframeTriangles,
+    const CKFFLinePatternParams &params)
+{
+    m_LinePatternSpans.Resize(0);
+    if (m_VertexData.IsEmpty() || m_VertexStride == 0 ||
+        params.TargetWidth <= 0.0f || params.TargetHeight <= 0.0f)
+        return FALSE;
+
+    const CKDWORD elementCount = m_IndexCount ? m_IndexCount : m_VertexCount;
+    CKDWORD lineCount = 0;
+    if (wireframeTriangles) {
+        lineCount = (elementCount / 3u) * 3u;
+    } else if (sourceType == VX_LINELIST) {
+        lineCount = elementCount / 2u;
+    } else if (sourceType == VX_LINESTRIP) {
+        lineCount = elementCount > 1u ? elementCount - 1u : 0u;
+    } else {
+        return FALSE;
+    }
+    if (lineCount == 0 || lineCount > 0x3fffffffu)
+        return FALSE;
+
+    const CKDWORD sourceStride = m_VertexStride;
+    const bool useWeight = (m_FormatFlags & CKFF_VF_POSITIONT) == 0 &&
+        params.BlendMode == CKFF_VERTEX_BLEND_TWEEN;
+    const bool reusesAttribute = useWeight
+        ? (m_FormatFlags & CKFF_VF_BLENDWEIGHT) != 0
+        : (m_FormatFlags & CKFF_VF_TWEENPOSITION) != 0;
+    CKDWORD phaseOffset = sourceStride;
+    if (reusesAttribute) {
+        phaseOffset = (m_FormatFlags & CKFF_VF_POSITIONT) ? 16u : 12u;
+        if (m_FormatFlags & CKFF_VF_NORMAL)
+            phaseOffset += 12u;
+        if (useWeight) {
+            if (m_FormatFlags & CKFF_VF_TWEENPOSITION)
+                phaseOffset += 12u;
+            if (m_FormatFlags & CKFF_VF_TWEENNORMAL)
+                phaseOffset += 12u;
+        }
+    }
+    const CKDWORD expandedStride = sourceStride +
+        (reusesAttribute ? 0u : (CKDWORD)sizeof(float));
+    const CKDWORD expandedVertexCount = lineCount * 2u;
+    if (expandedVertexCount > 0x7fffffffu / expandedStride)
+        return FALSE;
+
+    XArray<CKBYTE> lines;
+    lines.Resize((int)(expandedVertexCount * expandedStride));
+
+    auto elementIndex = [this](CKDWORD element) -> CKDWORD {
+        if (!m_IndexCount)
+            return element;
+        return m_Index32
+            ? ((const CKDWORD *)m_IndexData.Begin())[element]
+            : ((const CKWORD *)m_IndexData.Begin())[element];
+    };
+    CKDWORD emitted = 0;
+    for (CKDWORD line = 0; line < lineCount; ++line) {
+        CKDWORD firstElement = 0, secondElement = 0;
+        if (wireframeTriangles) {
+            const CKDWORD triangle = line / 3u;
+            const CKDWORD edge = line % 3u;
+            firstElement = triangle * 3u + edge;
+            secondElement = triangle * 3u + ((edge + 1u) % 3u);
+        } else if (sourceType == VX_LINELIST) {
+            firstElement = line * 2u;
+            secondElement = firstElement + 1u;
+        } else {
+            firstElement = line;
+            secondElement = line + 1u;
+        }
+
+        const CKDWORD firstIndex = elementIndex(firstElement);
+        const CKDWORD secondIndex = elementIndex(secondElement);
+        if (firstIndex >= m_VertexCount || secondIndex >= m_VertexCount)
+            return FALSE;
+        const CKBYTE *first = m_VertexData.Begin() + firstIndex * sourceStride;
+        const CKBYTE *second = m_VertexData.Begin() + secondIndex * sourceStride;
+
+        CKFFLineClipPosition firstClip, secondClip;
+        if (!LinePatternClipPosition(
+                first, m_FormatFlags, params, firstClip) ||
+            !LinePatternClipPosition(
+                second, m_FormatFlags, params, secondClip))
+            return FALSE;
+        double clipEnter = 0.0, clipLeave = 1.0;
+        const bool visible = ClipLinePatternSegment(
+            firstClip, secondClip, clipEnter, clipLeave);
+        double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
+        if (visible) {
+            const CKFFLineClipPosition clippedFirst =
+                InterpolateLineClipPosition(firstClip, secondClip, clipEnter);
+            const CKFFLineClipPosition clippedSecond =
+                InterpolateLineClipPosition(firstClip, secondClip, clipLeave);
+            if (!LinePatternScreenPosition(
+                    clippedFirst, params, x0, y0) ||
+                !LinePatternScreenPosition(
+                    clippedSecond, params, x1, y1))
+                return FALSE;
+        }
+        const double dx = x1 - x0;
+        const double dy = y1 - y0;
+        const bool xMajor = fabs(dx) >= fabs(dy);
+        const double firstMajor = xMajor ? x0 : y0;
+        const double secondMajor = xMajor ? x1 : y1;
+        const double majorLow = (std::min)(firstMajor, secondMajor);
+        const double majorHigh = (std::max)(firstMajor, secondMajor);
+        const double phaseDirection = secondMajor >= firstMajor ? 1.0 : -1.0;
+        const int majorLimit = (int)(xMajor ? params.TargetWidth : params.TargetHeight);
+        int firstPixel = (int)floor(majorLow - 1.0);
+        int lastPixel = (int)ceil(majorHigh + 1.0);
+        firstPixel = (std::max)(0, (std::min)(majorLimit, firstPixel));
+        lastPixel = (std::max)(0, (std::min)(majorLimit, lastPixel));
+        int runStart = -1;
+        for (int pixel = firstPixel; visible && pixel <= lastPixel; ++pixel) {
+            bool enabled = false;
+            if (pixel < lastPixel) {
+                const double phase = fabs((double)pixel + 0.5 - firstMajor) /
+                    (double)(params.RepeatFactor ? params.RepeatFactor : 1u);
+                const int bit = 15 - ((int)phase & 15);
+                enabled = (params.Pattern & (1u << bit)) != 0;
+            }
+            if (enabled && runStart < 0) {
+                runStart = pixel;
+            } else if (!enabled && runStart >= 0) {
+                if (m_LinePatternSpans.Size() == 0x7fffffff)
+                    return FALSE;
+                CKFFLinePatternSpan span = {};
+                span.FirstVertex = emitted;
+                if (xMajor) {
+                    span.Scissor.left = runStart;
+                    span.Scissor.top = 0;
+                    span.Scissor.right = pixel;
+                    span.Scissor.bottom = (int)params.TargetHeight;
+                } else {
+                    span.Scissor.left = 0;
+                    span.Scissor.top = runStart;
+                    span.Scissor.right = (int)params.TargetWidth;
+                    span.Scissor.bottom = pixel;
+                }
+                m_LinePatternSpans.PushBack(span);
+                runStart = -1;
+            }
+        }
+        const double repeat =
+            (double)(params.RepeatFactor ? params.RepeatFactor : 1u);
+        float firstPhase = 0.0f;
+        float secondPhase = 0.0f;
+        if (visible) {
+            // Store phase * clip-W. Perspective interpolation followed by
+            // gl_FragCoord.w reconstructs a screen-linear phase, including
+            // when an original endpoint lies on or behind the eye plane.
+            if (xMajor) {
+                const double halfWidth = params.TargetWidth * 0.5;
+                firstPhase = (float)(phaseDirection *
+                    (halfWidth * firstClip.X +
+                     (halfWidth - firstMajor) * firstClip.W) / repeat);
+                secondPhase = (float)(phaseDirection *
+                    (halfWidth * secondClip.X +
+                     (halfWidth - firstMajor) * secondClip.W) / repeat);
+            } else {
+                const double halfHeight = params.TargetHeight * 0.5;
+                firstPhase = (float)(phaseDirection *
+                    (-halfHeight * firstClip.Y +
+                     (halfHeight - firstMajor) * firstClip.W) / repeat);
+                secondPhase = (float)(phaseDirection *
+                    (-halfHeight * secondClip.Y +
+                     (halfHeight - firstMajor) * secondClip.W) / repeat);
+            }
+        }
+
+        CKBYTE *firstOut = lines.Begin() + emitted * expandedStride;
+        CKBYTE *secondOut = firstOut + expandedStride;
+        memcpy(firstOut, first, sourceStride);
+        memcpy(secondOut, second, sourceStride);
+        memcpy(firstOut + phaseOffset, &firstPhase, sizeof(firstPhase));
+        memcpy(secondOut + phaseOffset, &secondPhase, sizeof(secondPhase));
+        emitted += 2u;
+    }
+
+    m_VertexData.Swap(lines);
+    m_IndexData.Resize(0);
+    m_SourceVertexIndices.Resize(0);
+    m_FormatFlags |= CKFF_VF_LINEPATTERN;
+    if (useWeight)
+        m_FormatFlags |= CKFF_VF_LINEPATTERN_WEIGHT;
+    m_VertexStride = expandedStride;
+    m_VertexCount = emitted;
+    m_IndexCount = 0;
+    m_Index32 = FALSE;
+    m_LastVertexBytes = emitted * expandedStride;
+    m_LastIndexBytes = 0;
+    return TRUE;
+}
+
 void CKTransientGeometry::Clear() {
     m_VertexData.Resize(0);
     m_IndexData.Resize(0);
     m_SourceVertexIndices.Resize(0);
+    m_LinePatternSpans.Resize(0);
     m_FormatFlags = 0;
     m_VertexCount = 0;
     m_VertexStride = 0;

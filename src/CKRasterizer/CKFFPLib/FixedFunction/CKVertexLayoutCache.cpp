@@ -40,6 +40,15 @@ CKDWORD CKFFVertexLayout::ComputeStride(CKDWORD formatFlags) {
         if (!reusesAttribute)
             stride += 8; // float2 pixel offset
     }
+    if (formatFlags & CKFF_VF_LINEPATTERN) {
+        const bool useWeight =
+            (formatFlags & CKFF_VF_LINEPATTERN_WEIGHT) != 0;
+        const bool reusesAttribute = useWeight
+            ? (formatFlags & CKFF_VF_BLENDWEIGHT) != 0
+            : (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        if (!reusesAttribute)
+            stride += 4; // float screen-space line phase
+    }
     return stride;
 }
 
@@ -249,6 +258,26 @@ CKBOOL CKFFVertexLayout::BuildLayout(
             elements[count].Offset = offset;
             count++;
             offset += 8;
+        }
+    }
+    if ((formatFlags & CKFF_VF_LINEPATTERN) != 0) {
+        const bool useWeight =
+            (formatFlags & CKFF_VF_LINEPATTERN_WEIGHT) != 0;
+        const bool reusesAttribute = useWeight
+            ? (formatFlags & CKFF_VF_BLENDWEIGHT) != 0
+            : (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        if (!reusesAttribute) {
+            // Patterned lines use the attribute left idle by the selected
+            // vertex-blend mode for the endpoint's screen-space line phase.
+            elements[count].Attrib = useWeight
+                ? CKRST_ATTRIB_WEIGHT : CKRST_ATTRIB_TANGENT;
+            elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+            elements[count].Count = 1;
+            elements[count].Normalized = FALSE;
+            elements[count].AsInt = FALSE;
+            elements[count].Offset = offset;
+            count++;
+            offset += 4;
         }
     }
 

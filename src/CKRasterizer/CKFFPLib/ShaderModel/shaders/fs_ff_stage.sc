@@ -1162,6 +1162,16 @@ void main()
         v_clipDistance1.x < 0.0 || v_clipDistance1.y < 0.0)
         discard;
 // CKFF_BGFX_ONLY_END
+#if !CKFF_NATIVE_SDL_GPU
+    int linePattern = int(u_ffDrawParams[3].w);
+    int lineRepeat = int(u_ffDrawParams[11].w);
+    if (lineRepeat > 0) {
+        float linePhase = v_fogPos.y * gl_FragCoord.w;
+        int lineBit = 15 - (int(linePhase) & 15);
+        if (((linePattern >> lineBit) & 1) == 0)
+            discard;
+    }
+#endif
     bool flatShade = ckffSpec_FLAT_SHADE() != 0;
     int lastActiveStage = ckffSpec_LAST_ACTIVE_TEXTURE_STAGE();
     vec4 diffuse = flatShade ? v_flatColor0 : v_color0;

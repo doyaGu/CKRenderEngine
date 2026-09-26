@@ -227,6 +227,8 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     memcpy(drawParams[1], state.MaterialConstants.Ambient, sizeof(drawParams[1]));
     memcpy(drawParams[2], state.MaterialConstants.Specular, sizeof(drawParams[2]));
     memcpy(drawParams[3], state.MaterialConstants.Emissive, sizeof(drawParams[3]));
+    // Emissive alpha never contributes to fixed-function output alpha.
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_EMISSIVE][3] = 0.0f;
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = state.MaterialConstants.Power;
     CKDWORD zBias = drawState.GetRenderState(VXRENDERSTATE_ZBIAS);
     if (zBias > 16u)
@@ -285,6 +287,7 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
 
     CKDWORD fogColor = drawState.GetRenderState(VXRENDERSTATE_FOGCOLOR);
     CKFFPackColorARGB(fogColor, drawParams[CKFF_DRAW_PARAM_FOG_COLOR]);
+    drawParams[CKFF_DRAW_PARAM_FOG_COLOR][3] = 0.0f;
     drawParams[CKFF_DRAW_PARAM_TWEEN][0] = CKFFReadFloatRenderState(
         drawState, VXRENDERSTATE_TWEENFACTOR, 0.0f);
     // Vertex blend mode, weight count (or tween stream mask) and indexing come
@@ -292,6 +295,14 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     drawParams[CKFF_DRAW_PARAM_TWEEN][1] = (float)((shaderKey.VS.Bits >> 35) & 3u);
     drawParams[CKFF_DRAW_PARAM_TWEEN][2] = (float)((shaderKey.VS.Bits >> 38) & 3u);
     drawParams[CKFF_DRAW_PARAM_TWEEN][3] = ((shaderKey.VS.Bits >> 37) & 1u) ? 1.0f : 0.0f;
+    if (context->PatternedLines) {
+        const CKDWORD packed =
+            drawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
+        drawParams[CKFF_DRAW_PARAM_MATERIAL_EMISSIVE][3] =
+            (float)(packed >> 16);
+        drawParams[CKFF_DRAW_PARAM_FOG_COLOR][3] =
+            (float)(packed & 0xffffu);
+    }
     // The uber shader reads every draw parameter slot.
     return CKFF_DRAW_PARAM_VEC4_COUNT;
 }

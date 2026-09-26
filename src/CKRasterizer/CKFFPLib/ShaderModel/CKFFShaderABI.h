@@ -38,6 +38,7 @@ enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_DIFFUSE = 0,
     CKFF_DRAW_PARAM_MATERIAL_AMBIENT = 1,
     CKFF_DRAW_PARAM_MATERIAL_SPECULAR = 2,
+    // rgb = emissive material, w = 16-bit line pattern.
     CKFF_DRAW_PARAM_MATERIAL_EMISSIVE = 3,
     CKFF_DRAW_PARAM_MATERIAL_POWER = 4, // x = specular power, y = ZBIAS, z = affine interpolation, w = point offset source
     CKFF_DRAW_PARAM_MATERIAL_SOURCES = 5,
@@ -46,6 +47,7 @@ enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_ALPHA = 8,
     CKFF_DRAW_PARAM_TEXTURE_FACTOR = 9,
     CKFF_DRAW_PARAM_FOG = 10,
+    // rgb = fog color, w = line-pattern repeat factor.
     CKFF_DRAW_PARAM_FOG_COLOR = 11,
     CKFF_DRAW_PARAM_INLINE_LIGHT_BASE = 12,
     CKFF_DRAW_PARAM_TWEEN = 19,

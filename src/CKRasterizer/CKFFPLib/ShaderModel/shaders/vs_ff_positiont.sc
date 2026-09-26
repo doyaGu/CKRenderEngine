@@ -107,6 +107,7 @@ void main()
     vec4 worldClipPos = vec4(a_position.xyz, 1.0);
     v_fogPos = gl_Position;
     v_fogPos.x = clipW;
+    v_fogPos.y = a_tangent.x;
 #if CKFF_VS_CLIP_DISTANCE
     int clipCount = int(u_clipParams.x);
     v_clipDistance0.x = clipCount > 0 ? dot(worldClipPos, u_clipPlanes[0]) : 0.0;

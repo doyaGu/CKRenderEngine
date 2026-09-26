@@ -1,5 +1,6 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuShaders.h"
+#include "CKVertexLayoutCache.h"
 
 // CKSdlGpuRasterizerContext frame flow and fixed-function draw submission.
 
@@ -609,7 +610,36 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
         nativeDraw.TransientIndices = &indices;
     }
 
-    const CKERROR error = Draw(&nativeDraw);
+    CKERROR error = CK_OK;
+    if ((draw.VertexFormat & CKFF_VF_LINEPATTERN) != 0) {
+        for (CKDWORD i = 0; draw.LinePatternSpans &&
+                            i < draw.LinePatternSpanCount; ++i) {
+            const CKFFLinePatternSpan &span = draw.LinePatternSpans[i];
+            CKDrawCommand patternedDraw = nativeDraw;
+            patternedDraw.StartVertex = span.FirstVertex;
+            patternedDraw.VertexCount = 2;
+            patternedDraw.IndexBuffer = 0;
+            patternedDraw.TransientIndices = NULL;
+            patternedDraw.StartIndex = 0;
+            patternedDraw.IndexCount = 0;
+            CKRECT scissor = span.Scissor;
+            if (draw.Pipeline.ScissorEnabled) {
+                scissor.left = (std::max)(scissor.left, draw.Pipeline.Scissor.left);
+                scissor.top = (std::max)(scissor.top, draw.Pipeline.Scissor.top);
+                scissor.right = (std::min)(scissor.right, draw.Pipeline.Scissor.right);
+                scissor.bottom = (std::min)(scissor.bottom, draw.Pipeline.Scissor.bottom);
+            }
+            if (scissor.left >= scissor.right || scissor.top >= scissor.bottom)
+                continue;
+            patternedDraw.Pipeline.ScissorEnabled = TRUE;
+            patternedDraw.Pipeline.Scissor = scissor;
+            error = Draw(&patternedDraw);
+            if (error != CK_OK)
+                break;
+        }
+    } else {
+        error = Draw(&nativeDraw);
+    }
     return m_FFP.FinishDraw(error, GetDrawApproximationMask());
 }
 
@@ -691,6 +721,7 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD 
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
+        m_FFP.NeedsVertexBufferLinePattern(Type) ||
         m_FFP.NeedsVertexBufferPointFillExpansion(Type, vb->Desc.m_VertexFormat) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
@@ -750,6 +781,7 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWOR
     }
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
+        m_FFP.NeedsVertexBufferLinePattern(Type) ||
         m_FFP.NeedsVertexBufferPointFillExpansion(Type, vb->Desc.m_VertexFormat) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {

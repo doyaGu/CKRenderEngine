@@ -38,6 +38,32 @@ struct CKFFPointFillCullParams {
     CKBOOL InverseWinding;
 };
 
+struct CKFFLinePatternParams {
+    VxMatrix World;
+    VxMatrix ViewProjection;
+    VxMatrix BlendMatrices[4];
+    CKDWORD BlendMode;
+    CKDWORD BlendCount;
+    CKBOOL IndexedBlend;
+    float TweenFactor;
+    CKDWORD Pattern;
+    CKDWORD RepeatFactor;
+    // Final clip-space mapping used by the vertex shaders before the native
+    // viewport converts NDC to fragment coordinates.
+    float ClipScaleX;
+    float ClipScaleY;
+    float ClipOffsetX;
+    float ClipOffsetY;
+    float PositionTViewport[4];
+    float TargetWidth;
+    float TargetHeight;
+};
+
+struct CKFFLinePatternSpan {
+    CKDWORD FirstVertex;
+    CKRECT Scissor;
+};
+
 class CKTransientGeometry {
 public:
     CKTransientGeometry();
@@ -73,6 +99,14 @@ public:
                                       CKBOOL pointSprites,
                                       const VxDrawPrimitiveData *sourceData);
 
+    // Convert every rasterized line segment to an independent line-list pair
+    // and attach screen-space major-axis phase at both endpoints for exact
+    // pattern bit selection in the fragment shader. Wireframe triangles emit three
+    // pairs after the caller has applied triangle culling.
+    CKBOOL ExpandPatternedLines(VXPRIMITIVETYPE sourceType,
+                                CKBOOL wireframeTriangles,
+                                const CKFFLinePatternParams &params);
+
     CKDWORD GetFormatFlags() const { return m_FormatFlags; }
     CKDWORD GetVertexCount() const { return m_VertexCount; }
     CKDWORD GetVertexStride() const { return m_VertexStride; }
@@ -82,6 +116,12 @@ public:
     CKDWORD GetLastIndexBytes() const { return m_LastIndexBytes; }
     const CKBYTE *GetVertices() const { return m_VertexData.IsEmpty() ? NULL : m_VertexData.Begin(); }
     const CKBYTE *GetIndices() const { return m_IndexData.IsEmpty() ? NULL : m_IndexData.Begin(); }
+    const CKFFLinePatternSpan *GetLinePatternSpans() const {
+        return m_LinePatternSpans.IsEmpty() ? NULL : m_LinePatternSpans.Begin();
+    }
+    CKDWORD GetLinePatternSpanCount() const {
+        return (CKDWORD)m_LinePatternSpans.Size();
+    }
 
     // Convert triangle fan/strip indices to triangle list.
     // Returns the number of output indices written to dst.
@@ -124,6 +164,7 @@ private:
     CKDWORD m_LastIndexBytes;
     XArray<CKWORD> m_TempIndices;
     XArray<CKDWORD> m_SourceVertexIndices;
+    XArray<CKFFLinePatternSpan> m_LinePatternSpans;
 
     int ConvertToTriangleList(VXPRIMITIVETYPE srcType,
                               CKWORD *srcIndices, int srcCount,

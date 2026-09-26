@@ -210,9 +210,11 @@ void main()
     if (u_ffDrawParams[7].y > 0.5) {
         viewNormal = normalize(viewNormal);
     }
-    // Perspective interpolation of clip W gives the denominator needed to
-    // reconstruct affine attributes from attributes multiplied by clip W.
-    v_fogPos = vec4(gl_Position.w, 0.0, abs(viewPos.z), 1.0);
+    // The CPU supplies screen phase multiplied by clip W. Perspective
+    // interpolation and fragment reciprocal W reconstruct affine phase.
+    float linePhase = vertexBlendMode == 2 ? a_weight.x : a_tangent.x;
+    v_fogPos = vec4(gl_Position.w, linePhase,
+                    abs(viewPos.z), 1.0);
 
     vec4 matDiffuse  = selectMaterialSource(u_ffDrawParams[5].x, u_ffDrawParams[0], a_color0, a_color1);
     vec4 matAmbient  = selectMaterialSource(u_ffDrawParams[5].y, u_ffDrawParams[1], a_color0, a_color1);

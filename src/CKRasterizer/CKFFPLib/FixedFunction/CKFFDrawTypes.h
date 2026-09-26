@@ -12,6 +12,7 @@
 class CKDrawStateCache;
 class CKFFConstantSet;
 struct CKFFStateStore;
+struct CKFFLinePatternSpan;
 
 struct CKFFUniformSink {
     CKFFConstantSet *Constants;
@@ -84,6 +85,8 @@ struct CKFFDraw {
     CKDWORD StartIndex;
     CKDWORD IndexCount;
     CKDWORD SortKey;
+    const CKFFLinePatternSpan *LinePatternSpans;
+    CKDWORD LinePatternSpanCount;
     CKFFDrawSource Source;
     CKBOOL SkipSubmit;
 
@@ -92,7 +95,8 @@ struct CKFFDraw {
           VertexBuffer(0), Vertices(NULL),
           VertexStride(0), StartVertex(0), VertexCount(0), IndexBuffer(0),
           Indices(NULL), Index32(FALSE), StartIndex(0), IndexCount(0),
-          SortKey(0), Source(CKFF_DRAW_PRIMITIVE), SkipSubmit(FALSE) {}
+          SortKey(0), LinePatternSpans(NULL), LinePatternSpanCount(0),
+          Source(CKFF_DRAW_PRIMITIVE), SkipSubmit(FALSE) {}
 };
 
 struct CKFFUniformEmissionContext {
@@ -107,6 +111,7 @@ struct CKFFUniformEmissionContext {
     CKDWORD VertexFogMode;
     CKDWORD PixelFogMode;
     CKBOOL PolygonDepthBias;
+    CKBOOL PatternedLines;
 };
 
 inline void CKFFInitPreparedState(CKFFPreparedState *prepared)

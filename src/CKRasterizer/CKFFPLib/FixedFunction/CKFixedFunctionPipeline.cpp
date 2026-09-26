@@ -272,6 +272,17 @@ static bool CKFFLinePatternSuppressesDraw(VXPRIMITIVETYPE topology,
            CKFFUsesLineRasterization(topology, drawState);
 }
 
+static bool CKFFUsesPatternedLines(VXPRIMITIVETYPE topology,
+                                   const CKDrawStateCache &drawState)
+{
+    if (!CKFFUsesLineRasterization(topology, drawState))
+        return false;
+    const CKDWORD packed =
+        drawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
+    const CKDWORD pattern = packed >> 16;
+    return packed != 0 && pattern != 0 && pattern != 0xffffu;
+}
+
 const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code)
 {
     switch (code) {
@@ -403,11 +414,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
     // affect the primitives actually submitted by this draw.
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_DITHERENABLE))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_DITHER);
-    const CKDWORD linePattern =
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
-    if (lines && linePattern != 0 && (linePattern >> 16) != 0 &&
-        (linePattern >> 16) != 0xffffu)
-        RecordDrawApproximation(CKRST_DIAG_IGNORE_LINEPATTERN);
     if ((triangles || lines) &&
         m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
@@ -557,6 +563,12 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointFillExpansion(
            m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
            m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
            (dpFlags & CKRST_DP_PSIZE) != 0;
+}
+
+CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferLinePattern(
+    VXPRIMITIVETYPE type) const
+{
+    return CKFFUsesPatternedLines(type, m_State.DrawState) ? TRUE : FALSE;
 }
 
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
@@ -892,13 +904,79 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         ? fabsf(2.0f / m_State.Viewport[0]) : 1.0f;
     pointParams.ViewportHeight = m_State.Viewport[1] != 0.0f
         ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
+    const CKBOOL patternedLines =
+        CKFFUsesPatternedLines(type, m_State.DrawState) ? TRUE : FALSE;
+    CKFFLinePatternParams lineParams = {};
+    if (patternedLines) {
+        lineParams.World = m_State.World;
+        m_State.EnsureViewProjection();
+        lineParams.ViewProjection = m_State.ViewProjection();
+        lineParams.BlendMode = pointParams.BlendMode;
+        lineParams.BlendCount = pointParams.BlendCount;
+        lineParams.IndexedBlend = pointParams.IndexedBlend;
+        lineParams.TweenFactor = pointParams.TweenFactor;
+        const CKDWORD packedLinePattern =
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
+        lineParams.Pattern = packedLinePattern >> 16;
+        lineParams.RepeatFactor = packedLinePattern & 0xffffu;
+        if (lineParams.RepeatFactor == 0)
+            lineParams.RepeatFactor = 1;
+        for (int i = 0; i < 4; ++i)
+            lineParams.BlendMatrices[i] = pointParams.BlendMatrices[i];
+
+        memcpy(lineParams.PositionTViewport, m_State.Viewport,
+               sizeof(lineParams.PositionTViewport));
+        lineParams.PositionTViewport[0] *= m_State.ViewportRemap[0];
+        lineParams.PositionTViewport[2] =
+            lineParams.PositionTViewport[2] * m_State.ViewportRemap[0] +
+            m_State.ViewportRemap[2];
+        lineParams.PositionTViewport[1] *= m_State.ViewportRemap[1];
+        lineParams.PositionTViewport[3] =
+            lineParams.PositionTViewport[3] * m_State.ViewportRemap[1] +
+            m_State.ViewportRemap[3];
+
+        lineParams.ClipScaleX = m_State.ViewportRemap[0];
+        lineParams.ClipScaleY = m_State.ViewportRemap[1];
+        lineParams.ClipOffsetX = m_State.ViewportRemap[2] +
+            0.5f * m_State.Viewport[0] * m_State.ViewportRemap[0];
+        lineParams.ClipOffsetY = m_State.ViewportRemap[3] +
+            0.5f * m_State.Viewport[1] * m_State.ViewportRemap[1];
+        if (RenderTargetOriginFlip()) {
+            lineParams.PositionTViewport[1] =
+                -lineParams.PositionTViewport[1];
+            lineParams.PositionTViewport[3] =
+                -lineParams.PositionTViewport[3];
+            lineParams.ClipScaleY = -lineParams.ClipScaleY;
+            lineParams.ClipOffsetY = -lineParams.ClipOffsetY;
+        }
+        CKDWORD targetWidth = m_State.TargetPhysicalWidth;
+        CKDWORD targetHeight = m_State.TargetPhysicalHeight;
+        if (!targetWidth)
+            targetWidth = m_State.TargetLogicalWidth;
+        if (!targetHeight)
+            targetHeight = m_State.TargetLogicalHeight;
+        if (!targetWidth)
+            targetWidth = m_State.ViewportData.ViewX +
+                          m_State.ViewportData.ViewWidth;
+        if (!targetHeight)
+            targetHeight = m_State.ViewportData.ViewY +
+                           m_State.ViewportData.ViewHeight;
+        lineParams.TargetWidth = targetWidth ? (float)targetWidth : 1.0f;
+        lineParams.TargetHeight = targetHeight ? (float)targetHeight : 1.0f;
+    }
     CKFFProgramPreparation programPreparation;
     const CKDWORD pointOffsetFlags = pointFillExpansion
         ? CKFF_VF_POINTOFFSET |
             (pointParams.BlendMode == CKFF_VERTEX_BLEND_TWEEN
                 ? CKFF_VF_POINTOFFSET_WEIGHT : 0)
         : 0;
-    const CKDWORD programFormatFlags = formatFlags | pointOffsetFlags;
+    const CKDWORD linePatternFlags = patternedLines
+        ? CKFF_VF_LINEPATTERN |
+            (pointParams.BlendMode == CKFF_VERTEX_BLEND_TWEEN
+                ? CKFF_VF_LINEPATTERN_WEIGHT : 0)
+        : 0;
+    const CKDWORD programFormatFlags =
+        formatFlags | pointOffsetFlags | linePatternFlags;
     const CKFFProgramPrepareStatus prepareStatus = PrepareSoftwareProgram(
         &programPreparation, data->Flags, activeTextureCount, programFormatFlags,
         m_State.TexcoordComponentCounts, pointSprites);
@@ -1005,6 +1083,40 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
             return TRUE;
         }
     }
+    const CKBOOL patternedWireframe = patternedLines &&
+        (type == VX_TRIANGLELIST || type == VX_TRIANGLESTRIP ||
+         type == VX_TRIANGLEFAN);
+    if (patternedWireframe &&
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE) != VXCULL_NONE) {
+        CKFFPointFillCullParams cull = {};
+        cull.World = lineParams.World;
+        cull.ViewProjection = lineParams.ViewProjection;
+        cull.BlendMode = lineParams.BlendMode;
+        cull.BlendCount = lineParams.BlendCount;
+        cull.IndexedBlend = lineParams.IndexedBlend;
+        cull.TweenFactor = lineParams.TweenFactor;
+        cull.CullMode =
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE);
+        cull.InverseWinding =
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_INVERSEWINDING) != 0;
+        for (int i = 0; i < 4; ++i)
+            cull.BlendMatrices[i] = lineParams.BlendMatrices[i];
+        if (!m_TransientGeometry.CullPointFilledTriangles(cull))
+            return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
+        if (m_TransientGeometry.GetVertexCount() == 0) {
+            m_Draw = CKFFDraw();
+            m_Draw.SkipSubmit = TRUE;
+            m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
+            return TRUE;
+        }
+    }
+    if (patternedLines) {
+        const VXPRIMITIVETYPE lineSourceType =
+            type == VX_LINESTRIP && wrapsTexcoords ? VX_LINELIST : type;
+        if (!m_TransientGeometry.ExpandPatternedLines(
+                lineSourceType, patternedWireframe, lineParams))
+            return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
+    }
     CKBOOL expandedPointFill = FALSE;
     if (pointFillExpansion) {
         expandedPointFill = m_TransientGeometry.ExpandPointFilledTriangles(
@@ -1022,7 +1134,9 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
                                              m_TransientGeometry.GetLastIndexBytes()));
 
     VXPRIMITIVETYPE drawStateType = type;
-    if (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
+    if (patternedLines) {
+        drawStateType = VX_LINELIST;
+    } else if (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
         type == VX_POINTLIST) {
         drawStateType = VX_TRIANGLELIST;
     } else if (type == VX_LINESTRIP && wrapsTexcoords) {
@@ -1030,8 +1144,10 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     }
     CKFFDrawSubmission submission = {};
     submission.DrawStateType = drawStateType;
-    submission.ForceSolidFill = expandedPointFill || type == VX_POINTLIST;
+    submission.ForceSolidFill = expandedPointFill || type == VX_POINTLIST ||
+                                patternedWireframe;
     submission.PolygonDepthBias = CKFFUsesPolygonDepthBias(type) ? TRUE : FALSE;
+    submission.PatternedLines = patternedLines;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
     submission.VertexFormat = m_TransientGeometry.GetFormatFlags();
@@ -1071,6 +1187,8 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     // triangle. The direct VB path would submit the original strip/fan stream
     // as a point list and omit repeated vertices.
     if (NeedsVertexBufferPointFillExpansion(type, dpFlags))
+        return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
+    if (NeedsVertexBufferLinePattern(type))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     // Callers with WRAPn route through the transient primitive path, which
     // can adjust coordinates independently for each primitive.
@@ -1115,7 +1233,8 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         if (!m_UniformEmitter.UploadUniforms(
                 &m_Constants, programContext, textures->ActiveStageCount,
-                m_StaticUniformRevision, submission.PolygonDepthBias))
+                m_StaticUniformRevision, submission.PolygonDepthBias,
+                submission.PatternedLines))
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
     }
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
@@ -1184,6 +1303,11 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
         m_Draw.Indices = m_TransientGeometry.GetIndices();
         m_Draw.Index32 = m_TransientGeometry.IsIndex32();
         m_Draw.IndexCount = m_TransientGeometry.GetIndexCount();
+        if (submission.PatternedLines) {
+            m_Draw.LinePatternSpans = m_TransientGeometry.GetLinePatternSpans();
+            m_Draw.LinePatternSpanCount =
+                m_TransientGeometry.GetLinePatternSpanCount();
+        }
     }
 
     // Textures.
