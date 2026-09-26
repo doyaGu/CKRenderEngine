@@ -1067,6 +1067,70 @@ void CheckLineTopologyWithPointFill(Backend &b)
     }, pixels);
     TestCheck(PixelNear(pixels, 32, 32, 0, 255, 0),
               "an all-one pattern preserves the solid line");
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xf0000002u);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw horizontal repeated line pattern");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 255, 0) &&
+                  PixelNear(pixels, 24, 32, 0, 0, 0) &&
+                  PixelNear(pixels, 43, 32, 0, 255, 0) &&
+                  PixelNear(pixels, 52, 32, 0, 0, 0),
+              "line pattern must repeat MSB-first in major-axis pixel order");
+
+    const VxVector verticalPositions[2] = {
+        VxVector(0.0f, -0.8f, 0.5f), VxVector(0.0f, 0.8f, 0.5f)};
+    data.PositionPtr = const_cast<VxVector *>(verticalPositions);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw vertical repeated line pattern");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 32, 10, 0, 0, 0) &&
+                  PixelNear(pixels, 32, 24, 0, 255, 0) &&
+                  PixelNear(pixels, 32, 43, 0, 0, 0) &&
+                  PixelNear(pixels, 32, 52, 0, 255, 0),
+              "vertical line patterns advance from the first endpoint");
+
+    struct LineVertex { VxVector Position; CKDWORD Color; };
+    const LineVertex lineVertices[2] = {
+        {positions[0], 0xff00ff00u}, {positions[1], 0xff00ff00u}};
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = CKRST_DP_TR_VC;
+    vbDesc.m_MaxVertexCount = 2;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, lineVertices, &vb),
+              "create patterned-line VB");
+    const CKWORD reverseIndices[2] = {1, 0};
+    CKIndexBufferDesc ibDesc;
+    ibDesc.m_MaxIndexCount = 2;
+    CKDWORD ib = 0;
+    TestCheck(ctx->CreateIndexBuffer(&ibDesc, reverseIndices, &ib),
+              "create patterned-line IB");
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_LINELIST, vb, 0, 2, NULL, 0),
+                  "draw patterned VB line");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 255, 0) &&
+                  PixelNear(pixels, 24, 32, 0, 0, 0) &&
+                  PixelNear(pixels, 43, 32, 0, 255, 0) &&
+                  PixelNear(pixels, 52, 32, 0, 0, 0),
+              "VB line patterns use the CPU shadow exactly");
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVBIB(
+                      VX_LINELIST, vb, ib, 0, 2, 0, 2),
+                  "draw reversed patterned VBIB line");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 10, 32, 0, 0, 0) &&
+                  PixelNear(pixels, 24, 32, 0, 255, 0) &&
+                  PixelNear(pixels, 43, 32, 0, 0, 0) &&
+                  PixelNear(pixels, 52, 32, 0, 255, 0),
+              "reversed VBIB line patterns restart at the reversed first endpoint");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_LINEPATTERN] == 0,
+              "VB and VBIB line patterns report no ignored state");
+    TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER),
+              "delete patterned-line IB");
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER),
+              "delete patterned-line VB");
     ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
 }

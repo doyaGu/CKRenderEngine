@@ -1004,6 +1004,7 @@ void DrawTexturedTriangle(CKRasterizerContext *ctx)
 void SetupDither(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE); }
 void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD)
 {
+    ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
     ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u);
 }
@@ -1041,7 +1042,6 @@ void TestApproximationsKeepDrawing()
 {
     const ApproximationCase cases[] = {
         {"dither", CKRST_DIAG_IGNORE_DITHER, &SetupDither},
-        {"line pattern", CKRST_DIAG_IGNORE_LINEPATTERN, &SetupLinePattern},
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
         {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
@@ -1076,6 +1076,19 @@ void TestApproximationsKeepDrawing()
                       Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 0,
                   "approximations must not count as rejections");
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
+    }
+
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        SetupLinePattern(ctx, 0);
+        TestCheck(ctx->BeginScene(), "BeginScene (line pattern)");
+        DrawTexturedTriangle(ctx);
+        TestCheck(ctx->EndScene(), "EndScene (line pattern)");
+        TestCheck(CountDraws(f) == 1,
+                  "patterned wireframe draw must reach the device");
+        TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_LINEPATTERN) == 0,
+                  "line patterns must not count an approximation diagnostic");
     }
 
     // ZBIAS is resolved against the active depth format by the shared FFP and

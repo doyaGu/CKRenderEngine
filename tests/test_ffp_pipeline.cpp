@@ -9,6 +9,7 @@
 #include "CKFFTestPipeline.h"
 #include "TestTriangleMultiset.h"
 
+#include <cmath>
 #include <math.h>
 #include <string.h>
 
@@ -497,7 +498,6 @@ void IgnoredRenderStatesReportDiagnostics() {
     };
     const IgnoredStateCase cases[] = {
         {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKRST_DIAG_IGNORE_DITHER},
-        {VXRENDERSTATE_LINEPATTERN, 0x00FF0001u, 0, CKRST_DIAG_IGNORE_LINEPATTERN},
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
         {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
         {VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE, FALSE, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING},
@@ -511,8 +511,6 @@ void IgnoredRenderStatesReportDiagnostics() {
     CKBOOL allDrawn = TRUE;
     CKBOOL allReported = TRUE;
     for (CKDWORD i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        if (cases[i].State == VXRENDERSTATE_LINEPATTERN)
-            ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
         ffp.SetRenderState(cases[i].State, cases[i].Value);
         const CKBOOL drawn = ffp.DrawVertexBuffer(
             VX_TRIANGLELIST,
@@ -523,8 +521,6 @@ void IgnoredRenderStatesReportDiagnostics() {
             ffp.GetLastDrawApproximationMask() == (1ull << cases[i].Diagnostic) &&
             ffp.GetApproximatedDrawCount(cases[i].Diagnostic) == 1;
         ffp.SetRenderState(cases[i].State, cases[i].ResetValue);
-        if (cases[i].State == VXRENDERSTATE_LINEPATTERN)
-            ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
     }
 
     TestCheck(allDrawn && context.Log.DrawCount == sizeof(cases) / sizeof(cases[0]),
@@ -562,10 +558,10 @@ void IgnoredRenderStatesReportDiagnostics() {
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
                   ffp.GetLastDrawApproximationMask() == 0,
               "A solid triangle must not report an ignored line pattern");
-    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
-                  ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_IGNORE_LINEPATTERN),
-              "A line must report the ignored line pattern after a solid triangle");
+    TestCheck(!ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PREPARE_FAILED,
+              "A patterned direct line must route through its CPU shadow");
     ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
 
     ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00000001u);
@@ -598,6 +594,170 @@ void IgnoredRenderStatesReportDiagnostics() {
                   ((ffp.GetDraw().Pipeline.State.Lo >> 12) & 3u) == 0u,
               "An explicit line reports unsupported edge AA but ignores polygon point fill");
 
+    ffp.Shutdown();
+}
+
+void PatternedLinesUseExactScreenPhases() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 64;
+    viewport.ViewHeight = 64;
+    viewport.ViewZMax = 1.0f;
+    ffp.SetViewport(viewport);
+    ffp.SetTargetExtents(64, 64, 64, 64);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xcc000002u);
+
+    VxVector positions[3] = {
+        VxVector(-0.75f, 0.0f, 0.5f),
+        VxVector(0.75f, 0.0f, 0.5f),
+        VxVector(0.75f, 0.75f, 0.5f),
+    };
+    CKDWORD colors[3] = {0xffffffffu, 0xffffffffu, 0xffffffffu};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 2;
+    data.Flags = CKRST_DP_TR_VC;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = colors;
+    data.ColorStride = sizeof(CKDWORD);
+
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+              "patterned line list submits through transient geometry");
+    const CKFFDraw &line = ffp.GetDraw();
+    TestCheck(line.VertexCount == 2 && line.IndexCount == 0 &&
+                  DrawStateTopology(line.Pipeline.State) == VX_LINELIST,
+              "patterned line list keeps one independent endpoint pair");
+    TestCheck((line.VertexFormat & CKFF_VF_LINEPATTERN) != 0 &&
+                  (line.VertexFormat & CKFF_VF_LINEPATTERN_WEIGHT) == 0 &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "patterned line list uses the tangent phase without diagnostics");
+    bool lineSpansValid = line.LinePatternSpans != NULL &&
+                          line.LinePatternSpanCount >= 2;
+    for (CKDWORD i = 0; lineSpansValid && i < line.LinePatternSpanCount; ++i) {
+        const CKFFLinePatternSpan &span = line.LinePatternSpans[i];
+        lineSpansValid = span.FirstVertex == 0 &&
+                         span.Scissor.left < span.Scissor.right &&
+                         span.Scissor.top == 0 && span.Scissor.bottom == 64;
+    }
+    TestCheck(lineSpansValid,
+              "patterned horizontal lines expose nonempty SDL scissor runs");
+    const CKDWORD lineStride = line.VertexStride;
+    float firstPhase = -1.0f, secondPhase = -1.0f;
+    if (context.Log.LastVertexBytes.size() == lineStride * 2u) {
+        memcpy(&firstPhase,
+               &context.Log.LastVertexBytes[lineStride - sizeof(firstPhase)],
+               sizeof(firstPhase));
+        memcpy(&secondPhase,
+               &context.Log.LastVertexBytes[lineStride * 2u - sizeof(secondPhase)],
+               sizeof(secondPhase));
+    }
+    TestCheck(firstPhase == 0.0f && secondPhase > 23.99f && secondPhase < 24.01f,
+              "line endpoints carry repeat-scaled screen-space major-axis phase");
+    const CKDWORD drawParamsUniform =
+        context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const std::vector<float> &drawParams =
+        context.Log.FloatUniforms[drawParamsUniform];
+    TestCheck(drawParams.size() == CKFF_DRAW_PARAM_VEC4_COUNT * 4u &&
+                  drawParams[CKFF_DRAW_PARAM_MATERIAL_EMISSIVE * 4u + 3u] == 0xcc00u &&
+                  drawParams[CKFF_DRAW_PARAM_FOG_COLOR * 4u + 3u] == 2.0f,
+              "line pattern and repeat factor reach the fragment shader exactly");
+
+    data.VertexCount = 3;
+    TestCheck(ffp.DrawPrimitive(VX_LINESTRIP, NULL, 0, &data) &&
+                  ffp.GetDraw().VertexCount == 4 &&
+                  ffp.GetDraw().IndexCount == 0 &&
+                  DrawStateTopology(ffp.GetDraw().Pipeline.State) == VX_LINELIST,
+              "patterned line strips expand into independent line-list pairs");
+    const CKFFDraw &strip = ffp.GetDraw();
+    bool stripHasFirst = false, stripHasSecond = false, stripSpansValid =
+        strip.LinePatternSpans != NULL && strip.LinePatternSpanCount >= 2;
+    for (CKDWORD i = 0; stripSpansValid && i < strip.LinePatternSpanCount; ++i) {
+        const CKDWORD firstVertex = strip.LinePatternSpans[i].FirstVertex;
+        stripHasFirst |= firstVertex == 0;
+        stripHasSecond |= firstVertex == 2;
+        stripSpansValid = firstVertex == 0 || firstVertex == 2;
+    }
+    TestCheck(stripSpansValid && stripHasFirst && stripHasSecond,
+              "line-strip scissor runs select the matching independent pair");
+    float stripPhases[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    if (context.Log.LastVertexBytes.size() == strip.VertexStride * 4u) {
+        for (int i = 0; i < 4; ++i) {
+            memcpy(&stripPhases[i],
+                   &context.Log.LastVertexBytes[
+                       strip.VertexStride * (i + 1u) - sizeof(float)],
+                   sizeof(float));
+        }
+    }
+    TestCheck(stripPhases[0] == 0.0f &&
+                  stripPhases[1] > 23.99f && stripPhases[1] < 24.01f &&
+                  stripPhases[2] == 0.0f &&
+                  stripPhases[3] > 11.99f && stripPhases[3] < 12.01f,
+              "each line-strip segment restarts from the first pattern bit");
+
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data) &&
+                  ffp.GetDraw().VertexCount == 6 &&
+                  ffp.GetDraw().IndexCount == 0 &&
+                  DrawStateTopology(ffp.GetDraw().Pipeline.State) == VX_LINELIST,
+              "patterned wireframe triangles expand all three edges");
+    const CKFFDraw &wireframe = ffp.GetDraw();
+    bool wireframePairs[3] = {false, false, false};
+    bool wireframeSpansValid = wireframe.LinePatternSpans != NULL &&
+                               wireframe.LinePatternSpanCount >= 3;
+    for (CKDWORD i = 0;
+         wireframeSpansValid && i < wireframe.LinePatternSpanCount; ++i) {
+        const CKDWORD firstVertex = wireframe.LinePatternSpans[i].FirstVertex;
+        wireframeSpansValid = firstVertex <= 4 && (firstVertex & 1u) == 0;
+        if (wireframeSpansValid)
+            wireframePairs[firstVertex / 2u] = true;
+    }
+    TestCheck(wireframeSpansValid && wireframePairs[0] && wireframePairs[1] &&
+                  wireframePairs[2],
+              "wireframe scissor runs address all three expanded edges");
+
+    VxMatrix eyeCrossing;
+    memset(&eyeCrossing, 0, sizeof(eyeCrossing));
+    eyeCrossing[0][0] = 1.0f;
+    eyeCrossing[1][1] = 1.0f;
+    eyeCrossing[2][2] = 1.0f;
+    eyeCrossing[2][3] = 1.0f;
+    ffp.SetTransform(VXMATRIX_PROJECTION, eyeCrossing);
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    VxVector crossingPositions[2] = {
+        VxVector(-0.2f, 0.0f, -0.5f),
+        VxVector(0.2f, 0.0f, 1.0f),
+    };
+    data.VertexCount = 2;
+    data.PositionPtr = crossingPositions;
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data) &&
+                  ffp.GetDraw().LinePatternSpanCount > 0,
+              "patterned lines crossing the eye plane clip before phase setup");
+    const CKFFDraw &crossing = ffp.GetDraw();
+    float crossingFirst = 0.0f, crossingSecond = 0.0f;
+    if (context.Log.LastVertexBytes.size() == crossing.VertexStride * 2u) {
+        memcpy(&crossingFirst,
+               &context.Log.LastVertexBytes[
+                   crossing.VertexStride - sizeof(crossingFirst)],
+               sizeof(crossingFirst));
+        memcpy(&crossingSecond,
+               &context.Log.LastVertexBytes[
+                   crossing.VertexStride * 2u - sizeof(crossingSecond)],
+               sizeof(crossingSecond));
+    }
+    TestCheck(std::isfinite(crossingFirst) && std::isfinite(crossingSecond),
+              "eye-plane clipping keeps phase-times-W finite");
+
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
+    TestCheck(ffp.NeedsVertexBufferLinePattern(VX_TRIANGLELIST),
+              "patterned wireframe vertex buffers require the CPU shadow");
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xffff0001u);
+    TestCheck(!ffp.NeedsVertexBufferLinePattern(VX_TRIANGLELIST),
+              "all-one line patterns retain the direct vertex-buffer path");
     ffp.Shutdown();
 }
 
@@ -4119,6 +4279,8 @@ int main() {
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
     tests.Run("Ignored render states report diagnostics",
               &IgnoredRenderStatesReportDiagnostics);
+    tests.Run("Patterned lines use exact screen phases",
+              &PatternedLinesUseExactScreenPhases);
     tests.Run("Expanded point fill preserves point center semantics",
               &ExpandedPointFillPreservesPointCenterSemantics);
     tests.Run("Expanded point fill preserves blend and tween inputs",
