@@ -241,12 +241,43 @@ CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage) {
     if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES)
         return 0;
     const CKDWORD samplerType = key.Stages[stage].SamplerType;
+    const bool twoDimensional = samplerType == CKFF_SAMPLER_2D ||
+                                samplerType == CKFF_SAMPLER_DEPTH;
+    const bool comparison = samplerType == CKFF_SAMPLER_DEPTH &&
+        key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE;
+    const CKDWORD compareCount = CKFFDepthCompareSamplerCount(key);
+    if (twoDimensional && compareCount == 0)
+        return stage;
     CKDWORD ordinal = 0;
+    if (twoDimensional && !comparison)
+        ordinal = compareCount;
     for (CKDWORD previous = 0; previous < stage; ++previous) {
-        if (key.Stages[previous].HasTexture && key.Stages[previous].SamplerType == samplerType)
+        if (!key.Stages[previous].HasTexture)
+            continue;
+        const CKDWORD previousType = key.Stages[previous].SamplerType;
+        if (!twoDimensional) {
+            if (previousType == samplerType)
+                ++ordinal;
+            continue;
+        }
+        const bool previous2D = previousType == CKFF_SAMPLER_2D ||
+                                previousType == CKFF_SAMPLER_DEPTH;
+        const bool previousComparison = previousType == CKFF_SAMPLER_DEPTH &&
+            key.Stages[previous].SamplerCompareFunc != CKRST_COMPARE_NONE;
+        if (previous2D && previousComparison == comparison)
             ++ordinal;
     }
     return ordinal;
+}
+
+CKDWORD CKFFDepthCompareSamplerCount(const CKFFShaderKeyFS &key) {
+    CKDWORD count = 0;
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+        if (key.Stages[stage].HasTexture &&
+            key.Stages[stage].SamplerType == CKFF_SAMPLER_DEPTH &&
+            key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE)
+            ++count;
+    return count;
 }
 
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask) {

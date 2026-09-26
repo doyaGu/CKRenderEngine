@@ -506,21 +506,9 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
         const CKBOOL samplesTexture = textureBound &&
             CKFFShaderKeyStageUsesTexture(
                 shaderStage, previousColorOp, previousAlphaOp);
-        if (samplesTexture) {
-            if (!CKFFValidTextureStageValues(m_State.StageStates[stage]))
-                return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
-            const CKSamplerDesc sampler = BuildSamplerDesc((int)stage);
-            if ((m_State.TextureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
-                m_State.StageStates[stage][CKRST_TSS_COMPAREFUNC] != CKRST_COMPARE_NONE &&
-                (sampler.MinFilter != CKRST_FILTER_NEAREST ||
-                 sampler.MagFilter != CKRST_FILTER_NEAREST ||
-                 (sampler.MipFilter != CKRST_FILTER_NONE &&
-                  sampler.MipFilter != CKRST_FILTER_NEAREST &&
-                  sampler.MipFilter != CKRST_FILTER_MIPNEAREST))) {
-                // The shader compares one filtered depth sample instead of PCF.
-                RecordDrawApproximation(CKRST_DIAG_APPROX_COMPAREFUNC_FILTER);
-            }
-        }
+        if (samplesTexture &&
+            !CKFFValidTextureStageValues(m_State.StageStates[stage]))
+            return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
         previousColorOp = colorOp;
         previousAlphaOp = shaderStage.AlphaOp;
     }

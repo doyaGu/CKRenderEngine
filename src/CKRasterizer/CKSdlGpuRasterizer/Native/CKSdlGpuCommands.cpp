@@ -118,6 +118,99 @@ void CKSdlGpuBindVertexBuffer(SDL_GPURenderPass *pass,
     bound.Valid = true;
 }
 
+const CKFFUniformBinding *CKSdlGpuFindUniform(
+    const CKSdlGpuProgram &program, CK_SHADER_STAGE stage,
+    CKFFConstantBlock block)
+{
+    for (int i = 0; i < program.Interface.Uniforms.Size(); ++i) {
+        const CKFFUniformBinding &binding = program.Interface.Uniforms[i];
+        if (binding.Stage == stage && binding.Slot == (CKDWORD)block)
+            return &binding;
+    }
+    return nullptr;
+}
+
+bool CKSdlGpuRefreshVertexBlock(const CKSdlGpuProgram &program,
+                                CKFFProgramLayout &layout,
+                                const CKFFConstantSet &constants,
+                                CKFFConstantBlock block)
+{
+    const CKFFUniformBinding *binding = CKSdlGpuFindUniform(
+        program, CKRST_SHADER_VERTEX, block);
+    if (!binding)
+        return true;
+    const CKDWORD buffer = layout.BufferOffset(
+        binding->Stage, binding->BufferSlot);
+    if (buffer == UINT32_MAX)
+        return false;
+    const CKDWORD offset = buffer + binding->Offset;
+    const CKFFConstantValue &source = constants[(CKDWORD)block];
+    const CKDWORD size = XMin(binding->Size(), (CKDWORD)source.Bytes.Size());
+    if (size)
+        std::memcpy(layout.Data.Begin() + offset, source.Bytes.Begin(), size);
+    if (size < binding->Size())
+        std::memset(layout.Data.Begin() + offset + size, 0,
+                    binding->Size() - size);
+    return layout.MarkDataChanged(offset, binding->Size());
+}
+
+bool CKSdlGpuPatchDepthPad(const CKSdlGpuProgram &program,
+                           CKFFProgramLayout &layout, CKDWORD stage,
+                           const float transform[4])
+{
+    if (stage >= CKFF_MAX_TEXTURE_STAGES)
+        return false;
+    const CKFFUniformBinding *matrixBinding = CKSdlGpuFindUniform(
+        program, CKRST_SHADER_VERTEX, CKRST_BLOCK_TEX_MATRICES);
+    const CKFFUniformBinding *stageBinding = CKSdlGpuFindUniform(
+        program, CKRST_SHADER_VERTEX, CKRST_BLOCK_STAGE_PARAMS);
+    if (!matrixBinding || !stageBinding)
+        return false;
+    const CKDWORD matrixBuffer = layout.BufferOffset(
+        matrixBinding->Stage, matrixBinding->BufferSlot);
+    const CKDWORD stageBuffer = layout.BufferOffset(
+        stageBinding->Stage, stageBinding->BufferSlot);
+    if (matrixBuffer == UINT32_MAX || stageBuffer == UINT32_MAX)
+        return false;
+    const CKDWORD matrixOffset = matrixBuffer + matrixBinding->Offset + stage * 64u;
+    const CKDWORD stageOffset = stageBuffer + stageBinding->Offset + stage * 32u;
+    if (matrixOffset + sizeof(VxMatrix) > (CKDWORD)layout.Data.Size() ||
+        stageOffset + 8u > (CKDWORD)layout.Data.Size())
+        return false;
+
+    float packedFlags = 0.0f;
+    std::memcpy(&packedFlags, layout.Data.Begin() + stageOffset + 4u,
+                sizeof(packedFlags));
+    CKDWORD flags = (CKDWORD)packedFlags;
+    const CKDWORD componentCount = flags & 0xffu;
+    VxMatrix original;
+    const bool positionT = program.Vertex &&
+        program.Vertex->Desc.UniformBufferCount == 1;
+    if (!positionT && componentCount >= 1u && componentCount <= 4u)
+        std::memcpy(&original, layout.Data.Begin() + matrixOffset,
+                    sizeof(original));
+    else
+        original.SetIdentity();
+    VxMatrix pad;
+    pad.SetIdentity();
+    pad[0][0] = transform[0];
+    pad[3][0] = transform[1];
+    pad[1][1] = transform[2];
+    pad[3][1] = transform[3];
+    VxMatrix composed;
+    Vx3DMultiplyMatrix4(composed, pad, original);
+    std::memcpy(layout.Data.Begin() + matrixOffset, &composed,
+                sizeof(composed));
+    flags |= CKFF_TTF_DEPTH_PAD;
+    if (componentCount < 1u || componentCount > 4u)
+        flags = (flags & ~0xffu) | 4u;
+    packedFlags = (float)flags;
+    std::memcpy(layout.Data.Begin() + stageOffset + 4u, &packedFlags,
+                sizeof(packedFlags));
+    return layout.MarkDataChanged(matrixOffset, sizeof(composed)) &&
+           layout.MarkDataChanged(stageOffset + 4u, sizeof(packedFlags));
+}
+
 } // namespace
 
 CKERROR CKSdlGpuRasterizerContext::BeginPass(const CKRenderPassDesc *desc)
@@ -150,6 +243,91 @@ CKBOOL CKSdlGpuRasterizerContext::AllocTransientVertices(CKDWORD count, CKDWORD 
     out->Data = storage->Begin(); out->Count = count; out->Stride = layout->Stride;
     out->Layout = handle; out->Token = TransientVertexInfo.Back().Token;
     return TRUE;
+}
+
+CKERROR CKSdlGpuRasterizerContext::PrepareDepthPad(
+    const std::shared_ptr<CKSdlGpuTexture> &source,
+    const CKSamplerDesc &sampler,
+    std::shared_ptr<CKSdlGpuTexture> &padded,
+    float transform[4])
+{
+    const bool padU = sampler.AddressU == CKRST_ADDRESS_BORDER;
+    const bool padV = sampler.AddressV == CKRST_ADDRESS_BORDER;
+    if (!source || !source->Depth || source->Samples != 1 ||
+        source->Info.num_levels != 1 || (!padU && !padV))
+        return CKERR_INVALIDPARAMETER;
+    const CKDWORD borderDepth = (sampler.BorderColor >> 16) & 0xffu;
+    for (int i = DepthPads.Size() - 1; i >= 0; --i) {
+        std::shared_ptr<CKSdlGpuTexture> owner = DepthPads[i].Source.lock();
+        if (!owner) {
+            DepthPads.RemoveAt(i);
+            continue;
+        }
+        if (owner == source && DepthPads[i].BorderDepth == borderDepth &&
+            DepthPads[i].PadU == padU && DepthPads[i].PadV == padV) {
+            padded = DepthPads[i].Texture;
+            break;
+        }
+    }
+    const unsigned width = source->Info.width + (padU ? 2u : 0u);
+    const unsigned height = source->Info.height + (padV ? 2u : 0u);
+    if (width > Caps.MaxTextureSize || height > Caps.MaxTextureSize)
+        return CKERR_NOTIMPLEMENTED;
+    if (!padded) {
+        padded = std::make_shared<CKSdlGpuTexture>();
+        padded->Info = source->Info;
+        padded->Info.width = width;
+        padded->Info.height = height;
+        padded->Info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+                             SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        padded->Image = CKSdlGpuOwn(
+            Device, SDL_CreateGPUTexture(Device, &padded->Info),
+            SDL_ReleaseGPUTexture);
+        if (!padded->Image)
+            return Fail("CreateGPUTexture.depthPad");
+        padded->Depth = true;
+        padded->Samples = 1;
+        CKSdlGpuDepthPad entry;
+        entry.Source = source;
+        entry.Texture = padded;
+        entry.BorderDepth = borderDepth;
+        entry.PadU = padU;
+        entry.PadV = padV;
+        DepthPads.PushBack(entry);
+    }
+    if (!EnsureCommands())
+        return Error;
+    SDL_GPUDepthStencilTargetInfo clear = {};
+    clear.texture = padded->Image.get();
+    clear.clear_depth = float(borderDepth) / 255.0f;
+    clear.load_op = SDL_GPU_LOADOP_CLEAR;
+    clear.store_op = SDL_GPU_STOREOP_STORE;
+    clear.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+    clear.stencil_store_op = SDL_GPU_STOREOP_STORE;
+    SDL_GPURenderPass *clearPass = SDL_BeginGPURenderPass(
+        Commands, nullptr, 0, &clear);
+    if (!clearPass)
+        return Fail("BeginGPURenderPass.depthPad");
+    SDL_EndGPURenderPass(clearPass);
+
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Commands);
+    if (!copy)
+        return Fail("BeginGPUCopyPass.depthPad");
+    SDL_GPUTextureLocation from = {}, to = {};
+    from.texture = source->Image.get();
+    to.texture = padded->Image.get();
+    to.x = padU ? 1u : 0u;
+    to.y = padV ? 1u : 0u;
+    SDL_CopyGPUTextureToTexture(copy, &from, &to,
+                                source->Info.width, source->Info.height,
+                                1, false);
+    SDL_EndGPUCopyPass(copy);
+    source->Referenced = true;
+    transform[0] = float(source->Info.width) / float(width);
+    transform[1] = padU ? 1.0f / float(width) : 0.0f;
+    transform[2] = float(source->Info.height) / float(height);
+    transform[3] = padV ? 1.0f / float(height) : 0.0f;
+    return CK_OK;
 }
 
 CKBOOL CKSdlGpuRasterizerContext::AllocTransientIndices(CKDWORD count, CKBOOL index32, CKTransientIndexData *out)
@@ -253,9 +431,17 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     }
     auto &uniforms = draw.Program->UniformLayout;
     static const CKFFConstantSet emptyConstants;
-    uniforms.Update(desc->Constants ? *desc->Constants : emptyConstants);
+    const CKFFConstantSet &constantValues =
+        desc->Constants ? *desc->Constants : emptyConstants;
+    uniforms.Update(constantValues);
+    if (!CKSdlGpuRefreshVertexBlock(*draw.Program, uniforms, constantValues,
+                                    CKRST_BLOCK_TEX_MATRICES) ||
+        !CKSdlGpuRefreshVertexBlock(*draw.Program, uniforms, constantValues,
+                                    CKRST_BLOCK_STAGE_PARAMS))
+        return CKERR_INVALIDPARAMETER;
     CKSdlGpuBindingBatch::Inputs bindingInputs;
     bindingInputs.Hash = draw.Program->Identity;
+    std::shared_ptr<CKSdlGpuTexture> paddedOwners[CKFF_TEXTURE_SLOT_COUNT];
     for (unsigned slot = 0; slot < (unsigned)draw.Program->Interface.Samplers.Size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
         static const CKFFTextureSlot emptyBinding;
@@ -264,12 +450,29 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         if (decl.MetadataBufferSlot == UINT32_MAX && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
             return CKERR_NOTIMPLEMENTED;
-        const auto &texture = binding.Texture ? Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
+        const auto &sourceTexture = binding.Texture ?
+            Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
+        const std::shared_ptr<CKSdlGpuTexture> *textureOwner = &sourceTexture;
+        CKSdlGpuTexture *texture = sourceTexture.get();
         if (!texture || (texture->Depth &&
             (texture->Info.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) == 0) ||
             texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
-            (Target && (texture == Target->Color || texture == Target->Depth)))
+            (Target && (sourceTexture == Target->Color || sourceTexture == Target->Depth)))
             return CKERR_INVALIDPARAMETER;
+        if (texture->Depth && binding.Sampler.CompareFunc != CKRST_COMPARE_NONE &&
+            (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
+             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER)) {
+            float transform[4];
+            const CKERROR padError = PrepareDepthPad(
+                sourceTexture, binding.Sampler, paddedOwners[slot], transform);
+            if (padError != CK_OK)
+                return padError;
+            textureOwner = &paddedOwners[slot];
+            texture = paddedOwners[slot].get();
+            if (!CKSdlGpuPatchDepthPad(*draw.Program, uniforms,
+                                       binding.FixedStage, transform))
+                return CKERR_INVALIDPARAMETER;
+        }
         CKSamplerDesc hardwareSampler = binding.Sampler;
         if (texture->Info.type == SDL_GPU_TEXTURETYPE_3D &&
             hardwareSampler.ShaderAnisotropy) {
@@ -290,12 +493,12 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         }
         if (!cached.NativeSampler) cached.NativeSampler = Sampler(hardwareSampler);
         if (!cached.NativeSampler) return Error;
-        bindingInputs.Textures[slot] = texture.get();
+        bindingInputs.Textures[slot] = texture;
         bindingInputs.Samplers[slot] = cached.NativeSampler.get();
-        bindingInputs.TextureOwners[slot] = &texture;
+        bindingInputs.TextureOwners[slot] = textureOwner;
         bindingInputs.SamplerOwners[slot] = &cached.NativeSampler;
         bindingInputs.Hash = (bindingInputs.Hash * 16777619u) ^
-            (reinterpret_cast<uintptr_t>(texture.get()) >> 4);
+            (reinterpret_cast<uintptr_t>(texture) >> 4);
         bindingInputs.Hash = (bindingInputs.Hash * 16777619u) ^
             (reinterpret_cast<uintptr_t>(cached.NativeSampler.get()) >> 4);
         const CKDWORD metadata = draw.Program->SamplerMetadataOffsets[slot];
@@ -317,7 +520,10 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                                (unsigned(binding.Sampler.AddressV) << 4) |
                                (unsigned(binding.Sampler.AddressW) << 8));
         samplerInfo[1] = float(binding.Sampler.MinFilter); samplerInfo[2] = float(binding.Sampler.MagFilter);
-        samplerInfo[3] = float(binding.Sampler.MipFilter);
+        CKDWORD packedMipFilter = unsigned(binding.Sampler.MipFilter);
+        if (draw.Program->CompareSamplerCount != 0)
+            packedMipFilter |= binding.Sampler.MaxAnisotropy << 4;
+        samplerInfo[3] = float(packedMipFilter);
         std::memcpy(uniforms.Data.Begin() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
         std::memcpy(uniforms.Data.Begin() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));
         const CKDWORD first = (std::min)(decl.BorderColorOffset, decl.SamplerStateOffset);

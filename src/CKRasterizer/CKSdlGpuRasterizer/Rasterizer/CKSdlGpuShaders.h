@@ -7,5 +7,11 @@
 // FFP/presentation artifacts supplied by the rasterizer plugin. Private
 // backend image operations have their own CKSdlGpuNativeShaders interface.
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat Format, CKFFShaderSet &Out);
+CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
+                               CKDWORD CompareSamplerCount,
+                               CKShaderDesc &Out);
+CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat Format,
+                                     CKBOOL Clipping,
+                                     CKShaderDesc &Out);
 
 #endif

@@ -447,7 +447,11 @@ CKSamplerDesc CKFFBuildSamplerDesc(const CKDWORD *stageState) {
     desc.AddressW = (addrW != 0) ? CKFFTranslateAddressMode(addrW) : translateAddr;
 
     desc.BorderColor = stageState[CKRST_TSS_BORDERCOLOR];
-    desc.CompareFunc = CKRST_COMPARE_NONE;
+    const CKDWORD compare = stageState[CKRST_TSS_COMPAREFUNC];
+    desc.CompareFunc = compare <= CKRST_COMPARE_ALWAYS
+        ? static_cast<CK_COMPARE_MODE>(compare) : CKRST_COMPARE_NONE;
+    desc.MipLodBias = StageStateAsFloat(
+        stageState[CKRST_TSS_MIPMAPLODBIAS]);
     const CKDWORD minMip = stageState[CKRST_TSS_MAXMIPMLEVEL];
     desc.MinMipLevel = desc.MipFilter == CKRST_FILTER_NONE
         ? 0 : (minMip > 30u ? 30u : minMip);

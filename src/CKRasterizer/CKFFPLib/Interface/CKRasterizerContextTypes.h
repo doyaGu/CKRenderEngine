@@ -100,6 +100,7 @@ struct CKSamplerDesc {
     CKDWORD MinMipLevel = 0;
     CKDWORD MaxAnisotropy = 0; // 0 keeps the backend default for direct API callers.
     CKDWORD ShaderAnisotropy = 0; // Fixed-function shader supplies the capped taps.
+    float MipLodBias = 0.0f;
 };
 
 #endif // CKRASTERIZERCONTEXTTYPES_H

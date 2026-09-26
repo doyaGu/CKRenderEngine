@@ -2,6 +2,9 @@ $input a_position, a_tangent, a_bitangent, a_weight, a_texcoord0, a_texcoord1, a
 #ifndef CKFF_VS_CLIP_DISTANCE
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
+#ifndef CKFF_VS_DEPTH_PAD
+#define CKFF_VS_DEPTH_PAD 0
+#endif
 $output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
 
 #include "bgfx_shader.sh"
@@ -61,6 +64,37 @@ vec4 transformTexcoord(int stage, vec4 coord)
     return transformed;
 }
 
+#if CKFF_VS_DEPTH_PAD
+vec4 transformDepthPadTexcoord(int stage, vec4 coord, mat4 texMatrix)
+{
+    int flags = int(u_stageParams[stage * 2].y);
+    if (flags == 0) return coord;
+
+    int count = flags & 0xff;
+    vec4 transformed = coord;
+    if ((flags & 0x1000) != 0) {
+        vec4 padded = mul(texMatrix, vec4(coord.xyz, 1.0));
+        transformed.xy = padded.xy;
+    }
+    if ((flags & 0x100) != 0) {
+        float divisor = count == 1 ? transformed.x
+                      : count == 2 ? transformed.y
+                      : count == 3 ? transformed.z
+                      : transformed.w;
+        transformed.w = divisor;
+    }
+    if (count > 0 && count < 4) {
+        if (count <= 1) transformed.y = 0.0;
+        if (count <= 2) transformed.z = 0.0;
+        if (count <= 3 && (flags & 0x100) == 0) transformed.w = 0.0;
+    }
+    return transformed;
+}
+#define CKFF_TRANSFORM_TEXCOORD(_stage, _coord) transformDepthPadTexcoord(_stage, _coord, u_texMatrix[_stage])
+#else
+#define CKFF_TRANSFORM_TEXCOORD(_stage, _coord) transformTexcoord(_stage, _coord)
+#endif
+
 void main()
 {
     float rhw = a_position.w == 0.0 ? 1.0 : a_position.w;
@@ -99,15 +133,15 @@ void main()
     int tc5 = int(u_stageParams[5 * 2].x) & 7;
     int tc6 = int(u_stageParams[6 * 2].x) & 7;
     int tc7 = int(u_stageParams[7 * 2].x) & 7;
-    v_texcoord0 = transformTexcoord(0, selectTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    v_texcoord1 = transformTexcoord(1, selectTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    v_texcoord2 = transformTexcoord(2, selectTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    v_texcoord3 = transformTexcoord(3, selectTexcoord(tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    v_texcoord4 = transformTexcoord(4, selectTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    v_texcoord5 = transformTexcoord(5, selectTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
-    v_texcoord6 = transformTexcoord(6, selectTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord0 = CKFF_TRANSFORM_TEXCOORD(0, selectTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord1 = CKFF_TRANSFORM_TEXCOORD(1, selectTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord2 = CKFF_TRANSFORM_TEXCOORD(2, selectTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord3 = CKFF_TRANSFORM_TEXCOORD(3, selectTexcoord(tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord4 = CKFF_TRANSFORM_TEXCOORD(4, selectTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord5 = CKFF_TRANSFORM_TEXCOORD(5, selectTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord6 = CKFF_TRANSFORM_TEXCOORD(6, selectTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
     float fogFactor = ckffPositionTFogFactor(u_ffDrawParams[10].w > 0.5, a_color1.a);
-    v_texcoord7Fog = transformTexcoord(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
+    v_texcoord7Fog = CKFF_TRANSFORM_TEXCOORD(7, selectTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7));
     v_texcoord7Fog.z = fogFactor;
     if (u_ffDrawParams[4].z > 0.5) {
         v_texcoord0 *= clipW;

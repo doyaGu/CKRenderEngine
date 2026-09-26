@@ -106,6 +106,9 @@ enum CKFFShaderSemantic {
 static const CKDWORD CKFF_TTF_MIRRORONCE_U = 0x200u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_V = 0x400u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_W = 0x800u;
+// Backend-private affine remap stored in u_texMatrix. The fixed-function
+// translator never emits this bit; SDL GPU adds it to padded depth bindings.
+static const CKDWORD CKFF_TTF_DEPTH_PAD = 0x1000u;
 static const CKDWORD CKFF_TTF_BUMP_UNORM = 0x2000u;
 static const CKDWORD CKFF_TTF_MIRRORONCE_MASK = CKFF_TTF_MIRRORONCE_U |
                                                 CKFF_TTF_MIRRORONCE_V |

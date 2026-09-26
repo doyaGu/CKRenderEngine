@@ -403,6 +403,11 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
     if (Sampler) {
         nativeSampler = *Sampler;
         nativeSampler.BorderColor = 0;
+        // The shared fixed-function fragment shader reads depth values and
+        // evaluates comparison/filtering itself. Keep its native sampler
+        // ordinary; custom programs still receive hardware comparison state.
+        if (FixedFunctionBorderSampling)
+            nativeSampler.CompareFunc = CKRST_COMPARE_NONE;
         const bool hasBorder = Sampler->AddressU == CKRST_ADDRESS_BORDER ||
             Sampler->AddressV == CKRST_ADDRESS_BORDER ||
             Sampler->AddressW == CKRST_ADDRESS_BORDER;
@@ -434,7 +439,8 @@ CKERROR CKBgfxRasterizerContext::BindTextureSlot(const CKFFSamplerBinding &Bindi
     uint32_t flags = BGFX_SAMPLER_NONE;
     if (!CKBgfxTrySamplerFlags(Sampler ? &nativeSampler : nullptr, flags))
         return CKERR_INVALIDPARAMETER;
-    if (Sampler && Sampler->CompareFunc != CKRST_COMPARE_NONE) {
+    if (Sampler && Sampler->CompareFunc != CKRST_COMPARE_NONE &&
+        !FixedFunctionBorderSampling) {
         if (!texRec ||
             (m_CapsDesc.Features & CKRST_DEVCAPS_TEXTURE_COMPARISON) == 0 ||
             (CKBgfxMapFormatCaps(m_NativeFormatCaps[texRec->Format], FALSE, TRUE) &

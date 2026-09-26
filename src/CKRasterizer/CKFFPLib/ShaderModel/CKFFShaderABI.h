@@ -12,7 +12,7 @@
 // u_bumpEnv[stage * 2 + 1].w packs minimum mip in bits 0..4 and the
 // fixed-function anisotropy tap cap in bits 5..9 (zero disables manual taps),
 // the per-axis manual border mask in bits 10..12, and the min/mag linear
-// filter choices in bits 13..14 when that mask is nonzero. bgfx's
+// filter choices in bits 13..14. bgfx's
 // u_borderSampler[native slot] stores actual mip count and mip filter in xy.
 
 // VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space

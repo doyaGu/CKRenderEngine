@@ -86,8 +86,10 @@ bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
                                    CKDWORD previousColorOp,
                                    CKDWORD previousAlphaOp);
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask);
-// Ordinal of a sampling stage among the stages of the same sampler type.
+// Resource ordinal for a sampling stage. Comparison depth stages lead the 2D
+// block, followed by ordinary 2D/depth stages; cube and volume keep type order.
 CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage);
+CKDWORD CKFFDepthCompareSamplerCount(const CKFFShaderKeyFS &key);
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask);
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key);
 

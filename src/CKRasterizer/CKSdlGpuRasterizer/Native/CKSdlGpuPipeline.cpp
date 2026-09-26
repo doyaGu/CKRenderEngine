@@ -159,9 +159,11 @@ static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
 
 std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSamplerDesc &desc)
 {
-    const CKDWORD keyValues[9] = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
+    CKDWORD lodBiasBits = 0;
+    std::memcpy(&lodBiasBits, &desc.MipLodBias, sizeof(lodBiasBits));
+    const CKDWORD keyValues[10] = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
         unsigned(desc.AddressU), unsigned(desc.AddressV), unsigned(desc.AddressW), unsigned(desc.CompareFunc),
-        desc.MinMipLevel, desc.MaxAnisotropy};
+        desc.MinMipLevel, desc.MaxAnisotropy, lodBiasBits};
     CKSdlGpuSamplerKey key;
     std::memcpy(key.Values, keyValues, sizeof(keyValues));
     std::shared_ptr<SDL_GPUSampler> *found = Samplers.FindPtr(key);
@@ -173,6 +175,11 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
                        desc.MipFilter == CKRST_FILTER_ANISOTROPIC
         ? SDL_GPU_SAMPLERMIPMAPMODE_LINEAR : SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
     info.address_mode_u = AddressMode(desc.AddressU); info.address_mode_v = AddressMode(desc.AddressV); info.address_mode_w = AddressMode(desc.AddressW);
+    // Ordinary shader paths apply the legacy bias explicitly through
+    // SampleBias/SampleGrad. SampleCmp has no bias operand, so only comparison
+    // samplers carry it in native sampler state.
+    info.mip_lod_bias = desc.CompareFunc != CKRST_COMPARE_NONE ?
+        desc.MipLodBias : 0.0f;
     info.enable_anisotropy = desc.MinFilter == CKRST_FILTER_ANISOTROPIC || desc.MagFilter == CKRST_FILTER_ANISOTROPIC;
     info.max_anisotropy = info.enable_anisotropy
         ? float(desc.MaxAnisotropy ? desc.MaxAnisotropy : 16u) : 1.0f;

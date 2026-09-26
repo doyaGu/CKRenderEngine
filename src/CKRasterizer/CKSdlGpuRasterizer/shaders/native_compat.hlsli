@@ -25,14 +25,77 @@
 
 // Sampler resource indices are dense within fragment space 2. Their logical
 // roles (2D, cube and volume) are fixed by the shared FFP shader ABI.
-#define SAMPLER2D(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
-#define SAMPLERCUBE(name, slot) CK_COMBINED TextureCube<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
-#define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
+#if CKFF_NATIVE_FFP_STAGE
+#define CKFF_SAMPLER2D_NORMAL(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
+#define CKFF_SAMPLER2D_COMPARE(name, slot) CK_COMBINED Texture2D<float> name : register(t##slot, space2); CK_COMBINED SamplerComparisonState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
+#if CKFF_NATIVE_COMPARE_COUNT > 0
+#define CKFF_SAMPLER2D_0 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_0 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 1
+#define CKFF_SAMPLER2D_1 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_1 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 2
+#define CKFF_SAMPLER2D_2 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_2 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 3
+#define CKFF_SAMPLER2D_3 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_3 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 4
+#define CKFF_SAMPLER2D_4 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_4 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 5
+#define CKFF_SAMPLER2D_5 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_5 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 6
+#define CKFF_SAMPLER2D_6 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_6 CKFF_SAMPLER2D_NORMAL
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 7
+#define CKFF_SAMPLER2D_7 CKFF_SAMPLER2D_COMPARE
+#else
+#define CKFF_SAMPLER2D_7 CKFF_SAMPLER2D_NORMAL
+#endif
+#define CKFF_SAMPLER2D_SELECT(slot) CKFF_SAMPLER2D_##slot
+#define SAMPLER2D(name, slot) CKFF_SAMPLER2D_SELECT(slot)(name, slot)
+#if CKFF_NATIVE_COMPARE_COUNT > 0
+#define texture2D(name, uv) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, 0.0, 0.0)
+#define texture2DBias(name, uv, bias, minMip) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
+#define texture2DGrad(name, uv, dx, dy, minMip) ckCompareVariantSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip)
+#else
 #define texture2D(name, uv) ckSample2D(name, name##Sampler, name##Slot, uv)
 #define texture2DBias(name, uv, bias, minMip) ckSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
 #define texture2DGrad(name, uv, dx, dy, minMip) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip)
+#endif
+#define texture2DCompare(name, uv, dx, dy, bias, minMip, maxAnisotropy, reference, func) name.SampleCmp(name##Sampler, uv, reference)
+#else
+#define SAMPLER2D(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
+#define texture2D(name, uv) name.Sample(name##Sampler, uv)
+#define texture2DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
+#define texture2DGrad(name, uv, dx, dy, minMip) name.SampleGrad(name##Sampler, uv, dx, dy)
+#endif
+#define SAMPLERCUBE(name, slot) CK_COMBINED TextureCube<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
+#define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define textureCube(name, uv) name.Sample(name##Sampler, uv)
 #define textureCubeBias(name, uv, bias) name.SampleBias(name##Sampler, uv, bias)
+#if CKFF_NATIVE_FFP_STAGE && CKFF_NATIVE_COMPARE_COUNT > 0
+#define texture3D(name, uv) name.Sample(name##Sampler, uv)
+#define texture3DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
+#define texture3DGrad(name, uv, original, mirror, bias, minMip) name.SampleGrad(name##Sampler, uv, ddx(original) * exp2(bias), ddy(original) * exp2(bias))
+#else
 #define texture3D(name, uv) ckSample3D(name, name##Sampler, name##Slot, uv)
 #define texture3DBias(name, uv, bias, minMip) ckSample3DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
 #define texture3DGrad(name, uv, original, mirror, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, original, mirror, bias, minMip)
+#endif

@@ -147,6 +147,97 @@ float ckBorderAxisCoverage(float uv, uint extent, uint mode, bool filtered)
            (base + 1 >= 0 && base + 1 < int(extent) ? fraction : 0.0);
 }
 
+float4 ckCompareVariantBorderLevel2D(Texture2D<float4> image,
+                                     SamplerState state, uint slot,
+                                     float2 uv, uint mip, bool filtered,
+                                     uint modes)
+{
+    uint width, height, levels;
+    image.GetDimensions(mip, width, height, levels);
+    float coverage = ckBorderAxisCoverage(uv.x, width, modes & 15, filtered) *
+                     ckBorderAxisCoverage(uv.y, height, (modes >> 4) & 15,
+                                          filtered);
+    float2 extent = float2(width, height);
+    float2 sampleUv = filtered ? uv :
+        (floor(uv * extent) + 0.5) / extent;
+    return lerp(ck_borderColor[slot],
+                image.SampleLevel(state, sampleUv, float(mip)), coverage);
+}
+
+float4 ckCompareVariantBorderMips2D(Texture2D<float4> image,
+                                    SamplerState state, uint slot,
+                                    float2 uv, float lod, uint levels,
+                                    bool filtered, uint modes)
+{
+    uint mipFilter = uint(ck_samplerInfo[slot].w) & 15;
+    lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
+    if (mipFilter != 2 && mipFilter != 7)
+        return ckCompareVariantBorderLevel2D(
+            image, state, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
+    uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
+    return lerp(ckCompareVariantBorderLevel2D(
+                    image, state, slot, uv, lower, filtered, modes),
+                ckCompareVariantBorderLevel2D(
+                    image, state, slot, uv, upper, filtered, modes),
+                frac(lod));
+}
+
+float4 ckCompareVariantBorder2D(Texture2D<float4> image,
+                                SamplerState state, uint slot, float2 uv,
+                                float2 dx, float2 dy, float bias,
+                                float minMip)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    uint width, height, levels;
+    image.GetDimensions(0, width, height, levels);
+    float2 extent = float2(width, height);
+    float lx = length(dx * extent), ly = length(dy * extent);
+    float lod = max(log2(max(max(lx, ly), 0.000001)) + bias, minMip);
+    uint filter = uint(lod > 0.0 ? ck_samplerInfo[slot].y :
+                                      ck_samplerInfo[slot].z);
+    if (filter == 7 && lod > 0.0) {
+        float major = max(lx, ly);
+        float maxAnisotropy = float(max(1u, uint(ck_samplerInfo[slot].w) >> 4));
+        float minor = max(min(lx, ly), major / maxAnisotropy);
+        uint taps = uint(clamp(ceil(major / max(minor, 1.0)),
+                               1.0, maxAnisotropy));
+        float2 step = (lx > ly ? dx : dy) / float(taps);
+        float tapLod = max(log2(max(minor, 1.0)) + bias, minMip);
+        float4 result = 0.0;
+        [loop] for (uint tap = 0; tap < taps; ++tap)
+            result += ckCompareVariantBorderMips2D(
+                image, state, slot,
+                uv + (float(tap) - float(taps - 1) * 0.5) * step,
+                tapLod, levels, true, modes);
+        return result / float(taps);
+    }
+    return ckCompareVariantBorderMips2D(
+        image, state, slot, uv, lod, levels, filter != 1, modes);
+}
+
+float4 ckCompareVariantSample2DBias(Texture2D<float4> image,
+                                    SamplerState state, uint slot,
+                                    float2 uv, float bias, float minMip)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
+        return image.SampleBias(state, uv, bias);
+    return ckCompareVariantBorder2D(image, state, slot, uv,
+                                    ddx(uv), ddy(uv), bias, minMip);
+}
+
+float4 ckCompareVariantSample2DGrad(Texture2D<float4> image,
+                                    SamplerState state, uint slot,
+                                    float2 uv, float2 dx, float2 dy,
+                                    float minMip)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
+        return image.SampleGrad(state, uv, dx, dy);
+    return ckCompareVariantBorder2D(image, state, slot, uv,
+                                    dx, dy, 0.0, minMip);
+}
+
 float4 ckSample3DBorderLevel(Texture3D<float4> image, SamplerState state,
                              uint slot, float3 uv, uint mip, uint modes,
                              bool filtered)

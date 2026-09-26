@@ -302,10 +302,10 @@ vec4 ckffNative3DAniso(Texture3D<float4> image, SamplerState state, uint slot,
     texture3DGrad(_sampler, _uv, _original, _mirror, _bias, minMip)
 #endif
 
-// Ordinal of this stage among the stages sampling the same sampler type
-// (mirrors CKFFSamplerOrdinal on the C++ side).
+// Resource ordinal for this stage (mirrors CKFFSamplerOrdinal on the C++ side).
 int ckffSamplerOrdinal(int stage, int samplerType)
 {
+#if CKFF_NATIVE_SDL_GPU
     int ordinal = 0;
     for (int previousStage = 0; previousStage < 8; ++previousStage) {
         if (previousStage >= stage) break;
@@ -313,6 +313,32 @@ int ckffSamplerOrdinal(int stage, int samplerType)
             ++ordinal;
     }
     return ordinal;
+#else
+    bool twoDimensional = samplerType == 0 || samplerType == 2;
+    bool comparison = samplerType == 2 &&
+        ckffSpecStage_SAMPLER_COMPARE_FUNC(stage) != 0;
+    int ordinal = 0;
+    if (twoDimensional && !comparison) {
+        int compareCount = 0;
+        for (int candidate = 0; candidate < 8; ++candidate)
+            if (ckffSpecStage_SAMPLER_TYPE(candidate) == 2 &&
+                ckffSpecStage_SAMPLER_COMPARE_FUNC(candidate) != 0)
+                ++compareCount;
+        if (compareCount == 0) return stage;
+        ordinal = compareCount;
+    }
+    for (int previousStage = 0; previousStage < 8; ++previousStage) {
+        if (previousStage >= stage) break;
+        int previousType = ckffSpecStage_SAMPLER_TYPE(previousStage);
+        bool previous2D = previousType == 0 || previousType == 2;
+        bool previousComparison = previousType == 2 &&
+            ckffSpecStage_SAMPLER_COMPARE_FUNC(previousStage) != 0;
+        if ((!twoDimensional && previousType == samplerType) ||
+            (twoDimensional && previous2D && previousComparison == comparison))
+            ++ordinal;
+    }
+    return ordinal;
+#endif
 }
 
 // CKFF_BGFX_ONLY_BEGIN
@@ -484,6 +510,114 @@ vec4 ckffBorderSample3D(CKFF_BORDER_SAMPLER_3D image, vec3 uv, vec3 dx, vec3 dy,
     return ckffBorderMips3D(image, uv, lod, mipCount, mipFilter,
                              lod > 0.0 ? minLinear : magLinear, mask, border);
 }
+
+vec2 ckffCompareSize2D(int ordinal, int mip)
+{
+    if (ordinal == 0) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture0, mip);
+    if (ordinal == 1) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture1, mip);
+    if (ordinal == 2) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture2, mip);
+    if (ordinal == 3) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture3, mip);
+    if (ordinal == 4) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture4, mip);
+    if (ordinal == 5) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture5, mip);
+    if (ordinal == 6) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture6, mip);
+    return CKFF_BORDER_SIZE_2D_LEVEL(s_texture7, mip);
+}
+
+float ckffCompareDepth2D(int ordinal, vec2 uv, int mip)
+{
+    if (ordinal == 0) return CKFF_BORDER_SAMPLE_2D(s_texture0, uv, mip).r;
+    if (ordinal == 1) return CKFF_BORDER_SAMPLE_2D(s_texture1, uv, mip).r;
+    if (ordinal == 2) return CKFF_BORDER_SAMPLE_2D(s_texture2, uv, mip).r;
+    if (ordinal == 3) return CKFF_BORDER_SAMPLE_2D(s_texture3, uv, mip).r;
+    if (ordinal == 4) return CKFF_BORDER_SAMPLE_2D(s_texture4, uv, mip).r;
+    if (ordinal == 5) return CKFF_BORDER_SAMPLE_2D(s_texture5, uv, mip).r;
+    if (ordinal == 6) return CKFF_BORDER_SAMPLE_2D(s_texture6, uv, mip).r;
+    return CKFF_BORDER_SAMPLE_2D(s_texture7, uv, mip).r;
+}
+
+float ckffCompareTap2D(int ordinal, vec2 tap, vec2 size,
+                       int mip, int borderMask, vec4 border,
+                       float reference, int func)
+{
+    bool outside = ((borderMask & 1) != 0 &&
+                    (tap.x < 0.0 || tap.x >= size.x)) ||
+                   ((borderMask & 2) != 0 &&
+                    (tap.y < 0.0 || tap.y >= size.y));
+    vec2 tapUv = (tap + vec2_splat(0.5)) / size;
+    float depth = outside ? border.r : ckffCompareDepth2D(ordinal, tapUv, mip);
+    return compareDepth(depth, reference, func);
+}
+
+float ckffCompareLevel2D(int ordinal, vec2 uv,
+                         int mip, bool filtered, int borderMask, vec4 border,
+                         float reference, int func)
+{
+    vec2 size = ckffCompareSize2D(ordinal, mip);
+    if (!filtered) {
+        return ckffCompareTap2D(ordinal, floor(uv * size), size, mip,
+                                borderMask, border, reference, func);
+    }
+    vec2 coordinate = uv * size - vec2_splat(0.5);
+    vec2 base = floor(coordinate);
+    vec2 weight = coordinate - base;
+    float c00 = ckffCompareTap2D(ordinal, base, size, mip, borderMask,
+                                 border, reference, func);
+    float c10 = ckffCompareTap2D(ordinal, base + vec2(1.0, 0.0), size, mip,
+                                 borderMask, border, reference, func);
+    float c01 = ckffCompareTap2D(ordinal, base + vec2(0.0, 1.0), size, mip,
+                                 borderMask, border, reference, func);
+    float c11 = ckffCompareTap2D(ordinal, base + vec2(1.0, 1.0), size, mip,
+                                 borderMask, border, reference, func);
+    return mix(mix(c00, c10, weight.x), mix(c01, c11, weight.x), weight.y);
+}
+
+float ckffCompareMips2D(int ordinal, vec2 uv,
+                        float lod, int mipCount, int mipFilter, bool filtered,
+                        int borderMask, vec4 border, float reference, int func)
+{
+    float selected = mipFilter == 0 ? 0.0 :
+        clamp(lod, 0.0, float(mipCount - 1));
+    if (!ckffBorderLinearMips(mipFilter)) {
+        return ckffCompareLevel2D(ordinal, uv, int(floor(selected + 0.5)),
+                                  filtered, borderMask, border, reference, func);
+    }
+    int lower = int(floor(selected));
+    int upper = min(lower + 1, mipCount - 1);
+    return mix(ckffCompareLevel2D(ordinal, uv, lower, filtered, borderMask,
+                                  border, reference, func),
+               ckffCompareLevel2D(ordinal, uv, upper, filtered, borderMask,
+                                  border, reference, func),
+               selected - float(lower));
+}
+
+float ckffCompareSample2D(int ordinal, vec2 uv,
+                          vec2 dx, vec2 dy, float bias, float minMip,
+                          float maxAnisotropy, int stage, int borderMask,
+                          bool minLinear, bool magLinear,
+                          float reference, int func)
+{
+    vec2 size = ckffCompareSize2D(ordinal, 0);
+    int mipCount = max(1, int(u_borderSampler[stage].x));
+    int mipFilter = int(u_borderSampler[stage].y);
+    vec4 border = u_borderColor[stage];
+    if (maxAnisotropy > 1.0) {
+        vec3 plan = ckffAnisoPlan(length(dx * size), length(dy * size),
+                                  maxAnisotropy, bias, minMip);
+        vec2 step = plan.z < 0.5 ? dx : dy;
+        float value = 0.0;
+        for (int tap = 0; tap < int(plan.x); ++tap) {
+            value += ckffCompareMips2D(ordinal,
+                uv + step * ((float(tap) + 0.5) / plan.x - 0.5),
+                plan.y, mipCount, mipFilter, true, borderMask, border,
+                reference, func);
+        }
+        return value / plan.x;
+    }
+    float lod = ckffClampedLod2D(dx, dy, size, bias, minMip);
+    return ckffCompareMips2D(ordinal, uv, lod, mipCount, mipFilter,
+                             lod > 0.0 ? minLinear : magLinear,
+                             borderMask, border, reference, func);
+}
 #endif
 // CKFF_BGFX_ONLY_END
 
@@ -493,12 +627,11 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     float lodBias = u_bumpEnv[stage * 2 + 1].z;
     int packedSamplerLod = int(u_bumpEnv[stage * 2 + 1].w);
     float minMip = float(packedSamplerLod & 31);
+#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
     float maxAnisotropy = float(packedSamplerLod >> 5);
-// CKFF_BGFX_ONLY_BEGIN
-#if !CKFF_NATIVE_SDL_GPU
-    maxAnisotropy = float((packedSamplerLod >> 5) & 31);
+#else
+    float maxAnisotropy = float((packedSamplerLod >> 5) & 31);
 #endif
-// CKFF_BGFX_ONLY_END
     // Addressing must not change the derivatives used to choose a mip level.
     // In particular, clamping the coordinate outside [0, 1] would otherwise
     // force the LOD to zero instead of preserving the source footprint.
@@ -585,6 +718,55 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 
     vec2 uv = coord.xy;
     vec4 color;
+#if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0
+#if CKFF_NATIVE_SDL_GPU
+    int ordinal = (packedSamplerLod >> 15) & 7;
+#else
+    int ordinal = ckffSamplerOrdinal(stage, samplerType);
+#endif
+#endif
+
+#if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0
+    if (samplerType == 2 && compareFunc != 0) {
+#if CKFF_NATIVE_SDL_GPU
+#if CKFF_NATIVE_COMPARE_COUNT == 1
+        float compared = texture2DCompare(s_texture0, uv, originalDx, originalDy,
+            lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#else
+        float compared = 0.0;
+        if (ordinal == 0) compared = texture2DCompare(s_texture0, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#if CKFF_NATIVE_COMPARE_COUNT > 1
+        else if (ordinal == 1) compared = texture2DCompare(s_texture1, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 2
+        else if (ordinal == 2) compared = texture2DCompare(s_texture2, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 3
+        else if (ordinal == 3) compared = texture2DCompare(s_texture3, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 4
+        else if (ordinal == 4) compared = texture2DCompare(s_texture4, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 5
+        else if (ordinal == 5) compared = texture2DCompare(s_texture5, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 6
+        else if (ordinal == 6) compared = texture2DCompare(s_texture6, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT > 7
+        else compared = texture2DCompare(s_texture7, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy, coord.z, compareFunc);
+#endif
+#endif
+#else
+// CKFF_BGFX_ONLY_BEGIN
+        float compared = ckffCompareSample2D(ordinal, uv, originalDx, originalDy,
+            lodBias, minMip, maxAnisotropy, stage, borderMask, minLinear,
+            magLinear, coord.z, compareFunc);
+// CKFF_BGFX_ONLY_END
+#endif
+        return vec4_splat(compared);
+    }
+#endif
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias), minMip)
 #elif BGFX_SHADER_LANGUAGE_GLSL
@@ -613,6 +795,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
         maxAnisotropy, stage, borderMask, minLinear, magLinear) : CKFF_SAMPLE_2D(_sampler))
 // CKFF_BGFX_ONLY_END
 #endif
+#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
     if (stage == 0) color = CKFF_SAMPLE_2D_FINAL(s_texture0);
     else if (stage == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
     else if (stage == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
@@ -621,6 +804,50 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     else if (stage == 5) color = CKFF_SAMPLE_2D_FINAL(s_texture5);
     else if (stage == 6) color = CKFF_SAMPLE_2D_FINAL(s_texture6);
     else color = CKFF_SAMPLE_2D_FINAL(s_texture7);
+#elif CKFF_NATIVE_SDL_GPU
+#if CKFF_NATIVE_COMPARE_COUNT == 1
+    if (ordinal == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
+#elif CKFF_NATIVE_COMPARE_COUNT == 2
+    if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+#elif CKFF_NATIVE_COMPARE_COUNT == 3
+    if (ordinal == 3) color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#elif CKFF_NATIVE_COMPARE_COUNT == 4
+    if (ordinal == 4) color = CKFF_SAMPLE_2D_FINAL(s_texture4);
+#elif CKFF_NATIVE_COMPARE_COUNT == 5
+    if (ordinal == 5) color = CKFF_SAMPLE_2D_FINAL(s_texture5);
+#elif CKFF_NATIVE_COMPARE_COUNT == 6
+    if (ordinal == 6) color = CKFF_SAMPLE_2D_FINAL(s_texture6);
+#elif CKFF_NATIVE_COMPARE_COUNT == 7
+    if (ordinal == 7) color = CKFF_SAMPLE_2D_FINAL(s_texture7);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT <= 1
+    else if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT <= 2
+    else if (ordinal == 3) color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT <= 3
+    else if (ordinal == 4) color = CKFF_SAMPLE_2D_FINAL(s_texture4);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT <= 4
+    else if (ordinal == 5) color = CKFF_SAMPLE_2D_FINAL(s_texture5);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT <= 5
+    else if (ordinal == 6) color = CKFF_SAMPLE_2D_FINAL(s_texture6);
+#endif
+#if CKFF_NATIVE_COMPARE_COUNT <= 6
+    else color = CKFF_SAMPLE_2D_FINAL(s_texture7);
+#endif
+#else
+    if (ordinal == 0) color = CKFF_SAMPLE_2D_FINAL(s_texture0);
+    else if (ordinal == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
+    else if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+    else if (ordinal == 3) color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+    else if (ordinal == 4) color = CKFF_SAMPLE_2D_FINAL(s_texture4);
+    else if (ordinal == 5) color = CKFF_SAMPLE_2D_FINAL(s_texture5);
+    else if (ordinal == 6) color = CKFF_SAMPLE_2D_FINAL(s_texture6);
+    else color = CKFF_SAMPLE_2D_FINAL(s_texture7);
+#endif
 #undef CKFF_SAMPLE_2D_FINAL
 #undef CKFF_SAMPLE_2D
 #undef CKFF_TEXTURE_2D_GRAD
@@ -644,8 +871,11 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 #endif
 // CKFF_BGFX_ONLY_END
     if (samplerType == 2) {
+#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
         float depth = color.r;
-        if (compareFunc != 0) return vec4_splat(compareDepth(depth, coord.z, compareFunc));
+        if (compareFunc != 0)
+            return vec4_splat(compareDepth(depth, coord.z, compareFunc));
+#endif
         return color.rrrr;
     }
     return color;

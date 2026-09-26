@@ -46,7 +46,7 @@ struct CKSdlGpuQwordHash {
 };
 
 typedef CKSdlGpuFixedKey<10> CKSdlGpuPipelineKey;
-typedef CKSdlGpuFixedKey<9> CKSdlGpuSamplerKey;
+typedef CKSdlGpuFixedKey<10> CKSdlGpuSamplerKey;
 typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
 typedef XSHashTable<std::shared_ptr<SDL_GPUGraphicsPipeline>,
                     CKSdlGpuPipelineKey,
@@ -56,7 +56,7 @@ typedef XSHashTable<std::weak_ptr<SDL_GPUBuffer>,
                     CKSdlGpuFixedKeyHash<64>> CKSdlGpuDefaultVertexTable;
 typedef XSHashTable<std::shared_ptr<SDL_GPUSampler>,
                     CKSdlGpuSamplerKey,
-                    CKSdlGpuFixedKeyHash<9>> CKSdlGpuSamplerTable;
+                    CKSdlGpuFixedKeyHash<10>> CKSdlGpuSamplerTable;
 
 // Public handles identify logical resources, never SDL pointers. Generations
 // do not wrap: exhausted slots are retired for the life of the device.
@@ -113,6 +113,13 @@ struct CKSdlGpuTexture {
     XClassArray<XArray<CKBYTE>> BasePixels;
     XBitArray GpuMipBase;
 };
+struct CKSdlGpuDepthPad {
+    std::weak_ptr<CKSdlGpuTexture> Source;
+    std::shared_ptr<CKSdlGpuTexture> Texture;
+    CKDWORD BorderDepth = 0;
+    bool PadU = false;
+    bool PadV = false;
+};
 typedef XSHashTable<std::weak_ptr<CKSdlGpuTexture>, uint64_t,
                     CKSdlGpuQwordHash> CKSdlGpuDefaultTextureTable;
 struct CKSdlGpuBuffer {
@@ -148,6 +155,7 @@ struct CKSdlGpuProgram {
     CKFFProgramLayout UniformLayout;
     CKSdlGpuUniformCursor UniformCursor;
     CKDWORD Identity = 0;
+    CKDWORD CompareSamplerCount = 0;
     int AttributeLocations[CKRST_ATTRIB_COUNT];
     std::shared_ptr<SDL_GPUBuffer> DefaultVertices;
     XClassArray<std::shared_ptr<CKSdlGpuTexture>> DefaultTextures;

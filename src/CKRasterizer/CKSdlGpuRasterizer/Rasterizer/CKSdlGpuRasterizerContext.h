@@ -164,6 +164,9 @@ public:
     // --- Diagnostics ---
     // --- Test access ---
     CKFixedFunctionPipeline *GetFFPipelineForTests() { return &m_FFP; }
+    CKBOOL RegisterTextureForTests(CKDWORD Handle, const CKTextureDesc &Desc) {
+        return m_PublicResources.InsertTexture(Handle, Desc);
+    }
     CKDWORD GetTargetForTests() const { return m_TargetState.Texture; }
     CKBOOL IsInSceneForTests() const { return m_FrameState.IsSceneActive(); }
     CKBOOL IsOverlayPhaseForTests() const { return m_FrameState.IsOverlayActive(); }
@@ -210,6 +213,11 @@ private:
                             unsigned Layer, SDL_GPUTexture *Slice,
                             bool ToVolume);
     CKERROR PreserveTexture(CKSdlGpuTexture &Texture);
+    CKERROR PrepareDepthPad(
+        const std::shared_ptr<CKSdlGpuTexture> &Source,
+        const CKSamplerDesc &Sampler,
+        std::shared_ptr<CKSdlGpuTexture> &Padded,
+        float Transform[4]);
     CKERROR ClearRect(SDL_GPURenderPass *Pass,
                       const CKRenderPassDesc &Desc,
                       SDL_GPUTextureFormat ColorFormat,
@@ -287,7 +295,8 @@ private:
     CKBOOL SubmitPreparedDraw();
     CKDWORD GetNativeVertexLayout(CKDWORD FormatFlags);
     void ClearNativeVertexLayouts();
-    CKFFProgramBinding ResolveNativeFFProgram(const CKFFShaderKey &Key);
+    CKFFProgramBinding ResolveNativeFFProgram(const CKFFShaderKey &Key,
+                                              CKBOOL PositionTDepthPad);
     void ClearNativeFFPrograms();
 
     // Readback helpers
@@ -315,9 +324,10 @@ private:
     void *m_ReadyUser;
     CKFixedFunctionPipeline m_FFP;
     CKFFShaderCache m_ShaderCache;
-    CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT] = {};
+    CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT][CKFF_MAX_TEXTURE_STAGES + 1][2] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
-    CKDWORD m_NativeFFPixelShader = 0;
+    CKDWORD m_NativeFFDepthPadVertexShaders[2] = {};
+    CKDWORD m_NativeFFPixelShaders[CKFF_MAX_TEXTURE_STAGES + 1] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKSdlGpuPresentStage m_Present;
     // Verbatim fixed-function state mirror.
@@ -403,6 +413,7 @@ private:
     XArray<CKBYTE> BatchVertices;
     XArray<CKBYTE> BatchIndices;
     CKSdlGpuSamplerTable Samplers;
+    XClassArray<CKSdlGpuDepthPad> DepthPads;
     CKSdlGpuTable<CKSdlGpuTexture> Textures;
     CKSdlGpuTable<CKSdlGpuBuffer> VertexBuffers;
     CKSdlGpuTable<CKSdlGpuBuffer> IndexBuffers;

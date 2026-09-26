@@ -306,6 +306,9 @@ public:
 
     // --- Test access ---
     CKFixedFunctionPipeline *GetFFPipelineForTests() { return &m_FFP; }
+    CKBOOL RegisterTextureForTests(CKDWORD Handle, const CKTextureDesc &Desc) {
+        return m_PublicResources.InsertTexture(Handle, Desc);
+    }
     CKDWORD GetTargetForTests() const { return m_Target.Texture; }
     CKBOOL IsInSceneForTests() const { return m_Frame.IsSceneActive(); }
     CKBOOL IsOverlayPhaseForTests() const { return m_Frame.IsOverlayActive(); }
