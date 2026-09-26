@@ -333,6 +333,10 @@ void TestSamplerMetadata()
     p = WithMetadata(); p.Desc.Samplers.PushBack(p.Desc.Samplers[0]);
     p.Desc.Samplers[1].Slot = 22; p.Desc.Samplers[1].NativeSlot = 1; p.Pixel.SamplerCount = 2;
     ExpectInvalid(p, "metadata of different samplers cannot overlap");
+    p = WithMetadata();
+    p.Desc.Samplers[0].BorderColorName = "u_border23";
+    p.Desc.Samplers[0].SamplerStateName = "u_sampler23";
+    ExpectInvalid(p, "packed metadata cannot also declare named metadata uniforms");
 }
 
 void TestSharedUniformPacking()
@@ -394,6 +398,10 @@ void TestNamedUniforms()
     TestCheck(p.Validate() == CK_OK, "named uniforms require no artificial native buffers or reflected counts");
     p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
     TestCheck(p.Validate() == CK_OK, "a compatible named uniform can be shared between stages");
+    p.Desc.Samplers[0].BorderColorName = "u_border23";
+    p.Desc.Samplers[0].SamplerStateName = "u_sampler23";
+    TestCheck(p.Validate() == CK_OK,
+              "named samplers can opt into exact shader-assisted border metadata");
     Program bad = p; bad.Desc.Uniforms[0].Name.Clear();
     ExpectInvalid(bad, "named uniform cannot have an empty name");
     bad = p; bad.Desc.Samplers[0].Name = "1sampler";
@@ -410,6 +418,12 @@ void TestNamedUniforms()
     ExpectInvalid(bad, "declared native ranges still constrain named-uniform programs");
     bad = p; bad.Desc.Samplers[0].MetadataBufferSlot = 0;
     ExpectInvalid(bad, "named samplers do not bypass explicit metadata buffer validation");
+    bad = p; bad.Desc.Samplers[0].SamplerStateName.Clear();
+    ExpectInvalid(bad, "named sampler metadata requires both vec4 uniforms");
+    bad = p; bad.Desc.Samplers[0].SamplerStateName = bad.Desc.Samplers[0].BorderColorName;
+    ExpectInvalid(bad, "border color and sampler state require distinct uniform names");
+    bad = p; bad.Desc.Samplers[0].BorderColorName = bad.Desc.Uniforms[0].Name;
+    ExpectInvalid(bad, "sampler metadata cannot overwrite a caller uniform");
 }
 
 void TestVertexInputs()

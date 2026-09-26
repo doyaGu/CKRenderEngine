@@ -838,19 +838,44 @@ void TestBorderPaletteLifetime() {
     CKBgfxBorderPalette palette;
     for (CKDWORD i = 0; i < 16; ++i) {
         const auto entry = palette.Resolve(0xff000000u | (i * 16));
-        TEST_ASSERT(entry.Index == i && entry.Added && !entry.Approximated,
+        TEST_ASSERT(entry.Index == i && entry.Added && entry.Available,
                     "Sixteen exact colors remain stable within a submission");
     }
     const auto repeated = palette.Resolve(0xff000050u);
-    TEST_ASSERT(repeated.Index == 5 && !repeated.Added && !repeated.Approximated,
+    TEST_ASSERT(repeated.Index == 5 && !repeated.Added && repeated.Available,
                 "An existing color reuses its entry");
     const auto overflow = palette.Resolve(0xff000052u);
-    TEST_ASSERT(overflow.Index == 5 && !overflow.Added && overflow.Approximated,
-                "Overflow reuses the nearest entry and reports approximation");
+    TEST_ASSERT(!overflow.Added && !overflow.Available,
+                "Overflow requires shader-assisted border sampling");
     palette.Reset();
     const auto next = palette.Resolve(0x80402010u);
-    TEST_ASSERT(next.Index == 0 && next.Added && !next.Approximated,
+    TEST_ASSERT(next.Index == 0 && next.Added && next.Available,
                 "A submitted frame releases the palette entries");
+}
+
+void TestShaderBorderMetadata() {
+    CKSamplerDesc sampler;
+    sampler.AddressU = CKRST_ADDRESS_BORDER;
+    sampler.AddressV = CKRST_ADDRESS_MIRROR;
+    sampler.AddressW = CKRST_ADDRESS_CLAMP;
+    sampler.MinFilter = CKRST_FILTER_ANISOTROPIC;
+    sampler.MagFilter = CKRST_FILTER_LINEAR;
+    sampler.MipFilter = CKRST_FILTER_NEAREST;
+    sampler.BorderColor = 0x80402010u;
+    sampler.MaxAnisotropy = 8;
+    sampler.ShaderAnisotropy = 1;
+    float color[4], state[4];
+    CKBgfxPackSamplerMetadata(sampler, color, state);
+    TEST_ASSERT(color[0] == 64.0f / 255.0f && color[1] == 32.0f / 255.0f &&
+                    color[2] == 16.0f / 255.0f && color[3] == 128.0f / 255.0f,
+                "shader metadata preserves the exact ARGB border color as RGBA");
+    TEST_ASSERT(state[0] == float(unsigned(CKRST_ADDRESS_BORDER) |
+                                  (unsigned(CKRST_ADDRESS_MIRROR) << 4) |
+                                  (unsigned(CKRST_ADDRESS_CLAMP) << 8)) &&
+                    state[1] == float(CKRST_FILTER_ANISOTROPIC) &&
+                    state[2] == float(CKRST_FILTER_LINEAR) &&
+                    state[3] == float(unsigned(CKRST_FILTER_NEAREST) | (8u << 4)),
+                "shader metadata preserves address, filter and anisotropy state");
 }
 
 static void TestRejectedShaderTargets()
@@ -885,6 +910,7 @@ int main()
     printf("=== CKBgfxRasterizer Unit Tests ===\n");
 
     TestBorderPaletteLifetime();
+    TestShaderBorderMetadata();
     TestRejectedShaderTargets();
     TestFillModeTopology();
     TestDrawStateBuilderLayout();
