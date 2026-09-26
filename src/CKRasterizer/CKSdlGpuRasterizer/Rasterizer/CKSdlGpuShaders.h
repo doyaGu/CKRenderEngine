@@ -2,12 +2,14 @@
 #define CKSDLGPU_SHADERS_H
 
 #include "CKBuiltinShaders.h"
+#include "CKFFConstants.h"
 #include <SDL3/SDL_gpu.h>
 
 // FFP/presentation artifacts supplied by the rasterizer plugin. Private
 // backend image operations have their own CKSdlGpuNativeShaders interface.
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat Format, CKFFShaderSet &Out);
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
+                               CKFFSamplerLayout SamplerLayout,
                                CKDWORD CompareSamplerCount,
                                CKShaderDesc &Out);
 CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat Format,

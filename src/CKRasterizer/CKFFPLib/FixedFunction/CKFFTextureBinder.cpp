@@ -40,12 +40,26 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     // nine native shaders whose first N sampler declarations are comparison
     // samplers, while bgfx keeps the same logical binding order.
     CKDWORD compare2DCount = 0;
+    CKDWORD cubeCount = 0;
+    CKDWORD volumeCount = 0;
     for (CKDWORD stage = 0; stage < stageCount; ++stage) {
-        if ((sampledTextureMask & (1u << stage)) != 0 &&
-            (textureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
-            samplers[stage].CompareFunc != CKRST_COMPARE_NONE)
+        if ((sampledTextureMask & (1u << stage)) == 0)
+            continue;
+        const CKDWORD samplerType = CKFFTextureBindingSamplerType(
+            CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
+        if (samplerType == CKFF_SAMPLER_CUBE)
+            ++cubeCount;
+        else if (samplerType == CKFF_SAMPLER_VOLUME)
+            ++volumeCount;
+        else if ((textureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
+                 samplers[stage].CompareFunc != CKRST_COMPARE_NONE)
             ++compare2DCount;
     }
+    const CKFFSamplerLayout layout = cubeCount > CKFF_NARROW_SAMPLER_COUNT
+        ? CKFF_SAMPLER_LAYOUT_WIDE_CUBE
+        : volumeCount > CKFF_NARROW_SAMPLER_COUNT
+              ? CKFF_SAMPLER_LAYOUT_WIDE_VOLUME
+              : CKFF_SAMPLER_LAYOUT_WIDE_2D;
     CKDWORD compare2DOrdinal = 0;
     CKDWORD ordinary2DOrdinal = compare2DCount;
     CKDWORD cubeOrdinal = 0;
@@ -64,11 +78,12 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         else if ((textureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
                  samplers[stage].CompareFunc != CKRST_COMPARE_NONE)
             slotIndex = compare2DOrdinal++;
-        else if (compare2DCount == 0)
+        else if (compare2DCount == 0 &&
+                 layout == CKFF_SAMPLER_LAYOUT_WIDE_2D)
             slotIndex = stage;
         else
             slotIndex = ordinary2DOrdinal++;
-        set->Bindings[stage].Stage = CKFFSamplerSlot(samplerType, slotIndex);
+        set->Bindings[stage].Stage = CKFFSamplerSlot(samplerType, slotIndex, layout);
         set->Bindings[stage].Texture = textureHandles[stage];
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];

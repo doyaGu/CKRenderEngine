@@ -2,6 +2,7 @@
 #define CKFFSHADERKEY_H
 
 #include "CKFFStateDesc.h"
+#include "CKFFConstants.h"
 #include "CKFFSpecializationInfo.h"
 #include "CKRenderEngineTypes.h"
 
@@ -47,10 +48,6 @@ struct CKFFShaderKeyFSStage {
 struct CKFFShaderKeyFS {
     CKFFShaderKeyFSStage Stages[CKFF_STATE_DESC_TEXTURE_STAGES];
     CKDWORD LastActiveTextureStage;
-    // Stages whose cube / volume texture did not fit the fixed sampler layout
-    // (more than CKFF_CUBE_SAMPLER_COUNT / CKFF_VOLUME_SAMPLER_COUNT stages of
-    // one type). They sample as unbound; derived, not part of key identity.
-    CKDWORD SamplerSlotOverflowMask;
     CKDWORD AlphaFunc;
     CKDWORD VertexFogMode;
     CKDWORD PixelFogMode;
@@ -90,6 +87,7 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
 // block, followed by ordinary 2D/depth stages; cube and volume keep type order.
 CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage);
 CKDWORD CKFFDepthCompareSamplerCount(const CKFFShaderKeyFS &key);
+CKFFSamplerLayout CKFFSamplerLayoutForKey(const CKFFShaderKeyFS &key);
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask);
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key);
 

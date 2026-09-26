@@ -227,8 +227,11 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
     float borderColors[CKFF_MAX_TEXTURE_STAGES][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
-    const CKDWORD compareSamplerCount =
-        CKFFDepthCompareSamplerCount(context->ShaderKey.FS);
+    const CKBOOL packSamplerOrdinal =
+        (m_ShaderTargetFlags & CKRST_SHADER_TARGET_SAMPLER_ORDINAL) != 0 ||
+        CKFFDepthCompareSamplerCount(context->ShaderKey.FS) != 0 ||
+        CKFFSamplerLayoutForKey(context->ShaderKey.FS) !=
+            CKFF_SAMPLER_LAYOUT_WIDE_2D;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKSamplerDesc sampler = m_TextureBinder.BuildSamplerDesc((int)stage);
         const CKDWORD anisotropy = sampler.ShaderAnisotropy
@@ -247,7 +250,7 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         const CKDWORD comparisonFilter =
             (borderMask != 0 || sampler.CompareFunc != CKRST_COMPARE_NONE) ?
             minLinear * 8192u + magLinear * 16384u : 0u;
-        const CKDWORD samplerOrdinal = compareSamplerCount != 0 ?
+        const CKDWORD samplerOrdinal = packSamplerOrdinal ?
             (CKFFSamplerOrdinal(context->ShaderKey.FS, stage) & 7u) * 32768u : 0u;
         bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel +
             anisotropy * 32u + borderMask * 1024u +
@@ -281,8 +284,7 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     CKFFStageParamsUniform stageParams;
     CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
                         context->ActiveTextureCount, stageParams,
-                        m_State.StageStateSetMasks,
-                        context->ShaderKey.FS.SamplerSlotOverflowMask);
+                        m_State.StageStateSetMasks);
     if (context->ShaderKey.VS.GetPointSprite()) {
         // Expanded point sprites carry their own texcoords: bypass texgen,
         // texture matrices and projection, keep only the sampling flags.

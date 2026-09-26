@@ -6,7 +6,7 @@
 
 // Identifies the fixed-function shader data consumed by CKFFPLib. Concrete
 // rasterizer adapters use these values to reject stale generated artifacts.
-static const CKDWORD CKFF_SHADER_ABI_VERSION = 10u;
+static const CKDWORD CKFF_SHADER_ABI_VERSION = 11u;
 static const CKDWORD CKFF_SHADER_INTERFACE_HASH = 0x61c4f0a9u;
 static const CKDWORD CKFF_SHADER_SAMPLER_SLOT_COUNT = 16u;
 

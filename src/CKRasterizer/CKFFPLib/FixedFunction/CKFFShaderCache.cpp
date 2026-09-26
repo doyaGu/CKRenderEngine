@@ -58,11 +58,17 @@ void CKFFShaderCache::BuildSamplerLayout()
 {
     m_SamplerLayout = CKFFProgramSamplerLayout();
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage = CKFFSamplerSlot(CKFF_SAMPLER_2D, stage);
-    for (CKDWORD ordinal = 0; ordinal < CKFF_CUBE_SAMPLER_COUNT; ++ordinal)
-        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage = CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal);
-    for (CKDWORD ordinal = 0; ordinal < CKFF_VOLUME_SAMPLER_COUNT; ++ordinal)
-        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage = CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal);
+        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage =
+            CKFFSamplerSlot(CKFF_SAMPLER_2D, stage,
+                            CKFF_SAMPLER_LAYOUT_WIDE_2D);
+    for (CKDWORD ordinal = 0; ordinal < CKFF_NARROW_SAMPLER_COUNT; ++ordinal)
+        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage =
+            CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal,
+                            CKFF_SAMPLER_LAYOUT_WIDE_2D);
+    for (CKDWORD ordinal = 0; ordinal < CKFF_NARROW_SAMPLER_COUNT; ++ordinal)
+        m_SamplerLayout.Bindings[m_SamplerLayout.BindingCount++].Stage =
+            CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal,
+                            CKFF_SAMPLER_LAYOUT_WIDE_2D);
 }
 
 CKFFProgramVariant CKFFShaderCache::ProgramVariantForKey(const CKFFShaderKey &key)
@@ -79,6 +85,7 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
 {
     CKFFProgramSelection selection;
     selection.Variant = ProgramVariantForKey(key);
+    selection.SamplerLayout = CKFFSamplerLayoutForKey(key.FS);
     SpecializationCache &cache = m_Specializations[selection.Variant];
     ++cache.Clock;
     if (cache.Clock == 0) {

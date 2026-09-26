@@ -39,7 +39,7 @@ bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
 }
 
 CKFFShaderKeyFS::CKFFShaderKeyFS()
-    : Stages{}, LastActiveTextureStage(0), SamplerSlotOverflowMask(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
+    : Stages{}, LastActiveTextureStage(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
       GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false), RangeFog(false),
       FlatShade(false) {}
 
@@ -183,8 +183,6 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     CKDWORD activeCount = 0;
     CKDWORD previousColorOp = 0;
     CKDWORD previousAlphaOp = 0;
-    CKDWORD cubeStages = 0;
-    CKDWORD volumeStages = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         CKFFShaderKeyFSStage &dst = key.Stages[stage];
         dst.ColorOp = desc.GetStageColorOp(stage);
@@ -207,18 +205,6 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
         dst.HasTexture = CKFFShaderKeyStageUsesTexture(
                              dst, previousColorOp, previousAlphaOp) &&
                          ((textureBoundMask & (1u << stage)) != 0);
-        if (dst.HasTexture &&
-            (dst.SamplerType == CKFF_SAMPLER_CUBE || dst.SamplerType == CKFF_SAMPLER_VOLUME)) {
-            // Fixed sampler layout: four cube and four volume samplers per draw.
-            // A stage beyond that samples as unbound and is reported.
-            CKDWORD &typeStages = dst.SamplerType == CKFF_SAMPLER_CUBE ? cubeStages : volumeStages;
-            if (typeStages >= CKFFSamplerTypeSlotCount(dst.SamplerType)) {
-                dst.HasTexture = false;
-                key.SamplerSlotOverflowMask |= 1u << stage;
-            } else {
-                ++typeStages;
-            }
-        }
         if (!dst.HasTexture) {
             dst.ProjectedSampler = false;
             dst.SamplerType = CKFF_SAMPLER_2D;
@@ -246,7 +232,8 @@ CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage) {
     const bool comparison = samplerType == CKFF_SAMPLER_DEPTH &&
         key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE;
     const CKDWORD compareCount = CKFFDepthCompareSamplerCount(key);
-    if (twoDimensional && compareCount == 0)
+    if (twoDimensional && compareCount == 0 &&
+        CKFFSamplerLayoutForKey(key) == CKFF_SAMPLER_LAYOUT_WIDE_2D)
         return stage;
     CKDWORD ordinal = 0;
     if (twoDimensional && !comparison)
@@ -278,6 +265,24 @@ CKDWORD CKFFDepthCompareSamplerCount(const CKFFShaderKeyFS &key) {
             key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE)
             ++count;
     return count;
+}
+
+CKFFSamplerLayout CKFFSamplerLayoutForKey(const CKFFShaderKeyFS &key) {
+    CKDWORD cubeCount = 0;
+    CKDWORD volumeCount = 0;
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
+        if (!key.Stages[stage].HasTexture)
+            continue;
+        if (key.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE)
+            ++cubeCount;
+        else if (key.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME)
+            ++volumeCount;
+    }
+    if (cubeCount > CKFF_NARROW_SAMPLER_COUNT)
+        return CKFF_SAMPLER_LAYOUT_WIDE_CUBE;
+    if (volumeCount > CKFF_NARROW_SAMPLER_COUNT)
+        return CKFF_SAMPLER_LAYOUT_WIDE_VOLUME;
+    return CKFF_SAMPLER_LAYOUT_WIDE_2D;
 }
 
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask) {

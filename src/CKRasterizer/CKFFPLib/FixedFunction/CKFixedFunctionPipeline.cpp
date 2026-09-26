@@ -678,8 +678,6 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
     }
     m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
     bindingSet->ActiveStageCount = stageCount;
-    if (shaderKey.FS.SamplerSlotOverflowMask != 0)
-        RecordDrawApproximation(CKRST_DIAG_APPROX_SAMPLER_SLOTS);
     return TRUE;
 }
 

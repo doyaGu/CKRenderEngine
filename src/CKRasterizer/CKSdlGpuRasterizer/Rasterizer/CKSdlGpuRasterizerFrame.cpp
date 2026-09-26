@@ -431,16 +431,19 @@ CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
 {
     const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(Key);
     const CKDWORD variant = (CKDWORD)selection.Variant;
+    const CKDWORD samplerLayout = (CKDWORD)selection.SamplerLayout;
     const CKDWORD compareSamplerCount = CKFFDepthCompareSamplerCount(Key.FS);
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
         return CKFFProgramBinding();
 
-    if (!m_NativeFFPixelShaders[compareSamplerCount]) {
+    if (!m_NativeFFPixelShaders[samplerLayout][compareSamplerCount]) {
         CKShaderDesc pixelShader;
-        if (!CKSdlGpuFFFragmentShader(ShaderFormat, compareSamplerCount,
+        if (!CKSdlGpuFFFragmentShader(ShaderFormat, selection.SamplerLayout,
+                                     compareSamplerCount,
                                      pixelShader) ||
             CreateShader(&pixelShader,
-                         &m_NativeFFPixelShaders[compareSamplerCount]) != CK_OK)
+                         &m_NativeFFPixelShaders[samplerLayout]
+                                                [compareSamplerCount]) != CK_OK)
             return CKFFProgramBinding();
     }
     const CKBOOL positionT =
@@ -468,21 +471,26 @@ CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     }
 
     const CKDWORD pad = PositionTDepthPad ? 1u : 0u;
-    if (!m_NativeFFPrograms[variant][compareSamplerCount][pad]) {
+    if (!m_NativeFFPrograms[variant][samplerLayout]
+                               [compareSamplerCount][pad]) {
         const CKFFProgramDesc desc = CKFFBuildProgramInterface(
             vertexShader,
-            m_NativeFFPixelShaders[compareSamplerCount],
-            m_ShaderCache.GetShaderFormat(), FALSE, positionT);
+            m_NativeFFPixelShaders[samplerLayout][compareSamplerCount],
+            m_ShaderCache.GetShaderFormat(), FALSE, positionT,
+            selection.SamplerLayout);
         if (CreateProgram(&desc,
-                          &m_NativeFFPrograms[variant][compareSamplerCount][pad]) != CK_OK)
+                          &m_NativeFFPrograms[variant][samplerLayout]
+                                             [compareSamplerCount][pad]) != CK_OK)
             return CKFFProgramBinding();
         std::shared_ptr<CKSdlGpuProgram> program = Programs.Get(
-            m_NativeFFPrograms[variant][compareSamplerCount][pad]);
+            m_NativeFFPrograms[variant][samplerLayout]
+                               [compareSamplerCount][pad]);
         if (!program)
             return CKFFProgramBinding();
         program->CompareSamplerCount = compareSamplerCount;
     }
-    return CKFFProgramBinding(m_NativeFFPrograms[variant][compareSamplerCount][pad],
+    return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout]
+                                                [compareSamplerCount][pad],
                               selection.Specialization);
 }
 
@@ -490,14 +498,19 @@ void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()
 {
     for (CKDWORD variant = 0;
          variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
-        for (CKDWORD compareSamplerCount = 0;
-             compareSamplerCount <= CKFF_MAX_TEXTURE_STAGES;
-             ++compareSamplerCount) {
-            for (CKDWORD pad = 0; pad < 2; ++pad) {
-                if (m_NativeFFPrograms[variant][compareSamplerCount][pad])
-                    DestroyObject(m_NativeFFPrograms[variant][compareSamplerCount][pad],
-                                  CKRST_OBJ_PROGRAM);
-                m_NativeFFPrograms[variant][compareSamplerCount][pad] = 0;
+        for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
+            for (CKDWORD compareSamplerCount = 0;
+                 compareSamplerCount <= CKFF_MAX_TEXTURE_STAGES;
+                 ++compareSamplerCount) {
+                for (CKDWORD pad = 0; pad < 2; ++pad) {
+                    if (m_NativeFFPrograms[variant][layout]
+                                               [compareSamplerCount][pad])
+                        DestroyObject(m_NativeFFPrograms[variant][layout]
+                                                        [compareSamplerCount][pad],
+                                      CKRST_OBJ_PROGRAM);
+                    m_NativeFFPrograms[variant][layout]
+                                      [compareSamplerCount][pad] = 0;
+                }
             }
         }
         if (m_NativeFFVertexShaders[variant])
@@ -509,13 +522,15 @@ void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()
             DestroyObject(m_NativeFFDepthPadVertexShaders[clip], CKRST_OBJ_SHADER);
         m_NativeFFDepthPadVertexShaders[clip] = 0;
     }
-    for (CKDWORD compareSamplerCount = 0;
-         compareSamplerCount <= CKFF_MAX_TEXTURE_STAGES;
-         ++compareSamplerCount) {
-        if (m_NativeFFPixelShaders[compareSamplerCount])
-            DestroyObject(m_NativeFFPixelShaders[compareSamplerCount],
-                          CKRST_OBJ_SHADER);
-        m_NativeFFPixelShaders[compareSamplerCount] = 0;
+    for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
+        for (CKDWORD compareSamplerCount = 0;
+             compareSamplerCount <= CKFF_MAX_TEXTURE_STAGES;
+             ++compareSamplerCount) {
+            if (m_NativeFFPixelShaders[layout][compareSamplerCount])
+                DestroyObject(m_NativeFFPixelShaders[layout][compareSamplerCount],
+                              CKRST_OBJ_SHADER);
+            m_NativeFFPixelShaders[layout][compareSamplerCount] = 0;
+        }
     }
     m_ShaderCache.Shutdown();
 }

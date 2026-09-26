@@ -19,20 +19,24 @@ HERE = Path(__file__).resolve().parent
 CKFF_ROOT = HERE.parent.parent / "CKFFPLib"
 SHARED = CKFF_ROOT / "ShaderModel" / "shaders"
 SHADERS = [
-    ("vs_ff_3d", "vs_ff_3d", False, 0),
-    ("vs_ff_3d_clip", "vs_ff_3d", True, 0),
-    ("vs_ff_positiont", "vs_ff_positiont", False, 0),
-    ("vs_ff_positiont_clip", "vs_ff_positiont", True, 0),
-    ("vs_ff_positiont_depth_pad", "vs_ff_positiont", False, 0),
-    ("vs_ff_positiont_clip_depth_pad", "vs_ff_positiont", True, 0),
-    ("fs_ff_stage", "fs_ff_stage", False, 0),
-    *[(f"fs_ff_stage_compare{count}", "fs_ff_stage", False, count)
+    ("vs_ff_3d", "vs_ff_3d", False, 0, 0),
+    ("vs_ff_3d_clip", "vs_ff_3d", True, 0, 0),
+    ("vs_ff_positiont", "vs_ff_positiont", False, 0, 0),
+    ("vs_ff_positiont_clip", "vs_ff_positiont", True, 0, 0),
+    ("vs_ff_positiont_depth_pad", "vs_ff_positiont", False, 0, 0),
+    ("vs_ff_positiont_clip_depth_pad", "vs_ff_positiont", True, 0, 0),
+    ("fs_ff_stage", "fs_ff_stage", False, 0, 0),
+    *[(f"fs_ff_stage_compare{count}", "fs_ff_stage", False, count, 0)
       for count in range(1, 9)],
-    ("vs_postprocess", "vs_postprocess", False, 0),
-    ("fs_postprocess", "fs_postprocess", False, 0),
-    ("vs_clear", "vs_clear", False, 0),
-    ("fs_clear", "fs_clear", False, 0),
-    ("fs_volume_mip", "fs_volume_mip", False, 0),
+    *[("fs_ff_stage_cube" + (f"_compare{count}" if count else ""),
+       "fs_ff_stage", False, count, 1) for count in range(5)],
+    *[("fs_ff_stage_volume" + (f"_compare{count}" if count else ""),
+       "fs_ff_stage", False, count, 2) for count in range(5)],
+    ("vs_postprocess", "vs_postprocess", False, 0, 0),
+    ("fs_postprocess", "fs_postprocess", False, 0, 0),
+    ("vs_clear", "vs_clear", False, 0, 0),
+    ("fs_clear", "fs_clear", False, 0, 0),
+    ("fs_volume_mip", "fs_volume_mip", False, 0, 0),
 ]
 BLOCKS = [
     ("float4x4", "u_ffMatrices", 8),
@@ -168,7 +172,8 @@ def uniform_declaration(source: str) -> str:
     return "\n".join(result)
 
 
-def make_source(shader_name: str, source: str, clipping: bool, compare_count: int) -> str:
+def make_source(shader_name: str, source: str, clipping: bool,
+                compare_count: int, sampler_layout: int) -> str:
     vertex = source.startswith("vs_")
     if source == "fs_volume_mip":
         return "\n".join([uniform_declaration(source), HERE.joinpath("volume_mip.hlsl").read_text(encoding="utf-8")])
@@ -210,6 +215,7 @@ def make_source(shader_name: str, source: str, clipping: bool, compare_count: in
                        f"#define CKFF_VS_DEPTH_PAD {int(shader_name.endswith('_depth_pad'))}",
                        f"#define CKFF_NATIVE_FFP_STAGE {int(source == 'fs_ff_stage')}",
                        f"#define CKFF_NATIVE_COMPARE_COUNT {compare_count}",
+                       f"#define CKFF_NATIVE_SAMPLER_LAYOUT {sampler_layout}",
                        HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8"),
                        uniform_declaration(source),
                        "" if vertex else HERE.joinpath("native_sampling.hlsli").read_text(encoding="utf-8"), *declarations,
@@ -227,7 +233,7 @@ def reflection_binding(resource):
     return resource["binding"]
 
 
-def validate_spirv(reflection, source, vertex, samplers, uniforms):
+def validate_spirv(reflection, source, vertex, samplers, uniforms, sampler_layout):
     assert reflection["entryPoints"] == [{"name": "main", "mode": "vert" if vertex else "frag"}]
     ubos, textures = reflection.get("ubos", []), reflection.get("textures", [])
     assert len(ubos) == uniforms
@@ -254,6 +260,10 @@ def validate_spirv(reflection, source, vertex, samplers, uniforms):
         dimensions = ["sampler3D"]
     elif source == "fs_postprocess":
         dimensions = ["sampler2D"]
+    elif sampler_layout == 1:
+        dimensions = ["sampler2D"] * 4 + ["samplerCube"] * 8 + ["sampler3D"] * 4
+    elif sampler_layout == 2:
+        dimensions = ["sampler2D"] * 4 + ["samplerCube"] * 4 + ["sampler3D"] * 8
     else:
         dimensions = ["sampler2D"] * 8 + ["samplerCube"] * 4 + ["sampler3D"] * 4 if samplers else []
     assert [t["type"] for t in sorted(textures, key=lambda t: t["binding"])] == dimensions
@@ -264,6 +274,14 @@ def validate_dxil(assembly, source, vertex, samplers, uniforms):
     assert ("; Vertex Shader" if vertex else "; Pixel Shader") in assembly
     bindings = re.search(r"; Resource Bindings:(.*?)\n; ViewId state:", assembly, re.S)[1]
     rows = re.findall(r"^; (\w+)\s+(cbuffer|sampler|texture)\s+\S+\s+\S+\s+\S+\s+(\w+),space(\d+)\s+(\d+)$", bindings, re.M)
+    expanded = []
+    for name, kind, binding, space, count in rows:
+        parsed = re.fullmatch(r"([a-z]+)(\d+)", binding)
+        assert parsed
+        prefix, first = parsed[1], int(parsed[2])
+        expanded.extend((name, kind, f"{prefix}{first + index}", space, "1")
+                        for index in range(int(count)))
+    rows = expanded
     sampler_bindings = list(range(samplers))
     assert len(rows) == uniforms + 2 * samplers
     for kind, prefix, count, space in (("cbuffer", "cb", uniforms, 1 if vertex else 3),
@@ -287,13 +305,14 @@ def verify_artifacts(directory, abi, abi_hash):
     expected_abi = (f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
                     f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
     assert (directory / "abi.h").read_text(encoding="utf-8") == expected_abi, "Compiled shader identity is stale"
-    expected = {(name, format_) for name, _, _, _ in SHADERS for format_ in ("dxil", "spirv")}
+    expected = {(name, format_) for name, _, _, _, _ in SHADERS for format_ in ("dxil", "spirv")}
     assert {(s["name"], s["format"]) for s in manifest["shaders"]} == expected
-    sources = {name: hashlib.sha256(make_source(name, source, clipping, compare_count).encode()).hexdigest()
-               for name, source, clipping, compare_count in SHADERS}
+    sources = {name: hashlib.sha256(make_source(name, source, clipping, compare_count,
+                                                sampler_layout).encode()).hexdigest()
+               for name, source, clipping, compare_count, sampler_layout in SHADERS}
     layouts = {name: sum(buffer[2] for buffer in uniform_layout(source))
-               for name, source, _, _ in SHADERS}
-    source_by_name = {name: source for name, source, _, _ in SHADERS}
+               for name, source, _, _, _ in SHADERS}
+    source_by_name = {name: source for name, source, _, _, _ in SHADERS}
     for shader in manifest["shaders"]:
         name, format_ = shader["name"], shader["format"]
         assert (shader["uniform_buffers"], shader["samplers"]) == shader_resources(source_by_name[name]), f"{name}: resource count mismatch"
@@ -329,11 +348,12 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     pending = {}
     manifest = {"abi_version": abi, "interface_hash": abi_hash, "shaders": []}
-    for name, source, clipping, compare_count in SHADERS:
+    for name, source, clipping, compare_count, sampler_layout in SHADERS:
         vertex = source.startswith("vs_")
         uniforms, samplers = shader_resources(source)
         hlsl = args.work_dir / f"{name}.hlsl"
-        hlsl.write_text(make_source(name, source, clipping, compare_count))
+        hlsl.write_text(make_source(name, source, clipping, compare_count,
+                                    sampler_layout))
         for format_ in ("dxil", "spirv"):
             output = args.work_dir / f"{format_}_{name}.bin"
             assembly = args.work_dir / f"{format_}_{name}.asm"
@@ -345,7 +365,8 @@ def main() -> None:
             subprocess.run(command, check=True)
             if format_ == "spirv":
                 reflection = json.loads(subprocess.check_output([args.spirv_cross, str(output), "--reflect"]))
-                validate_spirv(reflection, source, vertex, samplers, uniforms)
+                validate_spirv(reflection, source, vertex, samplers, uniforms,
+                               sampler_layout)
                 (args.work_dir / f"{format_}_{name}.json").write_text(json.dumps(reflection, indent=2))
             else:
                 validate_dxil(assembly.read_text(encoding="utf-8"), source, vertex, samplers, uniforms)
@@ -362,7 +383,9 @@ def main() -> None:
             manifest["shaders"].append({"name": name, "format": format_, "entry": "main",
                 "samplers": samplers, "uniform_buffers": uniforms, "reflected": True,
                 "uniform_bytes": sum(buffer[2] for buffer in uniform_layout(source)),
-                "source_sha256": hashlib.sha256(make_source(name, source, clipping, compare_count).encode()).hexdigest(), "sha256": hashlib.sha256(code).hexdigest()})
+                "source_sha256": hashlib.sha256(make_source(name, source, clipping,
+                                                              compare_count, sampler_layout).encode()).hexdigest(),
+                "sha256": hashlib.sha256(code).hexdigest()})
     for destination, source in pending.items():
         shutil.copyfile(source, destination)
     (args.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

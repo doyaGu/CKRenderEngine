@@ -62,6 +62,7 @@ typedef uint32_t CK_SHADER_PROFILE;
 #define CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE 0x00000001u
 #define CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT    0x00000002u
 #define CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM 0x00000004u
+#define CKRST_SHADER_TARGET_SAMPLER_ORDINAL      0x00000008u
 
 // ---------------------------------------------------------------------------
 // Vertex Attributes

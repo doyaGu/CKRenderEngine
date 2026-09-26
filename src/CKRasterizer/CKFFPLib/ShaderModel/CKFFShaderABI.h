@@ -83,29 +83,41 @@ inline CKDWORD CKFFStageParamIndex(CKDWORD stage, CKFFStageParamSlot slot) {
 }
 
 enum CKFFSamplerSlotABI {
-    CKFF_CUBE_SAMPLER_SLOT_BASE = CKFF_MAX_TEXTURE_STAGES,
-    CKFF_VOLUME_SAMPLER_SLOT_BASE = CKFF_MAX_TEXTURE_STAGES + CKFF_CUBE_SAMPLER_COUNT,
-    CKFF_SAMPLER_SLOT_COUNT = CKFF_MAX_TEXTURE_STAGES + CKFF_CUBE_SAMPLER_COUNT + CKFF_VOLUME_SAMPLER_COUNT,
+    CKFF_SAMPLER_SLOT_COUNT = CKFF_WIDE_SAMPLER_COUNT +
+                              CKFF_NARROW_SAMPLER_COUNT * 2,
 };
 
-// Texture slot of a sampler in the fixed layout: 2D and depth samplers sit on
-// their stage index, cube and volume samplers on their type block indexed by
-// the ordinal of the stage among the stages sampling the same type (see
-// CKFFSamplerOrdinal / ckffSamplerOrdinal in fs_ff_stage.sc).
-inline CKDWORD CKFFSamplerSlot(CKDWORD samplerType, CKDWORD stageOrOrdinal) {
+inline CKDWORD CKFFSamplerTypeSlotCount(CKDWORD samplerType,
+                                        CKFFSamplerLayout layout =
+                                            CKFF_SAMPLER_LAYOUT_WIDE_2D) {
     if (samplerType == CKFF_SAMPLER_CUBE)
-        return CKFF_CUBE_SAMPLER_SLOT_BASE + stageOrOrdinal;
+        return layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE
+            ? CKFF_WIDE_SAMPLER_COUNT : CKFF_NARROW_SAMPLER_COUNT;
     if (samplerType == CKFF_SAMPLER_VOLUME)
-        return CKFF_VOLUME_SAMPLER_SLOT_BASE + stageOrOrdinal;
-    return stageOrOrdinal;
+        return layout == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME
+            ? CKFF_WIDE_SAMPLER_COUNT : CKFF_NARROW_SAMPLER_COUNT;
+    return layout == CKFF_SAMPLER_LAYOUT_WIDE_2D
+        ? CKFF_WIDE_SAMPLER_COUNT : CKFF_NARROW_SAMPLER_COUNT;
 }
 
-inline CKDWORD CKFFSamplerTypeSlotCount(CKDWORD samplerType) {
+inline CKDWORD CKFFSamplerTypeSlotBase(CKDWORD samplerType,
+                                       CKFFSamplerLayout layout =
+                                           CKFF_SAMPLER_LAYOUT_WIDE_2D) {
     if (samplerType == CKFF_SAMPLER_CUBE)
-        return CKFF_CUBE_SAMPLER_COUNT;
+        return CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, layout);
     if (samplerType == CKFF_SAMPLER_VOLUME)
-        return CKFF_VOLUME_SAMPLER_COUNT;
-    return CKFF_MAX_TEXTURE_STAGES;
+        return CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, layout) +
+               CKFFSamplerTypeSlotCount(CKFF_SAMPLER_CUBE, layout);
+    return 0;
+}
+
+// Texture slot of a sampler in the selected sixteen-slot layout. All sampler
+// types are packed by type ordinal; comparison depth samplers lead the 2D
+// block, followed by ordinary 2D/depth stages.
+inline CKDWORD CKFFSamplerSlot(CKDWORD samplerType, CKDWORD ordinal,
+                              CKFFSamplerLayout layout =
+                                  CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+    return CKFFSamplerTypeSlotBase(samplerType, layout) + ordinal;
 }
 
 static_assert(CKFF_DRAW_PARAM_VEC4_COUNT == 20, "ABI break: draw param vec4 count changed");

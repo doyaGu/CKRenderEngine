@@ -2,8 +2,8 @@
 """Compile the CK2_3D fixed-function shaders with bgfx shaderc.
 
 One program family serves every draw: two vertex shaders (3D, POSITIONT), each
-with a clip-distance variant, one fragment uber shader with the fixed sampler
-layout, and the postprocess pair. The generated headers hold the bgfx binary
+with a clip-distance variant, three fragment shaders covering the exact
+sixteen-slot sampler layouts, and the postprocess pair. The generated headers hold the bgfx binary
 blob per renderer backend; the runtime selects the set for its shader profile.
 """
 
@@ -26,6 +26,10 @@ SHADERS = [
     {"source": "vs_ff_positiont.sc", "stage": "vertex", "name": "vs_ff_positiont_clip",
      "defines": ["CKFF_VS_CLIP_DISTANCE=1"]},
     {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage"},
+    {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_cube",
+     "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=1"]},
+    {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_volume",
+     "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=2"]},
     {"source": "vs_postprocess.sc", "stage": "vertex", "name": "vs_postprocess"},
     {"source": "fs_postprocess.sc", "stage": "fragment", "name": "fs_postprocess"},
 ]
@@ -176,10 +180,13 @@ def write_header(path: Path, var_name: str, data: bytes) -> None:
 def validate_ff_varyings(compiled: dict[str, bytes], backend_name: str) -> None:
     # bgfx shader blobs store the fragment input hash at byte 4 and the
     # vertex output hash at byte 8; createProgram requires them to match.
-    fragment = compiled["fs_ff_stage"]
-    if fragment[:4] != b"FSH\x0b":
+    fragments = [compiled[name] for name in
+                 ("fs_ff_stage", "fs_ff_stage_cube", "fs_ff_stage_volume")]
+    if any(fragment[:4] != b"FSH\x0b" for fragment in fragments):
         raise ValueError(f"{backend_name}: invalid fixed-function fragment shader blob")
-    input_hash = fragment[4:8]
+    input_hash = fragments[0][4:8]
+    if any(fragment[4:8] != input_hash for fragment in fragments[1:]):
+        raise ValueError(f"{backend_name}: sampler-layout fragment varyings differ")
     for name in ("vs_ff_3d", "vs_ff_3d_clip",
                  "vs_ff_positiont", "vs_ff_positiont_clip"):
         vertex = compiled[name]

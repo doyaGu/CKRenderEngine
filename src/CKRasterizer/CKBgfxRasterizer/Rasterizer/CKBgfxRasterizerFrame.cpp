@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizerContext.h"
+#include "CKBgfxRasterizer.h"
 
 // CKBgfxRasterizerContext frame flow and fixed-function draw submission.
 
@@ -429,29 +430,37 @@ CKFFProgramBinding CKBgfxRasterizerContext::ResolveNativeFFProgram(
 {
     const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(Key);
     const CKDWORD variant = (CKDWORD)selection.Variant;
+    const CKDWORD samplerLayout = (CKDWORD)selection.SamplerLayout;
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
         return CKFFProgramBinding();
 
-    if (!m_NativeFFPixelShader &&
-        CreateShader(&m_ShaderCache.GetPixelShader(),
-                     &m_NativeFFPixelShader) != CK_OK)
-        return CKFFProgramBinding();
+    if (!m_NativeFFPixelShaders[samplerLayout]) {
+        CKShaderDesc pixelShader;
+        if (!CKBgfxRasterizerFFFragmentShader(m_Caps, selection.SamplerLayout,
+                                              pixelShader) ||
+            CreateShader(&pixelShader,
+                         &m_NativeFFPixelShaders[samplerLayout]) != CK_OK)
+            return CKFFProgramBinding();
+    }
     if (!m_NativeFFVertexShaders[variant] &&
         CreateShader(&m_ShaderCache.GetVertexShader(selection.Variant),
                      &m_NativeFFVertexShaders[variant]) != CK_OK)
         return CKFFProgramBinding();
 
-    if (!m_NativeFFPrograms[variant]) {
+    if (!m_NativeFFPrograms[variant][samplerLayout]) {
         const CKBOOL positionT =
             selection.Variant == CKFF_PROGRAM_POSITIONT ||
             selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP;
         const CKFFProgramDesc desc = CKFFBuildProgramInterface(
-            m_NativeFFVertexShaders[variant], m_NativeFFPixelShader,
-            m_ShaderCache.GetShaderFormat(), FALSE, positionT);
-        if (CreateProgram(&desc, &m_NativeFFPrograms[variant]) != CK_OK)
+            m_NativeFFVertexShaders[variant],
+            m_NativeFFPixelShaders[samplerLayout],
+            m_ShaderCache.GetShaderFormat(), FALSE, positionT,
+            selection.SamplerLayout);
+        if (CreateProgram(&desc,
+                          &m_NativeFFPrograms[variant][samplerLayout]) != CK_OK)
             return CKFFProgramBinding();
     }
-    return CKFFProgramBinding(m_NativeFFPrograms[variant],
+    return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout],
                               selection.Specialization);
 }
 
@@ -459,16 +468,21 @@ void CKBgfxRasterizerContext::ClearNativeFFPrograms()
 {
     for (CKDWORD variant = 0;
          variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
-        if (m_NativeFFPrograms[variant])
-            DestroyObject(m_NativeFFPrograms[variant], CKRST_OBJ_PROGRAM);
+        for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
+            if (m_NativeFFPrograms[variant][layout])
+                DestroyObject(m_NativeFFPrograms[variant][layout],
+                              CKRST_OBJ_PROGRAM);
+            m_NativeFFPrograms[variant][layout] = 0;
+        }
         if (m_NativeFFVertexShaders[variant])
             DestroyObject(m_NativeFFVertexShaders[variant], CKRST_OBJ_SHADER);
-        m_NativeFFPrograms[variant] = 0;
         m_NativeFFVertexShaders[variant] = 0;
     }
-    if (m_NativeFFPixelShader)
-        DestroyObject(m_NativeFFPixelShader, CKRST_OBJ_SHADER);
-    m_NativeFFPixelShader = 0;
+    for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
+        if (m_NativeFFPixelShaders[layout])
+            DestroyObject(m_NativeFFPixelShaders[layout], CKRST_OBJ_SHADER);
+        m_NativeFFPixelShaders[layout] = 0;
+    }
     m_ShaderCache.Shutdown();
 }
 

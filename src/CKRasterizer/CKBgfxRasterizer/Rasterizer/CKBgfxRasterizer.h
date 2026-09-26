@@ -2,6 +2,7 @@
 #define CKBGFXRASTERIZER_H
 
 #include "CKBuiltinShaders.h"
+#include "CKFFConstants.h"
 #include "CKRasterizer.h"
 
 class CKBgfxRasterizerDriver;
@@ -9,6 +10,9 @@ class CKBgfxRasterizerContext;
 struct CKRasterizerDeviceCaps;
 
 CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out);
+CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
+                                        CKFFSamplerLayout layout,
+                                        CKShaderDesc &out);
 
 class CKBgfxRasterizer final : public CKRasterizer {
 public:

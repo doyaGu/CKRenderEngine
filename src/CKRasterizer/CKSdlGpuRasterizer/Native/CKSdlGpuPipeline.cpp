@@ -144,7 +144,19 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     info.target_info.has_depth_stencil_target = depth != SDL_GPU_TEXTUREFORMAT_INVALID;
     info.target_info.depth_stencil_format = depth;
     auto pipeline = CKSdlGpuOwn(Device, SDL_CreateGPUGraphicsPipeline(Device, &info), SDL_ReleaseGPUGraphicsPipeline);
-    if (!pipeline) { Fail("CreateGPUGraphicsPipeline"); return nullptr; }
+    if (!pipeline) {
+        unsigned dimensions[3] = {};
+        for (const CKFFSamplerBinding &sampler : draw.Program->Interface.Samplers)
+            ++dimensions[sampler.Dimension];
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "FF pipeline details: fragment_bytes=%u compare_samplers=%u dimensions=%u/%u/%u",
+                     draw.Program->Fragment->Desc.CodeSize,
+                     draw.Program->CompareSamplerCount,
+                     dimensions[CKFF_TEXTURE_2D], dimensions[CKFF_TEXTURE_CUBE],
+                     dimensions[CKFF_TEXTURE_3D]);
+        Fail("CreateGPUGraphicsPipeline");
+        return nullptr;
+    }
     pipelines.Insert(key, pipeline, FALSE);
     return pipeline.get();
 }

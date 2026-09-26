@@ -90,8 +90,7 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          const CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES],
                          int activeTextureCount,
                          CKFFStageParamsUniform &outParams,
-                         const uint64_t *stageStateSetMasks,
-                         CKDWORD samplerSlotOverflowMask) {
+                         const uint64_t *stageStateSetMasks) {
     memset(&outParams, 0, sizeof(outParams));
     if (!stageStates)
         return;
@@ -101,9 +100,7 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
 
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const bool stageActive = stage < activeTextureCount;
-        // Stages beyond the fixed cube / volume sampler budget sample as unbound.
-        const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0 &&
-                                (samplerSlotOverflowMask & (1u << stage)) == 0;
+        const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
         CKDWORD textureTransformFlags = stageActive
             ? (stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
                CKFFResolveMirrorOnceAddressMask(stageStates[stage]))

@@ -311,7 +311,7 @@ typedef enum CKRST_DIAGNOSTIC {
     CKRST_DIAG_IGNORE_COMPAREFUNC,
     CKRST_DIAG_APPROX_STAGEBLEND,
     CKRST_DIAG_APPROX_COMPAREFUNC_FILTER,   // shader depth compare sampled with a filtering sampler
-    CKRST_DIAG_APPROX_SAMPLER_SLOTS,        // more than four cube or volume stages: the extra stages sample as unbound
+    CKRST_DIAG_APPROX_SAMPLER_SLOTS,        // reserved for diagnostic ABI compatibility; exact layouts cover all eight stages
 
     // Presentation
     CKRST_DIAG_APPROX_MSAA,                 // reserved for diagnostic ABI compatibility; no single-sample fallback

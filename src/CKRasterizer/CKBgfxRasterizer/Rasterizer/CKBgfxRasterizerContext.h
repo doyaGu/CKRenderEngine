@@ -416,9 +416,10 @@ private:
     CKFFShaderLibrary m_ShaderLibrary;
     CKFixedFunctionPipeline m_FFP;
     CKFFShaderCache m_ShaderCache;
-    CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT] = {};
+    CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT]
+                                [CKFF_SAMPLER_LAYOUT_COUNT] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
-    CKDWORD m_NativeFFPixelShader = 0;
+    CKDWORD m_NativeFFPixelShaders[CKFF_SAMPLER_LAYOUT_COUNT] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKBgfxPresentStage m_Present;
     // Verbatim fixed-function state mirror.

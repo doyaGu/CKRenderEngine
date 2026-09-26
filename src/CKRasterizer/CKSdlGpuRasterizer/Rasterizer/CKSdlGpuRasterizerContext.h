@@ -324,10 +324,13 @@ private:
     void *m_ReadyUser;
     CKFixedFunctionPipeline m_FFP;
     CKFFShaderCache m_ShaderCache;
-    CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT][CKFF_MAX_TEXTURE_STAGES + 1][2] = {};
+    CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT]
+                                [CKFF_SAMPLER_LAYOUT_COUNT]
+                                [CKFF_MAX_TEXTURE_STAGES + 1][2] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     CKDWORD m_NativeFFDepthPadVertexShaders[2] = {};
-    CKDWORD m_NativeFFPixelShaders[CKFF_MAX_TEXTURE_STAGES + 1] = {};
+    CKDWORD m_NativeFFPixelShaders[CKFF_SAMPLER_LAYOUT_COUNT]
+                                    [CKFF_MAX_TEXTURE_STAGES + 1] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKSdlGpuPresentStage m_Present;
     // Verbatim fixed-function state mirror.

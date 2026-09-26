@@ -9,10 +9,18 @@
 #define CKFF_MAX_TEXTURE_STAGES 8
 #define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
 #define CKFF_VERTEX_BLEND_MATRIX_COUNT 4
-// Fixed sampler layout: one 2D sampler per stage plus four cube and
-// four volume samplers filled by type ordinal.
-#define CKFF_CUBE_SAMPLER_COUNT 4
-#define CKFF_VOLUME_SAMPLER_COUNT 4
+// Each native fragment shader exposes sixteen samplers. Three layouts cover
+// every mix of the eight logical texture stages: when one non-2D type needs
+// more than four slots, at most three stages remain for the other two types.
+#define CKFF_NARROW_SAMPLER_COUNT 4
+#define CKFF_WIDE_SAMPLER_COUNT 8
+
+enum CKFFSamplerLayout {
+    CKFF_SAMPLER_LAYOUT_WIDE_2D = 0,
+    CKFF_SAMPLER_LAYOUT_WIDE_CUBE,
+    CKFF_SAMPLER_LAYOUT_WIDE_VOLUME,
+    CKFF_SAMPLER_LAYOUT_COUNT,
+};
 
 // ============================================================================
 // Light data for shader upload (view-space)

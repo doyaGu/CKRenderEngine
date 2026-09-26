@@ -10,13 +10,18 @@ uniform vec4 u_borderColor[8];
 uniform vec4 u_borderSampler[16];
 uniform vec4 u_ffSpec[5];
 
-// Fixed sampler layout shared by every draw (spec 5.3): one 2D sampler per
-// texture stage, then four cube and four volume samplers that the C++ side
-// fills in stage order (the n-th cube stage binds s_textureCube{n}).
+// Three sixteen-slot layouts cover every combination of eight logical stages.
+// 0 = 8x2D + 4xcube + 4xvolume, 1 = 4x2D + 8xcube + 4xvolume,
+// 2 = 4x2D + 4xcube + 8xvolume.
+#ifndef CKFF_NATIVE_SAMPLER_LAYOUT
+#define CKFF_NATIVE_SAMPLER_LAYOUT 0
+#endif
+
 SAMPLER2D(s_texture0, 0);
 SAMPLER2D(s_texture1, 1);
 SAMPLER2D(s_texture2, 2);
 SAMPLER2D(s_texture3, 3);
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 0
 SAMPLER2D(s_texture4, 4);
 SAMPLER2D(s_texture5, 5);
 SAMPLER2D(s_texture6, 6);
@@ -29,6 +34,49 @@ SAMPLER3D(s_textureVolume0, 12);
 SAMPLER3D(s_textureVolume1, 13);
 SAMPLER3D(s_textureVolume2, 14);
 SAMPLER3D(s_textureVolume3, 15);
+#elif CKFF_NATIVE_SAMPLER_LAYOUT == 1
+SAMPLERCUBE(s_textureCube0, 4);
+SAMPLERCUBE(s_textureCube1, 5);
+SAMPLERCUBE(s_textureCube2, 6);
+SAMPLERCUBE(s_textureCube3, 7);
+SAMPLERCUBE(s_textureCube4, 8);
+SAMPLERCUBE(s_textureCube5, 9);
+SAMPLERCUBE(s_textureCube6, 10);
+SAMPLERCUBE(s_textureCube7, 11);
+SAMPLER3D(s_textureVolume0, 12);
+SAMPLER3D(s_textureVolume1, 13);
+SAMPLER3D(s_textureVolume2, 14);
+SAMPLER3D(s_textureVolume3, 15);
+#else
+SAMPLERCUBE(s_textureCube0, 4);
+SAMPLERCUBE(s_textureCube1, 5);
+SAMPLERCUBE(s_textureCube2, 6);
+SAMPLERCUBE(s_textureCube3, 7);
+#if CKFF_NATIVE_SDL_GPU && !defined(__spirv__)
+Texture3D<float4> s_textureVolume[8] : register(t8, space2);
+SamplerState s_textureVolumeSampler[8] : register(s8, space2);
+#else
+SAMPLER3D(s_textureVolume0, 8);
+SAMPLER3D(s_textureVolume1, 9);
+SAMPLER3D(s_textureVolume2, 10);
+SAMPLER3D(s_textureVolume3, 11);
+SAMPLER3D(s_textureVolume4, 12);
+SAMPLER3D(s_textureVolume5, 13);
+SAMPLER3D(s_textureVolume6, 14);
+SAMPLER3D(s_textureVolume7, 15);
+#endif
+#endif
+
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 0
+#define CKFF_CUBE_SLOT_BASE 8
+#define CKFF_VOLUME_SLOT_BASE 12
+#elif CKFF_NATIVE_SAMPLER_LAYOUT == 1
+#define CKFF_CUBE_SLOT_BASE 4
+#define CKFF_VOLUME_SLOT_BASE 12
+#else
+#define CKFF_CUBE_SLOT_BASE 4
+#define CKFF_VOLUME_SLOT_BASE 8
+#endif
 
 #include "fs_ff_common.sc"
 
@@ -292,6 +340,17 @@ vec4 ckffNative3DAniso(Texture3D<float4> image, SamplerState state, uint slot,
     }
     return color / plan.x;
 }
+vec4 ckffNative3DSample(Texture3D<float4> image, SamplerState state, uint slot,
+                        vec3 uv, vec3 originalUv, vec3 dx, vec3 dy,
+                        int mirrorOnceMask, float bias, float minMip,
+                        float maxAnisotropy)
+{
+    if (maxAnisotropy > 1.0)
+        return ckffNative3DAniso(image, state, slot, uv, dx, dy, bias,
+                                 minMip, maxAnisotropy);
+    return ckSample3DGrad(image, state, slot, uv, originalUv,
+                          mirrorOnceMask, bias, minMip);
+}
 #define CKFF_TEXTURE_3D_ANISO(_sampler, _uv, _dx, _dy, _bias, _min, _max) \
     ckffNative3DAniso(_sampler, _sampler##Sampler, _sampler##Slot, \
                       _uv, _dx, _dy, _bias, _min, _max)
@@ -463,11 +522,12 @@ vec4 ckffBorderMips3D(CKFF_BORDER_SAMPLER_3D image, vec3 uv, float lod,
 
 vec4 ckffBorderSample2D(CKFF_BORDER_SAMPLER_2D image, vec2 uv, vec2 dx, vec2 dy,
                          float bias, float minMip, float maxAnisotropy,
-                         int stage, int mask, bool minLinear, bool magLinear)
+                         int stage, int slot, int mask,
+                         bool minLinear, bool magLinear)
 {
     vec2 size = CKFF_BORDER_SIZE_2D(image);
-    int mipCount = max(1, int(u_borderSampler[stage].x));
-    int mipFilter = int(u_borderSampler[stage].y);
+    int mipCount = max(1, int(u_borderSampler[slot].x));
+    int mipFilter = int(u_borderSampler[slot].y);
     float lod = ckffClampedLod2D(dx, dy, size, bias, minMip);
     vec4 border = u_borderColor[stage];
     if (maxAnisotropy > 1.0) {
@@ -516,11 +576,15 @@ vec2 ckffCompareSize2D(int ordinal, int mip)
     if (ordinal == 0) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture0, mip);
     if (ordinal == 1) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture1, mip);
     if (ordinal == 2) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture2, mip);
+#if CKFF_NATIVE_SAMPLER_LAYOUT != 0
+    return CKFF_BORDER_SIZE_2D_LEVEL(s_texture3, mip);
+#else
     if (ordinal == 3) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture3, mip);
     if (ordinal == 4) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture4, mip);
     if (ordinal == 5) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture5, mip);
     if (ordinal == 6) return CKFF_BORDER_SIZE_2D_LEVEL(s_texture6, mip);
     return CKFF_BORDER_SIZE_2D_LEVEL(s_texture7, mip);
+#endif
 }
 
 float ckffCompareDepth2D(int ordinal, vec2 uv, int mip)
@@ -528,11 +592,15 @@ float ckffCompareDepth2D(int ordinal, vec2 uv, int mip)
     if (ordinal == 0) return CKFF_BORDER_SAMPLE_2D(s_texture0, uv, mip).r;
     if (ordinal == 1) return CKFF_BORDER_SAMPLE_2D(s_texture1, uv, mip).r;
     if (ordinal == 2) return CKFF_BORDER_SAMPLE_2D(s_texture2, uv, mip).r;
+#if CKFF_NATIVE_SAMPLER_LAYOUT != 0
+    return CKFF_BORDER_SAMPLE_2D(s_texture3, uv, mip).r;
+#else
     if (ordinal == 3) return CKFF_BORDER_SAMPLE_2D(s_texture3, uv, mip).r;
     if (ordinal == 4) return CKFF_BORDER_SAMPLE_2D(s_texture4, uv, mip).r;
     if (ordinal == 5) return CKFF_BORDER_SAMPLE_2D(s_texture5, uv, mip).r;
     if (ordinal == 6) return CKFF_BORDER_SAMPLE_2D(s_texture6, uv, mip).r;
     return CKFF_BORDER_SAMPLE_2D(s_texture7, uv, mip).r;
+#endif
 }
 
 float ckffCompareTap2D(int ordinal, vec2 tap, vec2 size,
@@ -597,8 +665,8 @@ float ckffCompareSample2D(int ordinal, vec2 uv,
                           float reference, int func)
 {
     vec2 size = ckffCompareSize2D(ordinal, 0);
-    int mipCount = max(1, int(u_borderSampler[stage].x));
-    int mipFilter = int(u_borderSampler[stage].y);
+    int mipCount = max(1, int(u_borderSampler[ordinal].x));
+    int mipFilter = int(u_borderSampler[ordinal].y);
     vec4 border = u_borderColor[stage];
     if (maxAnisotropy > 1.0) {
         vec3 plan = ckffAnisoPlan(length(dx * size), length(dy * size),
@@ -627,9 +695,13 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     float lodBias = u_bumpEnv[stage * 2 + 1].z;
     int packedSamplerLod = int(u_bumpEnv[stage * 2 + 1].w);
     float minMip = float(packedSamplerLod & 31);
-#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
+#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_SAMPLER_LAYOUT == 0 && CKFF_NATIVE_COMPARE_COUNT == 0
+    // Keep the common SDL program statically indexed. Dynamic resource
+    // selection here makes some D3D12 drivers reject the otherwise ordinary
+    // 8/4/4 pipeline. This layout's ordinal is the logical stage.
     float maxAnisotropy = float(packedSamplerLod >> 5);
 #else
+    int samplerOrdinal = (packedSamplerLod >> 15) & 7;
     float maxAnisotropy = float((packedSamplerLod >> 5) & 31);
 #endif
     // Addressing must not change the derivatives used to choose a mip level.
@@ -649,7 +721,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     bool minLinear = ((packedSamplerLod >> 13) & 1) != 0;
     bool magLinear = ((packedSamplerLod >> 14) & 1) != 0;
     bool borderMip = borderMask != 0 &&
-        (u_borderSampler[stage].y > 0.5 || maxAnisotropy > 1.0);
+        (u_borderSampler[samplerOrdinal].y > 0.5 || maxAnisotropy > 1.0);
 #endif
 // CKFF_BGFX_ONLY_END
     if (samplerType == 1) {
@@ -665,7 +737,15 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
         if (ordinal == 0) return CKFF_SAMPLE_CUBE(s_textureCube0);
         if (ordinal == 1) return CKFF_SAMPLE_CUBE(s_textureCube1);
         if (ordinal == 2) return CKFF_SAMPLE_CUBE(s_textureCube2);
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 1
+        if (ordinal == 3) return CKFF_SAMPLE_CUBE(s_textureCube3);
+        if (ordinal == 4) return CKFF_SAMPLE_CUBE(s_textureCube4);
+        if (ordinal == 5) return CKFF_SAMPLE_CUBE(s_textureCube5);
+        if (ordinal == 6) return CKFF_SAMPLE_CUBE(s_textureCube6);
+        return CKFF_SAMPLE_CUBE(s_textureCube7);
+#else
         return CKFF_SAMPLE_CUBE(s_textureCube3);
+#endif
 #undef CKFF_SAMPLE_CUBE
     }
     if (samplerType == 3) {
@@ -681,30 +761,64 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)))
 #endif
 #if CKFF_NATIVE_SDL_GPU
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 2 && !defined(__spirv__)
+        return ckffNative3DSample(s_textureVolume[ordinal],
+                                  s_textureVolumeSampler[ordinal],
+                                  uint(CKFF_VOLUME_SLOT_BASE + ordinal),
+                                  coord.xyz, originalCoord3, originalDx3,
+                                  originalDy3, mirrorOnceMask, lodBias, minMip,
+                                  maxAnisotropy);
+#else
         if (ordinal == 0) return CKFF_SAMPLE_3D(s_textureVolume0);
         if (ordinal == 1) return CKFF_SAMPLE_3D(s_textureVolume1);
         if (ordinal == 2) return CKFF_SAMPLE_3D(s_textureVolume2);
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 2
+        if (ordinal == 3) return CKFF_SAMPLE_3D(s_textureVolume3);
+        if (ordinal == 4) return CKFF_SAMPLE_3D(s_textureVolume4);
+        if (ordinal == 5) return CKFF_SAMPLE_3D(s_textureVolume5);
+        if (ordinal == 6) return CKFF_SAMPLE_3D(s_textureVolume6);
+        return CKFF_SAMPLE_3D(s_textureVolume7);
+#else
         return CKFF_SAMPLE_3D(s_textureVolume3);
+#endif
+#endif
 #else
 // CKFF_BGFX_ONLY_BEGIN
         vec4 volumeColor;
         bool volumeBorderMip = borderMask != 0 &&
-            (u_borderSampler[12 + ordinal].y > 0.5 || maxAnisotropy > 1.0);
+            (u_borderSampler[CKFF_VOLUME_SLOT_BASE + ordinal].y > 0.5 ||
+             maxAnisotropy > 1.0);
 #define CKFF_SAMPLE_VOLUME(_sampler) (volumeBorderMip ? \
     ckffBorderSample3D(_sampler, coord.xyz, originalDx3, originalDy3, \
-        lodBias, minMip, maxAnisotropy, stage, 12 + ordinal, borderMask, minLinear, magLinear) : \
+        lodBias, minMip, maxAnisotropy, stage, CKFF_VOLUME_SLOT_BASE + ordinal, borderMask, minLinear, magLinear) : \
     CKFF_SAMPLE_3D(_sampler))
         if (ordinal == 0) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume0);
         else if (ordinal == 1) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume1);
         else if (ordinal == 2) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume2);
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 2
+        else if (ordinal == 3) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume3);
+        else if (ordinal == 4) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume4);
+        else if (ordinal == 5) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume5);
+        else if (ordinal == 6) volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume6);
+        else volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume7);
+#else
         else volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume3);
+#endif
 #undef CKFF_SAMPLE_VOLUME
         if (borderMask != 0 && !volumeBorderMip) {
             vec3 size;
             if (ordinal == 0) size = CKFF_BORDER_SIZE_3D(s_textureVolume0);
             else if (ordinal == 1) size = CKFF_BORDER_SIZE_3D(s_textureVolume1);
             else if (ordinal == 2) size = CKFF_BORDER_SIZE_3D(s_textureVolume2);
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 2
+            else if (ordinal == 3) size = CKFF_BORDER_SIZE_3D(s_textureVolume3);
+            else if (ordinal == 4) size = CKFF_BORDER_SIZE_3D(s_textureVolume4);
+            else if (ordinal == 5) size = CKFF_BORDER_SIZE_3D(s_textureVolume5);
+            else if (ordinal == 6) size = CKFF_BORDER_SIZE_3D(s_textureVolume6);
+            else size = CKFF_BORDER_SIZE_3D(s_textureVolume7);
+#else
             else size = CKFF_BORDER_SIZE_3D(s_textureVolume3);
+#endif
             float lod = ckffClampedLod3D(originalDx3, originalDy3, size, lodBias, 0.0);
             bool filtered = lod > 0.0 ? minLinear : magLinear;
             volumeColor = mix(u_borderColor[stage], volumeColor,
@@ -717,13 +831,9 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     }
 
     vec2 uv = coord.xy;
-    vec4 color;
-#if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0
-#if CKFF_NATIVE_SDL_GPU
-    int ordinal = (packedSamplerLod >> 15) & 7;
-#else
-    int ordinal = ckffSamplerOrdinal(stage, samplerType);
-#endif
+    vec4 color = vec4_splat(0.0);
+#if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0 || CKFF_NATIVE_SAMPLER_LAYOUT != 0
+    int ordinal = samplerOrdinal;
 #endif
 
 #if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0
@@ -792,10 +902,26 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 // CKFF_BGFX_ONLY_BEGIN
 #define CKFF_SAMPLE_2D_FINAL(_sampler) (borderMip ? \
     ckffBorderSample2D(_sampler, uv, originalDx, originalDy, lodBias, minMip, \
-        maxAnisotropy, stage, borderMask, minLinear, magLinear) : CKFF_SAMPLE_2D(_sampler))
+        maxAnisotropy, stage, ordinal, borderMask, minLinear, magLinear) : CKFF_SAMPLE_2D(_sampler))
 // CKFF_BGFX_ONLY_END
 #endif
-#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
+#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_SAMPLER_LAYOUT != 0
+#if CKFF_NATIVE_COMPARE_COUNT == 0
+    if (ordinal == 0) color = CKFF_SAMPLE_2D_FINAL(s_texture0);
+    else if (ordinal == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
+    else if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+    else color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#elif CKFF_NATIVE_COMPARE_COUNT == 1
+    if (ordinal == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
+    else if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+    else color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#elif CKFF_NATIVE_COMPARE_COUNT == 2
+    if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+    else color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#elif CKFF_NATIVE_COMPARE_COUNT == 3
+    color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#endif
+#elif CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
     if (stage == 0) color = CKFF_SAMPLE_2D_FINAL(s_texture0);
     else if (stage == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
     else if (stage == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
@@ -842,11 +968,15 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
     if (ordinal == 0) color = CKFF_SAMPLE_2D_FINAL(s_texture0);
     else if (ordinal == 1) color = CKFF_SAMPLE_2D_FINAL(s_texture1);
     else if (ordinal == 2) color = CKFF_SAMPLE_2D_FINAL(s_texture2);
+#if CKFF_NATIVE_SAMPLER_LAYOUT != 0
+    else color = CKFF_SAMPLE_2D_FINAL(s_texture3);
+#else
     else if (ordinal == 3) color = CKFF_SAMPLE_2D_FINAL(s_texture3);
     else if (ordinal == 4) color = CKFF_SAMPLE_2D_FINAL(s_texture4);
     else if (ordinal == 5) color = CKFF_SAMPLE_2D_FINAL(s_texture5);
     else if (ordinal == 6) color = CKFF_SAMPLE_2D_FINAL(s_texture6);
     else color = CKFF_SAMPLE_2D_FINAL(s_texture7);
+#endif
 #endif
 #undef CKFF_SAMPLE_2D_FINAL
 #undef CKFF_SAMPLE_2D
@@ -855,14 +985,18 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 #if !CKFF_NATIVE_SDL_GPU
     if (borderMask != 0 && !borderMip) {
         vec2 size;
-        if (stage == 0) size = CKFF_BORDER_SIZE_2D(s_texture0);
-        else if (stage == 1) size = CKFF_BORDER_SIZE_2D(s_texture1);
-        else if (stage == 2) size = CKFF_BORDER_SIZE_2D(s_texture2);
-        else if (stage == 3) size = CKFF_BORDER_SIZE_2D(s_texture3);
-        else if (stage == 4) size = CKFF_BORDER_SIZE_2D(s_texture4);
-        else if (stage == 5) size = CKFF_BORDER_SIZE_2D(s_texture5);
-        else if (stage == 6) size = CKFF_BORDER_SIZE_2D(s_texture6);
+        if (ordinal == 0) size = CKFF_BORDER_SIZE_2D(s_texture0);
+        else if (ordinal == 1) size = CKFF_BORDER_SIZE_2D(s_texture1);
+        else if (ordinal == 2) size = CKFF_BORDER_SIZE_2D(s_texture2);
+#if CKFF_NATIVE_SAMPLER_LAYOUT != 0
+        else size = CKFF_BORDER_SIZE_2D(s_texture3);
+#else
+        else if (ordinal == 3) size = CKFF_BORDER_SIZE_2D(s_texture3);
+        else if (ordinal == 4) size = CKFF_BORDER_SIZE_2D(s_texture4);
+        else if (ordinal == 5) size = CKFF_BORDER_SIZE_2D(s_texture5);
+        else if (ordinal == 6) size = CKFF_BORDER_SIZE_2D(s_texture6);
         else size = CKFF_BORDER_SIZE_2D(s_texture7);
+#endif
         float lod = ckffClampedLod2D(originalDx, originalDy, size, lodBias, 0.0);
         bool filtered = lod > 0.0 ? minLinear : magLinear;
         color = mix(u_borderColor[stage], color,

@@ -80,21 +80,42 @@ const CKFFConstantBlockDesc &CKFFConstantBlockInfo(CKFFConstantBlock block)
     return static_cast<CKDWORD>(block) < CKRST_BLOCK_COUNT ? BlockTable[block] : InvalidBlock;
 }
 
-const char *CKFFSamplerSlotName(CKDWORD slot)
+const char *CKFFSamplerSlotName(CKDWORD slot, CKFFSamplerLayout layout)
 {
-    static const char *const names[CKFF_SLOT_COUNT] = {
+    static const char *const wide2DNames[CKFF_SLOT_COUNT] = {
         "s_texture0", "s_texture1", "s_texture2", "s_texture3",
         "s_texture4", "s_texture5", "s_texture6", "s_texture7",
         "s_textureCube0", "s_textureCube1", "s_textureCube2", "s_textureCube3",
         "s_textureVolume0", "s_textureVolume1", "s_textureVolume2", "s_textureVolume3",
         "s_sceneColor",
     };
-    return slot < CKFF_SLOT_COUNT ? names[slot] : NULL;
+    static const char *const wideCubeNames[CKFF_SLOT_COUNT] = {
+        "s_texture0", "s_texture1", "s_texture2", "s_texture3",
+        "s_textureCube0", "s_textureCube1", "s_textureCube2", "s_textureCube3",
+        "s_textureCube4", "s_textureCube5", "s_textureCube6", "s_textureCube7",
+        "s_textureVolume0", "s_textureVolume1", "s_textureVolume2", "s_textureVolume3",
+        "s_sceneColor",
+    };
+    static const char *const wideVolumeNames[CKFF_SLOT_COUNT] = {
+        "s_texture0", "s_texture1", "s_texture2", "s_texture3",
+        "s_textureCube0", "s_textureCube1", "s_textureCube2", "s_textureCube3",
+        "s_textureVolume0", "s_textureVolume1", "s_textureVolume2", "s_textureVolume3",
+        "s_textureVolume4", "s_textureVolume5", "s_textureVolume6", "s_textureVolume7",
+        "s_sceneColor",
+    };
+    if (slot >= CKFF_SLOT_COUNT)
+        return NULL;
+    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE)
+        return wideCubeNames[slot];
+    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME)
+        return wideVolumeNames[slot];
+    return wide2DNames[slot];
 }
 
 CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
                                               CK_SHADER_FORMAT format, CKBOOL present,
-                                              CKBOOL positionT)
+                                              CKBOOL positionT,
+                                              CKFFSamplerLayout samplerLayout)
 {
     CKFFProgramDesc result;
     result.VertexShader = vertexShader;
@@ -165,9 +186,13 @@ CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelSha
         CKFFSamplerBinding sampler;
         sampler.Slot = present ? CKFF_SLOT_PRESENT : slot;
         sampler.NativeSlot = slot;
-        sampler.Name = CKFFSamplerSlotName(sampler.Slot);
-        sampler.Dimension = present || slot < CKFF_CUBE_SAMPLER_SLOT_BASE ? CKFF_TEXTURE_2D :
-            slot < CKFF_VOLUME_SAMPLER_SLOT_BASE ? CKFF_TEXTURE_CUBE : CKFF_TEXTURE_3D;
+        sampler.Name = CKFFSamplerSlotName(sampler.Slot, samplerLayout);
+        const CKDWORD cubeBase = CKFFSamplerTypeSlotBase(
+            CKFF_SAMPLER_CUBE, samplerLayout);
+        const CKDWORD volumeBase = CKFFSamplerTypeSlotBase(
+            CKFF_SAMPLER_VOLUME, samplerLayout);
+        sampler.Dimension = present || slot < cubeBase ? CKFF_TEXTURE_2D :
+            slot < volumeBase ? CKFF_TEXTURE_CUBE : CKFF_TEXTURE_3D;
         if (packed) {
             sampler.MetadataBufferSlot = metadataBufferSlot;
             sampler.BorderColorOffset = metadataOffset + slot * 16u;

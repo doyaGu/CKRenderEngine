@@ -25,10 +25,12 @@ struct CKFFProgramBinding {
 
 struct CKFFProgramSelection {
     CKFFProgramVariant Variant;
+    CKFFSamplerLayout SamplerLayout;
     CKFFSpecializationInfo Specialization;
 
     CKFFProgramSelection()
-        : Variant(CKFF_PROGRAM_3D), Specialization() {}
+        : Variant(CKFF_PROGRAM_3D),
+          SamplerLayout(CKFF_SAMPLER_LAYOUT_WIDE_2D), Specialization() {}
 };
 
 struct CKFFProgramSamplerBinding {
@@ -37,8 +39,8 @@ struct CKFFProgramSamplerBinding {
     CKFFProgramSamplerBinding() : Stage(0) {}
 };
 
-// The fixed sampler layout shared by every program: s_texture0..7 on slots
-// 0..7, s_textureCube0..3 on 8..11, s_textureVolume0..3 on 12..15.
+// The default wide-2D sampler layout. Native contexts select one of the three
+// sixteen-slot layouts for each fixed-function program.
 struct CKFFProgramSamplerLayout {
     CKDWORD BindingCount;
     CKFFProgramSamplerBinding Bindings[CKFF_SAMPLER_SLOT_COUNT];
