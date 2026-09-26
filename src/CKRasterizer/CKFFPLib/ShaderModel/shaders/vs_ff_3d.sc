@@ -333,7 +333,7 @@ void main()
         v_texcoord6 *= gl_Position.w;
         v_texcoord7Fog.xyw *= gl_Position.w;
     }
-    // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
+    // D3D8 ZBIAS compatibility offset, resolved for the active depth format.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     // Expanded point-filled triangles retain the source point for lighting,
     // fog, texgen and user clipping. The active vertex mode leaves either

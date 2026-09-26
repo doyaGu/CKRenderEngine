@@ -3,6 +3,7 @@
 
 #include "VxMath.h"
 #include "CKRasterizerContextTypes.h"
+#include "CKRasterizerContextEnums.h"
 #include "CKRasterizerTypes.h"
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
@@ -54,6 +55,7 @@ struct CKFFStateStore {
     CKBOOL ScissorEnabled;
     VxPlane UserClipPlanes[6];
     CKDWORD AlphaTestPrecision;
+    CK_DEPTH_FORMAT DepthBiasFormat;
 
     CKBOOL EnsureViewProjection();
     const VxMatrix &ViewProjection() const { return m_ViewProjection; }

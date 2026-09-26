@@ -5,6 +5,7 @@
 #include "CKFFConstants.h"
 #include "CKFFShaderKey.h"
 #include "CKFFSpecializationInfo.h"
+#include "CKRasterizerContextEnums.h"
 
 // Internal fixed-function shader ABI. These values define the logical C++
 // data consumed by the shared shader calculations. CKFFShaderInterface maps
@@ -15,10 +16,23 @@
 // filter choices in bits 13..14. bgfx's
 // u_borderSampler[native slot] stores actual mip count and mip filter in xy.
 
-// VXRENDERSTATE_ZBIAS (0..16) approximation: each unit moves the clip-space
-// depth of the draw towards the viewer by this fraction of the depth range
-// (u_ffDrawParams[CKFF_DRAW_PARAM_MATERIAL_POWER].y, applied in the vertex shaders).
-static const float CKFF_ZBIAS_DEPTH_UNIT = 0.000005f;
+// VXRENDERSTATE_ZBIAS is converted to the D3D8 compatibility depth-bias
+// scale selected for the active depth-buffer format. The resolved positive
+// offset is subtracted in the vertex shaders.
+inline float CKFFDepthBiasUnit(CK_DEPTH_FORMAT format)
+{
+    switch (format) {
+    case CKRST_DEPTHFMT_D16:
+        return 1.0f / 65535.0f;
+    case CKRST_DEPTHFMT_D24:
+    case CKRST_DEPTHFMT_D24S8:
+    case CKRST_DEPTHFMT_D32F:
+    default:
+        // A true 24-bit epsilon rounds away in the D3D float DEPTHBIAS
+        // representation. D3D8 compatibility layers use 20 effective bits.
+        return 1.0f / 1048575.0f;
+    }
+}
 
 enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_DIFFUSE = 0,

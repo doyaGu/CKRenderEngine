@@ -139,6 +139,7 @@ CKBOOL CKBgfxPresentStage::CreateTarget(CKBgfxPresentTarget &target, CKDWORD wid
     target.Width = width;
     target.Height = height;
     target.Samples = samples;
+    target.DepthFormat = depthDesc.Format;
     return TRUE;
 }
 

@@ -20,9 +20,11 @@ public:
     CKBOOL UploadUniforms(CKFFConstantSet *constants,
                           const CKFFProgramContext *programContext,
                           CKDWORD activeTextureCount,
-                          uint64_t staticUniformRevision);
+                          uint64_t staticUniformRevision,
+                          CKBOOL polygonDepthBias = TRUE);
     CKBOOL UploadObjectUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext, CKDWORD activeTextureCount);
-    CKBOOL UploadStaticUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext, CKDWORD activeTextureCount);
+    CKBOOL UploadStaticUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext,
+                                CKDWORD activeTextureCount, CKBOOL polygonDepthBias = TRUE);
     void ResetCache();
 
 private:
@@ -32,7 +34,8 @@ private:
                 CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
     void EmitPayloads(CKFFUniformSink *sink,
                       const CKFFProgramContext *programContext,
-                      CKDWORD activeTextureCount);
+                      CKDWORD activeTextureCount,
+                      CKBOOL polygonDepthBias);
     void EmitObjectMatrixUniforms(const CKFFUniformEmissionContext *context);
     void EmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context);
     void EmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context);
@@ -48,6 +51,7 @@ private:
     uint64_t m_LastStaticConstantsIdentity;
     uint64_t m_LastStaticUniformRevision;
     CKDWORD m_LastStaticActiveTextureCount;
+    CKBOOL m_LastStaticPolygonDepthBias;
     CKFFShaderKey m_LastStaticShaderKey;
     CKFFSpecializationInfo m_LastStaticSpecialization;
 };

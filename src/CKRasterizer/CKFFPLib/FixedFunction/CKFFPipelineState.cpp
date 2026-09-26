@@ -62,6 +62,15 @@ CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
     return m_State.AlphaTestPrecision;
 }
 
+void CKFixedFunctionPipeline::SetDepthBiasFormat(CK_DEPTH_FORMAT format) {
+    if ((CKDWORD)format > (CKDWORD)CKRST_DEPTHFMT_D32F)
+        format = CKRST_DEPTHFMT_D24S8;
+    if (m_State.DepthBiasFormat == format)
+        return;
+    m_State.DepthBiasFormat = format;
+    OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
+}
+
 CKBOOL CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix) {
     if (index >= CKFF_VERTEX_BLEND_MATRIX_COUNT)
         return FALSE;

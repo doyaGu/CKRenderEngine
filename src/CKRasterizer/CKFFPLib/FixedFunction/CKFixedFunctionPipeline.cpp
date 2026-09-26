@@ -256,6 +256,12 @@ static bool CKFFUsesLineRasterization(VXPRIMITIVETYPE topology,
            drawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_WIREFRAME;
 }
 
+static bool CKFFUsesPolygonDepthBias(VXPRIMITIVETYPE topology)
+{
+    return topology == VX_TRIANGLELIST || topology == VX_TRIANGLESTRIP ||
+           topology == VX_TRIANGLEFAN;
+}
+
 static bool CKFFLinePatternSuppressesDraw(VXPRIMITIVETYPE topology,
                                          const CKDrawStateCache &drawState)
 {
@@ -397,8 +403,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
     // affect the primitives actually submitted by this draw.
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_DITHERENABLE))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_DITHER);
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_ZBIAS) != 0)
-        RecordDrawApproximation(CKRST_DIAG_APPROX_ZBIAS);
     const CKDWORD linePattern =
         m_State.DrawState.GetRenderState(VXRENDERSTATE_LINEPATTERN);
     if (lines && linePattern != 0 && (linePattern >> 16) != 0 &&
@@ -1029,6 +1033,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     CKFFDrawSubmission submission = {};
     submission.DrawStateType = drawStateType;
     submission.ForceSolidFill = expandedPointFill || type == VX_POINTLIST;
+    submission.PolygonDepthBias = CKFFUsesPolygonDepthBias(type) ? TRUE : FALSE;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
     submission.VertexFormat = m_TransientGeometry.GetFormatFlags();
@@ -1112,7 +1117,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         if (!m_UniformEmitter.UploadUniforms(
                 &m_Constants, programContext, textures->ActiveStageCount,
-                m_StaticUniformRevision))
+                m_StaticUniformRevision, submission.PolygonDepthBias))
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
     }
     CKFF_PROBE(m_Probes, OnWorldMatrix(m_State.World));
@@ -1326,6 +1331,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
 
     CKFFDrawSubmission submission = {};
     submission.DrawStateType = type;
+    submission.PolygonDepthBias = CKFFUsesPolygonDepthBias(type) ? TRUE : FALSE;
     submission.ProgramContext = &programContext;
     submission.Textures = &textureBindingSet;
     submission.VertexBuffer = vb;

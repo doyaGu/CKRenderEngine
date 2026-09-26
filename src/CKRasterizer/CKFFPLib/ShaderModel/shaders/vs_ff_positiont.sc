@@ -153,7 +153,7 @@ void main()
         v_texcoord6 *= clipW;
         v_texcoord7Fog.xyw *= clipW;
     }
-    // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
+    // D3D8 ZBIAS compatibility offset, resolved for the active depth format.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     if (u_ffDrawParams[4].w > 0.5) {
         vec2 pointOffset = u_ffDrawParams[4].w > 1.5

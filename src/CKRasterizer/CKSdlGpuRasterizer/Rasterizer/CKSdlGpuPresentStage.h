@@ -19,9 +19,11 @@ struct CKSdlGpuPresentTarget {
     CKDWORD Width;
     CKDWORD Height;
     CKDWORD Samples;      // 0 = single sampled
+    CK_DEPTH_FORMAT DepthFormat;
 
     CKSdlGpuPresentTarget()
-        : ColorTexture(0), DepthTexture(0), FrameBuffer(0), Width(0), Height(0), Samples(0) {}
+        : ColorTexture(0), DepthTexture(0), FrameBuffer(0), Width(0), Height(0), Samples(0),
+          DepthFormat(CKRST_DEPTHFMT_D24S8) {}
     CKBOOL IsActive() const { return FrameBuffer != 0; }
 };
 

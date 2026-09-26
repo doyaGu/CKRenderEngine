@@ -2,6 +2,7 @@
 #define CKFFCONTEXTSTATE_H
 
 #include "CKRasterizer.h"
+#include "CKRasterizerContextEnums.h"
 
 class CKFixedFunctionPipeline;
 class CKFFBufferUseTracker;
@@ -88,6 +89,7 @@ struct CKFFRenderTargetState {
     CKRST_CUBEFACE Face;
     CKDWORD Width;
     CKDWORD Height;
+    CK_DEPTH_FORMAT DepthFormat;
 
     CKFFRenderTargetState();
 

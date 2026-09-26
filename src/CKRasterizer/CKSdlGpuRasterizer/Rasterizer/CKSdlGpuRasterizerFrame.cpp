@@ -136,6 +136,17 @@ CKBOOL CKSdlGpuRasterizerContext::PrepareFrameTarget()
 CKBOOL CKSdlGpuRasterizerContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rect, CKDWORD ClearFlags, CKDWORD Color,
                                      float Z, CKDWORD Stencil, const char *Name)
 {
+    CK_DEPTH_FORMAT depthFormat = m_ZBpp <= 16 ? CKRST_DEPTHFMT_D16 : CKRST_DEPTHFMT_D24S8;
+    if (m_TargetState.IsActive() && RenderTarget == m_TargetFrameBuffer) {
+        depthFormat = m_TargetState.DepthFormat;
+    } else if (m_Present.SceneTarget().IsActive() &&
+               RenderTarget == m_Present.SceneTarget().FrameBuffer) {
+        depthFormat = m_Present.SceneTarget().DepthFormat;
+    } else if (m_Present.NativeTarget().IsActive() &&
+               RenderTarget == m_Present.NativeTarget().FrameBuffer) {
+        depthFormat = m_Present.NativeTarget().DepthFormat;
+    }
+    m_FFP.SetDepthBiasFormat(depthFormat);
     CKRenderPassDesc pass;
     pass.RenderTarget = RenderTarget;
     pass.Rect = Rect;

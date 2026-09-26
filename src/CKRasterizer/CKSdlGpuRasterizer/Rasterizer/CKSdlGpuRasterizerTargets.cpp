@@ -105,6 +105,7 @@ CKBOOL CKSdlGpuRasterizerContext::SetTargetTexture(CKDWORD Texture, int Width, i
         return FALSE;
     }
     m_TargetState = target;
+    m_TargetState.DepthFormat = depthDesc.Format;
     m_TargetFrameBuffer = frameBuffer;
     m_TargetDepthTexture = depthTexture;
     m_FFP.SetRenderTargetActive(TRUE);

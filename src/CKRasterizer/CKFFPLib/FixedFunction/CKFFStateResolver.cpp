@@ -228,8 +228,12 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
     memcpy(drawParams[2], state.MaterialConstants.Specular, sizeof(drawParams[2]));
     memcpy(drawParams[3], state.MaterialConstants.Emissive, sizeof(drawParams[3]));
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][0] = state.MaterialConstants.Power;
-    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][1] =
-        (float)drawState.GetRenderState(VXRENDERSTATE_ZBIAS) * CKFF_ZBIAS_DEPTH_UNIT;
+    CKDWORD zBias = drawState.GetRenderState(VXRENDERSTATE_ZBIAS);
+    if (zBias > 16u)
+        zBias = 16u;
+    drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][1] = context->PolygonDepthBias
+        ? (float)zBias * CKFFDepthBiasUnit(state.DepthBiasFormat)
+        : 0.0f;
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][2] =
         drawState.GetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE) ? 0.0f : 1.0f;
     drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER][3] =

@@ -123,6 +123,8 @@ public:
     void SetDrawMarker(const char *marker) { m_DrawMarker = marker; }
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;
+    void SetDepthBiasFormat(CK_DEPTH_FORMAT format);
+    CK_DEPTH_FORMAT GetDepthBiasFormat() const { return m_State.DepthBiasFormat; }
     CKBOOL SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);
     void ResetVertexBlendMatrices();
     void SetTexcoordComponentCount(CKDWORD stage, CKDWORD count);
@@ -184,6 +186,7 @@ private:
     struct CKFFDrawSubmission {
         VXPRIMITIVETYPE DrawStateType;
         CKBOOL ForceSolidFill;
+        CKBOOL PolygonDepthBias;
         const CKFFProgramContext *ProgramContext;
         const CKFFTextureBindingSet *Textures;
         CKDWORD VertexBuffer;

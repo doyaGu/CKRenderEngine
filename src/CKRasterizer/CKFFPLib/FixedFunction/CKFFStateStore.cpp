@@ -20,6 +20,7 @@ void CKFFStateStore::Reset()
     DrawState.Reset();
     ActiveLightCount = 0;
     AlphaTestPrecision = 0;
+    DepthBiasFormat = CKRST_DEPTHFMT_D24S8;
     Vx3DMatrixIdentity(World);
     Vx3DMatrixIdentity(View);
     Vx3DMatrixIdentity(Projection);

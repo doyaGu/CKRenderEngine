@@ -105,6 +105,7 @@ CKBOOL CKBgfxRasterizerContext::SetTargetTexture(CKDWORD Texture, int Width, int
         return FALSE;
     }
     m_Target = target;
+    m_Target.DepthFormat = depthDesc.Format;
     m_TargetFrameBuffer = frameBuffer;
     m_TargetDepthTexture = depthTexture;
     m_FFP.SetRenderTargetActive(TRUE);

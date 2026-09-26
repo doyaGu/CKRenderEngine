@@ -106,6 +106,7 @@ struct CKFFUniformEmissionContext {
     CKBOOL FogEnabled;
     CKDWORD VertexFogMode;
     CKDWORD PixelFogMode;
+    CKBOOL PolygonDepthBias;
 };
 
 inline void CKFFInitPreparedState(CKFFPreparedState *prepared)

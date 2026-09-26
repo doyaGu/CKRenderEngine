@@ -138,6 +138,7 @@ CKBOOL CKSdlGpuPresentStage::CreateTarget(CKSdlGpuPresentTarget &target, CKDWORD
     target.Width = width;
     target.Height = height;
     target.Samples = samples;
+    target.DepthFormat = depthDesc.Format;
     return TRUE;
 }
 

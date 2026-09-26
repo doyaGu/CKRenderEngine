@@ -60,7 +60,8 @@ static void CKFFInitUniformSink(CKFFUniformSink *sink,
 static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
                                            CKFFUniformSink *sink,
                                            const CKFFProgramContext *programContext,
-                                           CKDWORD activeTextureCount)
+                                           CKDWORD activeTextureCount,
+                                           CKBOOL polygonDepthBias)
 {
     if (!context)
         return;
@@ -75,6 +76,7 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->FogEnabled = context->ShaderKey.FS.FogEnable ? TRUE : FALSE;
     context->VertexFogMode = context->FogEnabled ? context->ShaderKey.FS.VertexFogMode : 0;
     context->PixelFogMode = context->FogEnabled ? context->ShaderKey.FS.PixelFogMode : 0;
+    context->PolygonDepthBias = polygonDepthBias;
 }
 
 CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
@@ -90,7 +92,8 @@ CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
       m_StaticUniformCacheValid(FALSE),
       m_LastStaticConstantsIdentity(0),
       m_LastStaticUniformRevision(0),
-      m_LastStaticActiveTextureCount(0)
+      m_LastStaticActiveTextureCount(0),
+      m_LastStaticPolygonDepthBias(FALSE)
 {
 }
 
@@ -100,6 +103,7 @@ void CKFFUniformEmitter::ResetCache()
     m_LastStaticConstantsIdentity = 0;
     m_LastStaticUniformRevision = 0;
     m_LastStaticActiveTextureCount = 0;
+    m_LastStaticPolygonDepthBias = FALSE;
     m_LastStaticShaderKey = CKFFShaderKey();
     m_LastStaticSpecialization = CKFFSpecializationInfo();
 }
@@ -325,12 +329,14 @@ void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext 
 
 void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
                                       const CKFFProgramContext *programContext,
-                                      CKDWORD activeTextureCount)
+                                      CKDWORD activeTextureCount,
+                                      CKBOOL polygonDepthBias)
 {
     if (!sink || !programContext)
         return;
     CKFFUniformEmissionContext context;
-    CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount);
+    CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount,
+                                   polygonDepthBias);
     const bool emitStatic = sink->EmitStatic;
     const bool emitObject = sink->EmitObject;
 
@@ -368,7 +374,8 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
                                           const CKFFProgramContext *programContext,
                                           CKDWORD activeTextureCount,
-                                          uint64_t staticUniformRevision)
+                                          uint64_t staticUniformRevision,
+                                          CKBOOL polygonDepthBias)
 {
     if (!constants || !programContext)
         return FALSE;
@@ -378,16 +385,19 @@ CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
         m_LastStaticConstantsIdentity == constants->Identity() &&
         m_LastStaticUniformRevision == staticUniformRevision &&
         m_LastStaticActiveTextureCount == activeTextureCount &&
+        m_LastStaticPolygonDepthBias == polygonDepthBias &&
         m_LastStaticShaderKey == programContext->ShaderKey &&
         m_LastStaticSpecialization == programContext->Specialization) {
         return TRUE;
     }
-    if (!UploadStaticUniforms(constants, programContext, activeTextureCount))
+    if (!UploadStaticUniforms(constants, programContext, activeTextureCount,
+                              polygonDepthBias))
         return FALSE;
     m_StaticUniformCacheValid = TRUE;
     m_LastStaticConstantsIdentity = constants->Identity();
     m_LastStaticUniformRevision = staticUniformRevision;
     m_LastStaticActiveTextureCount = activeTextureCount;
+    m_LastStaticPolygonDepthBias = polygonDepthBias;
     m_LastStaticShaderKey = programContext->ShaderKey;
     m_LastStaticSpecialization = programContext->Specialization;
     return TRUE;
@@ -401,19 +411,20 @@ CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKFFConstantSet *constants,
         return FALSE;
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, constants, FALSE, TRUE);
-    EmitPayloads(&sink, programContext, activeTextureCount);
+    EmitPayloads(&sink, programContext, activeTextureCount, FALSE);
     return sink.Failed ? FALSE : TRUE;
 }
 
 CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKFFConstantSet *constants,
                                                 const CKFFProgramContext *programContext,
-                                                CKDWORD activeTextureCount)
+                                                CKDWORD activeTextureCount,
+                                                CKBOOL polygonDepthBias)
 {
     if (!constants || !programContext)
         return FALSE;
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, constants, TRUE, FALSE);
-    EmitPayloads(&sink, programContext, activeTextureCount);
+    EmitPayloads(&sink, programContext, activeTextureCount, polygonDepthBias);
     return sink.Failed ? FALSE : TRUE;
 }
 

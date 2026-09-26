@@ -244,6 +244,7 @@ void CKFFRenderTargetState::Reset()
     Face = CKRST_CUBEFACE_XPOS;
     Width = 0;
     Height = 0;
+    DepthFormat = CKRST_DEPTHFMT_D24S8;
 }
 
 CKDWORD CKFFTargetAlphaTestPrecision(const CKTextureDesc *TargetTexture,
