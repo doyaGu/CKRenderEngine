@@ -511,6 +511,88 @@ static void PointFilledWrapPreservesVertexSizes()
     }
 }
 
+static void PointFillScalingUsesBlendedAndTweenedCenters()
+{
+    struct BlendRecord {
+        VxVector Position;
+        float Weights[3];
+    } blended[3] = {
+        {VxVector(0.0f, 0.0f, 0.0f), {0.0f, 0.0f, 0.0f}},
+        {VxVector(0.0f, 0.0f, 0.0f), {0.0f, 0.0f, 0.0f}},
+        {VxVector(0.0f, 0.0f, 0.0f), {0.0f, 0.0f, 0.0f}}
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS1;
+    data.PositionPtr = blended;
+    data.PositionStride = sizeof(BlendRecord);
+
+    CKFFPointSpriteParams params = {};
+    params.Size = 1.0f;
+    params.MinSize = 1.0f;
+    params.MaxSize = 64.0f;
+    params.ScaleEnable = TRUE;
+    params.ScaleC = 1.0f;
+    params.World = VxMatrix::Identity();
+    params.View = VxMatrix::Identity();
+    params.Projection = VxMatrix::Identity();
+    for (int matrix = 0; matrix < 4; ++matrix)
+        params.BlendMatrices[matrix] = VxMatrix::Identity();
+    params.BlendMatrices[1][3][2] = 4.0f;
+    params.BlendMode = CKFF_VERTEX_BLEND_NORMAL;
+    params.BlendCount = 1;
+    params.ViewportHeight = 64.0f;
+
+    TransientGeometryHarness blendHarness;
+    TestCheck(blendHarness.Geometry.Prepare(
+                  VX_TRIANGLELIST, NULL, 0, &data, 0, FALSE, &params,
+                  NULL, NULL, TRUE),
+              "scaled matrix-blended point fill prepares source vertices");
+    CKBOOL approximate = FALSE;
+    TestCheck(blendHarness.Geometry.ExpandPointFilledTriangles(
+                  params, FALSE, &data, &approximate) && !approximate,
+              "scaled matrix-blended point fill expands exactly");
+    const CKBYTE *vertices = blendHarness.Geometry.GetVertices();
+    CKDWORD stride = blendHarness.Geometry.GetVertexStride();
+    TestCheck(vertices && fabs(ReadFloat(vertices + stride - 8) + 8.0f) < 0.0001f,
+              "point scaling must use the matrix-blended center distance");
+
+    VxVector positions[3] = {
+        VxVector(0.0f, 0.0f, 2.0f),
+        VxVector(0.0f, 0.0f, 2.0f),
+        VxVector(0.0f, 0.0f, 2.0f)
+    };
+    VxVector tweenPositions[3] = {
+        VxVector(0.0f, 0.0f, 4.0f),
+        VxVector(0.0f, 0.0f, 4.0f),
+        VxVector(0.0f, 0.0f, 4.0f)
+    };
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_TWEEN;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TweenPositionPtr = tweenPositions;
+    data.TweenPositionStride = sizeof(VxVector);
+    params.BlendMode = CKFF_VERTEX_BLEND_TWEEN;
+    params.BlendCount = 0;
+    params.TweenFactor = 0.5f;
+
+    TransientGeometryHarness tweenHarness;
+    TestCheck(tweenHarness.Geometry.Prepare(
+                  VX_TRIANGLELIST, NULL, 0, &data, 0, FALSE, &params,
+                  NULL, NULL, TRUE),
+              "scaled tweened point fill prepares source vertices");
+    approximate = FALSE;
+    TestCheck(tweenHarness.Geometry.ExpandPointFilledTriangles(
+                  params, FALSE, &data, &approximate) && !approximate,
+              "scaled tweened point fill expands exactly");
+    vertices = tweenHarness.Geometry.GetVertices();
+    stride = tweenHarness.Geometry.GetVertexStride();
+    const float expectedHalfSize = 64.0f / 3.0f * 0.5f;
+    TestCheck(vertices &&
+                  fabs(ReadFloat(vertices + stride - 8) + expectedHalfSize) < 0.0001f,
+              "point scaling must use the tweened center distance");
+}
+
 static void LargePointSpriteBatchUses32BitIndices()
 {
     TransientGeometryHarness harness;
@@ -987,6 +1069,8 @@ int main()
               &WrapPreservesLargeNonIndexedVertexNumbers);
     tests.Run("point-filled wrap preserves per-vertex sizes",
               &PointFilledWrapPreservesVertexSizes);
+    tests.Run("point-fill scaling uses blended and tweened centers",
+              &PointFillScalingUsesBlendedAndTweenedCenters);
     tests.Run("large point sprite batch uses 32-bit indices",
               &LargePointSpriteBatchUses32BitIndices);
     tests.Run("indexed point sprites use selected vertices",

@@ -1,4 +1,4 @@
-$input a_position, a_tangent, a_bitangent, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
+$input a_position, a_tangent, a_bitangent, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
 #ifndef CKFF_VS_CLIP_DISTANCE
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
@@ -121,7 +121,10 @@ void main()
     }
     // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
-    if (u_ffDrawParams[4].w > 0.5)
-        gl_Position.xy += vec2(a_tangent.x, a_bitangent.x) * u_viewport.xy * gl_Position.w;
+    if (u_ffDrawParams[4].w > 0.5) {
+        vec2 pointOffset = u_ffDrawParams[4].w > 1.5
+            ? a_weight.xy : a_tangent.xy;
+        gl_Position.xy += pointOffset * u_viewport.xy * gl_Position.w;
+    }
     ckffApplyBackendClipSpace(gl_Position);
 }

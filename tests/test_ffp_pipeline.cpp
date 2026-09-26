@@ -664,16 +664,16 @@ void ExpandedPointFillPreservesPointCenterSemantics() {
     TestCheck((ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET) != 0 &&
                   ffp.GetDraw().ShaderKey.VS.GetPointOffset(),
               "expanded point fill must enable the internal final-position offset path");
-    bool hasPointOffsetX = false;
-    bool hasPointOffsetY = false;
+    bool hasPointOffset = false;
+    bool hasRedundantPointOffset = false;
     for (size_t i = 0; i < context.LastVertexLayoutElements.size(); ++i) {
-        hasPointOffsetX = hasPointOffsetX ||
+        hasPointOffset = hasPointOffset ||
             context.LastVertexLayoutElements[i].Attrib == CKRST_ATTRIB_TANGENT;
-        hasPointOffsetY = hasPointOffsetY ||
+        hasRedundantPointOffset = hasRedundantPointOffset ||
             context.LastVertexLayoutElements[i].Attrib == CKRST_ATTRIB_BITANGENT;
     }
-    TestCheck(hasPointOffsetX && hasPointOffsetY,
-              "expanded point layout must carry both pixel-space corner offsets");
+    TestCheck(hasPointOffset && !hasRedundantPointOffset,
+              "expanded point layout must pack both pixel offsets into one attribute");
 
     const CKDWORD stride = CKFFVertexLayout::ComputeStride(ffp.GetDraw().VertexFormat);
     TestCheck(context.Log.LastVertexBytes.size() == stride * 12,
@@ -687,6 +687,89 @@ void ExpandedPointFillPreservesPointCenterSemantics() {
                           center[2] == positions[0].z,
                       "every expanded corner must retain the original point center");
         }
+    }
+
+    ffp.Shutdown();
+}
+
+void ExpandedPointFillPreservesBlendAndTweenInputs() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    struct BlendVertex {
+        VxVector Position;
+        float Weights[3];
+    } blended[3] = {
+        {VxVector(-0.5f, -0.5f, 0.5f), {0.25f, 0.0f, 0.0f}},
+        {VxVector(0.5f, -0.5f, 0.5f), {0.50f, 0.0f, 0.0f}},
+        {VxVector(-0.5f, 0.5f, 0.5f), {0.75f, 0.0f, 0.0f}}
+    };
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 3;
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTS1;
+    data.PositionPtr = blended;
+    data.PositionStride = sizeof(BlendVertex);
+
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+    ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
+    ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(8.0f));
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS);
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
+              "matrix-blended point fill must expand");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  (ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET) != 0 &&
+                  (ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET_WEIGHT) == 0,
+              "matrix-blended point fill must use exact tangent point offsets");
+    CKDWORD stride = CKFFVertexLayout::ComputeStride(ffp.GetDraw().VertexFormat);
+    TestCheck(context.Log.LastVertexBytes.size() == stride * 12,
+              "matrix-blended point fill must retain weights beside one offset attribute");
+    if (context.Log.LastVertexBytes.size() == stride * 12) {
+        float weight = 0.0f;
+        float offset[2] = {};
+        memcpy(&weight, &context.Log.LastVertexBytes[12], sizeof(weight));
+        memcpy(offset, &context.Log.LastVertexBytes[stride - 8], sizeof(offset));
+        TestCheck(weight == 0.25f && offset[0] == -4.0f && offset[1] == -4.0f,
+                  "matrix-blended point expansion must preserve weights and store its offset separately");
+    }
+
+    VxVector positions[3] = {
+        VxVector(-0.75f, -0.5f, 0.5f),
+        VxVector(0.25f, -0.5f, 0.5f),
+        VxVector(-0.75f, 0.5f, 0.5f)
+    };
+    VxVector tweenPositions[3] = {
+        VxVector(-0.25f, -0.5f, 0.5f),
+        VxVector(0.75f, -0.5f, 0.5f),
+        VxVector(-0.25f, 0.5f, 0.5f)
+    };
+    data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_TWEEN;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TweenPositionPtr = tweenPositions;
+    data.TweenPositionStride = sizeof(VxVector);
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    ffp.SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatStageState(0.5f));
+    TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
+              "tweened point fill must expand");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  (ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET_WEIGHT) != 0 &&
+                  ffp.GetDraw().ShaderKey.VS.GetPointOffsetWeight(),
+              "tweened point fill must use the inactive weight input for exact offsets");
+    stride = CKFFVertexLayout::ComputeStride(ffp.GetDraw().VertexFormat);
+    TestCheck(context.Log.LastVertexBytes.size() == stride * 12,
+              "tweened point fill must retain tween positions beside one offset attribute");
+    if (context.Log.LastVertexBytes.size() == stride * 12) {
+        float tween[3] = {};
+        float offset[2] = {};
+        memcpy(tween, &context.Log.LastVertexBytes[12], sizeof(tween));
+        memcpy(offset, &context.Log.LastVertexBytes[stride - 8], sizeof(offset));
+        TestCheck(tween[0] == tweenPositions[0].x &&
+                      tween[1] == tweenPositions[0].y &&
+                      tween[2] == tweenPositions[0].z &&
+                      offset[0] == -4.0f && offset[1] == -4.0f,
+                  "tweened point expansion must preserve its second position stream");
     }
 
     ffp.Shutdown();
@@ -3978,6 +4061,8 @@ int main() {
               &IgnoredRenderStatesReportDiagnostics);
     tests.Run("Expanded point fill preserves point center semantics",
               &ExpandedPointFillPreservesPointCenterSemantics);
+    tests.Run("Expanded point fill preserves blend and tween inputs",
+              &ExpandedPointFillPreservesBlendAndTweenInputs);
     tests.Run("Invalid state values reject before backend encoding",
               &InvalidStateValuesRejectBeforeBackendEncoding);
     tests.Run("Draw validation cache invalidates on state changes",

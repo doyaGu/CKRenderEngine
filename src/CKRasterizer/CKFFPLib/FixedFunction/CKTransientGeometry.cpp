@@ -325,21 +325,12 @@ static void PointFillTransform(const VxMatrix &matrix, const float input[4], flo
     }
 }
 
-static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
-                                    const CKFFPointFillCullParams &params,
-                                    double &x, double &y, bool &outsideClip)
+template <typename Params>
+static void PointFillWorldPosition(const CKBYTE *vertex, CKDWORD formatFlags,
+                                   const Params &params, float worldPosition[4])
 {
-    outsideClip = false;
     float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-    memcpy(position, vertex, (formatFlags & CKFF_VF_POSITIONT) ? 16 : 12);
-    if (formatFlags & CKFF_VF_POSITIONT) {
-        if (!(position[3] > 0.0f) || !std::isfinite(position[0]) ||
-            !std::isfinite(position[1]))
-            return false;
-        x = position[0];
-        y = position[1];
-        return true;
-    }
+    memcpy(position, vertex, 12);
 
     CKDWORD offset = 12;
     if (formatFlags & CKFF_VF_NORMAL)
@@ -356,7 +347,6 @@ static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
     if (formatFlags & CKFF_VF_TWEENNORMAL)
         offset += 12;
 
-    float worldPosition[4];
     if (params.BlendMode == CKFF_VERTEX_BLEND_NORMAL) {
         float weights[3] = {};
         if (formatFlags & CKFF_VF_BLENDWEIGHT) {
@@ -365,7 +355,7 @@ static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
         }
         const CKBYTE *indices = (formatFlags & CKFF_VF_BLENDINDEX)
             ? vertex + offset : nullptr;
-        memset(worldPosition, 0, sizeof(worldPosition));
+        memset(worldPosition, 0, sizeof(float) * 4);
         float remaining = 1.0f;
         for (CKDWORD slot = 0; slot <= params.BlendCount; ++slot) {
             float weight = remaining;
@@ -384,6 +374,26 @@ static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
     } else {
         PointFillTransform(params.World, position, worldPosition);
     }
+}
+
+static bool PointFillScreenPosition(const CKBYTE *vertex, CKDWORD formatFlags,
+                                    const CKFFPointFillCullParams &params,
+                                    double &x, double &y, bool &outsideClip)
+{
+    outsideClip = false;
+    float position[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    memcpy(position, vertex, (formatFlags & CKFF_VF_POSITIONT) ? 16 : 12);
+    if (formatFlags & CKFF_VF_POSITIONT) {
+        if (!(position[3] > 0.0f) || !std::isfinite(position[0]) ||
+            !std::isfinite(position[1]))
+            return false;
+        x = position[0];
+        y = position[1];
+        return true;
+    }
+
+    float worldPosition[4];
+    PointFillWorldPosition(vertex, formatFlags, params, worldPosition);
 
     float clip[4];
     PointFillTransform(params.ViewProjection, worldPosition, clip);
@@ -494,11 +504,7 @@ CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
 {
     if (approximate)
         *approximate = FALSE;
-    if (!sourceData || m_VertexData.IsEmpty() || m_VertexStride == 0 ||
-        // These layouts need their final position after vertex blending. A
-        // source-space quad would receive a different blend at each corner.
-        (m_FormatFlags & (CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX |
-                          CKFF_VF_TWEENPOSITION)) != 0)
+    if (!sourceData || m_VertexData.IsEmpty() || m_VertexStride == 0)
         return FALSE;
     if ((sourceData->Flags & CKRST_DP_PSIZE) != 0 &&
         m_SourceVertexIndices.Size() != (int)m_VertexCount)
@@ -507,7 +513,25 @@ CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
     const CKDWORD elementCount = m_IndexCount ? m_IndexCount : m_VertexCount;
     const CKDWORD pointCount = elementCount / 3 * 3;
     const CKDWORD sourceStride = m_VertexStride;
-    const CKDWORD expandedStride = sourceStride + 2u * sizeof(float);
+    const bool pointOffsetWeight =
+        params.BlendMode == CKFF_VERTEX_BLEND_TWEEN;
+    const bool reusesPointOffsetAttribute = pointOffsetWeight
+        ? (m_FormatFlags & CKFF_VF_BLENDWEIGHT) != 0
+        : (m_FormatFlags & CKFF_VF_TWEENPOSITION) != 0;
+    CKDWORD pointOffset = sourceStride;
+    if (reusesPointOffsetAttribute) {
+        pointOffset = (m_FormatFlags & CKFF_VF_POSITIONT) ? 16u : 12u;
+        if (m_FormatFlags & CKFF_VF_NORMAL)
+            pointOffset += 12;
+        if (pointOffsetWeight) {
+            if (m_FormatFlags & CKFF_VF_TWEENPOSITION)
+                pointOffset += 12;
+            if (m_FormatFlags & CKFF_VF_TWEENNORMAL)
+                pointOffset += 12;
+        }
+    }
+    const CKDWORD expandedStride = sourceStride +
+        (reusesPointOffsetAttribute ? 0u : 2u * sizeof(float));
     if (pointCount == 0 || pointCount > 0x2aaaaaaau ||
         pointCount > 0x7fffffffu / 4 / expandedStride)
         return FALSE;
@@ -563,9 +587,12 @@ CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
                 FALSE, vertexParams.ScaleA, vertexParams.ScaleB,
                 vertexParams.ScaleC, 0.0f);
         } else {
-            const VxVector local(center[0], center[1], center[2]);
-            const VxVector world = TransformPoint(local, vertexParams.World);
-            const VxVector view = TransformPoint(world, vertexParams.View);
+            float worldPosition[4];
+            float viewPosition[4];
+            PointFillWorldPosition(source, m_FormatFlags,
+                                   vertexParams, worldPosition);
+            PointFillTransform(vertexParams.View, worldPosition, viewPosition);
+            const VxVector view(viewPosition[0], viewPosition[1], viewPosition[2]);
             pixelSize = ComputePointSpritePixelSize(view, vertexParams);
         }
 
@@ -577,7 +604,7 @@ CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
         for (int corner = 0; corner < 4; ++corner) {
             CKBYTE *dst = quads.Begin() + (base + corner) * expandedStride;
             memcpy(dst, source, sourceStride);
-            memcpy(dst + sourceStride, pointOffsets[corner], sizeof(pointOffsets[corner]));
+            memcpy(dst + pointOffset, pointOffsets[corner], sizeof(pointOffsets[corner]));
             if (pointSprites) {
                 CKDWORD offset = texcoordOffset;
                 for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
@@ -606,6 +633,8 @@ CKBOOL CKTransientGeometry::ExpandPointFilledTriangles(
     m_IndexData.Swap(quadIndices);
     m_SourceVertexIndices.Resize(0);
     m_FormatFlags |= CKFF_VF_POINTOFFSET;
+    if (pointOffsetWeight)
+        m_FormatFlags |= CKFF_VF_POINTOFFSET_WEIGHT;
     m_VertexStride = expandedStride;
     m_VertexCount = emitted * 4;
     m_IndexCount = emitted * 6;

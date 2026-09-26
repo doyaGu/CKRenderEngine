@@ -31,7 +31,15 @@ CKDWORD CKFFVertexLayout::ComputeStride(CKDWORD formatFlags) {
     }
     if (formatFlags & CKFF_VF_COLOR0)    stride += 4;  // uint8x4 normalized
     if (formatFlags & CKFF_VF_COLOR1)    stride += 4;  // uint8x4 normalized
-    if (formatFlags & CKFF_VF_POINTOFFSET) stride += 8; // two float pixel offsets
+    if (formatFlags & CKFF_VF_POINTOFFSET) {
+        const bool useWeight =
+            (formatFlags & CKFF_VF_POINTOFFSET_WEIGHT) != 0;
+        const bool reusesAttribute = useWeight
+            ? (formatFlags & CKFF_VF_BLENDWEIGHT) != 0
+            : (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        if (!reusesAttribute)
+            stride += 8; // float2 pixel offset
+    }
     return stride;
 }
 
@@ -222,27 +230,26 @@ CKBOOL CKFFVertexLayout::BuildLayout(
         count++;
         offset += 4;
     }
-    if (formatFlags & CKFF_VF_POINTOFFSET) {
-        // Point-filled triangle quads keep the source vertex at the point
-        // centre. Two otherwise-unused scalar attributes move only the final
-        // clip position in the vertex shader.
-        elements[count].Attrib = CKRST_ATTRIB_TANGENT;
-        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
-        elements[count].Count = 1;
-        elements[count].Normalized = FALSE;
-        elements[count].AsInt = FALSE;
-        elements[count].Offset = offset;
-        count++;
-        offset += 4;
-
-        elements[count].Attrib = CKRST_ATTRIB_BITANGENT;
-        elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
-        elements[count].Count = 1;
-        elements[count].Normalized = FALSE;
-        elements[count].AsInt = FALSE;
-        elements[count].Offset = offset;
-        count++;
-        offset += 4;
+    if ((formatFlags & CKFF_VF_POINTOFFSET) != 0) {
+        const bool useWeight =
+            (formatFlags & CKFF_VF_POINTOFFSET_WEIGHT) != 0;
+        const bool reusesAttribute = useWeight
+            ? (formatFlags & CKFF_VF_BLENDWEIGHT) != 0
+            : (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        if (!reusesAttribute) {
+            // The selected source is unused by the active vertex mode. A
+            // float2 carries the final pixel offset without consuming another
+            // shader input location.
+            elements[count].Attrib = useWeight
+                ? CKRST_ATTRIB_WEIGHT : CKRST_ATTRIB_TANGENT;
+            elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+            elements[count].Count = 2;
+            elements[count].Normalized = FALSE;
+            elements[count].AsInt = FALSE;
+            elements[count].Offset = offset;
+            count++;
+            offset += 8;
+        }
     }
 
     desc.Elements = elements;

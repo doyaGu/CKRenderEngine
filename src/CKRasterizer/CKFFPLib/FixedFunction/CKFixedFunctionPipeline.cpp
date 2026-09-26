@@ -823,11 +823,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
          m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
          m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
          (data->Flags & CKRST_DP_PSIZE) != 0);
-    const CKBOOL canExpandPointFill =
-        (formatFlags & (CKFF_VF_BLENDWEIGHT | CKFF_VF_BLENDINDEX |
-                        CKFF_VF_TWEENPOSITION)) == 0;
     const CKBOOL pointSprites =
-        (type == VX_POINTLIST || (pointFillExpansion && canExpandPointFill)) &&
+        (type == VX_POINTLIST || pointFillExpansion) &&
         m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) != 0;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     const bool debugLogging = m_DebugState.AnyLoggingEnabled();
@@ -882,13 +879,36 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     pointParams.World = m_State.World;
     pointParams.View = m_State.View;
     pointParams.Projection = m_State.Projection;
+    pointParams.BlendMode = CKFF_VERTEX_BLEND_DISABLED;
+    pointParams.BlendCount = 0;
+    pointParams.IndexedBlend = FALSE;
+    if ((formatFlags & CKFF_VF_POSITIONT) == 0) {
+        const CKFFVertexBlendState blend = CKFFResolveVertexBlendState(
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
+            formatFlags);
+        pointParams.BlendMode = blend.Mode;
+        pointParams.BlendCount = blend.Count;
+        pointParams.IndexedBlend = blend.Indexed;
+    }
+    pointParams.TweenFactor = CKFFReadFloatRenderState(
+        m_State.DrawState, VXRENDERSTATE_TWEENFACTOR, 0.0f);
+    for (int i = 0; i < 4; ++i) {
+        pointParams.BlendMatrices[i] = m_State.VertexBlendMatrixSet[i]
+            ? m_State.VertexBlendMatrices[i]
+            : (i == 0 ? m_State.World : VxMatrix::Identity());
+    }
     pointParams.ViewportWidth = m_State.Viewport[0] != 0.0f
         ? fabsf(2.0f / m_State.Viewport[0]) : 1.0f;
     pointParams.ViewportHeight = m_State.Viewport[1] != 0.0f
         ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
     CKFFProgramPreparation programPreparation;
-    const CKDWORD programFormatFlags = formatFlags |
-        (pointFillExpansion && canExpandPointFill ? CKFF_VF_POINTOFFSET : 0);
+    const CKDWORD pointOffsetFlags = pointFillExpansion
+        ? CKFF_VF_POINTOFFSET |
+            (pointParams.BlendMode == CKFF_VERTEX_BLEND_TWEEN
+                ? CKFF_VF_POINTOFFSET_WEIGHT : 0)
+        : 0;
+    const CKDWORD programFormatFlags = formatFlags | pointOffsetFlags;
     const CKFFProgramPrepareStatus prepareStatus = PrepareSoftwareProgram(
         &programPreparation, data->Flags, activeTextureCount, programFormatFlags,
         m_State.TexcoordComponentCounts, pointSprites);
@@ -978,22 +998,14 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         cull.World = m_State.World;
         m_State.EnsureViewProjection();
         cull.ViewProjection = m_State.ViewProjection();
-        const CKFFVertexBlendState blend = CKFFResolveVertexBlendState(
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
-            m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
-            formatFlags);
-        cull.BlendMode = (formatFlags & CKFF_VF_POSITIONT) ? 0 : blend.Mode;
-        cull.BlendCount = blend.Count;
-        cull.IndexedBlend = blend.Indexed;
-        cull.TweenFactor = CKFFReadFloatRenderState(
-            m_State.DrawState, VXRENDERSTATE_TWEENFACTOR, 0.0f);
+        cull.BlendMode = pointParams.BlendMode;
+        cull.BlendCount = pointParams.BlendCount;
+        cull.IndexedBlend = pointParams.IndexedBlend;
+        cull.TweenFactor = pointParams.TweenFactor;
         cull.CullMode = m_State.DrawState.GetRenderState(VXRENDERSTATE_CULLMODE);
         cull.InverseWinding = m_State.DrawState.GetRenderState(VXRENDERSTATE_INVERSEWINDING) != 0;
-        for (int i = 0; i < 4; ++i) {
-            cull.BlendMatrices[i] = m_State.VertexBlendMatrixSet[i]
-                ? m_State.VertexBlendMatrices[i]
-                : (i == 0 ? m_State.World : VxMatrix::Identity());
-        }
+        for (int i = 0; i < 4; ++i)
+            cull.BlendMatrices[i] = pointParams.BlendMatrices[i];
         CKBOOL approximate = FALSE;
         m_TransientGeometry.CullPointFilledTriangles(cull, &approximate);
         if (approximate)
@@ -1010,9 +1022,9 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         CKBOOL approximate = FALSE;
         expandedPointFill = m_TransientGeometry.ExpandPointFilledTriangles(
             pointParams, pointSprites, data, &approximate);
-        if (!expandedPointFill && canExpandPointFill)
+        if (!expandedPointFill)
             return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
-        if (!expandedPointFill || approximate)
+        if (approximate)
             RecordDrawApproximation(CKRST_DIAG_APPROX_FILLMODE_POINT);
         if (expandedPointFill && m_TransientGeometry.GetVertexCount() == 0) {
             m_Draw = CKFFDraw();

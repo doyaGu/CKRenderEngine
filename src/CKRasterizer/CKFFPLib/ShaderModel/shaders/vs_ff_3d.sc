@@ -336,9 +336,12 @@ void main()
     // ZBIAS approximation: pull the depth towards the viewer by the resolved offset.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
     // Expanded point-filled triangles retain the source point for lighting,
-    // fog, texgen and user clipping. The internal tangent/bitangent scalars
-    // move only the final raster position by a pixel-space corner offset.
-    if (u_ffDrawParams[4].w > 0.5)
-        gl_Position.xy += vec2(a_tangent.x, a_bitangent.x) * u_viewport.xy * gl_Position.w;
+    // fog, texgen and user clipping. The active vertex mode leaves either
+    // tangent or blend weight available for the final pixel-space offset.
+    if (u_ffDrawParams[4].w > 0.5) {
+        vec2 pointOffset = u_ffDrawParams[4].w > 1.5
+            ? a_weight.xy : a_tangent.xy;
+        gl_Position.xy += pointOffset * u_viewport.xy * gl_Position.w;
+    }
     ckffApplyBackendClipSpace(gl_Position);
 }

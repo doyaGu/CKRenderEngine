@@ -1305,6 +1305,9 @@ void CheckPointFillTriangleCulling(Backend &b)
     TestCheck(redCount(blendUnculled) > 0 &&
                   PixelNear(blendUnculled, 44, 20, 255, 0, 0),
               "indexed matrix blend uses palette slot one");
+    const CKDWORD blendPointApproxBefore =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT];
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(8.0f));
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
     for (CKDWORD cull : {VXCULL_CW, VXCULL_CCW}) {
         Pixels solid, point;
@@ -1345,12 +1348,16 @@ void CheckPointFillTriangleCulling(Backend &b)
         TestCheck((redCount(point) > 0) == (redCount(solid) > 0),
                   "tweened point fill culls the interpolated face");
     }
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_FILLMODE_POINT] ==
+                  blendPointApproxBefore,
+              "expanded matrix-blended and tweened point fill has no approximation");
 
     ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_DISABLE);
     ctx->SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatBits(0.0f));
     ctx->SetRenderState(VXRENDERSTATE_INVERSEWINDING, FALSE);
     ctx->SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(1.0f));
     TestCheck(ctx->DeleteObject(ib, CKRST_OBJ_INDEXBUFFER), "delete point-fill culling IB");
     TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER), "delete point-fill culling VB");
     printf("  point-filled triangle face culling matches solid triangles and VB paths: passed\n");
