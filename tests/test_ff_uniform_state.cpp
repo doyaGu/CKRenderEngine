@@ -902,13 +902,35 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
               "Cube ordinals must count only earlier sampling cube stages");
     TestCheck(CKFFSamplerOrdinal(key, 2) == 0 && CKFFSamplerOrdinal(key, 5) == 1,
               "Volume ordinals must count only earlier sampling volume stages");
-    TestCheck(CKFFSamplerOrdinal(key, 4) == 0,
-              "2D ordinals are not used for slot selection and must not count cube / volume stages");
+    TestCheck(CKFFSamplerOrdinal(key, 4) == 4,
+              "Without comparison samplers, 2D resources retain their stage slot");
     TestCheck(key.SamplerSlotOverflowMask == 0,
               "Within the fixed sampler budget no stage may overflow");
     TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_CUBE, CKFFSamplerOrdinal(key, 3)) == 9 &&
                   CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, CKFFSamplerOrdinal(key, 5)) == 13,
               "Type ordinals must map onto the cube 8..11 and volume 12..15 slot blocks");
+
+    CKFFFSStateDesc comparisonDesc;
+    for (CKDWORD stage = 0; stage < 4; ++stage) {
+        comparisonDesc.SetStageColorOp(stage, CKRST_TOP_SELECTARG1);
+        comparisonDesc.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
+        comparisonDesc.SetStageAlphaOp(stage, CKRST_TOP_SELECTARG1);
+        comparisonDesc.SetStageAlphaArg1(stage, CKRST_TA_TEXTURE);
+    }
+    comparisonDesc.SetStageSamplerType(0, CKFF_SAMPLER_2D);
+    comparisonDesc.SetStageSamplerType(1, CKFF_SAMPLER_DEPTH);
+    comparisonDesc.SetStageSamplerCompareFunc(1, CKRST_COMPARE_LEQUAL);
+    comparisonDesc.SetStageSamplerType(2, CKFF_SAMPLER_DEPTH);
+    comparisonDesc.SetStageSamplerType(3, CKFF_SAMPLER_DEPTH);
+    comparisonDesc.SetStageSamplerCompareFunc(3, CKRST_COMPARE_GREATER);
+    const CKFFShaderKeyFS comparisonKey =
+        CKFFBuildShaderKeyFS(comparisonDesc, 0x0fu);
+    TestCheck(CKFFDepthCompareSamplerCount(comparisonKey) == 2 &&
+                  CKFFSamplerOrdinal(comparisonKey, 1) == 0 &&
+                  CKFFSamplerOrdinal(comparisonKey, 3) == 1 &&
+                  CKFFSamplerOrdinal(comparisonKey, 0) == 2 &&
+                  CKFFSamplerOrdinal(comparisonKey, 2) == 3,
+              "Comparison depth samplers must precede ordinary 2D resources");
 }
 
 void SamplerSlotOverflowSamplesAsUnbound() {
@@ -957,7 +979,7 @@ void SamplerSlotOverflowSamplesAsUnbound() {
               "Stage params must clear the has-texture flag of overflowing stages only");
 }
 
-void TextureStageCompareFuncStaysOutOfSamplerDesc() {
+void TextureStageCompareFuncReachesSamplerDesc() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     CKSamplerDesc sampler = CKFFBuildSamplerDesc(stages[0]);
     TestCheck(sampler.CompareFunc == CKRST_COMPARE_NONE,
@@ -965,8 +987,13 @@ void TextureStageCompareFuncStaysOutOfSamplerDesc() {
 
     stages[0][CKRST_TSS_COMPAREFUNC] = CKRST_COMPARE_GREATER;
     sampler = CKFFBuildSamplerDesc(stages[0]);
+    TestCheck(sampler.CompareFunc == CKRST_COMPARE_GREATER,
+              "Texture stage compare func must reach native comparison samplers");
+
+    stages[0][CKRST_TSS_COMPAREFUNC] = CKRST_COMPARE_ALWAYS + 1;
+    sampler = CKFFBuildSamplerDesc(stages[0]);
     TestCheck(sampler.CompareFunc == CKRST_COMPARE_NONE,
-              "FFP depth compare is shader-evaluated and must not enable sampler compare");
+              "Invalid texture stage compare funcs must not reach native samplers");
 }
 
 void TextureFilterLinearDoesNotRequestMipSampling() {
@@ -1222,8 +1249,8 @@ int main() {
               &SamplerOrdinalCountsOnlySamplingStagesOfTheSameType);
     tests.Run("Sampler slot overflow samples as unbound",
               &SamplerSlotOverflowSamplesAsUnbound);
-    tests.Run("Texture stage compare func stays out of sampler desc",
-              &TextureStageCompareFuncStaysOutOfSamplerDesc);
+    tests.Run("Texture stage compare func reaches sampler desc",
+              &TextureStageCompareFuncReachesSamplerDesc);
     tests.Run("Texture filter linear does not request mip sampling",
               &TextureFilterLinearDoesNotRequestMipSampling);
     tests.Run("DisableMipmap forces base-level sampling",

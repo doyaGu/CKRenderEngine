@@ -2734,6 +2734,255 @@ void CheckIndependentAttachmentClears(Backend &b)
     printf("  independent rectangular depth/stencil clears: passed single-sample and MSAA\n");
 }
 
+void CheckFilteredDepthComparison(Backend &b)
+{
+#ifdef CKRE_PIXEL_SDL_GPU
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+#else
+    CKBgfxRasterizerContext *backend =
+        static_cast<CKBgfxRasterizerContext *>(b.Context);
+#endif
+    CKRasterizerContext *ctx = b.Context;
+
+    CKTextureDesc colorDesc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, colorDesc.Format);
+    colorDesc.Format.Width = 4;
+    colorDesc.Format.Height = 4;
+    colorDesc.Format.BytesPerLine = 16;
+    colorDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                      CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+    colorDesc.MipMapCount = 1;
+    CKDWORD colorTexture = 0;
+    TestCheck(ctx->CreateTexture(&colorDesc, &colorTexture) && colorTexture != 0,
+              "PCF color attachment");
+
+    CKDepthTextureDesc depthDesc;
+    depthDesc.Width = 4;
+    depthDesc.Height = 4;
+    depthDesc.Format = CKRST_DEPTHFMT_D32F;
+    CKDWORD depthTexture = 0;
+    TestCheck(backend->CreateDepthTexture(&depthDesc, &depthTexture) == CK_OK &&
+                  depthTexture != 0,
+              "sampleable PCF depth texture");
+
+    CKTextureDesc publicDepth;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, publicDepth.Format);
+    publicDepth.Format.Width = 4;
+    publicDepth.Format.Height = 4;
+    publicDepth.Format.BytesPerLine = 16;
+    publicDepth.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_DEPTHSTENCIL;
+    publicDepth.MipMapCount = 1;
+    TestCheck(backend->RegisterTextureForTests(depthTexture, publicDepth),
+              "register native depth texture for fixed-function binding");
+
+    CKRenderTargetDesc targetDesc;
+    targetDesc.ColorTexture = colorTexture;
+    targetDesc.DepthTexture = depthTexture;
+    CKDWORD renderTarget = 0;
+    TestCheck(backend->CreateRenderTarget(&targetDesc, &renderTarget) == CK_OK &&
+                  renderTarget != 0,
+              "PCF render target");
+
+    CKRenderPassDesc pass;
+    pass.RenderTarget = renderTarget;
+    pass.Rect.left = 0;
+    pass.Rect.top = 0;
+    pass.Rect.right = 4;
+    pass.Rect.bottom = 4;
+    pass.ClearFlags = CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH;
+    pass.ClearZ = 0.75f;
+    pass.Name = "PCF depth high";
+    TestCheck(backend->BeginPass(&pass) == CK_OK,
+              "clear the PCF depth texture to the high value");
+    pass.Rect.right = 2;
+    pass.ClearFlags = CKRST_CTXCLEAR_DEPTH;
+    pass.ClearZ = 0.25f;
+    pass.Name = "PCF depth low left";
+    TestCheck(backend->BeginPass(&pass) == CK_OK,
+              "clear half the PCF depth texture to the low value");
+    CKDWORD submitted = 0;
+    TestCheck(backend->Submit(CKRST_PRESENT_UNCHANGED, FALSE, &submitted) == CK_OK,
+              "submit the PCF depth pattern");
+
+    const CKDWORD approximationsBefore =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_COMPAREFUNC_FILTER];
+    SetDiffuseState(ctx);
+    TestCheck(ctx->SetTexture(depthTexture, 0), "bind the PCF depth texture");
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                              CKRST_TTF_COUNT3);
+    VxMatrix compareTransform;
+    Vx3DMatrixIdentity(compareTransform);
+    compareTransform[3][2] = 0.5f;
+    ctx->SetTransformMatrix(VXMATRIX_TEXTURE0, compareTransform);
+    float coordinates[3][4] = {
+        {0.5f, 0.5f, 0.5f, 1.0f},
+        {0.5f, 0.5f, 0.5f, 1.0f},
+        {0.5f, 0.5f, 0.5f, 1.0f}
+    };
+    Pixels pixels;
+    ctx->SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_NEVER);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw depth comparison with NEVER");
+    }, pixels);
+    ExpectCenter(pixels, 0, 0, 0, "NEVER depth comparison rejects every tap");
+    ctx->SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_ALWAYS);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw depth comparison with ALWAYS");
+    }, pixels);
+    ExpectCenter(pixels, 255, 255, 255,
+                 "ALWAYS depth comparison accepts every tap");
+    ctx->SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LEQUAL);
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.25f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw depth comparison in the low-depth half");
+    }, pixels);
+    ExpectCenter(pixels, 0, 0, 0,
+                 "LEQUAL depth comparison rejects the low-depth half");
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.75f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw depth comparison in the high-depth half");
+    }, pixels);
+    ExpectCenter(pixels, 255, 255, 255,
+                 "LEQUAL depth comparison accepts the high-depth half");
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.5f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw bilinear depth comparison");
+    }, pixels);
+    ExpectCenter(pixels, 128, 128, 128,
+                 "bilinear depth comparison filters four comparison results");
+
+    SetDiffuseState(ctx);
+    TestCheck(ctx->SetTexture(colorTexture, 0),
+              "bind an ordinary texture beside the comparison texture");
+    TestCheck(ctx->SetTexture(depthTexture, 1),
+              "bind the PCF depth texture after the ordinary texture");
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xff0000ffu);
+    ctx->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_MODULATE);
+    ctx->SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+    ctx->SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_MODULATE);
+    ctx->SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+    ctx->SetTextureStageState(1, CKRST_TSS_AARG2, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX, 0);
+    ctx->SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(1, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(1, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(1, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_ALWAYS);
+    for (int i = 0; i < 3; ++i) {
+        coordinates[i][0] = 0.0f;
+        coordinates[i][1] = 0.5f;
+    }
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw ordinary border filtering beside depth comparison");
+    }, pixels);
+    ExpectCenter(pixels, 0, 0, 128,
+                 "ordinary border filtering remains exact in a comparison draw");
+
+    SetDiffuseState(ctx);
+    TestCheck(ctx->SetTexture(depthTexture, 0), "rebind the PCF depth texture");
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+    ctx->SetTextureStageState(0, CKRST_TSS_COMPAREFUNC, CKRST_COMPARE_LEQUAL);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                              CKRST_TTF_COUNT3);
+    ctx->SetTransformMatrix(VXMATRIX_TEXTURE0, compareTransform);
+
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xffff0000u);
+    for (int i = 0; i < 3; ++i) {
+        coordinates[i][0] = 0.0f;
+        coordinates[i][1] = 0.5f;
+    }
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw depth comparison across the border");
+    }, pixels);
+    ExpectCenter(pixels, 128, 128, 128,
+                 "depth border participates in bilinear comparison filtering");
+
+    float screenPositions[3][4] = {
+        {8.0f, 48.0f, 0.5f, 1.0f}, {56.0f, 48.0f, 0.5f, 1.0f},
+        {32.0f, 8.0f, 0.5f, 1.0f}};
+    backend->GetFFPipelineForTests()->SetTexcoordComponentCount(0, 3);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.5f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedPositionTTriangle(ctx, screenPositions, kWhite,
+                                                coordinates),
+                  "draw POSITIONT filtered depth comparison");
+    }, pixels);
+    ExpectCenter(pixels, 128, 128, 128,
+                 "POSITIONT depth comparison preserves the reference coordinate");
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV, VXTEXTURE_ADDRESSCLAMP);
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.0f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedPositionTTriangle(ctx, screenPositions, kWhite,
+                                                coordinates),
+                  "draw POSITIONT depth comparison across the border");
+    }, pixels);
+    ExpectCenter(pixels, 128, 128, 128,
+                 "POSITIONT depth border uses the padded comparison texture");
+    backend->GetFFPipelineForTests()->SetTexcoordComponentCount(0, 2);
+
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = -0.25f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw depth comparison fully outside the border");
+    }, pixels);
+    ExpectCenter(pixels, 255, 255, 255,
+                 "depth comparison uses the configured border depth outside");
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS, VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                              0);
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_COMPAREFUNC_FILTER] ==
+                  approximationsBefore,
+              "filtered depth comparison emits no approximation diagnostic");
+
+    TestCheck(ctx->SetTexture(0, 0), "unbind the PCF depth texture");
+    TestCheck(backend->DestroyObject(renderTarget, CKRST_OBJ_RENDERTARGET) == CK_OK,
+              "destroy PCF render target");
+    TestCheck(ctx->DeleteObject(depthTexture, CKRST_OBJ_TEXTURE),
+              "delete PCF depth texture");
+    TestCheck(ctx->DeleteObject(colorTexture, CKRST_OBJ_TEXTURE),
+              "delete PCF color attachment");
+    printf("  filtered depth comparison applies exact bilinear PCF and border depth: passed\n");
+}
+
 void CheckStencilWriteMasks(Backend &b)
 {
     auto *ctx = b.Context;
@@ -3262,6 +3511,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckMemoryCopyPixelIdentity(backend);
         CheckScaledTextureCopies(backend);
         CheckIndependentAttachmentClears(backend);
+        CheckFilteredDepthComparison(backend);
         CheckStencilWriteMasks(backend);
         CheckOrderedReadbacks(backend);
         CheckResizeAndReadback(backend);

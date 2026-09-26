@@ -857,8 +857,9 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
     const CKDWORD lodUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
     const std::vector<float> &lodParams = context.Log.FloatUniforms[lodUniform];
     TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
-                  lodParams.size() >= 7 && lodParams[6] == 1.0f,
-              "Mip LOD bias reaches the shared sampler shader without approximation");
+                  lodParams.size() >= 7 && lodParams[6] == 1.0f &&
+                  context.Log.LastTextureSampler.MipLodBias == 1.0f,
+              "Mip LOD bias reaches shader and native comparison sampler state");
 
     ffp.SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, FloatStageState(0.0f));
     ffp.SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 1);
@@ -867,7 +868,8 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
                                 CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     const std::vector<float> &minMipParams = context.Log.FloatUniforms[lodUniform];
     TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
-                  minMipParams.size() >= 8 && minMipParams[7] == 1.0f &&
+                  minMipParams.size() >= 8 &&
+                  (((CKDWORD)minMipParams[7]) & 31u) == 1u &&
                   context.Log.LastTextureSampler.MinMipLevel == 1,
               "MAXMIPLEVEL reaches the shared sampler shader without approximation");
     ffp.SetRenderOptions(FALSE, TRUE, FALSE);
@@ -875,7 +877,8 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
                                 1, 0, 0, 3, 0, 0,
                                 CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     const std::vector<float> &disabledMipParams = context.Log.FloatUniforms[lodUniform];
-    TestCheck(drawn && disabledMipParams.size() >= 8 && disabledMipParams[7] == 0.0f &&
+    TestCheck(drawn && disabledMipParams.size() >= 8 &&
+                  (((CKDWORD)disabledMipParams[7]) & 31u) == 0u &&
                   context.Log.LastTextureSampler.MinMipLevel == 0,
               "disabling mipmaps also disables the sampler's minimum mip");
     ffp.SetRenderOptions(FALSE, FALSE, FALSE);
@@ -892,7 +895,8 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
                   context.Log.LastTextureSampler.MinFilter == CKRST_FILTER_ANISOTROPIC &&
                   context.Log.LastTextureSampler.MaxAnisotropy == 4 &&
                   context.Log.LastTextureSampler.ShaderAnisotropy == 1 &&
-                  anisoParams.size() >= 8 && anisoParams[7] == 128.0f,
+                  anisoParams.size() >= 8 &&
+                  (((CKDWORD)anisoParams[7]) & (31u << 5)) == 128u,
               "MAXANISOTROPY reaches the sampler and fixed-function shader");
 
     ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
@@ -1890,13 +1894,18 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
     const CKFFSpecializationInfo compareSpec = CurrentDrawSpecialization(ffp, context);
     TestCheck(compareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
               "Depth compare func must enter specialization mask");
-    TestCheck(context.Log.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
-              "Depth compare func must stay shader-evaluated and bind a non-compare sampler");
+    TestCheck(context.Log.LastTextureSampler.CompareFunc == CKRST_COMPARE_LEQUAL,
+              "Depth compare func must reach backends that use comparison samplers");
+    const CKDWORD bumpUniform =
+        context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
+    const std::vector<float> &bump = context.Log.FloatUniforms[bumpUniform];
+    TestCheck(bump.size() >= 8 && ((CKDWORD)bump[7] & (3u << 13)) == 0,
+              "Nearest depth comparison clears both shader PCF filter bits");
 
     ffp.Shutdown();
 }
 
-void FilteredDepthTextureCompareApproximates() {
+void FilteredDepthTextureCompareIsExact() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1914,11 +1923,18 @@ void FilteredDepthTextureCompareApproximates() {
 
     TestCheck(drawn && context.Log.DrawCount == 1,
               "Filtered shader depth compare must draw");
-    TestCheck(ffp.GetLastDrawApproximationMask() == (1ull << CKRST_DIAG_APPROX_COMPAREFUNC_FILTER),
-              "Filtered shader depth compare must report its approximation");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_COMPAREFUNC_FILTER) == 0,
+              "Filtered shader depth compare must use exact PCF");
     const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
     TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
               "The compare function still reaches the shader");
+    const CKDWORD bumpUniform =
+        context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
+    const std::vector<float> &bump = context.Log.FloatUniforms[bumpUniform];
+    TestCheck(bump.size() >= 8 && ((CKDWORD)bump[7] & (3u << 13)) ==
+                  (3u << 13),
+              "Linear depth comparison packs both shader PCF filter bits");
 
     ffp.Shutdown();
 }
@@ -4149,8 +4165,8 @@ int main() {
               &MultipleVolumeTexturesBindEachVolumeSampler);
     tests.Run("Depth texture compare func uploads sampler and specialization",
               &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
-    tests.Run("Filtered depth texture compare approximates",
-              &FilteredDepthTextureCompareApproximates);
+    tests.Run("Filtered depth texture compare is exact",
+              &FilteredDepthTextureCompareIsExact);
     tests.Run("Border color reaches backend unmodified",
               &BorderColorReachesBackendUnmodified);
     tests.Run("Translation preserves distinct border colors",
