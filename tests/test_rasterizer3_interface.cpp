@@ -1002,7 +1002,6 @@ void DrawTexturedTriangle(CKRasterizerContext *ctx)
 }
 
 void SetupDither(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE); }
-void SetupZBias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 4); }
 void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD)
 {
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
@@ -1042,7 +1041,6 @@ void TestApproximationsKeepDrawing()
 {
     const ApproximationCase cases[] = {
         {"dither", CKRST_DIAG_IGNORE_DITHER, &SetupDither},
-        {"z-bias", CKRST_DIAG_APPROX_ZBIAS, &SetupZBias},
         {"line pattern", CKRST_DIAG_IGNORE_LINEPATTERN, &SetupLinePattern},
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
         {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
@@ -1078,6 +1076,20 @@ void TestApproximationsKeepDrawing()
                       Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 0,
                   "approximations must not count as rejections");
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
+    }
+
+    // ZBIAS is resolved against the active depth format by the shared FFP and
+    // is no longer an approximation in either backend.
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 4);
+        TestCheck(ctx->BeginScene(), "BeginScene (ZBIAS)");
+        DrawTexturedTriangle(ctx);
+        TestCheck(ctx->EndScene(), "EndScene (ZBIAS)");
+        TestCheck(CountDraws(f) == 1, "ZBIAS draw submitted");
+        TestCheck(Diag(f.Context, CKRST_DIAG_APPROX_ZBIAS) == 0,
+                  "ZBIAS must not count an approximation diagnostic");
     }
 
     // The public interface does not impose a backend-specific palette limit.

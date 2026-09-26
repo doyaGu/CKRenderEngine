@@ -560,6 +560,27 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     ExpectCenter(pixels, 0, 255, 0, what);
     Record(samples, SAMPLE_DEPTH_ORDER, pixels);
 
+    // D3D8 ZBIAS pulls a coplanar polygon towards the viewer. A strict LESS
+    // test makes the result observable: the second draw can replace the first
+    // only when the format-aware bias is applied.
+    SetDiffuseState(ctx);
+    ctx->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESS);
+    ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 0);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kRed),
+                  "unbiased coplanar base draw");
+        ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 1);
+        TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen),
+                  "ZBIAS coplanar overlay draw");
+    }, pixels);
+    snprintf(what, sizeof(what), "[%s] ZBIAS admits a coplanar polygon under LESS", mode);
+    ExpectCenter(pixels, 0, 255, 0, what);
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_APPROX_ZBIAS] == 0,
+              "ZBIAS pixel path emits no approximation diagnostic");
+    ctx->SetRenderState(VXRENDERSTATE_ZBIAS, 0);
+
     // Readback is top-first, independent of the backend framebuffer origin.
     SetDiffuseState(ctx);
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {

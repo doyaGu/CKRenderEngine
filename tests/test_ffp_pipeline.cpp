@@ -495,7 +495,6 @@ void IgnoredRenderStatesReportDiagnostics() {
     };
     const IgnoredStateCase cases[] = {
         {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKRST_DIAG_IGNORE_DITHER},
-        {VXRENDERSTATE_ZBIAS, 1, 0, CKRST_DIAG_APPROX_ZBIAS},
         {VXRENDERSTATE_LINEPATTERN, 0x00FF0001u, 0, CKRST_DIAG_IGNORE_LINEPATTERN},
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
         {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
@@ -1055,6 +1054,51 @@ void DrawVertexBufferUploadsAlphaPrecision() {
               "FFP draw params must upload alpha-test compare function");
     TestCheck(((alphaFuncPrecision >> 4) & 0xFu) == 0x2,
               "FFP draw params must upload current alpha-test precision");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferUsesDepthFormatAwarePolygonZBias() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+    ffp.SetRenderState(VXRENDERSTATE_ZBIAS, 20);
+
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    ffp.SetDepthBiasFormat(CKRST_DEPTHFMT_D16);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "D16 ZBIAS triangle draw");
+    const std::vector<float> &d16 = context.Log.FloatUniforms[uniform];
+    TestCheck(d16.size() >= 18 &&
+                  fabsf(d16[17] - 16.0f / 65535.0f) < 0.00000001f,
+              "D16 ZBIAS must clamp to 16 and use a 16-bit depth epsilon");
+
+    const uint64_t triangleRevision =
+        ffp.GetConstantRevision(CKRST_BLOCK_DRAW_PARAMS);
+    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST,
+                                   1, 0, 0, 2, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "line draw with ZBIAS state");
+    const std::vector<float> &line = context.Log.FloatUniforms[uniform];
+    TestCheck(line.size() >= 18 && line[17] == 0.0f,
+              "D3D8 ZBIAS must not offset native line primitives");
+    TestCheck(ffp.GetConstantRevision(CKRST_BLOCK_DRAW_PARAMS) > triangleRevision,
+              "switching between polygon and line draws must refresh ZBIAS constants");
+
+    ffp.SetDepthBiasFormat(CKRST_DEPTHFMT_D24S8);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "D24 ZBIAS triangle draw");
+    const std::vector<float> &d24 = context.Log.FloatUniforms[uniform];
+    TestCheck(d24.size() >= 18 &&
+                  fabsf(d24[17] - 16.0f / 1048575.0f) < 0.00000001f,
+              "D24 ZBIAS must use the 20-bit D3D8 compatibility epsilon");
+    TestCheck(ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_ZBIAS) == 0,
+              "supported ZBIAS draws must not report an approximation");
 
     ffp.Shutdown();
 }
@@ -4119,6 +4163,8 @@ int main() {
               &ViewportMappingRemapsClipSpaceAndScissors);
     tests.Run("DrawVertexBuffer uploads alpha precision",
               &DrawVertexBufferUploadsAlphaPrecision);
+    tests.Run("DrawVertexBuffer uses depth-format-aware polygon ZBIAS",
+              &DrawVertexBufferUsesDepthFormatAwarePolygonZBias);
     tests.Run("DrawVertexBuffer sets flat shade specialization",
               &DrawVertexBufferSetsFlatShadeSpecialization);
     tests.Run("DrawVertexBuffer uploads fog params",
