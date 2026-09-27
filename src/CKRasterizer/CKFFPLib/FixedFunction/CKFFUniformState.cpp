@@ -122,9 +122,10 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     }
 }
 
-void CKFFPackSpecialization(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec) {
-    memset(&outSpec, 0, sizeof(outSpec));
-    info.Pack24(outSpec.Values);
+void CKFFPackFragmentProgram(const CKFFFragmentProgram &program,
+                             CKFFFragmentProgramUniform &outProgram) {
+    memset(&outProgram, 0, sizeof(outProgram));
+    program.Pack24(outProgram.Values);
 }
 
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip) {

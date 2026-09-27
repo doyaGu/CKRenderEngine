@@ -114,7 +114,7 @@ static const CKDWORD CKFF_TTF_MIRRORONCE_MASK = CKFF_TTF_MIRRORONCE_U |
                                                 CKFF_TTF_MIRRORONCE_V |
                                                 CKFF_TTF_MIRRORONCE_W;
 // Shader-only operation for STAGEBLEND pairs that cannot be represented by
-// one of the public texture combiners. The 5-bit specialization field has
+// one of the public texture combiners. The 5-bit fragment-program field has
 // room for this value after CKRST_TOP_LERP (26).
 static const CKDWORD CKFF_TOP_STAGEBLEND = 27u;
 

@@ -2,7 +2,7 @@
 #include "CKFFContextState.h"
 #include "CKFFImage.h"
 #include "CKFFPresentDraw.h"
-#include "CKFFSpecializationInfo.h"
+#include "CKFFFragmentProgram.h"
 #include "CKFFUniformState.h"
 #include "CKRenderSettings.h"
 #include "FFPRecordingHarness.h"
@@ -16,6 +16,13 @@
 #define CKFixedFunctionPipeline CKFFTestPipeline
 
 namespace {
+
+CKFFFragmentProgram BuildTestFragmentProgram(const CKFFShaderKeyFS &key)
+{
+    const CKFFSamplerLayoutPlan samplerLayoutPlan =
+        CKFFBuildSamplerLayoutPlan(key);
+    return CKFFBuildFragmentProgram(key, samplerLayoutPlan);
+}
 
 void PointImageScalingUsesDestinationPixelCenters()
 {
@@ -60,10 +67,10 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                   CKFFConstantBlockInfo(CKRST_BLOCK_MATRICES).Mat4 &&
                   CKFFConstantBlockInfo(CKRST_BLOCK_MATRICES).Count == CKFF_MATRIX_VEC4_COUNT,
               "matrix shader ABI belongs to the fixed-function layer");
-    TestCheck(CKFFConstantBlockInfo(CKRST_BLOCK_SPEC).Count == CKFF_SPEC_UNIFORM_VEC4_COUNT &&
-                  !CKFFConstantBlockInfo(CKRST_BLOCK_SPEC).Mat4 &&
+    TestCheck(CKFFConstantBlockInfo(CKRST_BLOCK_FRAGMENT_PROGRAM).Count == CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT &&
+                  !CKFFConstantBlockInfo(CKRST_BLOCK_FRAGMENT_PROGRAM).Mat4 &&
                   CKFFConstantBlockInfo(CKRST_BLOCK_COUNT).Name == NULL,
-              "specialization block and invalid logical slot");
+              "fragment program block and invalid logical slot");
     TestCheck(strcmp(CKFFSamplerSlotName(0), "s_texture0") == 0 &&
                   strcmp(CKFFSamplerSlotName(CKFFSamplerTypeSlotBase(CKFF_SAMPLER_CUBE)),
                          "s_textureCube0") == 0 &&
@@ -179,11 +186,11 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
         for (int repeat = 0; repeat < 3; ++repeat) {
             const CKFFProgramBinding binding = cache.GetProgram(&backend, key);
             TestCheck(binding.Program == first &&
-                          binding.Specialization == CKFFBuildSpecializationInfo(key.FS),
-                      "repeated and changed materials must carry their own current specialization");
+                          binding.FragmentProgram == BuildTestFragmentProgram(key.FS),
+                      "repeated and changed materials must carry their own current fragment program");
         }
     }
-    TestCheck(original.Specialization == CKFFBuildSpecializationInfo(CKFFShaderKeyFS()),
+    TestCheck(original.FragmentProgram == BuildTestFragmentProgram(CKFFShaderKeyFS()),
               "later materials must not mutate an earlier draw binding");
     TestCheck(backend.CreatedProgramCount == 1,
               "fragment state changes must retain the fixed native program family");
@@ -198,7 +205,7 @@ void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
     cache.Shutdown(&backend);
 }
 
-void ShaderCacheRetainsAlternatingSpecializations()
+void ShaderCacheRetainsAlternatingFragmentPrograms()
 {
     FFPRecordingDriver driver;
     FFPRecordingBackend backend(&driver);
@@ -212,32 +219,32 @@ void ShaderCacheRetainsAlternatingSpecializations()
         keys[i].FS.AlphaFunc = i + 1;
         const CKFFProgramBinding binding = cache.GetProgram(&backend, keys[i]);
         TestCheck(binding.Program != 0 &&
-                      binding.Specialization ==
-                          CKFFBuildSpecializationInfo(keys[i].FS),
+                      binding.FragmentProgram ==
+                          BuildTestFragmentProgram(keys[i].FS),
                   "each alternating fragment state must resolve correctly");
     }
 
-    TestCheck(cache.GetCachedSpecializationCount(CKFF_PROGRAM_3D) == 8,
+    TestCheck(cache.GetCachedFragmentProgramCount(CKFF_PROGRAM_3D) == 8,
               "one vertex variant must retain the eight-material working set");
     for (const CKFFShaderKey &key : keys) {
         const CKFFProgramBinding binding = cache.GetProgram(&backend, key);
-        TestCheck(binding.Specialization ==
-                      CKFFBuildSpecializationInfo(key.FS),
-                  "retained specialization values must survive alternation");
+        TestCheck(binding.FragmentProgram ==
+                      BuildTestFragmentProgram(key.FS),
+                  "retained fragment program values must survive alternation");
     }
     CKFFShaderKey outputOnly = keys[0];
     outputOnly.FS.DitherEnable = true;
     outputOnly.FS.ColorTargetFormat = CKFF_COLOR_TARGET_RGB565;
     const CKFFProgramBinding outputBinding =
         cache.GetProgram(&backend, outputOnly);
-    TestCheck(cache.GetCachedSpecializationCount(CKFF_PROGRAM_3D) == 8 &&
-                  outputBinding.Specialization ==
-                      CKFFBuildSpecializationInfo(keys[0].FS),
-              "output conversion must not allocate a core specialization");
+    TestCheck(cache.GetCachedFragmentProgramCount(CKFF_PROGRAM_3D) == 8 &&
+                  outputBinding.FragmentProgram ==
+                      BuildTestFragmentProgram(keys[0].FS),
+              "output conversion must not allocate a core fragment program");
     cache.Shutdown(&backend);
 }
 
-void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
+void ShaderCacheEvictsLeastRecentlyUsedFragmentProgram()
 {
     FFPRecordingDriver driver;
     FFPRecordingBackend backend(&driver);
@@ -245,7 +252,7 @@ void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
     TestCheck(cache.Init(backend.GetCaps(), backend.ShaderSet()),
               "shader cache accepts the benchmark catalog");
 
-    const size_t capacity = CKFFShaderCache::GetSpecializationCapacity();
+    const size_t capacity = CKFFShaderCache::GetFragmentProgramCapacity();
     std::vector<CKFFShaderKey> keys(capacity + 1);
     for (size_t i = 0; i <= capacity; ++i) {
         keys[i].FS.AlphaTestEnable = true;
@@ -258,14 +265,14 @@ void ShaderCacheEvictsLeastRecentlyUsedSpecialization()
     cache.GetProgram(&backend, keys[0]);
     cache.GetProgram(&backend, keys[capacity]);
 
-    TestCheck(cache.GetCachedSpecializationCount(CKFF_PROGRAM_3D) == capacity,
-              "specialization cache must remain bounded");
-    TestCheck(cache.HasCachedSpecialization(CKFF_PROGRAM_3D, keys[0].FS),
-              "recently used specialization must survive eviction");
-    TestCheck(!cache.HasCachedSpecialization(CKFF_PROGRAM_3D, keys[1].FS),
-              "least recently used specialization must be evicted");
-    TestCheck(cache.HasCachedSpecialization(CKFF_PROGRAM_3D, keys[capacity].FS),
-              "new specialization must enter the bounded cache");
+    TestCheck(cache.GetCachedFragmentProgramCount(CKFF_PROGRAM_3D) == capacity,
+              "fragment program cache must remain bounded");
+    TestCheck(cache.HasCachedFragmentProgram(CKFF_PROGRAM_3D, keys[0].FS),
+              "recently used fragment program must survive eviction");
+    TestCheck(!cache.HasCachedFragmentProgram(CKFF_PROGRAM_3D, keys[1].FS),
+              "least recently used fragment program must be evicted");
+    TestCheck(cache.HasCachedFragmentProgram(CKFF_PROGRAM_3D, keys[capacity].FS),
+              "new fragment program must enter the bounded cache");
     cache.Shutdown(&backend);
 }
 
@@ -344,15 +351,15 @@ static const ShaderProfileCase kSamplerLayoutProfiles[] = {
     {CKRST_SHADER_PROFILE_MSL, "metal"},
 };
 
-CKFFSpecializationInfo CurrentDrawSpecialization(CKFixedFunctionPipeline &ffp,
+CKFFFragmentProgram CurrentDrawFragmentProgram(CKFixedFunctionPipeline &ffp,
                                                  const FFPRecordingBackend &context) {
-    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_SPEC);
+    const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_FRAGMENT_PROGRAM);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Log.FloatUniforms.find(uniform);
     if (it == context.Log.FloatUniforms.end() ||
-        it->second.size() < CKFF_SPEC_UNIFORM_VEC4_COUNT * 4)
-        return CKFFSpecializationInfo();
-    return CKFFSpecializationInfo::Unpack24(it->second.data(), CKFF_SPEC_UNIFORM_VEC4_COUNT * 4);
+        it->second.size() < CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT * 4)
+        return CKFFFragmentProgram();
+    return CKFFFragmentProgram::Unpack24(it->second.data(), CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT * 4);
 }
 
 void DrawVertexBufferApproximatesStencilWriteMasks() {
@@ -992,10 +999,10 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
     TestCheck(drawn && context.Log.DrawCount == 1 &&
                   ffp.GetLastDrawApproximationMask() == 0 &&
-                  spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKFF_TOP_STAGEBLEND,
+                  spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKFF_TOP_STAGEBLEND,
               "An arbitrary STAGEBLEND pair must use the exact shader operation");
     const CKDWORD stageUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     const std::vector<float> &stageParams = context.Log.FloatUniforms[stageUniform];
@@ -1010,9 +1017,9 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    spec = CurrentDrawSpecialization(ffp, context);
+    spec = CurrentDrawFragmentProgram(ffp, context);
     TestCheck(drawn && ffp.GetLastDrawApproximationMask() == 0 &&
-                  spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_ADD,
+                  spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_ADD,
               "STAGEBLEND(ONE, ONE) is the exact ADD combiner");
 
     ffp.ResetTextureStage(0);
@@ -1240,7 +1247,7 @@ void DrawVertexBufferRoutesTargetDithering() {
                                    1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "dithered RGB565 draw submits");
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
     TestCheck(ffp.GetDraw().ShaderKey.FS.DitherEnable &&
                   ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
                       CKFF_COLOR_TARGET_RGB565,
@@ -1254,25 +1261,25 @@ void DrawVertexBufferRoutesTargetDithering() {
                                    1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "disabling RGB565 dithering submits");
-    const CKFFSpecializationInfo disabledSpec =
-        CurrentDrawSpecialization(ffp, context);
+    const CKFFFragmentProgram disabledSpec =
+        CurrentDrawFragmentProgram(ffp, context);
     TestCheck(!ffp.GetDraw().ShaderKey.FS.DitherEnable &&
                   ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
                       CKFF_COLOR_TARGET_RGB565 &&
                   disabledSpec == spec,
-              "changing only dither state reuses the core specialization");
+              "changing only dither state reuses the core fragment program");
 
     ffp.SetColorTargetFormat(CKFF_COLOR_TARGET_RGBA4);
     TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                                    1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "non-dithered RGBA4 draw submits");
-    const CKFFSpecializationInfo rgba4Spec =
-        CurrentDrawSpecialization(ffp, context);
+    const CKFFFragmentProgram rgba4Spec =
+        CurrentDrawFragmentProgram(ffp, context);
     TestCheck(ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
                   CKFF_COLOR_TARGET_RGBA4 &&
                   rgba4Spec == spec,
-              "target format routing reuses the core specialization");
+              "target format routing reuses the core fragment program");
 
     CKTextureDesc target;
     VxPixelFormat2ImageDesc(_16_RGB565, target.Format);
@@ -1341,7 +1348,7 @@ void DrawVertexBufferUsesDepthFormatAwarePolygonZBias() {
     ffp.Shutdown();
 }
 
-void DrawVertexBufferSetsFlatShadeSpecialization() {
+void DrawVertexBufferSetsFlatShadeFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1352,18 +1359,18 @@ void DrawVertexBufferSetsFlatShadeSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo gouraudSpec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(gouraudSpec.Get(CKFF_SPEC_FLAT_SHADE) == 0,
-              "Gouraud shade mode must not set flat shade specialization");
+    const CKFFFragmentProgram gouraudSpec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(gouraudSpec.Get(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE) == 0,
+              "Gouraud shade mode must not set flat shade fragment program");
 
     ffp.SetRenderState(VXRENDERSTATE_SHADEMODE, VXSHADE_FLAT);
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo flatSpec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(flatSpec.Get(CKFF_SPEC_FLAT_SHADE) == 1,
-              "Flat shade mode must set flat shade specialization");
+    const CKFFFragmentProgram flatSpec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(flatSpec.Get(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE) == 1,
+              "Flat shade mode must set flat shade fragment program");
 
     ffp.Shutdown();
 }
@@ -1435,7 +1442,7 @@ void PositionTFogUsesPositionTShaderKey() {
     ffp.Shutdown();
 }
 
-void RangeFogChangesSpecialization() {
+void RangeFogChangesFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1448,18 +1455,18 @@ void RangeFogChangesSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo specNoRange = CurrentDrawSpecialization(ffp, context);
-    TestCheck(specNoRange.Get(CKFF_SPEC_RANGE_FOG) == 0,
-              "Range fog disabled must clear range fog specialization");
+    const CKFFFragmentProgram specNoRange = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(specNoRange.Get(CKFF_FRAGMENT_PROGRAM_RANGE_FOG) == 0,
+              "Range fog disabled must clear range fog fragment program");
 
     ffp.SetRenderState(VXRENDERSTATE_RANGEFOGENABLE, TRUE);
     ffp.DrawVertexBuffer(VX_TRIANGLELIST,
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo specRange = CurrentDrawSpecialization(ffp, context);
-    TestCheck(specRange.Get(CKFF_SPEC_RANGE_FOG) == 1,
-              "Range fog enabled must set range fog specialization");
+    const CKFFFragmentProgram specRange = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(specRange.Get(CKFF_FRAGMENT_PROGRAM_RANGE_FOG) == 1,
+              "Range fog enabled must set range fog fragment program");
 
     ffp.Shutdown();
 }
@@ -1478,16 +1485,16 @@ void PixelFogOverridesVertexFogMode() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKFF_VF_POSITION | CKFF_VF_NORMAL, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
     const CKDWORD uniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Log.FloatUniforms.find(uniform);
 
-    TestCheck(spec.Get(CKFF_SPEC_VERTEX_FOG_MODE) == VXFOG_NONE,
-              "Pixel fog must clear vertex fog specialization");
-    TestCheck(spec.Get(CKFF_SPEC_PIXEL_FOG_MODE) == VXFOG_LINEAR,
-              "Pixel fog must keep the pixel fog specialization");
+    TestCheck(spec.Get(CKFF_FRAGMENT_PROGRAM_VERTEX_FOG_MODE) == VXFOG_NONE,
+              "Pixel fog must clear vertex fog fragment program");
+    TestCheck(spec.Get(CKFF_FRAGMENT_PROGRAM_PIXEL_FOG_MODE) == VXFOG_LINEAR,
+              "Pixel fog must keep the pixel fog fragment program");
     TestCheck(it != context.Log.FloatUniforms.end() &&
                   it->second.size() >= 44 &&
                   it->second[35] == (float)VXFOG_LINEAR &&
@@ -1643,17 +1650,17 @@ void ResultArgTempPreservesEveryActiveStage() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_RESULT_IS_TEMP) == 1,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP) == 1,
               "Non-final active stage must preserve RESULTARG=TEMP");
-    TestCheck(spec.GetStage(1, CKFF_SPEC_STAGE_RESULT_IS_TEMP) == 1,
+    TestCheck(spec.GetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP) == 1,
               "Final TEMP writes must leave the final CURRENT color unchanged");
 
     ffp.Shutdown();
 }
 
-void Modulate4XStaysInTextureStageSpecialization() {
+void Modulate4XStaysInTextureStageFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1667,15 +1674,15 @@ void Modulate4XStaysInTextureStageSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE4X,
-              "MODULATE4X must remain a normal texture-stage specialization op");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_MODULATE4X,
+              "MODULATE4X must remain a normal texture-stage fragment program op");
 
     ffp.Shutdown();
 }
 
-void PremodulateStaysInTextureStageSpecialization() {
+void PremodulateStaysInTextureStageFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1689,17 +1696,17 @@ void PremodulateStaysInTextureStageSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_PREMODULATE,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_PREMODULATE,
               "PREMODULATE must remain encoded as the stage color op");
-    TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 0,
+    TestCheck(spec.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE) == 0,
               "Single-stage PREMODULATE draw must keep last active stage at zero");
 
     ffp.Shutdown();
 }
 
-void TextureArgModifiersStayInSpecialization() {
+void TextureArgModifiersStayInFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1714,19 +1721,19 @@ void TextureArgModifiersStayInSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V | CKRST_DP_STAGE(0), CKFF_VF_POSITION | CKFF_VF_TEXCOORD0, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_ARG1) ==
-                  CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT),
-              "COMPLEMENT must remain in stage specialization");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_ALPHA_ARG1) ==
-                  CKFFSpecializationInfo::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE),
-              "ALPHAREPLICATE must remain in stage specialization");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1) ==
+                  CKFFFragmentProgram::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_COMPLEMENT),
+              "COMPLEMENT must remain in stage fragment program");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG1) ==
+                  CKFFFragmentProgram::RepackArg(CKRST_TA_TEXTURE | CKRST_TA_ALPHAREPLICATE),
+              "ALPHAREPLICATE must remain in stage fragment program");
 
     ffp.Shutdown();
 }
 
-void NullTextureStagePreservesSpecialization() {
+void NullTextureStagePreservesFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1742,13 +1749,13 @@ void NullTextureStagePreservesSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1,
               "Unbound texture stage must keep its original color op");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_ARG1) == CKRST_TA_TEXTURE,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1) == CKRST_TA_TEXTURE,
               "Unbound texture stage must keep TEXTURE as its color arg");
-    TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 1,
+    TestCheck(spec.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE) == 1,
               "Unbound texture stage must not truncate later active stages");
 
     ffp.Shutdown();
@@ -1769,16 +1776,16 @@ void StageConstantDoesNotCreateTextureDependency() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
     const CKDWORD stageParamsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
         context.Log.FloatUniforms.find(stageParamsUniform);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1,
               "D3DTA_CONSTANT must not disable the stage when no texture is bound");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_ARG1) == CKRST_TA_CONSTANT,
-              "D3DTA_CONSTANT must remain encoded in specialization");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1) == CKRST_TA_CONSTANT,
+              "D3DTA_CONSTANT must remain encoded in fragment program");
     const size_t constant = CKFFStageParamIndex(0, CKFF_STAGE_PARAM_CONSTANT) * 4;
     TestCheck(stageParams != context.Log.FloatUniforms.end() &&
                   stageParams->second.size() >= constant + 4 &&
@@ -1791,7 +1798,7 @@ void StageConstantDoesNotCreateTextureDependency() {
     ffp.Shutdown();
 }
 
-void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
+void CubeTextureUsesCubeSamplerFragmentProgramAndBinding() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -1807,8 +1814,8 @@ void CubeTextureUsesCubeSamplerSpecializationAndBinding() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE,
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE,
               "Cubemap texture must mark stage 0 as cube sampler");
     TestCheck(context.Log.TextureBindCount == 1,
               "Cubemap draw must bind one texture");
@@ -1838,12 +1845,12 @@ void VolumeTextureBindsFirstVolumeSampler() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
     TestCheck(context.Log.DrawCount == 1,
               "Volume texture draw must submit through the uber shader");
-    TestCheck((spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE) &&
-              (spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME),
-              "Volume draw must keep the stage op and volume sampler type in the specialization data");
+    TestCheck((spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_MODULATE) &&
+              (spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME),
+              "Volume draw must keep the stage op and volume sampler type in the fragment program data");
     TestCheck(context.Log.TextureBindCount == 1,
               "Volume draw must bind one texture");
     TestCheck(context.Log.LastTextureStage == 12 &&
@@ -1911,16 +1918,16 @@ void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_TR_CL_V, CKRST_DP_TR_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
     TestCheck(context.Log.DrawCount == 1,
               "Volume + cube draw must submit through the uber shader");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME &&
-                  spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE,
-              "Volume + cube draw must carry both sampler types in the specialization data");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE &&
-                  spec.GetStage(1, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_ADD,
-              "Volume + cube draw must keep the texture stage ops in the specialization data");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME &&
+                  spec.GetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE,
+              "Volume + cube draw must carry both sampler types in the fragment program data");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_MODULATE &&
+                  spec.GetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_ADD,
+              "Volume + cube draw must keep the texture stage ops in the fragment program data");
     const FFPRecordingBackend &u = context;
     bool sawVolume = false;
     bool sawCube = false;
@@ -2076,10 +2083,10 @@ void FifthCubeStageUsesWideLayout() {
     TestCheck(found[0] && found[1] && found[2] && found[3] && found[4],
               "five cube stages bind the wide layout slots 4..8");
 
-    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.GetStage(4, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE &&
-                  spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 4,
-              "the fifth stage retains its cube sampler specialization");
+    const CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(spec.GetStage(4, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE &&
+                  spec.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE) == 4,
+              "the fifth stage retains its cube sampler fragment program");
     const CKDWORD stageParams = u.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator it =
         context.Log.FloatUniforms.find(stageParams);
@@ -2140,7 +2147,7 @@ void MultipleVolumeTexturesBindEachVolumeSampler() {
     ffp.Shutdown();
 }
 
-void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
+void DepthTextureCompareFuncUploadsSamplerAndFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -2156,10 +2163,10 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo noCompareSpec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(noCompareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
+    const CKFFFragmentProgram noCompareSpec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(noCompareSpec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
               "Depth texture must mark stage 0 as depth sampler");
-    TestCheck(noCompareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_NONE,
+    TestCheck(noCompareSpec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_NONE,
               "Depth texture without compare func must keep compare mask empty");
     TestCheck(context.Log.LastTextureSampler.CompareFunc == CKRST_COMPARE_NONE,
               "Depth texture without compare func must bind a non-compare sampler");
@@ -2171,9 +2178,9 @@ void DepthTextureCompareFuncUploadsSamplerAndSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo compareSpec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(compareSpec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
-              "Depth compare func must enter specialization mask");
+    const CKFFFragmentProgram compareSpec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(compareSpec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
+              "Depth compare func must enter fragment program mask");
     TestCheck(context.Log.LastTextureSampler.CompareFunc == CKRST_COMPARE_LEQUAL,
               "Depth compare func must reach backends that use comparison samplers");
     const CKDWORD bumpUniform =
@@ -2206,8 +2213,8 @@ void FilteredDepthTextureCompareIsExact() {
     TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
                   ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_COMPAREFUNC_FILTER) == 0,
               "Filtered shader depth compare must use exact PCF");
-    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
+    const CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL,
               "The compare function still reaches the shader");
     const CKDWORD bumpUniform =
         context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
@@ -2748,9 +2755,9 @@ void UntexturedStageKeepsRuntimeStageParams() {
         context.Log.FloatUniforms.find(uniform);
     TestCheck(drawn && params != context.Log.FloatUniforms.end(),
               "An untextured constant stage must upload stage params");
-    const CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1 &&
-                  spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == 0,
+    const CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_SELECTARG1 &&
+                  spec.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE) == 0,
               "Texture binding span must not disable an active untextured stage");
     TestCheck(params != context.Log.FloatUniforms.end() &&
                   params->second.size() >= 8 &&
@@ -2810,13 +2817,13 @@ void ProgramFamilyIsSharedAcrossStateBindings() {
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    const CKFFSpecializationInfo current = CurrentDrawSpecialization(ffp, context);
+    const CKFFFragmentProgram current = CurrentDrawFragmentProgram(ffp, context);
     TestCheck(gouraud && flat && context.CreatedProgramCount == 1,
               "State variants of one vertex layout must share one backend program");
     TestCheck(ffp.CachedProgramCount() == 1,
               "The shader cache must hold one program per created vertex variant");
-    TestCheck(current.Get(CKFF_SPEC_FLAT_SHADE) == 1,
-              "The shared program must receive the current-draw specialization data");
+    TestCheck(current.Get(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE) == 1,
+              "The shared program must receive the current-draw fragment program data");
 
     ffp.Shutdown();
 }
@@ -2981,14 +2988,14 @@ void PreparedCachesInvalidateEveryUniformAndProgramDependency() {
     ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
     TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
               "initial software prepared-cache draw");
-    TestCheck(CurrentDrawSpecialization(ffp, context).Get(
-                  CKFF_SPEC_ALPHA_TEST_ENABLED) == 0,
-              "initial software specialization has alpha testing disabled");
+    TestCheck(CurrentDrawFragmentProgram(ffp, context).Get(
+                  CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED) == 0,
+              "initial software fragment program has alpha testing disabled");
     ffp.SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
     TestCheck(ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data),
               "mutated software prepared-cache draw");
-    TestCheck(CurrentDrawSpecialization(ffp, context).Get(
-                  CKFF_SPEC_ALPHA_TEST_ENABLED) == 1,
+    TestCheck(CurrentDrawFragmentProgram(ffp, context).Get(
+                  CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED) == 1,
               "program-affecting state invalidates the software prepared cache");
 
     ffp.Shutdown();
@@ -3138,11 +3145,11 @@ void LegacyTextureMapBlendClearsExplicitStageOps() {
     ffp.SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, VXTEXTUREBLEND_MODULATEALPHA);
     ffp.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &data);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_COLOR_OP) == CKRST_TOP_MODULATE,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_MODULATE,
               "TEXTUREMAPBLEND must restore legacy modulate color op over stale explicit op");
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_ALPHA_OP) == CKRST_TOP_MODULATE,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP) == CKRST_TOP_MODULATE,
               "TEXTUREMAPBLEND must restore legacy modulate alpha op over stale explicit op");
 
     ffp.Shutdown();
@@ -3191,8 +3198,8 @@ void PointSpriteDrawPrimitiveExpandsToTriangleList() {
     TestCheck(context.Log.LastIndexBytes.size() == sizeof(CKWORD) * 6,
               "One point sprite must expand to six transient indices");
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_PROJECTED) == 0,
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED) == 0,
               "point sprite sampling must bypass projected texture coordinates");
     const CKDWORD stageUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator packedStage =
@@ -3393,7 +3400,7 @@ void PointSpriteUsesPerVertexPointSize() {
     ffp.Shutdown();
 }
 
-void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
+void ProjectedSamplerStagesZeroToThreeEnterFragmentProgramMask() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -3412,15 +3419,15 @@ void ProjectedSamplerStagesZeroToThreeEnterSpecializationMask() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
-    TestCheck(spec.GetStage(2, CKFF_SPEC_STAGE_PROJECTED) == 1,
-              "Stage 2 projected sampler must be encoded in the specialization mask");
+    TestCheck(spec.GetStage(2, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED) == 1,
+              "Stage 2 projected sampler must be encoded in the fragment program mask");
 
     ffp.Shutdown();
 }
 
-void ProjectedSamplerStageFourEntersSpecialization() {
+void ProjectedSamplerStageFourEntersFragmentProgram() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -3441,15 +3448,15 @@ void ProjectedSamplerStageFourEntersSpecialization() {
                          1, 0, 0, 3, 0, 0,
                          CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
 
-    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
 
     const CKDWORD stageParamsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_STAGE_PARAMS);
     std::unordered_map<CKDWORD, std::vector<float> >::const_iterator stageParams =
         context.Log.FloatUniforms.find(stageParamsUniform);
 
-    TestCheck(spec.GetStage(4, CKFF_SPEC_STAGE_PROJECTED) == 1 &&
-                  spec.GetStage(3, CKFF_SPEC_STAGE_PROJECTED) == 0,
-              "Stage 4 projected sampler must be encoded in its own specialization field");
+    TestCheck(spec.GetStage(4, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED) == 1 &&
+                  spec.GetStage(3, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED) == 0,
+              "Stage 4 projected sampler must be encoded in its own fragment program field");
     TestCheck(stageParams != context.Log.FloatUniforms.end() &&
                   stageParams->second.size() >= CKFF_STAGE_PARAM_VEC4_COUNT * 4 &&
                   stageParams->second[CKFFStageParamIndex(4, CKFF_STAGE_PARAM_COORD) * 4 + 1] == (float)CKRST_TTF_PROJECTED,
@@ -4339,10 +4346,10 @@ int main() {
     tests.Run("FFP declares generic program resources", &FixedFunctionProgramDeclaresItsShaderInterface);
     tests.Run("Shader catalog and program metadata stay outside cached draws",
               &ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss);
-    tests.Run("Shader cache retains alternating specializations",
-              &ShaderCacheRetainsAlternatingSpecializations);
-    tests.Run("Shader cache evicts least recently used specialization",
-              &ShaderCacheEvictsLeastRecentlyUsedSpecialization);
+    tests.Run("Shader cache retains alternating fragment programs",
+              &ShaderCacheRetainsAlternatingFragmentPrograms);
+    tests.Run("Shader cache evicts least recently used fragment program",
+              &ShaderCacheEvictsLeastRecentlyUsedFragmentProgram);
     tests.Run("Null rasterizer supports headless FFP",
               &NullRasterizerSupportsHeadlessFFP);
     tests.Run("Missing shader payload family fails initialization",
@@ -4405,14 +4412,14 @@ int main() {
               &DrawVertexBufferRoutesTargetDithering);
     tests.Run("DrawVertexBuffer uses depth-format-aware polygon ZBIAS",
               &DrawVertexBufferUsesDepthFormatAwarePolygonZBias);
-    tests.Run("DrawVertexBuffer sets flat shade specialization",
-              &DrawVertexBufferSetsFlatShadeSpecialization);
+    tests.Run("DrawVertexBuffer sets flat shade fragment program",
+              &DrawVertexBufferSetsFlatShadeFragmentProgram);
     tests.Run("DrawVertexBuffer uploads fog params",
               &DrawVertexBufferUploadsFogParams);
     tests.Run("POSITIONT fog uses POSITIONT shader key",
               &PositionTFogUsesPositionTShaderKey);
-    tests.Run("Range fog changes specialization",
-              &RangeFogChangesSpecialization);
+    tests.Run("Range fog changes fragment program",
+              &RangeFogChangesFragmentProgram);
     tests.Run("Pixel fog overrides vertex fog mode",
               &PixelFogOverridesVertexFogMode);
     tests.Run("DrawVertexBuffer compacts clip plane uniforms",
@@ -4423,18 +4430,18 @@ int main() {
               &ClipPlanesUseDedicatedVertexShaderVariant);
     tests.Run("RESULTARG TEMP preserves every active stage",
               &ResultArgTempPreservesEveryActiveStage);
-    tests.Run("MODULATE4X stays in texture stage specialization",
-              &Modulate4XStaysInTextureStageSpecialization);
-    tests.Run("PREMODULATE stays in texture stage specialization",
-              &PremodulateStaysInTextureStageSpecialization);
-    tests.Run("Texture arg modifiers stay in specialization",
-              &TextureArgModifiersStayInSpecialization);
-    tests.Run("Null texture stage preserves specialization",
-              &NullTextureStagePreservesSpecialization);
+    tests.Run("MODULATE4X stays in texture stage fragment program",
+              &Modulate4XStaysInTextureStageFragmentProgram);
+    tests.Run("PREMODULATE stays in texture stage fragment program",
+              &PremodulateStaysInTextureStageFragmentProgram);
+    tests.Run("Texture arg modifiers stay in fragment program",
+              &TextureArgModifiersStayInFragmentProgram);
+    tests.Run("Null texture stage preserves fragment program",
+              &NullTextureStagePreservesFragmentProgram);
     tests.Run("Stage constant does not create texture dependency",
               &StageConstantDoesNotCreateTextureDependency);
-    tests.Run("Cube texture uses cube sampler specialization and binding",
-              &CubeTextureUsesCubeSamplerSpecializationAndBinding);
+    tests.Run("Cube texture uses cube sampler fragment program and binding",
+              &CubeTextureUsesCubeSamplerFragmentProgramAndBinding);
     tests.Run("Volume texture binds the first volume sampler",
               &VolumeTextureBindsFirstVolumeSampler);
     tests.Run("Volume texture stage seven binds volume sampler",
@@ -4449,8 +4456,8 @@ int main() {
               &FifthCubeStageUsesWideLayout);
     tests.Run("Multiple volume textures bind each volume sampler",
               &MultipleVolumeTexturesBindEachVolumeSampler);
-    tests.Run("Depth texture compare func uploads sampler and specialization",
-              &DepthTextureCompareFuncUploadsSamplerAndSpecialization);
+    tests.Run("Depth texture compare func uploads sampler and fragment program",
+              &DepthTextureCompareFuncUploadsSamplerAndFragmentProgram);
     tests.Run("Filtered depth texture compare is exact",
               &FilteredDepthTextureCompareIsExact);
     tests.Run("Border color reaches backend unmodified",
@@ -4495,10 +4502,10 @@ int main() {
               &InvalidTexcoordComponentCountFallsBackToLegacyXY);
     tests.Run("Simple DrawPrimitive data uses legacy texcoord path",
               &SimpleDrawPrimitiveDataUsesLegacyTexcoordPath);
-    tests.Run("Projected sampler stages zero to three enter specialization mask",
-              &ProjectedSamplerStagesZeroToThreeEnterSpecializationMask);
-    tests.Run("Projected sampler stage four enters specialization",
-              &ProjectedSamplerStageFourEntersSpecialization);
+    tests.Run("Projected sampler stages zero to three enter fragment program mask",
+              &ProjectedSamplerStagesZeroToThreeEnterFragmentProgramMask);
+    tests.Run("Projected sampler stage four enters fragment program",
+              &ProjectedSamplerStageFourEntersFragmentProgram);
     tests.Run("Draw uploads per-stage bump env uniforms",
               &DrawUploadsPerStageBumpEnvUniforms);
     tests.Run("Invalid bump formats reject without approximation",

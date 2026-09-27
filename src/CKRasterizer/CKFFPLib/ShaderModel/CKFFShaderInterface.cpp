@@ -13,7 +13,7 @@ const CKFFConstantBlockDesc BlockTable[CKRST_BLOCK_COUNT] = {
     {"u_stageParams", FALSE, CKFF_STAGE_PARAM_VEC4_COUNT},
     {"u_borderColor", FALSE, CKFF_MAX_TEXTURE_STAGES},
     {"u_borderSampler", FALSE, CKFF_SAMPLER_SLOT_COUNT},
-    {"u_ffSpec", FALSE, CKFF_SPEC_UNIFORM_VEC4_COUNT},
+    {"u_ffProgram", FALSE, CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT},
     {"u_clipPlanes", FALSE, CKFF_CLIP_PLANE_COUNT},
     {"u_clipParams", FALSE, 1},
     {"u_postParams", FALSE, 1},

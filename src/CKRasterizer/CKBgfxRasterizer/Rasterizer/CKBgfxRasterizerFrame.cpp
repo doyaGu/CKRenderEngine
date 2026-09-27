@@ -469,7 +469,7 @@ CKFFProgramBinding CKBgfxRasterizerContext::ResolveNativeFFProgram(
             return CKFFProgramBinding();
     }
     return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout],
-                              selection.Specialization);
+                              selection.FragmentProgram);
 }
 
 void CKBgfxRasterizerContext::ClearNativeFFPrograms()

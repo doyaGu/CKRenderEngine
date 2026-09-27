@@ -2,7 +2,7 @@
 #define CKFFPROGRAM_H
 
 #include "CKFFShaderKey.h"
-#include "CKFFSpecializationInfo.h"
+#include "CKFFFragmentProgram.h"
 
 enum CKFFProgramVariant {
     CKFF_PROGRAM_3D = 0,
@@ -16,22 +16,23 @@ enum CKFFProgramVariant {
 // shader and program objects are deliberately absent.
 struct CKFFProgramContext {
     CKFFShaderKey ShaderKey;
-    CKFFSpecializationInfo Specialization;
+    CKFFFragmentProgram FragmentProgram;
     CKFFSamplerLayoutPlan SamplerLayoutPlan;
 
     CKFFProgramContext()
-        : ShaderKey(), Specialization(), SamplerLayoutPlan() {}
+        : ShaderKey(), FragmentProgram(), SamplerLayoutPlan() {}
 };
 
 inline void CKFFInitProgramContext(CKFFProgramContext *context,
                                    const CKFFShaderKey &key,
-                                   const CKFFSpecializationInfo &specialization)
+                                   const CKFFFragmentProgram &fragmentProgram,
+                                   const CKFFSamplerLayoutPlan &samplerLayoutPlan)
 {
     if (!context)
         return;
     context->ShaderKey = key;
-    context->Specialization = specialization;
-    context->SamplerLayoutPlan = CKFFBuildSamplerLayoutPlan(key.FS);
+    context->FragmentProgram = fragmentProgram;
+    context->SamplerLayoutPlan = samplerLayoutPlan;
 }
 
 #endif // CKFFPROGRAM_H

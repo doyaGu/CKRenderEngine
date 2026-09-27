@@ -4,7 +4,7 @@
 #include "CKDrawStateCache.h"
 #include "CKFFConstants.h"
 #include "CKFFShaderABI.h"
-#include "CKFFSpecializationInfo.h"
+#include "CKFFFragmentProgram.h"
 #include "CKFFStateDesc.h"
 #include "CKRenderEngineEnums.h"
 #include "CKTypes.h"
@@ -14,8 +14,8 @@ struct CKFFStageParamsUniform {
     float Values[CKFF_STAGE_PARAM_VEC4_COUNT][4];
 };
 
-struct CKFFSpecUniform {
-    float Values[CKFF_SPEC_UNIFORM_VEC4_COUNT][4];
+struct CKFFFragmentProgramUniform {
+    float Values[CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT][4];
 };
 
 struct CKFFClipPlaneUniform {
@@ -42,7 +42,8 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
                          int activeTextureCount,
                          CKFFStageParamsUniform &outParams,
                          const uint64_t *stageStateSetMasks = NULL);
-void CKFFPackSpecialization(const CKFFSpecializationInfo &info, CKFFSpecUniform &outSpec);
+void CKFFPackFragmentProgram(const CKFFFragmentProgram &program,
+                             CKFFFragmentProgramUniform &outProgram);
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip);
 int CKFFPackViewLights(const CKFFLightData lights[CKFF_MAX_LIGHTS],
                        const CKBOOL lightEnabled[CKFF_MAX_LIGHTS],

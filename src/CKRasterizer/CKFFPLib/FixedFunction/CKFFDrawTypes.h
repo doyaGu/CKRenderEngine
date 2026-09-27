@@ -73,7 +73,7 @@ struct CKFFDraw {
     const CKFFConstantSet *Constants;
     const char *Marker;
     CKFFShaderKey ShaderKey;
-    CKFFSpecializationInfo Specialization;
+    CKFFFragmentProgram FragmentProgram;
     CKDWORD VertexFormat;
     CKDWORD VertexBuffer;
     const CKBYTE *Vertices;
@@ -105,7 +105,7 @@ struct CKFFUniformEmissionContext {
     const CKFFProgramContext *ProgramContext;
     const CKFFTextureBindingSet *Textures;
     CKFFShaderKey ShaderKey;
-    CKFFSpecializationInfo Specialization;
+    CKFFFragmentProgram FragmentProgram;
     CKDWORD ActiveTextureCount;
     CKBOOL PositionT;
     CKBOOL LightingEnabled;

@@ -3,7 +3,7 @@
 
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
-#include "CKFFSpecializationInfo.h"
+#include "CKFFFragmentProgram.h"
 #include "CKRenderEngineTypes.h"
 
 #include <stddef.h>
@@ -107,6 +107,8 @@ bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask);
 CKFFSamplerLayoutPlan CKFFBuildSamplerLayoutPlan(const CKFFShaderKeyFS &key);
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask);
-CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key);
+CKFFFragmentProgram CKFFBuildFragmentProgram(
+    const CKFFShaderKeyFS &key,
+    const CKFFSamplerLayoutPlan &samplerLayoutPlan);
 
 #endif // CKFFSHADERKEY_H

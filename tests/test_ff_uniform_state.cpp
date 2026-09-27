@@ -17,6 +17,13 @@
 
 namespace {
 
+CKFFFragmentProgram BuildTestFragmentProgram(const CKFFShaderKeyFS &key)
+{
+    const CKFFSamplerLayoutPlan samplerLayoutPlan =
+        CKFFBuildSamplerLayoutPlan(key);
+    return CKFFBuildFragmentProgram(key, samplerLayoutPlan);
+}
+
 CKDWORD FloatStageState(float value) {
     union {
         float F;
@@ -106,11 +113,11 @@ void BumpEnvUniformsPackEachStageIndependently() {
 
 void TextureArgModifierRepackRoundTripsBothModifierBits() {
     const CKDWORD arg = CKRST_TA_TEMP | CKRST_TA_COMPLEMENT | CKRST_TA_ALPHAREPLICATE;
-    const CKDWORD repacked = CKFFSpecializationInfo::RepackArg(arg);
+    const CKDWORD repacked = CKFFFragmentProgram::RepackArg(arg);
     const CKDWORD unpacked = (repacked & 0x7u) | ((repacked & 0x18u) << 1u);
 
     TestCheck(unpacked == arg,
-              "Specialization repack/unpack must preserve complement and alpha replicate modifiers");
+              "FragmentProgram repack/unpack must preserve complement and alpha replicate modifiers");
 }
 
 void ShaderABIConstantsMatchShaderUniformDeclarations() {
@@ -118,9 +125,9 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
               "u_ffDrawParams ABI must include the tween parameter vec4");
     TestCheck(CKFF_STAGE_PARAM_VEC4_COUNT == 16,
               "u_stageParams ABI must be 16 vec4s (coord + constant per stage)");
-    TestCheck(CKFF_SPEC_UNIFORM_VEC4_COUNT == CKFFSpecializationInfo::Vec4Count &&
-                  CKFF_SPEC_UNIFORM_VEC4_COUNT == 5,
-              "u_ffSpec ABI must mirror the specialization lane count (20 lanes = 5 vec4)");
+    TestCheck(CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT == CKFFFragmentProgram::Vec4Count &&
+                  CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT == 5,
+              "u_ffProgram ABI must mirror the fragment program lane count (20 lanes = 5 vec4)");
     TestCheck(CKFFStageParamIndex(3, CKFF_STAGE_PARAM_CONSTANT) == 7,
               "Stage parameter index helper must encode two vec4s per stage");
     TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_2D, 2) == 2 &&
@@ -142,8 +149,8 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
     TestCheck(fs.find("uniform vec4 u_stageParams[16]") != std::string::npos &&
                   vs.find("uniform vec4 u_stageParams[16]") != std::string::npos,
               "Shader sources must declare u_stageParams with the ABI count");
-    TestCheck(fs.find("uniform vec4 u_ffSpec[5]") != std::string::npos,
-              "Fragment shader must declare u_ffSpec with the specialization ABI count");
+    TestCheck(fs.find("uniform vec4 u_ffProgram[5]") != std::string::npos,
+              "Fragment shader must declare u_ffProgram with the fragment program ABI count");
 }
 
 void StageParamsPackThroughABIIndices() {
@@ -259,9 +266,9 @@ void MirrorOnceSamplerDescFallsBackToClamp() {
               "FFP shader mask must preserve the original MIRRORONCE axes despite sampler fallback");
 }
 
-void MirrorOnceSpecializationPacksEveryStage() {
+void FragmentProgramPacksSamplerOrdinalsEveryStage() {
     CKFFFSStateDesc desc;
-    CKDWORD expectedMask = 0;
+    CKDWORD expectedOrdinals = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         desc.SetStageColorOp(stage, CKRST_TOP_SELECTARG1);
         desc.SetStageColorArg1(stage, CKRST_TA_TEXTURE);
@@ -269,26 +276,34 @@ void MirrorOnceSpecializationPacksEveryStage() {
         desc.SetStageAlphaArg1(stage, CKRST_TA_TEXTURE);
         const CKDWORD mask = (stage % 7u) + 1u;
         desc.SetStageMirrorOnceMask(stage, mask);
-        expectedMask |= mask << (stage * 3);
+        expectedOrdinals |= stage << (stage * 3);
     }
 
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0xFFu);
-    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
+    CKFFFragmentProgram program = BuildTestFragmentProgram(key);
 
     TestCheck(key.Stages[3].MirrorOnceMask == 4 && key.Stages[7].MirrorOnceMask == 1,
               "Shader key must preserve per-stage MIRRORONCE mask");
-    TestCheck(spec.Get(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK) == expectedMask,
-              "Specialization data must pack the MIRRORONCE masks of all eight stages");
-    TestCheck(spec.GetMirrorOnceMask(7) == 1 && spec.GetMirrorOnceMask(2) == 3,
-              "Per-stage MIRRORONCE accessor must read three bits per stage");
+    TestCheck(program.Get(CKFF_FRAGMENT_PROGRAM_SAMPLER_ORDINALS) == expectedOrdinals,
+              "Fragment program must pack the sampler ordinals of all eight stages");
+    TestCheck(program.GetSamplerOrdinal(7) == 7 &&
+                  program.GetSamplerOrdinal(2) == 2,
+              "Per-stage sampler ordinal accessor must read three bits per stage");
+
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
+        desc.SetStageMirrorOnceMask(stage, 0);
+    const CKFFFragmentProgram withoutMirror = BuildTestFragmentProgram(
+        CKFFBuildShaderKeyFS(desc, 0xFFu));
+    TestCheck(program == withoutMirror,
+              "MIRRORONCE must not duplicate stage-param state in the fragment program");
 }
 
-void LastActiveTextureStageSpecializationRoundTrips() {
-    CKFFSpecializationInfo spec;
+void LastActiveTextureStageFragmentProgramRoundTrips() {
+    CKFFFragmentProgram program;
     for (CKDWORD lastStage = 0; lastStage < 8; ++lastStage) {
-        spec.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, lastStage);
-        TestCheck(spec.Get(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE) == lastStage,
-                  "Last active texture stage must round-trip through specialization dwords");
+        program.Set(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE, lastStage);
+        TestCheck(program.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE) == lastStage,
+                  "Last active texture stage must round-trip through fragment-program lanes");
     }
 }
 
@@ -301,9 +316,9 @@ void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
     TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
               "FFP shader sources must be readable");
     TestCheck(common.find("int MirrorOnceMask;") != std::string::npos &&
-                  common.find("ckffSpecMirrorOnceMask") != std::string::npos &&
-                  common.find("ckffSpec_MIRRORONCE_SAMPLER_MASK() >> (stage * 3)") != std::string::npos,
-              "Fragment common shader must read MIRRORONCE masks from the specialization data");
+                  common.find("params.MirrorOnceMask = (flags >> 9) & 7;") != std::string::npos &&
+                  common.find("MIRRORONCE_SAMPLER_MASK") == std::string::npos,
+              "Fragment common shader must read MIRRORONCE masks only from texture-transform flags");
     TestCheck(fs.find("vec4 applyMirrorOnceCoord") != std::string::npos &&
                   fs.find("if (samplerType == 1 || mirrorOnceMask == 0) return coord") != std::string::npos &&
                   fs.find("samplerType == 3 && (mirrorOnceMask & 4)") != std::string::npos,
@@ -341,74 +356,74 @@ void TextureCombinerOpFormulasStayDxvkCompatible() {
               "PREMODULATE must feed Arg1 through and premultiply next-stage CURRENT arguments");
 }
 
-void SpecUniformCarriesLanesAsExactIntegers() {
-    CKFFSpecializationInfo info;
-    info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, 1);
-    info.Set(CKFF_SPEC_ALPHA_FUNC, VXCMP_GREATER);
-    info.Set(CKFF_SPEC_MIRRORONCE_SAMPLER_MASK, 0xFFFFFFu);
-    info.SetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_CUBE);
-    info.SetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_VOLUME);
-    info.SetStage(7, CKFF_SPEC_STAGE_COLOR_OP, CKRST_TOP_LERP);
+void FragmentProgramUniformCarriesLanesAsExactIntegers() {
+    CKFFFragmentProgram program;
+    program.Set(CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED, 1);
+    program.Set(CKFF_FRAGMENT_PROGRAM_ALPHA_FUNC, VXCMP_GREATER);
+    program.Set(CKFF_FRAGMENT_PROGRAM_SAMPLER_ORDINALS, 0xFFFFFFu);
+    program.SetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_CUBE);
+    program.SetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_VOLUME);
+    program.SetStage(7, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP, CKRST_TOP_LERP);
 
-    CKFFSpecUniform packed;
-    CKFFPackSpecialization(info, packed);
+    CKFFFragmentProgramUniform packed;
+    CKFFPackFragmentProgram(program, packed);
 
-    const CKDWORD *lanes = info.Lanes();
-    for (CKDWORD lane = 0; lane < CKFFSpecializationInfo::LaneCount; ++lane) {
+    const CKDWORD *lanes = program.Lanes();
+    for (CKDWORD lane = 0; lane < CKFFFragmentProgram::LaneCount; ++lane) {
         const float value = packed.Values[lane / 4][lane % 4];
         TestCheck((CKDWORD)value == lanes[lane] && value < 16777216.0f,
-                  "u_ffSpec must carry every 24-bit lane as an exact integer float");
+                  "u_ffProgram must carry every 24-bit lane as an exact integer float");
     }
     TestCheck(packed.Values[17 / 4][17 % 4] == 16777215.0f,
               "A full 24-bit lane must survive the float encoding");
-    const CKFFSpecializationInfo unpacked =
-        CKFFSpecializationInfo::Unpack24(&packed.Values[0][0], CKFF_SPEC_UNIFORM_VEC4_COUNT * 4);
-    TestCheck(unpacked == info,
-              "u_ffSpec encoding must round-trip the specialization data");
+    const CKFFFragmentProgram unpacked =
+        CKFFFragmentProgram::Unpack24(&packed.Values[0][0], CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT * 4);
+    TestCheck(unpacked == program,
+              "u_ffProgram encoding must round-trip the fragment program");
 }
 
-void SpecLayoutShaderHeaderMatchesTheDef() {
-    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_spec_layout.sh");
+void FragmentProgramLayoutShaderHeaderMatchesTheDef() {
+    const std::string generated = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_fragment_program_layout.sh");
     const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
     const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
     TestCheck(!generated.empty() && !common.empty() && !script.empty(),
-              "Generated spec layout header, fragment common shader and codegen script must be readable");
+              "Generated fragment-program layout header, fragment common shader and codegen script must be readable");
 
     char line[160];
-    snprintf(line, sizeof(line), "#define CKFF_SPEC_LANE_COUNT %u", (unsigned)CKFF_SPEC_LANE_COUNT);
+    snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_LANE_COUNT %u", (unsigned)CKFF_FRAGMENT_PROGRAM_LANE_COUNT);
     TestCheck(generated.find(line) != std::string::npos,
-              "Generated spec layout must define the lane count");
-    snprintf(line, sizeof(line), "#define CKFF_SPEC_STAGE_LANE_STRIDE %u", (unsigned)CKFF_SPEC_STAGE_LANE_STRIDE);
+              "Generated fragment-program layout must define the lane count");
+    snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_STAGE_LANE_STRIDE %u", (unsigned)CKFF_FRAGMENT_PROGRAM_STAGE_LANE_STRIDE);
     TestCheck(generated.find(line) != std::string::npos,
-              "Generated spec layout must define the stage lane stride");
-    snprintf(line, sizeof(line), "#define CKFF_SPEC_GLOBAL_LANE_BASE %u", (unsigned)CKFF_SPEC_GLOBAL_LANE_BASE);
+              "Generated fragment-program layout must define the stage lane stride");
+    snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_GLOBAL_LANE_BASE %u", (unsigned)CKFF_FRAGMENT_PROGRAM_GLOBAL_LANE_BASE);
     TestCheck(generated.find(line) != std::string::npos,
-              "Generated spec layout must define the global lane base");
+              "Generated fragment-program layout must define the global lane base");
 
-    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_STAGE_FIELD_COUNT; ++fieldIndex) {
-        const CKFFSpecFieldDesc &desc = CKFFSpecStageFieldDesc((CKFFSpecStageField)fieldIndex);
-        snprintf(line, sizeof(line), "int ckffSpecStage_%s(int stage) { return ckffSpecStageBits(stage, %u, %u, %u); }",
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_FRAGMENT_PROGRAM_STAGE_FIELD_COUNT; ++fieldIndex) {
+        const CKFFFragmentProgramFieldDesc &desc = CKFFFragmentProgramStageFieldDesc((CKFFFragmentProgramStageField)fieldIndex);
+        snprintf(line, sizeof(line), "int ckffProgramStage_%s(int stage) { return ckffProgramStageBits(stage, %u, %u, %u); }",
                  desc.Name, desc.Layout.Lane, desc.Layout.BitOffset, desc.Layout.BitCount);
         TestCheck(generated.find(line) != std::string::npos,
-                  "Generated spec layout must expose every stage field with the C++ bit positions");
+                  "Generated fragment-program layout must expose every stage field with the C++ bit positions");
     }
-    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_SPEC_GLOBAL_FIELD_COUNT; ++fieldIndex) {
-        const CKFFSpecFieldDesc &desc = CKFFSpecGlobalFieldDesc((CKFFSpecGlobalField)fieldIndex);
-        snprintf(line, sizeof(line), "int ckffSpec_%s() { return ckffSpecBits(%u, %u, %u); }",
+    for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_FRAGMENT_PROGRAM_GLOBAL_FIELD_COUNT; ++fieldIndex) {
+        const CKFFFragmentProgramFieldDesc &desc = CKFFFragmentProgramGlobalFieldDesc((CKFFFragmentProgramGlobalField)fieldIndex);
+        snprintf(line, sizeof(line), "int ckffProgram_%s() { return ckffProgramBits(%u, %u, %u); }",
                  desc.Name, desc.Layout.Lane, desc.Layout.BitOffset, desc.Layout.BitCount);
         TestCheck(generated.find(line) != std::string::npos,
-                  "Generated spec layout must expose every global field with the C++ bit positions");
+                  "Generated fragment-program layout must expose every global field with the C++ bit positions");
     }
-    TestCheck(common.find("#include \"ff_spec_layout.sh\"") != std::string::npos &&
-                  common.find("int ckffSpecLane(int lane)") != std::string::npos &&
+    TestCheck(common.find("#include \"ff_fragment_program_layout.sh\"") != std::string::npos &&
+                  common.find("int ckffProgramLane(int lane)") != std::string::npos &&
                   common.find("return int(v.x)") != std::string::npos &&
                   common.find("floatBitsToUint") == std::string::npos &&
                   common.find("uint(255)") == std::string::npos,
-              "Fragment shader must read u_ffSpec lanes with int() through the generated layout, not bytes or bit casts");
-    TestCheck(script.find("gen-spec-layout") != std::string::npos &&
-                  script.find("CKFFSpecLayout.def") != std::string::npos &&
-                  script.find("def validate_spec_layout") != std::string::npos,
-              "Shader codegen must generate and validate the spec layout from CKFFSpecLayout.def");
+              "Fragment shader must read u_ffProgram lanes with int() through the generated layout, not bytes or bit casts");
+    TestCheck(script.find("gen-fragment-program-layout") != std::string::npos &&
+                  script.find("CKFFFragmentProgramLayout.def") != std::string::npos &&
+                  script.find("def validate_fragment_program_layout") != std::string::npos,
+              "Shader codegen must generate and validate the fragment-program layout from CKFFFragmentProgramLayout.def");
 }
 
 void PremodulateCoverageIsExact() {
@@ -680,7 +695,7 @@ void DPWeightFlagsAddBlendLayoutFlags() {
               "Matrix palette DP flags must request both weights and indices");
 }
 
-void SamplerTypesPackIntoSpecialization() {
+void SamplerTypesPackIntoFragmentProgram() {
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
     desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
@@ -705,16 +720,16 @@ void SamplerTypesPackIntoSpecialization() {
     desc.SetStageSamplerType(3, CKFF_SAMPLER_DEPTH);
 
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 3));
-    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
+    CKFFFragmentProgram spec = BuildTestFragmentProgram(key);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE &&
-                  spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
-                  spec.GetStage(2, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
-                  spec.GetStage(3, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
-              "Sampler type specialization must pack per stage");
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_CUBE &&
+                  spec.GetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
+                  spec.GetStage(2, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_2D &&
+                  spec.GetStage(3, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
+              "Sampler type fragment program must pack per stage");
 }
 
-void VolumeSamplerAndCompareFuncPackIntoSpecialization() {
+void VolumeSamplerAndCompareFuncPackIntoFragmentProgram() {
     CKFFFSStateDesc desc;
     desc.SetStageColorOp(0, CKRST_TOP_SELECTARG1);
     desc.SetStageColorArg1(0, CKRST_TA_TEXTURE);
@@ -730,14 +745,14 @@ void VolumeSamplerAndCompareFuncPackIntoSpecialization() {
     desc.SetStageSamplerCompareFunc(1, CKRST_COMPARE_LEQUAL);
 
     CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, (1u << 0) | (1u << 1));
-    CKFFSpecializationInfo spec = CKFFBuildSpecializationInfo(key);
+    CKFFFragmentProgram spec = BuildTestFragmentProgram(key);
 
-    TestCheck(spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME,
-              "Volume sampler type must pack into specialization");
-    TestCheck(spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
+    TestCheck(spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_VOLUME,
+              "Volume sampler type must pack into fragment program");
+    TestCheck(spec.GetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH,
               "Depth sampler type must remain packed independently");
-    TestCheck(spec.GetStage(1, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL &&
-                  spec.GetStage(0, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_NONE,
+    TestCheck(spec.GetStage(1, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_LEQUAL &&
+                  spec.GetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) == CKRST_COMPARE_NONE,
               "Depth compare func must pack four bits per stage");
 }
 
@@ -811,15 +826,16 @@ void FragmentShaderDeclaresAllExactSamplerLayouts() {
                   fs.find("SAMPLER3D(s_textureVolume7, 15);") != std::string::npos &&
                   fs.find("CKFF_NATIVE_SAMPLER_LAYOUT") != std::string::npos,
               "Fragment shader must declare the wide cube and volume layouts");
-    TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") != std::string::npos &&
-                  fs.find("if (ckffSpecStage_SAMPLER_TYPE(previousStage) == samplerType)") != std::string::npos,
-              "Fragment shader must pick cube / volume samplers by type ordinal from the specialization data");
+    TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") == std::string::npos &&
+                  common.find("params.SamplerOrdinal = (ckffProgram_SAMPLER_ORDINALS() >> (stage * 3)) & 7;") != std::string::npos &&
+                  fs.find("int ordinal = samplerOrdinal;") != std::string::npos,
+              "Fragment shader must consume CPU-resolved sampler ordinals from the fragment program");
 
     const std::string *sources[] = {&fs, &common, &vs3d, &vsPositionT};
     const char *retiredMacros[] = {
         "CKFF_FULL_SPECIALIZED", "CKFF_STATIC_SAMPLER_LAYOUT", "CKFF_VOLUME_SAMPLER_LAYOUT",
         "CKFF_MIXED_SAMPLER_LAYOUT", "CKFF_VS_INSTANCED", "CKFF_VS_ACTIVE_TEXCOORD_COUNT",
-        "CKFF_FS_ACTIVE_STAGE_COUNT", "ckffSpecIsOptimized", "u_ffDrawParams[8].y",
+        "CKFF_FS_ACTIVE_STAGE_COUNT", "ckffProgramIsOptimized", "u_ffDrawParams[8].y",
     };
     for (const std::string *source : sources) {
         for (const char *macro : retiredMacros) {
@@ -899,6 +915,7 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
 
     const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x3Fu);
     const CKFFSamplerLayoutPlan plan = CKFFBuildSamplerLayoutPlan(key);
+    const CKFFFragmentProgram program = CKFFBuildFragmentProgram(key, plan);
     TestCheck(!key.Stages[1].HasTexture && key.Stages[1].SamplerType == CKFF_SAMPLER_2D,
               "A non-sampling stage must normalize to a 2D sampler type");
     TestCheck(plan.Stages[0].Ordinal == 0 && plan.Stages[3].Ordinal == 1,
@@ -910,6 +927,10 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
     TestCheck(plan.Stages[3].NativeSlot == 9 &&
                   plan.Stages[5].NativeSlot == 13,
               "Type ordinals must map onto the cube 8..11 and volume 12..15 slot blocks");
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        TestCheck(program.GetSamplerOrdinal(stage) == plan.Stages[stage].Ordinal,
+                  "Fragment program sampler ordinals must match the binding layout plan");
+    }
 
     CKFFFSStateDesc comparisonDesc;
     for (CKDWORD stage = 0; stage < 4; ++stage) {
@@ -1318,18 +1339,18 @@ int main() {
               &MirrorOnceAddressModesPackIntoStageParams);
     tests.Run("MIRRORONCE sampler desc falls back to clamp",
               &MirrorOnceSamplerDescFallsBackToClamp);
-    tests.Run("MIRRORONCE specialization packs every stage",
-              &MirrorOnceSpecializationPacksEveryStage);
-    tests.Run("Last active texture stage specialization round trips",
-              &LastActiveTextureStageSpecializationRoundTrips);
+    tests.Run("Fragment program packs sampler ordinals for every stage",
+              &FragmentProgramPacksSamplerOrdinalsEveryStage);
+    tests.Run("Last active texture stage fragment program round trips",
+              &LastActiveTextureStageFragmentProgramRoundTrips);
     tests.Run("MIRRORONCE shader source applies only to 2D and volume",
               &MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume);
     tests.Run("Texture combiner op formulas stay DXVK compatible",
               &TextureCombinerOpFormulasStayDxvkCompatible);
-    tests.Run("Spec uniform carries lanes as exact integers",
-              &SpecUniformCarriesLanesAsExactIntegers);
-    tests.Run("Spec layout shader header matches the def",
-              &SpecLayoutShaderHeaderMatchesTheDef);
+    tests.Run("Fragment program uniform carries lanes as exact integers",
+              &FragmentProgramUniformCarriesLanesAsExactIntegers);
+    tests.Run("Fragment program layout shader header matches the def",
+              &FragmentProgramLayoutShaderHeaderMatchesTheDef);
     tests.Run("PREMODULATE coverage is exact",
               &PremodulateCoverageIsExact);
     tests.Run("BUMPENVMAP always creates texture dependency",
@@ -1360,10 +1381,10 @@ int main() {
               &TweeningInputsAndShaderAreWired);
     tests.Run("DP weight flags add blend layout flags",
               &DPWeightFlagsAddBlendLayoutFlags);
-    tests.Run("Sampler types pack into specialization",
-              &SamplerTypesPackIntoSpecialization);
-    tests.Run("Volume sampler and compare func pack into specialization",
-              &VolumeSamplerAndCompareFuncPackIntoSpecialization);
+    tests.Run("Sampler types pack into fragment program",
+              &SamplerTypesPackIntoFragmentProgram);
+    tests.Run("Volume sampler and compare func pack into fragment program",
+              &VolumeSamplerAndCompareFuncPackIntoFragmentProgram);
     tests.Run("Volume sampler mask can be derived from shader key",
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
     tests.Run("Fragment shader declares all exact sampler layouts",

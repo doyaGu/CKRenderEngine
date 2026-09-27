@@ -50,7 +50,7 @@ BLOCKS = [
     ("float4", "u_stageParams", 16),
     ("float4", "u_borderColor", 8),
     ("float4", "u_borderSampler", 16),
-    ("float4", "u_ffSpec", 5),
+    ("float4", "u_ffProgram", 5),
     ("float4", "u_clipPlanes", 6),
     ("float4", "u_clipParams", 1),
     ("float4", "u_postParams", 1),

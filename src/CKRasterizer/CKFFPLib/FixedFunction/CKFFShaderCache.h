@@ -14,11 +14,11 @@
 
 struct CKFFProgramBinding {
     CKDWORD Program;
-    CKFFSpecializationInfo Specialization;
+    CKFFFragmentProgram FragmentProgram;
 
-    CKFFProgramBinding() : Program(0), Specialization() {}
-    CKFFProgramBinding(CKDWORD program, const CKFFSpecializationInfo &specialization)
-        : Program(program), Specialization(specialization) {}
+    CKFFProgramBinding() : Program(0), FragmentProgram() {}
+    CKFFProgramBinding(CKDWORD program, const CKFFFragmentProgram &fragmentProgram)
+        : Program(program), FragmentProgram(fragmentProgram) {}
 
     operator CKDWORD() const { return Program; }
 };
@@ -26,11 +26,11 @@ struct CKFFProgramBinding {
 struct CKFFProgramSelection {
     CKFFProgramVariant Variant;
     CKFFSamplerLayoutPlan SamplerLayoutPlan;
-    CKFFSpecializationInfo Specialization;
+    CKFFFragmentProgram FragmentProgram;
 
     CKFFProgramSelection()
         : Variant(CKFF_PROGRAM_3D),
-          SamplerLayoutPlan(), Specialization() {}
+          SamplerLayoutPlan(), FragmentProgram() {}
 };
 
 struct CKFFProgramSamplerBinding {
@@ -56,7 +56,7 @@ public:
     bool Init(const CKRasterizerTargetDesc &target, const CKFFShaderSet &shaders);
     void Shutdown();
 
-    // Resolve CPU-only program choice and specialization. Concrete contexts
+    // Resolve CPU-only shader choice and fragment program. Concrete contexts
     // own and cache the native shader/program objects for the chosen variant.
     CKFFProgramSelection ResolveProgram(
         const CKFFShaderKey &key,
@@ -84,9 +84,9 @@ public:
         return flags;
     }
 
-    CKDWORD GetCachedSpecializationCount(CKFFProgramVariant variant) const;
-    static CKDWORD GetSpecializationCapacity();
-    CKBOOL HasCachedSpecialization(CKFFProgramVariant variant, const CKFFShaderKeyFS &key) const;
+    CKDWORD GetCachedFragmentProgramCount(CKFFProgramVariant variant) const;
+    static CKDWORD GetFragmentProgramCapacity();
+    CKBOOL HasCachedFragmentProgram(CKFFProgramVariant variant, const CKFFShaderKeyFS &key) const;
 
 private:
     CKRasterizerTargetDesc m_Target;
@@ -95,19 +95,19 @@ private:
 
     // Repeated materials change matrices much more often than fragment state.
     // Retain a bounded working set per vertex variant; draws keep their own
-    // specialization copy when an older entry is evicted.
-    static constexpr CKDWORD SPECIALIZATION_CACHE_CAPACITY = 16;
-    struct SpecializationEntry {
+    // fragment-program copy when an older entry is evicted.
+    static constexpr CKDWORD FRAGMENT_PROGRAM_CACHE_CAPACITY = 16;
+    struct FragmentProgramEntry {
         CKFFShaderKeyFS Key;
-        CKFFSpecializationInfo Value;
+        CKFFFragmentProgram Value;
         uint64_t LastUse = 0;
     };
-    struct SpecializationCache {
-        SpecializationEntry Entries[SPECIALIZATION_CACHE_CAPACITY];
+    struct FragmentProgramCache {
+        FragmentProgramEntry Entries[FRAGMENT_PROGRAM_CACHE_CAPACITY];
         CKDWORD Count = 0;
         uint64_t Clock = 0;
     };
-    SpecializationCache m_Specializations[CKFF_PROGRAM_VARIANT_COUNT];
+    FragmentProgramCache m_FragmentPrograms[CKFF_PROGRAM_VARIANT_COUNT];
 
     bool ResolveShaderTarget(const CKRasterizerTargetDesc &target);
     void BuildSamplerLayout();

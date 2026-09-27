@@ -18,7 +18,7 @@ set(CKFFP_LIB_SOURCES
     FixedFunction/CKFFShaderCache.cpp
     ShaderModel/CKFFShaderInterface.cpp
     ShaderModel/CKFFShaderKey.cpp
-    ShaderModel/CKFFSpecializationInfo.cpp
+    ShaderModel/CKFFFragmentProgram.cpp
     FixedFunction/CKFFStageState.cpp
     FixedFunction/CKFFStateResolver.cpp
     FixedFunction/CKFFStateStore.cpp
@@ -69,9 +69,9 @@ set(CKFFP_LIB_HEADERS
     ShaderModel/CKFFShaderABI.h
     ShaderModel/CKFFShaderInterface.h
     ShaderModel/CKFFShaderKey.h
-    ShaderModel/CKFFSpecializationInfo.h
-    ShaderModel/CKFFSpecLayout.def
-    ShaderModel/CKFFSpecLayout.h
+    ShaderModel/CKFFFragmentProgram.h
+    ShaderModel/CKFFFragmentProgramLayout.def
+    ShaderModel/CKFFFragmentProgramLayout.h
 )
 
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})

@@ -4,7 +4,7 @@
 #include "CKBuiltinShaderIdentity.h"
 #include "CKFFConstants.h"
 #include "CKFFShaderKey.h"
-#include "CKFFSpecializationInfo.h"
+#include "CKFFFragmentProgram.h"
 #include "CKRasterizerContextEnums.h"
 
 // Internal fixed-function shader ABI. These values define the logical C++
@@ -54,8 +54,8 @@ enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_VEC4_COUNT = 20,
 };
 
-// u_stageParams: per-draw stage data that is not part of the specialization
-// (combiner ops / args, sampler kinds and switches live in u_ffSpec).
+// u_stageParams: per-draw stage data that is not part of the fragment program
+// (combiner ops / args, sampler kinds and switches live in u_ffProgram).
 enum CKFFStageParamSlot {
     // x = packed TEXCOORDINDEX (index | texgen << 16), y = texture transform
     // flags (count, PROJECTED, MIRRORONCE axes, render-target flip, bump
@@ -77,7 +77,7 @@ enum CKFFMatrixABI {
 
 enum CKFFClipABI {
     CKFF_CLIP_PLANE_COUNT = 6,
-    CKFF_SPEC_UNIFORM_VEC4_COUNT = CKFFSpecializationInfo::Vec4Count,
+    CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT = CKFFFragmentProgram::Vec4Count,
 };
 
 inline CKDWORD CKFFStageParamIndex(CKDWORD stage, CKFFStageParamSlot slot) {
@@ -124,7 +124,7 @@ inline CKDWORD CKFFSamplerSlot(CKDWORD samplerType, CKDWORD ordinal,
 
 static_assert(CKFF_DRAW_PARAM_VEC4_COUNT == 20, "ABI break: draw param vec4 count changed");
 static_assert(CKFF_STAGE_PARAM_VEC4S_PER_STAGE == 2, "ABI break: stage param vec4s per stage changed");
-static_assert(CKFF_SPEC_UNIFORM_VEC4_COUNT == 5, "ABI break: specialization vec4 count changed");
+static_assert(CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT == 5, "ABI break: fragment program vec4 count changed");
 static_assert(CKFF_MATRIX_VEC4_COUNT == 8, "ABI break: matrix vec4 count changed");
 static_assert(CKFF_CLIP_PLANE_COUNT == 6, "ABI break: clip plane count changed");
 static_assert(CKFF_DRAW_PARAM_INLINE_LIGHT_BASE == 12, "ABI break: inline light base changed");

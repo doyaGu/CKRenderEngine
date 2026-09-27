@@ -10,7 +10,7 @@
 #include <string.h>
 
 // Test-owned native cache for the recording device. CKFFPLib itself resolves
-// only CPU shader variants and specialization data.
+// only CPU shader variants and fragment-program data.
 class CKFFTestShaderCache : public CKFFShaderCache {
 public:
     CKFFTestShaderCache()
@@ -96,7 +96,7 @@ public:
                 return CKFFProgramBinding();
         }
         return CKFFProgramBinding(m_Programs[variant][layout],
-                                  selection.Specialization);
+                                  selection.FragmentProgram);
     }
 
     size_t CachedProgramCount() const

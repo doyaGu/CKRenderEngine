@@ -449,7 +449,10 @@ struct ComponentFixture {
                 Valid = false;
                 return;
             }
-            CKFFInitProgramContext(&Contexts[i], Keys[i], binding.Specialization);
+            const CKFFSamplerLayoutPlan samplerLayoutPlan =
+                CKFFBuildSamplerLayoutPlan(Keys[i].FS);
+            CKFFInitProgramContext(&Contexts[i], Keys[i], binding.FragmentProgram,
+                                   samplerLayoutPlan);
         }
         ConfigureState(UniformState, Workload, 0, 1);
         UniformTextureBinder = std::make_unique<CKFFTextureBinder>(
@@ -674,7 +677,7 @@ private:
                 m_Fixture->ShaderCache.GetProgram(
                     &m_Fixture->Backend, m_Fixture->Keys[profile]);
             hash = Mix(hash, binding.Program);
-            hash = Mix(hash, binding.Specialization.Lanes()[0]);
+            hash = Mix(hash, binding.FragmentProgram.Lanes()[0]);
         }
         return {true, count, 0, hash};
     }

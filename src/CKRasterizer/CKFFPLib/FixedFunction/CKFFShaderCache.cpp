@@ -13,10 +13,12 @@ CKFFShaderKeyFS CKFFProgramFragmentKey(const CKFFShaderKeyFS &key)
 {
     CKFFShaderKeyFS result = key;
     // Output-target conversion is performed after the core fragment program.
-    // Do not spend specialization-cache or native pipeline entries on state
+    // Do not spend fragment-program cache or native pipeline entries on state
     // that does not change this program's code or uniforms.
     result.DitherEnable = false;
     result.ColorTargetFormat = CKFF_COLOR_TARGET_RGBA8;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        result.Stages[stage].MirrorOnceMask = 0;
     return result;
 }
 
@@ -41,8 +43,8 @@ bool CKFFShaderCache::Init(const CKRasterizerTargetDesc &target, const CKFFShade
 }
 
 void CKFFShaderCache::Reset() {
-    for (auto &cache : m_Specializations)
-        cache = SpecializationCache();
+    for (auto &cache : m_FragmentPrograms)
+        cache = FragmentProgramCache();
     m_SamplerLayout = CKFFProgramSamplerLayout();
     m_Shaders = CKFFShaderSet();
 }
@@ -103,7 +105,7 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
     selection.Variant = ProgramVariantForKey(key);
     selection.SamplerLayoutPlan = samplerLayoutPlan;
     const CKFFShaderKeyFS programKey = CKFFProgramFragmentKey(key.FS);
-    SpecializationCache &cache = m_Specializations[selection.Variant];
+    FragmentProgramCache &cache = m_FragmentPrograms[selection.Variant];
     ++cache.Clock;
     if (cache.Clock == 0) {
         cache.Clock = 1;
@@ -112,16 +114,16 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
     }
 
     for (CKDWORD i = 0; i < cache.Count; ++i) {
-        SpecializationEntry &entry = cache.Entries[i];
+        FragmentProgramEntry &entry = cache.Entries[i];
         if (entry.Key == programKey) {
             entry.LastUse = cache.Clock;
-            selection.Specialization = entry.Value;
+            selection.FragmentProgram = entry.Value;
             return selection;
         }
     }
 
     CKDWORD entryIndex = cache.Count;
-    if (cache.Count < SPECIALIZATION_CACHE_CAPACITY) {
+    if (cache.Count < FRAGMENT_PROGRAM_CACHE_CAPACITY) {
         ++cache.Count;
     } else {
         entryIndex = 0;
@@ -131,32 +133,32 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
         }
     }
 
-    SpecializationEntry &entry = cache.Entries[entryIndex];
-    entry.Value = CKFFBuildSpecializationInfo(programKey);
+    FragmentProgramEntry &entry = cache.Entries[entryIndex];
+    entry.Value = CKFFBuildFragmentProgram(programKey, samplerLayoutPlan);
     entry.Key = programKey;
     entry.LastUse = cache.Clock;
-    selection.Specialization = entry.Value;
+    selection.FragmentProgram = entry.Value;
     return selection;
 }
 
-CKDWORD CKFFShaderCache::GetCachedSpecializationCount(CKFFProgramVariant variant) const
+CKDWORD CKFFShaderCache::GetCachedFragmentProgramCount(CKFFProgramVariant variant) const
 {
-    return variant < CKFF_PROGRAM_VARIANT_COUNT ? m_Specializations[variant].Count : 0;
+    return variant < CKFF_PROGRAM_VARIANT_COUNT ? m_FragmentPrograms[variant].Count : 0;
 }
 
-CKDWORD CKFFShaderCache::GetSpecializationCapacity()
+CKDWORD CKFFShaderCache::GetFragmentProgramCapacity()
 {
-    return SPECIALIZATION_CACHE_CAPACITY;
+    return FRAGMENT_PROGRAM_CACHE_CAPACITY;
 }
 
-CKBOOL CKFFShaderCache::HasCachedSpecialization(CKFFProgramVariant variant, const CKFFShaderKeyFS &key) const
+CKBOOL CKFFShaderCache::HasCachedFragmentProgram(CKFFProgramVariant variant, const CKFFShaderKeyFS &key) const
 {
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
         return FALSE;
-    const SpecializationCache &specializations = m_Specializations[variant];
+    const FragmentProgramCache &programs = m_FragmentPrograms[variant];
     const CKFFShaderKeyFS programKey = CKFFProgramFragmentKey(key);
-    for (CKDWORD i = 0; i < specializations.Count; ++i)
-        if (specializations.Entries[i].Key == programKey)
+    for (CKDWORD i = 0; i < programs.Count; ++i)
+        if (programs.Entries[i].Key == programKey)
             return TRUE;
     return FALSE;
 }

@@ -45,8 +45,8 @@ BACKENDS = [
 ]
 
 ABI_HEADER = "CKFFShaderABI.generated.h"
-SPEC_LAYOUT_DEF = "CKFFSpecLayout.def"      # in CKFFPLib/ShaderModel
-SPEC_LAYOUT_SHADER = "ff_spec_layout.sh"    # generated next to the shader sources
+FRAGMENT_PROGRAM_LAYOUT_DEF = "CKFFFragmentProgramLayout.def"      # in CKFFPLib/ShaderModel
+FRAGMENT_PROGRAM_LAYOUT_SHADER = "ff_fragment_program_layout.sh"    # generated next to the shader sources
 
 
 def _exe_name(name: str) -> str:
@@ -215,8 +215,8 @@ def write_abi_header(generated_dir: Path, version: int, interface_hash: int) -> 
         f.write(f"static const CKDWORD g_CKFFGeneratedShaderInterfaceHash = 0x{interface_hash:08x}u;\n")
 
 
-class SpecLayout:
-    """The specialization data layout parsed from CKFFSpecLayout.def."""
+class FragmentProgramLayout:
+    """The fragment program layout parsed from CKFFFragmentProgramLayout.def."""
 
     def __init__(self) -> None:
         self.consts: dict[str, int] = {}
@@ -224,9 +224,9 @@ class SpecLayout:
         self.global_fields: list[tuple[str, int, int, int]] = []
 
 
-def load_spec_layout(def_path: Path) -> SpecLayout:
-    layout = SpecLayout()
-    pattern = re.compile(r"^\s*CKFF_SPEC_(CONST|STAGE_FIELD|GLOBAL_FIELD)\(([^)]*)\)")
+def load_fragment_program_layout(def_path: Path) -> FragmentProgramLayout:
+    layout = FragmentProgramLayout()
+    pattern = re.compile(r"^\s*CKFF_FRAGMENT_PROGRAM_(CONST|STAGE_FIELD|GLOBAL_FIELD)\(([^)]*)\)")
     for line_number, raw in enumerate(def_path.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.split("//", 1)[0]
         match = pattern.match(line)
@@ -238,83 +238,83 @@ def load_spec_layout(def_path: Path) -> SpecLayout:
         args = [value.strip() for value in match.group(2).split(",")]
         if kind == "CONST":
             if len(args) != 2:
-                raise ValueError(f"{def_path.name}:{line_number}: CKFF_SPEC_CONST takes NAME, value")
+                raise ValueError(f"{def_path.name}:{line_number}: CKFF_FRAGMENT_PROGRAM_CONST takes NAME, value")
             layout.consts[args[0]] = int(args[1], 0)
         else:
             if len(args) != 4:
                 raise ValueError(f"{def_path.name}:{line_number}: field entries take NAME, lane, offset, bits")
             entry = (args[0], int(args[1], 0), int(args[2], 0), int(args[3], 0))
             (layout.stage_fields if kind == "STAGE_FIELD" else layout.global_fields).append(entry)
-    validate_spec_layout(layout)
+    validate_fragment_program_layout(layout)
     return layout
 
 
-def validate_spec_layout(layout: SpecLayout) -> None:
+def validate_fragment_program_layout(layout: FragmentProgramLayout) -> None:
     for name in ("LANE_BITS", "LANE_COUNT", "VEC4_COUNT", "STAGE_COUNT",
                  "STAGE_LANE_BASE", "STAGE_LANE_STRIDE", "GLOBAL_LANE_BASE"):
         if name not in layout.consts:
-            raise ValueError(f"{SPEC_LAYOUT_DEF}: missing CKFF_SPEC_CONST {name}")
+            raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: missing CKFF_FRAGMENT_PROGRAM_CONST {name}")
     lane_bits = layout.consts["LANE_BITS"]
     lane_count = layout.consts["LANE_COUNT"]
     if lane_bits != 24:
-        raise ValueError(f"{SPEC_LAYOUT_DEF}: lanes must be 24 bits to stay exact in fp32")
+        raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: lanes must be 24 bits to stay exact in fp32")
     if lane_count != layout.consts["VEC4_COUNT"] * 4:
-        raise ValueError(f"{SPEC_LAYOUT_DEF}: LANE_COUNT must equal VEC4_COUNT * 4")
+        raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: LANE_COUNT must equal VEC4_COUNT * 4")
     stage_lanes = layout.consts["STAGE_COUNT"] * layout.consts["STAGE_LANE_STRIDE"]
     if layout.consts["STAGE_LANE_BASE"] + stage_lanes > layout.consts["GLOBAL_LANE_BASE"]:
-        raise ValueError(f"{SPEC_LAYOUT_DEF}: stage lanes overlap the global lanes")
+        raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: stage lanes overlap the global lanes")
 
     occupancy: dict[int, int] = {}
 
     def occupy(name: str, lane: int, offset: int, bits: int) -> None:
         if bits <= 0 or offset < 0 or offset + bits > lane_bits:
-            raise ValueError(f"{SPEC_LAYOUT_DEF}: {name} does not fit inside one {lane_bits}-bit lane")
+            raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: {name} does not fit inside one {lane_bits}-bit lane")
         if lane < 0 or lane >= lane_count:
-            raise ValueError(f"{SPEC_LAYOUT_DEF}: {name} uses lane {lane} outside LANE_COUNT")
+            raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: {name} uses lane {lane} outside LANE_COUNT")
         mask = ((1 << bits) - 1) << offset
         if occupancy.get(lane, 0) & mask:
-            raise ValueError(f"{SPEC_LAYOUT_DEF}: {name} overlaps another field in lane {lane}")
+            raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: {name} overlaps another field in lane {lane}")
         occupancy[lane] = occupancy.get(lane, 0) | mask
 
     for stage in range(layout.consts["STAGE_COUNT"]):
         base = layout.consts["STAGE_LANE_BASE"] + stage * layout.consts["STAGE_LANE_STRIDE"]
         for name, lane, offset, bits in layout.stage_fields:
             if lane >= layout.consts["STAGE_LANE_STRIDE"]:
-                raise ValueError(f"{SPEC_LAYOUT_DEF}: stage field {name} lane {lane} exceeds the stage stride")
+                raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: stage field {name} lane {lane} exceeds the stage stride")
             occupy(f"stage {stage} {name}", base + lane, offset, bits)
     for name, lane, offset, bits in layout.global_fields:
         if lane < layout.consts["GLOBAL_LANE_BASE"]:
-            raise ValueError(f"{SPEC_LAYOUT_DEF}: global field {name} must live at or after GLOBAL_LANE_BASE")
+            raise ValueError(f"{FRAGMENT_PROGRAM_LAYOUT_DEF}: global field {name} must live at or after GLOBAL_LANE_BASE")
         occupy(name, lane, offset, bits)
 
 
-def spec_layout_shader_lines(layout: SpecLayout) -> list[str]:
+def fragment_program_layout_shader_lines(layout: FragmentProgramLayout) -> list[str]:
     lines = [
-        "// Auto-generated by compile_shaders.py gen-spec-layout from CKFFSpecLayout.def - DO NOT EDIT",
-        "// Requires int ckffSpecBits(int lane, int offset, int bits) to be defined before inclusion.",
+        "// Auto-generated by compile_shaders.py gen-fragment-program-layout from CKFFFragmentProgramLayout.def - DO NOT EDIT",
+        "// Requires int ckffProgramBits(int lane, int offset, int bits) to be defined before inclusion.",
         "",
     ]
     for name, value in layout.consts.items():
-        lines.append(f"#define CKFF_SPEC_{name} {value}")
+        lines.append(f"#define CKFF_FRAGMENT_PROGRAM_{name} {value}")
     lines.append("")
-    lines.append("int ckffSpecStageBits(int stage, int laneInStage, int offset, int bits)")
+    lines.append("int ckffProgramStageBits(int stage, int laneInStage, int offset, int bits)")
     lines.append("{")
-    lines.append("    return ckffSpecBits(CKFF_SPEC_STAGE_LANE_BASE + stage * CKFF_SPEC_STAGE_LANE_STRIDE + laneInStage, offset, bits);")
+    lines.append("    return ckffProgramBits(CKFF_FRAGMENT_PROGRAM_STAGE_LANE_BASE + stage * CKFF_FRAGMENT_PROGRAM_STAGE_LANE_STRIDE + laneInStage, offset, bits);")
     lines.append("}")
     lines.append("")
     for name, lane, offset, bits in layout.stage_fields:
-        lines.append(f"int ckffSpecStage_{name}(int stage) {{ return ckffSpecStageBits(stage, {lane}, {offset}, {bits}); }}")
+        lines.append(f"int ckffProgramStage_{name}(int stage) {{ return ckffProgramStageBits(stage, {lane}, {offset}, {bits}); }}")
     lines.append("")
     for name, lane, offset, bits in layout.global_fields:
-        lines.append(f"int ckffSpec_{name}() {{ return ckffSpecBits({lane}, {offset}, {bits}); }}")
+        lines.append(f"int ckffProgram_{name}() {{ return ckffProgramBits({lane}, {offset}, {bits}); }}")
     lines.append("")
     return lines
 
 
-def write_spec_layout_shader(script_dir: Path) -> Path:
-    layout = load_spec_layout(script_dir.parent / SPEC_LAYOUT_DEF)
-    path = script_dir / SPEC_LAYOUT_SHADER
-    path.write_text("\n".join(spec_layout_shader_lines(layout)), encoding="utf-8", newline="\n")
+def write_fragment_program_layout_shader(script_dir: Path) -> Path:
+    layout = load_fragment_program_layout(script_dir.parent / FRAGMENT_PROGRAM_LAYOUT_DEF)
+    path = script_dir / FRAGMENT_PROGRAM_LAYOUT_SHADER
+    path.write_text("\n".join(fragment_program_layout_shader_lines(layout)), encoding="utf-8", newline="\n")
     return path
 
 
@@ -337,9 +337,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Compile CK2_3D fixed-function shaders with bgfx shaderc."
     )
-    parser.add_argument("command", nargs="?", choices=["compile", "gen-spec-layout"], default="compile",
-                        help="compile (default): regenerate ff_spec_layout.sh and every shader blob; "
-                             "gen-spec-layout: only regenerate ff_spec_layout.sh from CKFFSpecLayout.def.")
+    parser.add_argument("command", nargs="?", choices=["compile", "gen-fragment-program-layout"], default="compile",
+                        help="compile (default): regenerate ff_fragment_program_layout.sh and every shader blob; "
+                             "gen-fragment-program-layout: only regenerate ff_fragment_program_layout.sh from CKFFFragmentProgramLayout.def.")
     parser.add_argument("--bgfx-source", type=Path, help="Unmodified bgfx source directory populated by CMake.")
     parser.add_argument("--shaderc", help="Path to bgfx shaderc executable.")
     parser.add_argument("--backend", choices=[b["name"] for b in BACKENDS],
@@ -351,9 +351,9 @@ def main() -> int:
     source_dir = ckff_root / "ShaderModel" / "shaders"
     interface_dir = ckff_root / "Interface"
     generated_dir = rasterizer_shader_dir / "generated"
-    spec_layout = write_spec_layout_shader(source_dir)
-    print(f"Wrote {spec_layout.name} from {SPEC_LAYOUT_DEF}")
-    if args.command == "gen-spec-layout":
+    fragment_program_layout = write_fragment_program_layout_shader(source_dir)
+    print(f"Wrote {fragment_program_layout.name} from {FRAGMENT_PROGRAM_LAYOUT_DEF}")
+    if args.command == "gen-fragment-program-layout":
         return 0
 
     if not args.bgfx_source or not (args.bgfx_source / "src" / "bgfx_shader.sh").is_file():

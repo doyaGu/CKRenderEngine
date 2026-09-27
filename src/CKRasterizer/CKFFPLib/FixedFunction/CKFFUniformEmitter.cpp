@@ -71,7 +71,7 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->ProgramContext = programContext;
     context->Textures = textures;
     context->ShaderKey = programContext->ShaderKey;
-    context->Specialization = programContext->Specialization;
+    context->FragmentProgram = programContext->FragmentProgram;
     context->ActiveTextureCount = activeTextureCount;
     context->PositionT = context->ShaderKey.VS.GetHasPositionT() ? TRUE : FALSE;
     context->LightingEnabled = context->PositionT ? FALSE : TRUE;
@@ -110,7 +110,7 @@ void CKFFUniformEmitter::ResetCache()
     m_LastStaticPolygonDepthBias = FALSE;
     m_LastStaticPatternedLines = FALSE;
     m_LastStaticShaderKey = CKFFShaderKey();
-    m_LastStaticSpecialization = CKFFSpecializationInfo();
+    m_LastStaticFragmentProgram = CKFFFragmentProgram();
 }
 
 CKBOOL CKFFUniformEmitter::Emit(CKFFUniformSink *sink, CKFFConstantBlock block,
@@ -221,7 +221,7 @@ void CKFFUniformEmitter::EmitTextureMatrixUniforms(const CKFFUniformEmissionCont
              texMatrixCount, texMatrixCount * 4, FALSE);
 }
 
-void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context)
+void CKFFUniformEmitter::EmitStageAndFragmentProgramUniforms(const CKFFUniformEmissionContext *context)
 {
     if (!context || !context->Uniforms || !context->Textures)
         return;
@@ -232,12 +232,6 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
     float borderColors[CKFF_MAX_TEXTURE_STAGES][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
-    const CKFFSamplerLayoutPlan &layoutPlan =
-        context->Textures->SamplerLayoutPlan;
-    const CKBOOL packSamplerOrdinal =
-        (m_ShaderTargetFlags & CKRST_SHADER_TARGET_SAMPLER_ORDINAL) != 0 ||
-        layoutPlan.CompareSamplerCount != 0 ||
-        layoutPlan.Layout != CKFF_SAMPLER_LAYOUT_WIDE_2D;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKSamplerDesc &sampler = context->Textures->Bindings[stage].Sampler;
         const CKDWORD anisotropy = sampler.ShaderAnisotropy
@@ -256,11 +250,9 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
         const CKDWORD comparisonFilter =
             (borderMask != 0 || sampler.CompareFunc != CKRST_COMPARE_NONE) ?
             minLinear * 8192u + magLinear * 16384u : 0u;
-        const CKDWORD samplerOrdinal = packSamplerOrdinal ?
-            (layoutPlan.Stages[stage].Ordinal & 7u) * 32768u : 0u;
         bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel +
             anisotropy * 32u + borderMask * 1024u +
-            comparisonFilter + samplerOrdinal);
+            comparisonFilter);
         CKFFPackColorARGB(sampler.BorderColor, borderColors[stage]);
     }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,
@@ -311,10 +303,10 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     Emit(sink, CKRST_BLOCK_STAGE_PARAMS, stageParams.Values,
          CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
 
-    CKFFSpecUniform ffSpec;
-    CKFFPackSpecialization(context->Specialization, ffSpec);
-    Emit(sink, CKRST_BLOCK_SPEC, ffSpec.Values,
-         CKFF_SPEC_UNIFORM_VEC4_COUNT, CKFF_SPEC_UNIFORM_VEC4_COUNT, FALSE);
+    CKFFFragmentProgramUniform ffProgram;
+    CKFFPackFragmentProgram(context->FragmentProgram, ffProgram);
+    Emit(sink, CKRST_BLOCK_FRAGMENT_PROGRAM, ffProgram.Values,
+         CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT, CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT, FALSE);
 }
 
 void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext *context)
@@ -378,7 +370,7 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
     if (drawParamCount > 0)
         Emit(sink, CKRST_BLOCK_DRAW_PARAMS, drawParams, drawParamCount, drawParamCount, FALSE);
 
-    EmitStageAndSpecUniforms(&context);
+    EmitStageAndFragmentProgramUniforms(&context);
     EmitClipPlaneUniforms(&context);
 }
 
@@ -402,7 +394,7 @@ CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
         m_LastStaticPolygonDepthBias == polygonDepthBias &&
         m_LastStaticPatternedLines == patternedLines &&
         m_LastStaticShaderKey == programContext->ShaderKey &&
-        m_LastStaticSpecialization == programContext->Specialization) {
+        m_LastStaticFragmentProgram == programContext->FragmentProgram) {
         return TRUE;
     }
     if (!UploadStaticUniforms(constants, programContext, textures,
@@ -416,7 +408,7 @@ CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
     m_LastStaticPolygonDepthBias = polygonDepthBias;
     m_LastStaticPatternedLines = patternedLines;
     m_LastStaticShaderKey = programContext->ShaderKey;
-    m_LastStaticSpecialization = programContext->Specialization;
+    m_LastStaticFragmentProgram = programContext->FragmentProgram;
     return TRUE;
 }
 

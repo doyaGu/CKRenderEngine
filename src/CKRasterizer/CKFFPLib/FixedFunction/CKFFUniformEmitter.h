@@ -40,7 +40,7 @@ private:
                       CKBOOL patternedLines);
     void EmitObjectMatrixUniforms(const CKFFUniformEmissionContext *context);
     void EmitTextureMatrixUniforms(const CKFFUniformEmissionContext *context);
-    void EmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context);
+    void EmitStageAndFragmentProgramUniforms(const CKFFUniformEmissionContext *context);
     void EmitClipPlaneUniforms(const CKFFUniformEmissionContext *context);
     CKBOOL RenderTargetOriginFlip() const;
 
@@ -56,7 +56,7 @@ private:
     CKBOOL m_LastStaticPolygonDepthBias;
     CKBOOL m_LastStaticPatternedLines;
     CKFFShaderKey m_LastStaticShaderKey;
-    CKFFSpecializationInfo m_LastStaticSpecialization;
+    CKFFFragmentProgram m_LastStaticFragmentProgram;
 };
 
 #endif // CKFFUNIFORMEMITTER_H

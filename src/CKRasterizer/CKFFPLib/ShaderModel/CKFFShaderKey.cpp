@@ -290,33 +290,35 @@ CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBound
     return key;
 }
 
-CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
-    CKFFSpecializationInfo info;
-    info.Set(CKFF_SPEC_LAST_ACTIVE_TEXTURE_STAGE, key.LastActiveTextureStage);
-    info.Set(CKFF_SPEC_GLOBAL_SPECULAR_ENABLED, key.GlobalSpecularEnable ? 1u : 0u);
-    info.Set(CKFF_SPEC_ALPHA_TEST_ENABLED, key.AlphaTestEnable ? 1u : 0u);
-    info.Set(CKFF_SPEC_ALPHA_FUNC, key.AlphaFunc);
-    info.Set(CKFF_SPEC_FOG_ENABLED, key.FogEnable ? 1u : 0u);
-    info.Set(CKFF_SPEC_VERTEX_FOG_MODE, key.VertexFogMode);
-    info.Set(CKFF_SPEC_PIXEL_FOG_MODE, key.PixelFogMode);
-    info.Set(CKFF_SPEC_RANGE_FOG, key.RangeFog ? 1u : 0u);
-    info.Set(CKFF_SPEC_FLAT_SHADE, key.FlatShade ? 1u : 0u);
+CKFFFragmentProgram CKFFBuildFragmentProgram(
+    const CKFFShaderKeyFS &key,
+    const CKFFSamplerLayoutPlan &samplerLayoutPlan) {
+    CKFFFragmentProgram program;
+    program.Set(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE, key.LastActiveTextureStage);
+    program.Set(CKFF_FRAGMENT_PROGRAM_GLOBAL_SPECULAR_ENABLED, key.GlobalSpecularEnable ? 1u : 0u);
+    program.Set(CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED, key.AlphaTestEnable ? 1u : 0u);
+    program.Set(CKFF_FRAGMENT_PROGRAM_ALPHA_FUNC, key.AlphaFunc);
+    program.Set(CKFF_FRAGMENT_PROGRAM_FOG_ENABLED, key.FogEnable ? 1u : 0u);
+    program.Set(CKFF_FRAGMENT_PROGRAM_VERTEX_FOG_MODE, key.VertexFogMode);
+    program.Set(CKFF_FRAGMENT_PROGRAM_PIXEL_FOG_MODE, key.PixelFogMode);
+    program.Set(CKFF_FRAGMENT_PROGRAM_RANGE_FOG, key.RangeFog ? 1u : 0u);
+    program.Set(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE, key.FlatShade ? 1u : 0u);
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];
-        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_OP, src.ColorOp);
-        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG0, CKFFSpecializationInfo::RepackArg(src.ColorArg0));
-        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG1, CKFFSpecializationInfo::RepackArg(src.ColorArg1));
-        info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_ARG2, CKFFSpecializationInfo::RepackArg(src.ColorArg2));
-        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_OP, src.AlphaOp);
-        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG0, CKFFSpecializationInfo::RepackArg(src.AlphaArg0));
-        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG1, CKFFSpecializationInfo::RepackArg(src.AlphaArg1));
-        info.SetStage(stage, CKFF_SPEC_STAGE_ALPHA_ARG2, CKFFSpecializationInfo::RepackArg(src.AlphaArg2));
-        info.SetStage(stage, CKFF_SPEC_STAGE_RESULT_IS_TEMP, src.ResultIsTemp ? 1u : 0u);
-        info.SetStage(stage, CKFF_SPEC_STAGE_SAMPLER_TYPE, src.SamplerType & 3u);
-        info.SetStage(stage, CKFF_SPEC_STAGE_PROJECTED, src.ProjectedSampler ? 1u : 0u);
-        info.SetStage(stage, CKFF_SPEC_STAGE_SAMPLER_COMPARE_FUNC, src.SamplerCompareFunc & 0xFu);
-        info.SetMirrorOnceMask(stage, src.MirrorOnceMask & 7u);
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP, src.ColorOp);
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0, CKFFFragmentProgram::RepackArg(src.ColorArg0));
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1, CKFFFragmentProgram::RepackArg(src.ColorArg1));
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG2, CKFFFragmentProgram::RepackArg(src.ColorArg2));
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP, src.AlphaOp);
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG0, CKFFFragmentProgram::RepackArg(src.AlphaArg0));
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG1, CKFFFragmentProgram::RepackArg(src.AlphaArg1));
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG2, CKFFFragmentProgram::RepackArg(src.AlphaArg2));
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP, src.ResultIsTemp ? 1u : 0u);
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, src.SamplerType & 3u);
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED, src.ProjectedSampler ? 1u : 0u);
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, src.SamplerCompareFunc & 0xFu);
+        program.SetSamplerOrdinal(stage, samplerLayoutPlan.Stages[stage].Ordinal);
     }
 
-    return info;
+    return program;
 }

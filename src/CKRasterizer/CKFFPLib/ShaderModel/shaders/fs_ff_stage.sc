@@ -8,7 +8,7 @@ uniform vec4 u_bumpEnv[16];
 uniform vec4 u_stageParams[16];
 uniform vec4 u_borderColor[8];
 uniform vec4 u_borderSampler[16];
-uniform vec4 u_ffSpec[5];
+uniform vec4 u_ffProgram[5];
 
 // Three sixteen-slot layouts cover every combination of eight logical stages.
 // 0 = 8x2D + 4xcube + 4xvolume, 1 = 4x2D + 8xcube + 4xvolume,
@@ -361,45 +361,6 @@ vec4 ckffNative3DSample(Texture3D<float4> image, SamplerState state, uint slot,
     texture3DGrad(_sampler, _uv, _original, _mirror, _bias, minMip)
 #endif
 
-// Resource ordinal for this stage (mirrors CKFFSamplerOrdinal on the C++ side).
-int ckffSamplerOrdinal(int stage, int samplerType)
-{
-#if CKFF_NATIVE_SDL_GPU
-    int ordinal = 0;
-    for (int previousStage = 0; previousStage < 8; ++previousStage) {
-        if (previousStage >= stage) break;
-        if (ckffSpecStage_SAMPLER_TYPE(previousStage) == samplerType)
-            ++ordinal;
-    }
-    return ordinal;
-#else
-    bool twoDimensional = samplerType == 0 || samplerType == 2;
-    bool comparison = samplerType == 2 &&
-        ckffSpecStage_SAMPLER_COMPARE_FUNC(stage) != 0;
-    int ordinal = 0;
-    if (twoDimensional && !comparison) {
-        int compareCount = 0;
-        for (int candidate = 0; candidate < 8; ++candidate)
-            if (ckffSpecStage_SAMPLER_TYPE(candidate) == 2 &&
-                ckffSpecStage_SAMPLER_COMPARE_FUNC(candidate) != 0)
-                ++compareCount;
-        if (compareCount == 0) return stage;
-        ordinal = compareCount;
-    }
-    for (int previousStage = 0; previousStage < 8; ++previousStage) {
-        if (previousStage >= stage) break;
-        int previousType = ckffSpecStage_SAMPLER_TYPE(previousStage);
-        bool previous2D = previousType == 0 || previousType == 2;
-        bool previousComparison = previousType == 2 &&
-            ckffSpecStage_SAMPLER_COMPARE_FUNC(previousStage) != 0;
-        if ((!twoDimensional && previousType == samplerType) ||
-            (twoDimensional && previous2D && previousComparison == comparison))
-            ++ordinal;
-    }
-    return ordinal;
-#endif
-}
-
 // CKFF_BGFX_ONLY_BEGIN
 #if !CKFF_NATIVE_SDL_GPU
 float ckffBorderAxisCoverage(float uv, float extent, bool border, bool filtered)
@@ -689,21 +650,14 @@ float ckffCompareSample2D(int ordinal, vec2 uv,
 #endif
 // CKFF_BGFX_ONLY_END
 
-vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, int mirrorOnceMask, bool hasTexture)
+vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
+                     int samplerOrdinal, int mirrorOnceMask, bool hasTexture)
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
     float lodBias = u_bumpEnv[stage * 2 + 1].z;
     int packedSamplerLod = int(u_bumpEnv[stage * 2 + 1].w);
     float minMip = float(packedSamplerLod & 31);
-#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_SAMPLER_LAYOUT == 0 && CKFF_NATIVE_COMPARE_COUNT == 0
-    // Keep the common SDL program statically indexed. Dynamic resource
-    // selection here makes some D3D12 drivers reject the otherwise ordinary
-    // 8/4/4 pipeline. This layout's ordinal is the logical stage.
-    float maxAnisotropy = float(packedSamplerLod >> 5);
-#else
-    int samplerOrdinal = (packedSamplerLod >> 15) & 7;
     float maxAnisotropy = float((packedSamplerLod >> 5) & 31);
-#endif
     // Addressing must not change the derivatives used to choose a mip level.
     // In particular, clamping the coordinate outside [0, 1] would otherwise
     // force the LOD to zero instead of preserving the source footprint.
@@ -725,7 +679,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 #endif
 // CKFF_BGFX_ONLY_END
     if (samplerType == 1) {
-        int ordinal = ckffSamplerOrdinal(stage, samplerType);
+        int ordinal = samplerOrdinal;
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_CUBE(_sampler) CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)
 #else
@@ -749,7 +703,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 #undef CKFF_SAMPLE_CUBE
     }
     if (samplerType == 3) {
-        int ordinal = ckffSamplerOrdinal(stage, samplerType);
+        int ordinal = samplerOrdinal;
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_3D(_sampler) (maxAnisotropy > 1.0 ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
@@ -832,9 +786,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc, in
 
     vec2 uv = coord.xy;
     vec4 color = vec4_splat(0.0);
-#if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0 || CKFF_NATIVE_SAMPLER_LAYOUT != 0
     int ordinal = samplerOrdinal;
-#endif
 
 #if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0
     if (samplerType == 2 && compareFunc != 0) {
@@ -1172,8 +1124,8 @@ void main()
             discard;
     }
 #endif
-    bool flatShade = ckffSpec_FLAT_SHADE() != 0;
-    int lastActiveStage = ckffSpec_LAST_ACTIVE_TEXTURE_STAGE();
+    bool flatShade = ckffProgram_FLAT_SHADE() != 0;
+    int lastActiveStage = ckffProgram_LAST_ACTIVE_TEXTURE_STAGE();
     vec4 diffuse = flatShade ? v_flatColor0 : v_color0;
     vec4 specular = flatShade ? v_flatColor1 : v_color1;
     vec4 current = diffuse;
@@ -1221,7 +1173,9 @@ void main()
             sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType, stageParams.SamplerCompareFunc, stageParams.MirrorOnceMask, hasTexture);
+        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType,
+            stageParams.SamplerCompareFunc, stageParams.SamplerOrdinal,
+            stageParams.MirrorOnceMask, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
             float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);
@@ -1260,14 +1214,14 @@ void main()
         previousAlphaOp = alphaOp;
     }
 
-    if (ckffSpec_GLOBAL_SPECULAR_ENABLED() != 0) {
+    if (ckffProgram_GLOBAL_SPECULAR_ENABLED() != 0) {
         current.rgb += specular.rgb;
     }
     // Alpha test precision (the high nibble of the packed alpha draw param) is not applied yet:
     // the 8-bit path matches the reference; wider alpha targets are a phase 2.3 item.
-    if (ckffSpec_ALPHA_TEST_ENABLED() != 0 && !alphaPass(current.a, ckffSpec_ALPHA_FUNC())) discard;
-    if (ckffSpec_FOG_ENABLED() != 0) {
-        int pixelFogMode = ckffSpec_PIXEL_FOG_MODE();
+    if (ckffProgram_ALPHA_TEST_ENABLED() != 0 && !alphaPass(current.a, ckffProgram_ALPHA_FUNC())) discard;
+    if (ckffProgram_FOG_ENABLED() != 0) {
+        int pixelFogMode = ckffProgram_PIXEL_FOG_MODE();
         float fogFactor = pixelFogMode == 0
             ? v_texcoord7Fog.z
             : computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);

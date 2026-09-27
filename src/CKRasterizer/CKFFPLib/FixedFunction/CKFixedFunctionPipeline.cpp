@@ -52,12 +52,14 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
     memset(&m_Probes.Stats, 0, sizeof(m_Probes.Stats));
     CKFFInitPreparedState(&m_VertexBufferProgramCache.PreparedState);
     CKFFInitProgramContext(&m_VertexBufferProgramCache.ProgramContext,
-                           CKFFShaderKey(), CKFFSpecializationInfo());
+                           CKFFShaderKey(), CKFFFragmentProgram(),
+                           CKFFSamplerLayoutPlan());
     memset(m_SoftwareProgramCacheTexcoordComponentCounts, 0,
            sizeof(m_SoftwareProgramCacheTexcoordComponentCounts));
     CKFFInitPreparedState(&m_SoftwareProgramCache.PreparedState);
     CKFFInitProgramContext(&m_SoftwareProgramCache.ProgramContext,
-                           CKFFShaderKey(), CKFFSpecializationInfo());
+                           CKFFShaderKey(), CKFFFragmentProgram(),
+                           CKFFSamplerLayoutPlan());
 }
 
 CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
@@ -727,9 +729,12 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
 
     const CKFFShaderKey shaderKey =
         CKFFBuildShaderKeyFromPreparedState(&preparation->PreparedState);
+    const CKFFSamplerLayoutPlan samplerLayoutPlan =
+        CKFFBuildSamplerLayoutPlan(shaderKey.FS);
     CKFFInitProgramContext(
         &preparation->ProgramContext, shaderKey,
-        CKFFBuildSpecializationInfo(shaderKey.FS));
+        CKFFBuildFragmentProgram(shaderKey.FS, samplerLayoutPlan),
+        samplerLayoutPlan);
     return CKFF_PROGRAM_PREPARE_OK;
 }
 
@@ -1276,7 +1281,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     m_Draw.Constants = &m_Constants;
     m_Draw.Marker = m_DrawMarker;
     m_Draw.ShaderKey = programContext->ShaderKey;
-    m_Draw.Specialization = programContext->Specialization;
+    m_Draw.FragmentProgram = programContext->FragmentProgram;
     m_Draw.Source = submission.Source;
     if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());

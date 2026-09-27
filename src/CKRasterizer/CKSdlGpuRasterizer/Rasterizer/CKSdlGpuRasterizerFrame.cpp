@@ -498,7 +498,7 @@ CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     }
     return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout]
                                                 [compareSamplerCount][pad],
-                              selection.Specialization);
+                              selection.FragmentProgram);
 }
 
 void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()
