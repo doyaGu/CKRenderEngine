@@ -1,6 +1,14 @@
-struct CKFFTextureStageProgram
+struct CKFFTextureStageSamplingProgram
 {
     int ColorOp;
+    int SamplerType;
+    bool Projected;
+    int SamplerCompareFunc;
+    int SamplerOrdinal;
+};
+
+struct CKFFTextureStageCombinerProgram
+{
     int ColorArg0;
     int ColorArg1;
     int ColorArg2;
@@ -9,9 +17,12 @@ struct CKFFTextureStageProgram
     int AlphaArg1;
     int AlphaArg2;
     bool ResultIsTemp;
-    int SamplerType;
-    bool Projected;
-    int SamplerCompareFunc;
+};
+
+struct CKFFTextureStageProgramWords
+{
+    int Color;
+    int Alpha;
     int SamplerOrdinal;
 };
 
@@ -35,8 +46,6 @@ struct CKFFStageParams
     int MirrorOnceMask;
     bool BumpUnorm;
     bool HasTexture;
-    int StageBlend;
-    vec4 Constant;
 };
 
 // Fragment program data: u_ffProgram carries CKFF_FRAGMENT_PROGRAM_LANE_COUNT
@@ -86,21 +95,52 @@ CKFFGlobalFragmentProgram ckffDecodeGlobalFragmentProgram()
     return program;
 }
 
-CKFFTextureStageProgram ckffDecodeTextureStageProgram(
+CKFFTextureStageProgramWords ckffReadTextureStageProgramWords(
     int stage, int samplerOrdinals)
 {
-    CKFFTextureStageProgram program;
+    CKFFTextureStageProgramWords words;
     vec4 packedWords = u_ffProgram[stage / 2];
-    int colorWord = int(packedWords.x);
-    int alphaWord = int(packedWords.y);
+    words.Color = int(packedWords.x);
+    words.Alpha = int(packedWords.y);
     if ((stage & 1) != 0) {
-        colorWord = int(packedWords.z);
-        alphaWord = int(packedWords.w);
+        words.Color = int(packedWords.z);
+        words.Alpha = int(packedWords.w);
     }
+    words.SamplerOrdinal = (samplerOrdinals >> (stage * 3)) & 7;
+    return words;
+}
+
+CKFFTextureStageSamplingProgram ckffDecodeTextureStageSamplingProgram(
+    CKFFTextureStageProgramWords words)
+{
+    CKFFTextureStageSamplingProgram program;
+    int colorWord = words.Color;
+    int alphaWord = words.Alpha;
 
     program.ColorOp =
         (colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP_SHIFT) &
         CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP_MASK;
+    program.SamplerType =
+        (colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE_SHIFT) &
+        CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE_MASK;
+    program.Projected =
+        ((colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED_SHIFT) &
+         CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED_MASK) != 0;
+
+    program.SamplerCompareFunc =
+        (alphaWord >> CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC_SHIFT) &
+        CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC_MASK;
+    program.SamplerOrdinal = words.SamplerOrdinal;
+    return program;
+}
+
+CKFFTextureStageCombinerProgram ckffDecodeTextureStageCombinerProgram(
+    CKFFTextureStageProgramWords words)
+{
+    CKFFTextureStageCombinerProgram program;
+    int colorWord = words.Color;
+    int alphaWord = words.Alpha;
+
     program.ColorArg0 = ckffUnpackProgramArg(
         (colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0_SHIFT) &
         CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0_MASK);
@@ -113,13 +153,6 @@ CKFFTextureStageProgram ckffDecodeTextureStageProgram(
     program.ResultIsTemp =
         ((colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP_SHIFT) &
          CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP_MASK) != 0;
-    program.SamplerType =
-        (colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE_SHIFT) &
-        CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE_MASK;
-    program.Projected =
-        ((colorWord >> CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED_SHIFT) &
-         CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED_MASK) != 0;
-
     program.AlphaOp =
         (alphaWord >> CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP_SHIFT) &
         CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP_MASK;
@@ -132,18 +165,13 @@ CKFFTextureStageProgram ckffDecodeTextureStageProgram(
     program.AlphaArg2 = ckffUnpackProgramArg(
         (alphaWord >> CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG2_SHIFT) &
         CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG2_MASK);
-    program.SamplerCompareFunc =
-        (alphaWord >> CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC_SHIFT) &
-        CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC_MASK;
-    program.SamplerOrdinal = (samplerOrdinals >> (stage * 3)) & 7;
     return program;
 }
 
 // coordParams = u_stageParams[stage * 2 + 0]: x = packed texcoord index,
 // y = texture transform flags (+ MIRRORONCE / render-target flip / bump bits),
 // z = has texture. constant = u_stageParams[stage * 2 + 1].
-CKFFStageParams ckffReadStageParams(bool projected, vec4 coordParams,
-                                    vec4 constant)
+CKFFStageParams ckffReadStageParams(bool projected, vec4 coordParams)
 {
     CKFFStageParams params;
     int flags = int(coordParams.y);
@@ -156,7 +184,5 @@ CKFFStageParams ckffReadStageParams(bool projected, vec4 coordParams,
     params.MirrorOnceMask = (flags >> 9) & 7;
     params.BumpUnorm = (flags & 0x2000) != 0;
     params.HasTexture = coordParams.z > 0.5;
-    params.StageBlend = int(coordParams.w + 0.5);
-    params.Constant = constant;
     return params;
 }

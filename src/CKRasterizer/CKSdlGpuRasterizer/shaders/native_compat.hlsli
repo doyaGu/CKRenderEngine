@@ -97,9 +97,9 @@
 #if CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
 #define texture3D(name, uv) name.Sample(name##Sampler, uv)
 #define texture3DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
-#define texture3DGrad(name, uv, dx, dy, bias, minMip) name.SampleGrad(name##Sampler, uv, dx, dy)
+#define texture3DGrad(name, uv, originalUv, mirrorOnceMask, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
 #else
 #define texture3D(name, uv) ckSample3D(name, name##Sampler, name##Slot, uv)
 #define texture3DBias(name, uv, bias, minMip) ckSample3DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
-#define texture3DGrad(name, uv, dx, dy, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, dx, dy, bias, minMip)
+#define texture3DGrad(name, uv, originalUv, mirrorOnceMask, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, originalUv, mirrorOnceMask, bias, minMip)
 #endif

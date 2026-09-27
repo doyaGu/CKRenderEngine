@@ -16,14 +16,16 @@ uniform vec4 u_ffProgram[5];
 #ifndef CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
 #define CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT 0
 #endif
+#if !CKFF_NATIVE_SDL_GPU && BGFX_SHADER_LANGUAGE_HLSL >= 600
+#define CKFF_DEFER_COMBINER_DECODE 1
+#else
+#define CKFF_DEFER_COMBINER_DECODE 0
+#endif
 #if CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
 #include "ff_sampler_native_exact.sc"
 #else
 #include "ff_sampler_common.sc"
-#include "ff_sampler_2d.sc"
-#include "ff_sampler_cube.sc"
-#include "ff_sampler_volume.sc"
-#include "ff_sampler_depth.sc"
+#include "ff_sampler_full_exact.sc"
 #endif
 #include "ff_texture_ops.sc"
 
@@ -63,14 +65,23 @@ void main()
     for (int stage = 0; stage < 8; ++stage) {
         if (stage > fragmentProgram.LastActiveTextureStage) break;
 
-        CKFFTextureStageProgram stageProgram =
-            ckffDecodeTextureStageProgram(stage,
+        CKFFTextureStageProgramWords stageWords =
+            ckffReadTextureStageProgramWords(stage,
                 fragmentProgram.SamplerOrdinals);
+        // Keep only sampling fields live across CKFFSampleTexture.  Decoding
+        // all combiner fields here raises register pressure in the full-exact
+        // DXIL program even though those fields are consumed afterwards.
+        CKFFTextureStageSamplingProgram samplingProgram =
+            ckffDecodeTextureStageSamplingProgram(stageWords);
+        int colorOp = samplingProgram.ColorOp;
+#if !CKFF_DEFER_COMBINER_DECODE
+        CKFFTextureStageCombinerProgram combinerProgram =
+            ckffDecodeTextureStageCombinerProgram(stageWords);
+        vec4 stageConstant = u_stageParams[stage * 2 + 1];
+        int stageBlend = int(u_stageParams[stage * 2 + 0].w + 0.5);
+#endif
         CKFFStageParams stageParams = ckffReadStageParams(
-            stageProgram.Projected, u_stageParams[stage * 2 + 0],
-            u_stageParams[stage * 2 + 1]);
-        int colorOp = stageProgram.ColorOp;
-        int alphaOp = stageProgram.AlphaOp;
+            samplingProgram.Projected, u_stageParams[stage * 2 + 0]);
         bool hasTexture = stageParams.HasTexture;
 
         if (colorOp == 1) break;
@@ -100,27 +111,36 @@ void main()
             sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 texColor = CKFFSampleTexture(stage, sampleCoord, stageProgram.SamplerType,
-            stageProgram.SamplerCompareFunc, stageProgram.SamplerOrdinal,
+        vec4 texColor = CKFFSampleTexture(stage, sampleCoord,
+            samplingProgram.SamplerType,
+            samplingProgram.SamplerCompareFunc,
+            samplingProgram.SamplerOrdinal,
             stageParams.MirrorOnceMask, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
             float lum = clamp(previousTexture.z * u_bumpEnv[bumpBase + 1].x + u_bumpEnv[bumpBase + 1].y, 0.0, 1.0);
             texColor *= lum;
         }
+#if CKFF_DEFER_COMBINER_DECODE
+        CKFFTextureStageCombinerProgram combinerProgram =
+            ckffDecodeTextureStageCombinerProgram(stageWords);
+        vec4 stageConstant = u_stageParams[stage * 2 + 1];
+        int stageBlend = int(u_stageParams[stage * 2 + 0].w + 0.5);
+#endif
+        int alphaOp = combinerProgram.AlphaOp;
         bool premodulateColor = previousColorOp == 17 && hasTexture;
         bool premodulateAlpha = previousAlphaOp == 17 && hasTexture;
-        vec4 colorA = getArg(stageProgram.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
-        vec4 colorB = getArg(stageProgram.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
-        vec4 colorC = getArg(stageProgram.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
-        vec4 alphaA = getArg(stageProgram.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
-        vec4 alphaB = getArg(stageProgram.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
-        vec4 alphaC = getArg(stageProgram.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
+        vec4 colorA = getArg(combinerProgram.ColorArg1, texColor, current, diffuse, specular, temp, stageConstant, premodulateColor);
+        vec4 colorB = getArg(combinerProgram.ColorArg2, texColor, current, diffuse, specular, temp, stageConstant, premodulateColor);
+        vec4 colorC = getArg(combinerProgram.ColorArg0, texColor, current, diffuse, specular, temp, stageConstant, premodulateColor);
+        vec4 alphaA = getArg(combinerProgram.AlphaArg1, texColor, current, diffuse, specular, temp, stageConstant, premodulateAlpha);
+        vec4 alphaB = getArg(combinerProgram.AlphaArg2, texColor, current, diffuse, specular, temp, stageConstant, premodulateAlpha);
+        vec4 alphaC = getArg(combinerProgram.AlphaArg0, texColor, current, diffuse, specular, temp, stageConstant, premodulateAlpha);
 
-        int resultArg = stageProgram.ResultIsTemp ? 5 : 1;
+        int resultArg = combinerProgram.ResultIsTemp ? 5 : 1;
         vec4 stageResult = resultArg == 5 ? temp : current;
         vec4 colorResult = colorOp == 27
-            ? ckffStageBlend(texColor, current, stageParams.StageBlend)
+            ? ckffStageBlend(texColor, current, stageBlend)
             : applyOp(colorOp, colorA, colorB, colorC, stageResult, current, diffuse, texColor);
         vec4 alphaResult = applyOp(alphaOp, alphaA, alphaB, alphaC, stageResult, current, diffuse, texColor);
         stageResult.rgb = colorResult.rgb;

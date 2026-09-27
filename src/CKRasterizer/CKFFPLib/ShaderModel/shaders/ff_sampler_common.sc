@@ -9,52 +9,6 @@ vec4 applyMirrorOnceCoord(vec4 coord, int mirrorOnceMask, int samplerType)
     return coord;
 }
 
-struct CKFFSamplerShaderProgram
-{
-    float LodBias;
-    float MinimumMip;
-    float AnisotropyTaps;
-    int BorderMask;
-    bool MinLinear;
-    bool MagLinear;
-    bool RequiresExplicitGradient;
-    bool ManualLod;
-    bool ManualAnisotropy;
-    bool ManualBorder;
-    bool ManualDepthCompare;
-};
-
-CKFFSamplerShaderProgram ckffReadSamplerShaderProgram(int stage)
-{
-    CKFFSamplerShaderProgram program;
-    program.LodBias = u_bumpEnv[stage * 2 + 1].z;
-    int state = int(u_bumpEnv[stage * 2 + 1].w);
-    program.MinimumMip = float(
-        (state >> CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT) &
-        CKFF_SAMPLER_SHADER_MIN_MIP_MASK);
-    program.AnisotropyTaps = float(
-        (state >> CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT) &
-        CKFF_SAMPLER_SHADER_ANISOTROPY_MASK);
-    program.BorderMask =
-        (state >> CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT) &
-        CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK;
-    program.MinLinear =
-        (state & CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR) != 0;
-    program.MagLinear =
-        (state & CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR) != 0;
-    program.RequiresExplicitGradient =
-        (state & CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) != 0;
-    program.ManualLod =
-        (state & CKFF_SAMPLER_SHADER_MANUAL_LOD) != 0;
-    program.ManualAnisotropy =
-        (state & CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) != 0;
-    program.ManualBorder =
-        (state & CKFF_SAMPLER_SHADER_MANUAL_BORDER) != 0;
-    program.ManualDepthCompare =
-        (state & CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) != 0;
-    return program;
-}
-
 float ckffClampedLod2D(vec2 dx, vec2 dy, vec2 size, float bias, float minMip)
 {
     vec2 footprintX = dx * size;
@@ -164,7 +118,7 @@ vec4 ckffAniso3D(sampler3D image, vec3 uv, vec3 dx, vec3 dy,
     ckffAnisoCube(_sampler, _uv, _dx, _dy, _bias, _min, _max)
 #define CKFF_TEXTURE_3D_ANISO(_sampler, _uv, _dx, _dy, _bias, _min, _max) \
     ckffAniso3D(_sampler, _uv, _dx, _dy, _bias, _min, _max)
-#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _dx, _dy, _mirror, _bias) \
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
     (_mirror != 0 ? textureGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #elif !CKFF_NATIVE_SDL_GPU
 vec4 ckffTexture2DBias(BgfxSampler2D sampleState, vec2 uv, float bias)
@@ -268,7 +222,7 @@ vec4 ckffTexture3DAniso(BgfxSampler3D sampleState, vec3 uv, vec3 dx, vec3 dy,
     ckffTextureCubeAniso(_sampler, _uv, _dx, _dy, _bias, _min, _max)
 #define CKFF_TEXTURE_3D_ANISO(_sampler, _uv, _dx, _dy, _bias, _min, _max) \
     ckffTexture3DAniso(_sampler, _uv, _dx, _dy, _bias, _min, _max)
-#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _dx, _dy, _mirror, _bias) \
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
     (_mirror != 0 ? ckffTexture3DGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #else
 vec4 ckffNative3DAniso(Texture3D<float4> image, SamplerState state, uint slot,
@@ -294,16 +248,15 @@ vec4 ckffNative3DAniso(Texture3D<float4> image, SamplerState state, uint slot,
     return color / plan.x;
 }
 vec4 ckffNative3DSample(Texture3D<float4> image, SamplerState state, uint slot,
-                        vec3 uv, vec3 dx, vec3 dy,
-                        bool requiresExplicitGradient, float bias, float minMip,
+                        vec3 uv, vec3 originalUv, vec3 dx, vec3 dy,
+                        int mirrorOnceMask, float bias, float minMip,
                         float maxAnisotropy)
 {
-    if (!requiresExplicitGradient)
-        return image.SampleBias(state, uv, bias);
     if (maxAnisotropy > 1.0)
         return ckffNative3DAniso(image, state, slot, uv, dx, dy, bias,
                                  minMip, maxAnisotropy);
-    return ckSample3DGrad(image, state, slot, uv, dx, dy, bias, minMip);
+    return ckSample3DGrad(image, state, slot, uv, originalUv,
+                          mirrorOnceMask, bias, minMip);
 }
 #define CKFF_TEXTURE_3D_ANISO(_sampler, _uv, _dx, _dy, _bias, _min, _max) \
     ckffNative3DAniso(_sampler, _sampler##Sampler, _sampler##Slot, \
@@ -311,8 +264,8 @@ vec4 ckffNative3DSample(Texture3D<float4> image, SamplerState state, uint slot,
 #define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias, minMip, maxAnisotropy)
 #define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) textureCubeBias(_sampler, _uv, _bias)
 #define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture3DBias(_sampler, _uv, _bias, minMip)
-#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _dx, _dy, _mirror, _bias) \
-    texture3DGrad(_sampler, _uv, _dx, _dy, _bias, minMip)
+#define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
+    texture3DGrad(_sampler, _uv, _original, _mirror, _bias, minMip)
 #endif
 
 // CKFF_BGFX_ONLY_BEGIN
