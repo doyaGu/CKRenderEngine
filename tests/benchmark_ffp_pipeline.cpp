@@ -413,6 +413,7 @@ struct ComponentFixture {
     CKFFConstantSet StaticConstants;
     CKFFConstantSet FullConstants;
     CKDWORD ShaderTargetFlags = 0;
+    std::unique_ptr<CKFFTextureBinder> UniformTextureBinder;
     std::unique_ptr<CKFFUniformEmitter> UniformEmitter;
     CKFFStateStore OneTextureState;
     CKFFStateStore FourTextureState;
@@ -448,8 +449,11 @@ struct ComponentFixture {
             CKFFInitProgramContext(&Contexts[i], Keys[i], binding.Specialization);
         }
         ConfigureState(UniformState, Workload, 0, 1);
+        UniformTextureBinder = std::make_unique<CKFFTextureBinder>(
+            UniformState, Probes);
         UniformEmitter = std::make_unique<CKFFUniformEmitter>(
-            UniformState, UniformState.DrawState, ShaderTargetFlags, Probes);
+            UniformState, UniformState.DrawState, *UniformTextureBinder,
+            ShaderTargetFlags, Probes);
         ConfigureState(OneTextureState, Workload, 0, 1);
         ConfigureState(FourTextureState, Workload, 0, 4);
         OneTextureBinder = std::make_unique<CKFFTextureBinder>(
