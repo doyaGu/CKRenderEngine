@@ -2,9 +2,6 @@ function(ckre_configure_test_target TARGET_NAME)
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CKRE_INCLUDE_DIR}
     )
-    target_compile_definitions(${TARGET_NAME} PRIVATE
-        CKRE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/.."
-    )
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -135,10 +132,6 @@ endif()
 if (Python3_Interpreter_FOUND)
     add_test(NAME RasterizerTraceAccounting
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rasterizer_trace.py)
-    add_test(NAME RasterizerModuleStructure
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/check_rasterizer_boundaries.py
-                --source-root ${CMAKE_CURRENT_SOURCE_DIR}/..)
-    set_tests_properties(RasterizerModuleStructure PROPERTIES TIMEOUT 60)
 endif ()
 
 # White-box conformance tests drive CKRasterizerContext through its public

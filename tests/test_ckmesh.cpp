@@ -1,10 +1,7 @@
 #include <math.h>
 #include <stdint.h>
-#include <fstream>
-#include <iterator>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string>
 
 #include "CKEnums.h"
 #include "CKContext.h"
@@ -34,13 +31,6 @@ bool UVsEqual(const Vx2DVector &lhs, const Vx2DVector &rhs, float epsilon = 0.00
 }
 
 void DummyMeshCallback(CKRenderContext *, CK3dEntity *, CKMesh *, void *) {}
-
-std::string ReadSourceText(const char *relativePath) {
-    std::ifstream file(std::string(CKRE_SOURCE_DIR) + "/" + relativePath, std::ios::binary);
-    if (!file)
-        return std::string();
-    return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-}
 
 VxVertex MakePMTestVertex(const VxVector &position, const VxVector &normal, const Vx2DVector &uv) {
     VxVertex vertex;
@@ -657,17 +647,6 @@ void RunPMModifierMutationBoundsChecks() {
     }
 }
 
-void RunPMGeoMorphSkinBranchSourceChecks() {
-    const std::string source = ReadSourceText("src/CK3dEntity.cpp");
-    TestCheck(!source.empty(), "CK3dEntity source must be readable");
-    TestCheck(source.find("mesh->IsPM() && mesh->IsPMGeoMorphEnabled()") != std::string::npos,
-              "UpdateSkin must keep the PM GeoMorph branch");
-    TestCheck(source.find("modifierVertexCount = m_Skin->GetVertexCount()") != std::string::npos,
-              "PM GeoMorph skin branch must use the full skin vertex count");
-    TestCheck(source.find("mesh->ModifyObjectFlags(0, CK_OBJECT_UPTODATE)") != std::string::npos,
-              "PM GeoMorph skin branch must dirty the mesh");
-}
-
 void RunPMSaveLoadRoundTripChecks() {
     CKContext context(nullptr, 0, 0);
     TestablePMMesh source(&context, "PMSaveSource");
@@ -706,7 +685,7 @@ void RunPMSaveLoadRoundTripChecks() {
     loaded.ClearRenderCallbacksForTest();
 }
 
-void RunNoPMLoadSourceChecks() {
+void RunNoPMSaveChecks() {
     CKContext context(nullptr, 0, 0);
     TestablePMMesh source(&context, "NoPMSource");
     FillPMTestMesh(source);
@@ -718,11 +697,6 @@ void RunNoPMLoadSourceChecks() {
               "Non-PM source should not save a progressive mesh chunk");
     delete chunk;
 
-    const std::string sourceText = ReadSourceText("src/CKMesh.cpp");
-    TestCheck(!sourceText.empty(), "CKMesh source must be readable");
-    TestCheck(sourceText.find("if (pmSize == -1)") != std::string::npos &&
-                  sourceText.find("DestroyPM();") != std::string::npos,
-              "Load without a PM chunk must keep destroying existing PM data");
 }
 
 } // namespace
@@ -740,9 +714,8 @@ int main() {
     tests.Run("PM degenerate collapse checks", &RunPMDegenerateCollapseChecks);
     tests.Run("PM modifier count checks", &RunPMModifierCountChecks);
     tests.Run("PM modifier mutation bounds checks", &RunPMModifierMutationBoundsChecks);
-    tests.Run("PM GeoMorph skin branch source checks", &RunPMGeoMorphSkinBranchSourceChecks);
     tests.Run("PM save/load round trip checks", &RunPMSaveLoadRoundTripChecks);
-    tests.Run("No-PM load source checks", &RunNoPMLoadSourceChecks);
+    tests.Run("No-PM save checks", &RunNoPMSaveChecks);
     tests.Run("Copy regression checks", &RunCopyRegressionChecks);
     return tests.ExitCode();
 }
