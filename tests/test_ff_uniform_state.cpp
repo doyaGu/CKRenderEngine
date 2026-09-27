@@ -402,24 +402,42 @@ void FragmentProgramLayoutShaderHeaderMatchesTheDef() {
 
     for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_FRAGMENT_PROGRAM_STAGE_FIELD_COUNT; ++fieldIndex) {
         const CKFFFragmentProgramFieldDesc &desc = CKFFFragmentProgramStageFieldDesc((CKFFFragmentProgramStageField)fieldIndex);
-        snprintf(line, sizeof(line), "int ckffProgramStage_%s(int stage) { return ckffProgramStageBits(stage, %u, %u, %u); }",
-                 desc.Name, desc.Layout.Lane, desc.Layout.BitOffset, desc.Layout.BitCount);
+        snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_STAGE_%s_WORD %u",
+                 desc.Name, desc.Layout.Lane);
         TestCheck(generated.find(line) != std::string::npos,
-                  "Generated fragment-program layout must expose every stage field with the C++ bit positions");
+                  "Generated fragment-program layout must expose every stage field word");
+        snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_STAGE_%s_SHIFT %u",
+                 desc.Name, desc.Layout.BitOffset);
+        TestCheck(generated.find(line) != std::string::npos,
+                  "Generated fragment-program layout must expose every stage field shift");
+        snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_STAGE_%s_MASK 0x%x",
+                 desc.Name, (1u << desc.Layout.BitCount) - 1u);
+        TestCheck(generated.find(line) != std::string::npos,
+                  "Generated fragment-program layout must expose every stage field mask");
     }
     for (CKDWORD fieldIndex = 0; fieldIndex < (CKDWORD)CKFF_FRAGMENT_PROGRAM_GLOBAL_FIELD_COUNT; ++fieldIndex) {
         const CKFFFragmentProgramFieldDesc &desc = CKFFFragmentProgramGlobalFieldDesc((CKFFFragmentProgramGlobalField)fieldIndex);
-        snprintf(line, sizeof(line), "int ckffProgram_%s() { return ckffProgramBits(%u, %u, %u); }",
-                 desc.Name, desc.Layout.Lane, desc.Layout.BitOffset, desc.Layout.BitCount);
+        snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_%s_LANE %u",
+                 desc.Name, desc.Layout.Lane);
         TestCheck(generated.find(line) != std::string::npos,
-                  "Generated fragment-program layout must expose every global field with the C++ bit positions");
+                  "Generated fragment-program layout must expose every global field lane");
+        snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_%s_SHIFT %u",
+                 desc.Name, desc.Layout.BitOffset);
+        TestCheck(generated.find(line) != std::string::npos,
+                  "Generated fragment-program layout must expose every global field shift");
+        snprintf(line, sizeof(line), "#define CKFF_FRAGMENT_PROGRAM_%s_MASK 0x%x",
+                 desc.Name, (1u << desc.Layout.BitCount) - 1u);
+        TestCheck(generated.find(line) != std::string::npos,
+                  "Generated fragment-program layout must expose every global field mask");
     }
     TestCheck(common.find("#include \"ff_fragment_program_layout.sh\"") != std::string::npos &&
-                  common.find("int ckffProgramLane(int lane)") != std::string::npos &&
-                  common.find("return int(v.x)") != std::string::npos &&
+                  common.find("CKFFTextureStageProgram ckffDecodeTextureStageProgram") != std::string::npos &&
+                  common.find("vec4 packedWords = u_ffProgram[stage / 2]") != std::string::npos &&
+                  common.find("CKFFGlobalFragmentProgram ckffDecodeGlobalFragmentProgram") != std::string::npos &&
+                  common.find("ckffProgramStage_") == std::string::npos &&
                   common.find("floatBitsToUint") == std::string::npos &&
                   common.find("uint(255)") == std::string::npos,
-              "Fragment shader must read u_ffProgram lanes with int() through the generated layout, not bytes or bit casts");
+              "Fragment shader must decode each stage pair once through generated shifts and masks");
     TestCheck(script.find("gen-fragment-program-layout") != std::string::npos &&
                   script.find("CKFFFragmentProgramLayout.def") != std::string::npos &&
                   script.find("def validate_fragment_program_layout") != std::string::npos,
@@ -827,7 +845,7 @@ void FragmentShaderDeclaresAllExactSamplerLayouts() {
                   fs.find("CKFF_NATIVE_SAMPLER_LAYOUT") != std::string::npos,
               "Fragment shader must declare the wide cube and volume layouts");
     TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") == std::string::npos &&
-                  common.find("params.SamplerOrdinal = (ckffProgram_SAMPLER_ORDINALS() >> (stage * 3)) & 7;") != std::string::npos &&
+                  common.find("program.SamplerOrdinal = (samplerOrdinals >> (stage * 3)) & 7;") != std::string::npos &&
                   fs.find("int ordinal = samplerOrdinal;") != std::string::npos,
               "Fragment shader must consume CPU-resolved sampler ordinals from the fragment program");
 

@@ -1124,10 +1124,10 @@ void main()
             discard;
     }
 #endif
-    bool flatShade = ckffProgram_FLAT_SHADE() != 0;
-    int lastActiveStage = ckffProgram_LAST_ACTIVE_TEXTURE_STAGE();
-    vec4 diffuse = flatShade ? v_flatColor0 : v_color0;
-    vec4 specular = flatShade ? v_flatColor1 : v_color1;
+    CKFFGlobalFragmentProgram fragmentProgram =
+        ckffDecodeGlobalFragmentProgram();
+    vec4 diffuse = fragmentProgram.FlatShade ? v_flatColor0 : v_color0;
+    vec4 specular = fragmentProgram.FlatShade ? v_flatColor1 : v_color1;
     vec4 current = diffuse;
     vec4 temp = vec4(0.0, 0.0, 0.0, 0.0);
     vec4 previousTexture = vec4(0.0, 0.0, 0.0, 1.0);
@@ -1139,11 +1139,16 @@ void main()
     [loop]
 #endif
     for (int stage = 0; stage < 8; ++stage) {
-        if (stage > lastActiveStage) break;
+        if (stage > fragmentProgram.LastActiveTextureStage) break;
 
-        CKFFStageParams stageParams = ckffReadStageParams(stage, u_stageParams[stage * 2 + 0], u_stageParams[stage * 2 + 1]);
-        int colorOp = stageParams.ColorOp;
-        int alphaOp = stageParams.AlphaOp;
+        CKFFTextureStageProgram stageProgram =
+            ckffDecodeTextureStageProgram(stage,
+                fragmentProgram.SamplerOrdinals);
+        CKFFStageParams stageParams = ckffReadStageParams(
+            stageProgram.Projected, u_stageParams[stage * 2 + 0],
+            u_stageParams[stage * 2 + 1]);
+        int colorOp = stageProgram.ColorOp;
+        int alphaOp = stageProgram.AlphaOp;
         bool hasTexture = stageParams.HasTexture;
 
         if (colorOp == 1) break;
@@ -1173,8 +1178,8 @@ void main()
             sampleCoord.y += dot(u_bumpEnv[bumpBase].zw, bump);
         }
 
-        vec4 texColor = getTextureColor(stage, sampleCoord, stageParams.SamplerType,
-            stageParams.SamplerCompareFunc, stageParams.SamplerOrdinal,
+        vec4 texColor = getTextureColor(stage, sampleCoord, stageProgram.SamplerType,
+            stageProgram.SamplerCompareFunc, stageProgram.SamplerOrdinal,
             stageParams.MirrorOnceMask, hasTexture);
         if (stage != 0 && previousColorOp == 23) {
             int bumpBase = (stage - 1) * 2;
@@ -1183,14 +1188,14 @@ void main()
         }
         bool premodulateColor = previousColorOp == 17 && hasTexture;
         bool premodulateAlpha = previousAlphaOp == 17 && hasTexture;
-        vec4 colorA = getArg(stageParams.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
-        vec4 colorB = getArg(stageParams.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
-        vec4 colorC = getArg(stageParams.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
-        vec4 alphaA = getArg(stageParams.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
-        vec4 alphaB = getArg(stageParams.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
-        vec4 alphaC = getArg(stageParams.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
+        vec4 colorA = getArg(stageProgram.ColorArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
+        vec4 colorB = getArg(stageProgram.ColorArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
+        vec4 colorC = getArg(stageProgram.ColorArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateColor);
+        vec4 alphaA = getArg(stageProgram.AlphaArg1, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
+        vec4 alphaB = getArg(stageProgram.AlphaArg2, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
+        vec4 alphaC = getArg(stageProgram.AlphaArg0, texColor, current, diffuse, specular, temp, stageParams.Constant, premodulateAlpha);
 
-        int resultArg = stageParams.ResultArg;
+        int resultArg = stageProgram.ResultIsTemp ? 5 : 1;
         vec4 stageResult = resultArg == 5 ? temp : current;
         vec4 colorResult = colorOp == 27
             ? ckffStageBlend(texColor, current, stageParams.StageBlend)
@@ -1214,14 +1219,15 @@ void main()
         previousAlphaOp = alphaOp;
     }
 
-    if (ckffProgram_GLOBAL_SPECULAR_ENABLED() != 0) {
+    if (fragmentProgram.GlobalSpecularEnabled) {
         current.rgb += specular.rgb;
     }
     // Alpha test precision (the high nibble of the packed alpha draw param) is not applied yet:
     // the 8-bit path matches the reference; wider alpha targets are a phase 2.3 item.
-    if (ckffProgram_ALPHA_TEST_ENABLED() != 0 && !alphaPass(current.a, ckffProgram_ALPHA_FUNC())) discard;
-    if (ckffProgram_FOG_ENABLED() != 0) {
-        int pixelFogMode = ckffProgram_PIXEL_FOG_MODE();
+    if (fragmentProgram.AlphaTestEnabled &&
+        !alphaPass(current.a, fragmentProgram.AlphaFunc)) discard;
+    if (fragmentProgram.FogEnabled) {
+        int pixelFogMode = fragmentProgram.PixelFogMode;
         float fogFactor = pixelFogMode == 0
             ? v_texcoord7Fog.z
             : computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);
