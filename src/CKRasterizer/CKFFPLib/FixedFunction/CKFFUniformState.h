@@ -6,6 +6,7 @@
 #include "CKFFShaderABI.h"
 #include "CKFFFragmentProgram.h"
 #include "CKFFStateDesc.h"
+#include "CKRasterizerContextTypes.h"
 #include "CKRenderEngineEnums.h"
 #include "CKTypes.h"
 #include "VxMath.h"
@@ -36,6 +37,11 @@ CKDWORD CKFFResolveMaterialSource(CKBOOL lighting,
                                   CKDWORD streamFlag,
                                   CKFFMaterialSource vertexSource);
 float CKFFEncodeShaderLightType(VXLIGHT_TYPE type);
+CKFFSamplerShaderState CKFFBuildSamplerShaderState(
+    const CKSamplerDesc &sampler,
+    CKDWORD textureFlags,
+    CKDWORD textureTransformFlags,
+    CKDWORD shaderTargetFlags);
 void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
                          const CKDWORD textureHandles[CKFF_MAX_TEXTURE_STAGES],
                          const CKDWORD textureFlags[CKFF_MAX_TEXTURE_STAGES],

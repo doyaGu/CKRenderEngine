@@ -2671,6 +2671,11 @@ void BorderColorsAreNotQuantizedByTranslation() {
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
     const CKDWORD borderUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BORDER_COLORS);
     const CKDWORD bumpUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
+    const CKDWORD bgfxSamplerFlags =
+        CKRST_SHADER_TARGET_MANUAL_LOD |
+        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+        CKRST_SHADER_TARGET_MANUAL_BORDER |
+        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
     for (CKDWORD i = 0; i < 32; ++i) {
         const CKDWORD color = 0x80402000u | i;
         ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, color);
@@ -2681,6 +2686,10 @@ void BorderColorsAreNotQuantizedByTranslation() {
                   "The core preserves more than sixteen distinct border colors");
         float expected[4];
         CKFFPackColorARGB(color, expected);
+        const CKFFSamplerShaderState expectedSamplerState =
+            CKFFBuildSamplerShaderState(context.Log.LastTextureSampler,
+                                        CKRST_TEXTURE_VALID, 0,
+                                        bgfxSamplerFlags);
         const std::vector<float> &border = context.Log.FloatUniforms[borderUniform];
         const std::vector<float> &bump = context.Log.FloatUniforms[bumpUniform];
         TestCheck(border.size() >= 4 && bump.size() >= 8 &&
@@ -2688,7 +2697,7 @@ void BorderColorsAreNotQuantizedByTranslation() {
                       fabsf(border[1] - expected[1]) < 0.00001f &&
                       fabsf(border[2] - expected[2]) < 0.00001f &&
                       fabsf(border[3] - expected[3]) < 0.00001f &&
-                      (CKDWORD)bump[7] == 1024u,
+                      (CKDWORD)bump[7] == expectedSamplerState.Bits,
                   "nearest border color and address mask reach the fragment shader");
     }
     ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
@@ -2696,7 +2705,12 @@ void BorderColorsAreNotQuantizedByTranslation() {
     TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1), "Linear border draw succeeds");
     const std::vector<float> &linearBump = context.Log.FloatUniforms[bumpUniform];
-    TestCheck(linearBump.size() >= 8 && (CKDWORD)linearBump[7] == 25600u,
+    const CKFFSamplerShaderState linearSamplerState =
+        CKFFBuildSamplerShaderState(context.Log.LastTextureSampler,
+                                    CKRST_TEXTURE_VALID, 0,
+                                    bgfxSamplerFlags);
+    TestCheck(linearBump.size() >= 8 &&
+                  (CKDWORD)linearBump[7] == linearSamplerState.Bits,
               "linear minification and magnification retain the exact border mask");
     ffp.Shutdown();
 }

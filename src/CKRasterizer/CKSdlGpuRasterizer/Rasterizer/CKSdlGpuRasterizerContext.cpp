@@ -79,7 +79,9 @@ CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, 
         return FALSE;
     }
     if (!m_FFP.Init(backendCaps.Features, backendCaps.MaxTextureBindings,
-                    m_ShaderCache.GetTargetFlags())) {
+                    m_ShaderCache.GetTargetFlags() |
+                    CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
+                    CKRST_SHADER_TARGET_MANUAL_BORDER)) {
         ClearNativeVertexLayouts();
         ClearNativeFFPrograms();
         Shutdown();

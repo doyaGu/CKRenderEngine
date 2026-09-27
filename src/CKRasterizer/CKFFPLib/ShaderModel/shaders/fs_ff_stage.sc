@@ -2,6 +2,7 @@ $input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1,
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
+#include "ff_sampler_shader_state.sh"
 
 uniform vec4 u_ffDrawParams[20];
 uniform vec4 u_bumpEnv[16];
@@ -354,7 +355,7 @@ vec4 ckffNative3DSample(Texture3D<float4> image, SamplerState state, uint slot,
 #define CKFF_TEXTURE_3D_ANISO(_sampler, _uv, _dx, _dy, _bias, _min, _max) \
     ckffNative3DAniso(_sampler, _sampler##Sampler, _sampler##Slot, \
                       _uv, _dx, _dy, _bias, _min, _max)
-#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias, minMip)
+#define CKFF_TEXTURE_2D_BIAS(_sampler, _uv, _bias) texture2DBias(_sampler, _uv, _bias, minMip, maxAnisotropy)
 #define CKFF_TEXTURE_CUBE_BIAS(_sampler, _uv, _bias) textureCubeBias(_sampler, _uv, _bias)
 #define CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias) texture3DBias(_sampler, _uv, _bias, minMip)
 #define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
@@ -655,9 +656,29 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 {
     if (!hasTexture) return vec4(0.0, 0.0, 0.0, 1.0);
     float lodBias = u_bumpEnv[stage * 2 + 1].z;
-    int packedSamplerLod = int(u_bumpEnv[stage * 2 + 1].w);
-    float minMip = float(packedSamplerLod & 31);
-    float maxAnisotropy = float((packedSamplerLod >> 5) & 31);
+    int samplerState = int(u_bumpEnv[stage * 2 + 1].w);
+    float minMip = float((samplerState >> CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT) &
+                         CKFF_SAMPLER_SHADER_MIN_MIP_MASK);
+    float maxAnisotropy = float(
+        (samplerState >> CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT) &
+        CKFF_SAMPLER_SHADER_ANISOTROPY_MASK);
+    int borderMask =
+        (samplerState >> CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT) &
+        CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK;
+    bool minLinear =
+        (samplerState & CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR) != 0;
+    bool magLinear =
+        (samplerState & CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR) != 0;
+    bool requiresExplicitGradient =
+        (samplerState & CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) != 0;
+    bool manualLod =
+        (samplerState & CKFF_SAMPLER_SHADER_MANUAL_LOD) != 0;
+    bool manualAnisotropy =
+        (samplerState & CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) != 0;
+    bool manualBorder =
+        (samplerState & CKFF_SAMPLER_SHADER_MANUAL_BORDER) != 0;
+    bool manualDepthCompare =
+        (samplerState & CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) != 0;
     // Addressing must not change the derivatives used to choose a mip level.
     // In particular, clamping the coordinate outside [0, 1] would otherwise
     // force the LOD to zero instead of preserving the source footprint.
@@ -671,11 +692,8 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 #if !CKFF_NATIVE_SDL_GPU
     // bgfx has only sixteen border palette entries for the whole frame.
     // The shader computes the coverage of texels inside each border axis.
-    int borderMask = (packedSamplerLod >> 10) & 7;
-    bool minLinear = ((packedSamplerLod >> 13) & 1) != 0;
-    bool magLinear = ((packedSamplerLod >> 14) & 1) != 0;
-    bool borderMip = borderMask != 0 &&
-        (u_borderSampler[samplerOrdinal].y > 0.5 || maxAnisotropy > 1.0);
+    bool borderMip = manualBorder &&
+        (u_borderSampler[samplerOrdinal].y > 0.5 || manualAnisotropy);
 #endif
 // CKFF_BGFX_ONLY_END
     if (samplerType == 1) {
@@ -683,9 +701,9 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_CUBE(_sampler) CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)
 #else
-#define CKFF_SAMPLE_CUBE(_sampler) (maxAnisotropy > 1.0 ? \
+#define CKFF_SAMPLE_CUBE(_sampler) (manualAnisotropy ? \
     CKFF_TEXTURE_CUBE_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
-    (minMip > 0.0 ? CKFF_TEXTURE_CUBE_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
+    (manualLod ? CKFF_TEXTURE_CUBE_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
     CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)))
 #endif
         if (ordinal == 0) return CKFF_SAMPLE_CUBE(s_textureCube0);
@@ -705,13 +723,13 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
     if (samplerType == 3) {
         int ordinal = samplerOrdinal;
 #if CKFF_NATIVE_SDL_GPU
-#define CKFF_SAMPLE_3D(_sampler) (maxAnisotropy > 1.0 ? \
+#define CKFF_SAMPLE_3D(_sampler) (manualAnisotropy ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias))
 #else
-#define CKFF_SAMPLE_3D(_sampler) (maxAnisotropy > 1.0 ? \
+#define CKFF_SAMPLE_3D(_sampler) (manualAnisotropy ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
-    (minMip > 0.0 ? CKFF_TEXTURE_3D_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
+    (manualLod ? CKFF_TEXTURE_3D_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)))
 #endif
 #if CKFF_NATIVE_SDL_GPU
@@ -739,9 +757,9 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 #else
 // CKFF_BGFX_ONLY_BEGIN
         vec4 volumeColor;
-        bool volumeBorderMip = borderMask != 0 &&
+        bool volumeBorderMip = manualBorder &&
             (u_borderSampler[CKFF_VOLUME_SLOT_BASE + ordinal].y > 0.5 ||
-             maxAnisotropy > 1.0);
+             manualAnisotropy);
 #define CKFF_SAMPLE_VOLUME(_sampler) (volumeBorderMip ? \
     ckffBorderSample3D(_sampler, coord.xyz, originalDx3, originalDy3, \
         lodBias, minMip, maxAnisotropy, stage, CKFF_VOLUME_SLOT_BASE + ordinal, borderMask, minLinear, magLinear) : \
@@ -759,7 +777,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
         else volumeColor = CKFF_SAMPLE_VOLUME(s_textureVolume3);
 #endif
 #undef CKFF_SAMPLE_VOLUME
-        if (borderMask != 0 && !volumeBorderMip) {
+        if (manualBorder && !volumeBorderMip) {
             vec3 size;
             if (ordinal == 0) size = CKFF_BORDER_SIZE_3D(s_textureVolume0);
             else if (ordinal == 1) size = CKFF_BORDER_SIZE_3D(s_textureVolume1);
@@ -821,16 +839,18 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 #endif
 #else
 // CKFF_BGFX_ONLY_BEGIN
-        float compared = ckffCompareSample2D(ordinal, uv, originalDx, originalDy,
-            lodBias, minMip, maxAnisotropy, stage, borderMask, minLinear,
-            magLinear, coord.z, compareFunc);
+        float compared = manualDepthCompare
+            ? ckffCompareSample2D(ordinal, uv, originalDx, originalDy,
+                lodBias, minMip, maxAnisotropy, stage, borderMask, minLinear,
+                magLinear, coord.z, compareFunc)
+            : color.r;
 // CKFF_BGFX_ONLY_END
 #endif
         return vec4_splat(compared);
     }
 #endif
 #if CKFF_NATIVE_SDL_GPU
-#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias), minMip)
+#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias), minMip, maxAnisotropy)
 #elif BGFX_SHADER_LANGUAGE_GLSL
     // bgfx's OpenGL compatibility preamble aliases texture2DGrad to the ARB
     // extension even on core GLSL contexts; use the core entry point here.
@@ -839,13 +859,13 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 #define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
 #endif
 #if CKFF_NATIVE_SDL_GPU
-#define CKFF_SAMPLE_2D(_sampler) (mirrorOnceMask != 0 ? \
+#define CKFF_SAMPLE_2D(_sampler) (requiresExplicitGradient ? \
     CKFF_TEXTURE_2D_GRAD(_sampler) : CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias))
 #else
-#define CKFF_SAMPLE_2D(_sampler) (maxAnisotropy > 1.0 ? \
+#define CKFF_SAMPLE_2D(_sampler) (manualAnisotropy ? \
     CKFF_TEXTURE_2D_ANISO(_sampler, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy) : \
-    (minMip > 0.0 ? CKFF_TEXTURE_2D_MIN_MIP(_sampler, uv, originalDx, originalDy, lodBias, minMip) : \
-    (mirrorOnceMask != 0 ? CKFF_TEXTURE_2D_GRAD(_sampler) : \
+    (manualLod ? CKFF_TEXTURE_2D_MIN_MIP(_sampler, uv, originalDx, originalDy, lodBias, minMip) : \
+    (requiresExplicitGradient ? CKFF_TEXTURE_2D_GRAD(_sampler) : \
     CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias))))
 #endif
 #if CKFF_NATIVE_SDL_GPU
@@ -935,7 +955,7 @@ vec4 getTextureColor(int stage, vec4 coord, int samplerType, int compareFunc,
 #undef CKFF_TEXTURE_2D_GRAD
 // CKFF_BGFX_ONLY_BEGIN
 #if !CKFF_NATIVE_SDL_GPU
-    if (borderMask != 0 && !borderMip) {
+    if (manualBorder && !borderMip) {
         vec2 size;
         if (ordinal == 0) size = CKFF_BORDER_SIZE_2D(s_texture0);
         else if (ordinal == 1) size = CKFF_BORDER_SIZE_2D(s_texture1);

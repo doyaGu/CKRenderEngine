@@ -49,7 +49,10 @@ set(_ckbgfx_shader_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_ff_common.sc
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fog_common.sc
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fragment_program_layout.sh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_shader_state.sh
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/CKFFFragmentProgramLayout.def
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/CKFFShaderABI.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shader_abi_codegen.py
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)

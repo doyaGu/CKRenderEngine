@@ -14,10 +14,14 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 HERE = Path(__file__).resolve().parent
 CKFF_ROOT = HERE.parent.parent / "CKFFPLib"
 SHARED = CKFF_ROOT / "ShaderModel" / "shaders"
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(CKFF_ROOT / "ShaderModel"))
+from shader_abi_codegen import sync_sampler_shader_state
 SHADERS = [
     ("vs_ff_3d", "vs_ff_3d", False, 0, 0),
     ("vs_ff_3d_clip", "vs_ff_3d", True, 0, 0),
@@ -345,6 +349,11 @@ def main() -> None:
     # Hash exactly the ordered schema consumed by the rasterizer shader identity.
     for byte in native_layout_schema()[1].encode("ascii"):
         abi_hash = ((abi_hash ^ byte) * 16777619) & 0xffffffff
+    sync_sampler_shader_state(
+        CKFF_ROOT / "ShaderModel" / "CKFFShaderABI.h",
+        SHARED / "ff_sampler_shader_state.sh",
+        verify=args.verify,
+    )
     if args.verify:
         verify_artifacts(args.output_dir, abi, abi_hash)
         return

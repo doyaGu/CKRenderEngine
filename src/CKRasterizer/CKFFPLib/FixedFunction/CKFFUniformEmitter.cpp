@@ -233,26 +233,18 @@ void CKFFUniformEmitter::EmitStageAndFragmentProgramUniforms(const CKFFUniformEm
     float borderColors[CKFF_MAX_TEXTURE_STAGES][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKSamplerDesc &sampler = context->Textures->Bindings[stage].Sampler;
-        const CKDWORD anisotropy = sampler.ShaderAnisotropy
-            ? sampler.MaxAnisotropy : 0;
-        CKDWORD borderMask = 0;
-        if ((m_ShaderTargetFlags & CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM) != 0 &&
-            (sampler.AddressU == CKRST_ADDRESS_BORDER ||
-             sampler.AddressV == CKRST_ADDRESS_BORDER ||
-             sampler.AddressW == CKRST_ADDRESS_BORDER)) {
-            borderMask = (sampler.AddressU == CKRST_ADDRESS_BORDER ? 1u : 0u) |
-                         (sampler.AddressV == CKRST_ADDRESS_BORDER ? 2u : 0u) |
-                         (sampler.AddressW == CKRST_ADDRESS_BORDER ? 4u : 0u);
+        const CKFFTextureBinding &binding = context->Textures->Bindings[stage];
+        const CKSamplerDesc &sampler = binding.Sampler;
+        if (binding.Texture != 0) {
+            const CKDWORD transformFlags =
+                m_State.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
+                CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
+            const CKFFSamplerShaderState samplerState =
+                CKFFBuildSamplerShaderState(sampler, binding.TextureFlags,
+                                            transformFlags,
+                                            m_ShaderTargetFlags);
+            bumpEnv[stage * 2 + 1][3] = float(samplerState.Bits);
         }
-        const CKDWORD minLinear = sampler.MinFilter != CKRST_FILTER_NEAREST ? 1u : 0u;
-        const CKDWORD magLinear = sampler.MagFilter != CKRST_FILTER_NEAREST ? 1u : 0u;
-        const CKDWORD comparisonFilter =
-            (borderMask != 0 || sampler.CompareFunc != CKRST_COMPARE_NONE) ?
-            minLinear * 8192u + magLinear * 16384u : 0u;
-        bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel +
-            anisotropy * 32u + borderMask * 1024u +
-            comparisonFilter);
         CKFFPackColorARGB(sampler.BorderColor, borderColors[stage]);
     }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,

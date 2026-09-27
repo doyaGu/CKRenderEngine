@@ -10,11 +10,54 @@
 // Internal fixed-function shader ABI. These values define the logical C++
 // data consumed by the shared shader calculations. CKFFShaderInterface maps
 // it to named uniforms or native stage buffers for each artifact family.
-// u_bumpEnv[stage * 2 + 1].w packs minimum mip in bits 0..4 and the
-// fixed-function anisotropy tap cap in bits 5..9 (zero disables manual taps),
-// the per-axis manual border mask in bits 10..12, and the min/mag linear
-// filter choices in bits 13..14. bgfx's
-// u_borderSampler[native slot] stores actual mip count and mip filter in xy.
+// u_bumpEnv[stage * 2 + 1].w carries CKFFSamplerShaderState as an exact
+// 24-bit integer float. bgfx's u_borderSampler[native slot] stores actual mip
+// count and mip filter in xy.
+
+// This enum is also parsed by ShaderModel/shader_abi_codegen.py. Keep every
+// value as a numeric literal so generated shader definitions have this header
+// as their single source of truth.
+enum CKFFSamplerShaderStateABI {
+    CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT = 0,
+    CKFF_SAMPLER_SHADER_MIN_MIP_MASK = 0x0000001fu,
+    CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT = 5,
+    CKFF_SAMPLER_SHADER_ANISOTROPY_MASK = 0x0000001fu,
+    CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT = 10,
+    CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK = 0x00000007u,
+    CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR = 0x00002000u,
+    CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR = 0x00004000u,
+    CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT = 0x00008000u,
+    CKFF_SAMPLER_SHADER_MANUAL_LOD = 0x00010000u,
+    CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY = 0x00020000u,
+    CKFF_SAMPLER_SHADER_MANUAL_BORDER = 0x00040000u,
+    CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE = 0x00080000u,
+    CKFF_SAMPLER_SHADER_STATE_VALID_MASK = 0x000fffffu,
+};
+
+struct CKFFSamplerShaderState {
+    CKDWORD Bits;
+
+    CKFFSamplerShaderState(CKDWORD bits = 0) : Bits(bits) {}
+
+    CKDWORD MinimumMipLevel() const {
+        return (Bits >> CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT) &
+               CKFF_SAMPLER_SHADER_MIN_MIP_MASK;
+    }
+    CKDWORD AnisotropyTapCount() const {
+        return (Bits >> CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT) &
+               CKFF_SAMPLER_SHADER_ANISOTROPY_MASK;
+    }
+    CKDWORD BorderAxisMask() const {
+        return (Bits >> CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT) &
+               CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK;
+    }
+    CKBOOL Has(CKDWORD flag) const {
+        return (Bits & flag) != 0 ? TRUE : FALSE;
+    }
+};
+
+static_assert(CKFF_SAMPLER_SHADER_STATE_VALID_MASK < (1u << 24),
+              "Sampler shader state must remain exactly representable in fp32");
 
 // VXRENDERSTATE_ZBIAS is converted to the D3D8 compatibility depth-bias
 // scale selected for the active depth-buffer format. The resolved positive

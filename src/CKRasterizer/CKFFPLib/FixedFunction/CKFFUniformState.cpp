@@ -128,6 +128,79 @@ void CKFFPackFragmentProgram(const CKFFFragmentProgram &program,
     program.Pack24(outProgram.Values);
 }
 
+CKFFSamplerShaderState CKFFBuildSamplerShaderState(
+    const CKSamplerDesc &sampler,
+    CKDWORD textureFlags,
+    CKDWORD textureTransformFlags,
+    CKDWORD shaderTargetFlags) {
+    const bool cube = (textureFlags & CKRST_TEXTURE_CUBEMAP) != 0;
+    const bool volume = (textureFlags & CKRST_TEXTURE_VOLUMEMAP) != 0;
+    const bool depth = (textureFlags & CKRST_TEXTURE_DEPTHSTENCIL) != 0;
+
+    CKDWORD borderAxisMask = 0;
+    if (!cube) {
+        if (sampler.AddressU == CKRST_ADDRESS_BORDER)
+            borderAxisMask |= 1u;
+        if (sampler.AddressV == CKRST_ADDRESS_BORDER)
+            borderAxisMask |= 2u;
+        if (volume && sampler.AddressW == CKRST_ADDRESS_BORDER)
+            borderAxisMask |= 4u;
+    }
+
+    const bool depthCompare = depth && sampler.CompareFunc != CKRST_COMPARE_NONE;
+    const bool manualDepthCompare = depthCompare &&
+        (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE) != 0;
+    // SDL GPU pads comparison depth textures before binding them. That path
+    // needs neither shader border evaluation nor a second depth comparison.
+    const bool manualBorder = borderAxisMask != 0 &&
+        (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_BORDER) != 0 &&
+        (!depthCompare || manualDepthCompare);
+    const bool manualAnisotropy = sampler.ShaderAnisotropy != 0 &&
+        (((shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_ANISOTROPY) != 0) ||
+         (volume &&
+          (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO) != 0) ||
+         manualBorder);
+    const bool mirrorOnce = !cube &&
+        (textureTransformFlags & CKFF_TTF_MIRRORONCE_MASK) != 0;
+    const bool manualLod = sampler.MinMipLevel != 0 &&
+        (((shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_LOD) != 0) ||
+         manualAnisotropy || manualBorder || manualDepthCompare || mirrorOnce);
+    const bool explicitGradient = mirrorOnce || manualLod ||
+        manualAnisotropy || manualBorder || manualDepthCompare;
+
+    const CKDWORD minimumMip = sampler.MinMipLevel >
+            CKFF_SAMPLER_SHADER_MIN_MIP_MASK
+        ? CKFF_SAMPLER_SHADER_MIN_MIP_MASK
+        : sampler.MinMipLevel;
+    const CKDWORD anisotropyTaps = manualAnisotropy
+        ? ((sampler.MaxAnisotropy > CKFF_SAMPLER_SHADER_ANISOTROPY_MASK
+                ? CKFF_SAMPLER_SHADER_ANISOTROPY_MASK
+                : sampler.MaxAnisotropy) &
+           CKFF_SAMPLER_SHADER_ANISOTROPY_MASK)
+        : 0u;
+
+    CKDWORD bits =
+        (minimumMip << CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT) |
+        (anisotropyTaps << CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT) |
+        ((borderAxisMask & CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK) <<
+         CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT);
+    if (sampler.MinFilter != CKRST_FILTER_NEAREST)
+        bits |= CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR;
+    if (sampler.MagFilter != CKRST_FILTER_NEAREST)
+        bits |= CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR;
+    if (explicitGradient)
+        bits |= CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT;
+    if (manualLod)
+        bits |= CKFF_SAMPLER_SHADER_MANUAL_LOD;
+    if (manualAnisotropy)
+        bits |= CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY;
+    if (manualBorder)
+        bits |= CKFF_SAMPLER_SHADER_MANUAL_BORDER;
+    if (manualDepthCompare)
+        bits |= CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE;
+    return CKFFSamplerShaderState(bits);
+}
+
 int CKFFPackClipPlaneUniforms(const VxPlane planes[6], CKDWORD clipMask, CKFFClipPlaneUniform &outClip) {
     memset(&outClip, 0, sizeof(outClip));
     if (!planes)

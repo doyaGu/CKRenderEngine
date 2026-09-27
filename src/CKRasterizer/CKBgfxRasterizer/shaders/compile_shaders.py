@@ -47,6 +47,7 @@ BACKENDS = [
 ABI_HEADER = "CKFFShaderABI.generated.h"
 FRAGMENT_PROGRAM_LAYOUT_DEF = "CKFFFragmentProgramLayout.def"      # in CKFFPLib/ShaderModel
 FRAGMENT_PROGRAM_LAYOUT_SHADER = "ff_fragment_program_layout.sh"    # generated next to the shader sources
+SAMPLER_SHADER_STATE_SHADER = "ff_sampler_shader_state.sh"
 
 
 def _exe_name(name: str) -> str:
@@ -348,10 +349,17 @@ def main() -> int:
     rasterizer_shader_dir = Path(__file__).resolve().parent
     ckff_root = rasterizer_shader_dir.parents[1] / "CKFFPLib"
     source_dir = ckff_root / "ShaderModel" / "shaders"
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, str(ckff_root / "ShaderModel"))
+    from shader_abi_codegen import sync_sampler_shader_state
     interface_dir = ckff_root / "Interface"
     generated_dir = rasterizer_shader_dir / "generated"
     fragment_program_layout = write_fragment_program_layout_shader(source_dir)
     print(f"Wrote {fragment_program_layout.name} from {FRAGMENT_PROGRAM_LAYOUT_DEF}")
+    sampler_shader_state = source_dir / SAMPLER_SHADER_STATE_SHADER
+    sync_sampler_shader_state(
+        ckff_root / "ShaderModel" / "CKFFShaderABI.h", sampler_shader_state)
+    print(f"Wrote {sampler_shader_state.name} from CKFFShaderABI.h")
     if args.command == "gen-fragment-program-layout":
         return 0
 

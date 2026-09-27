@@ -139,7 +139,12 @@ public:
                 caps.Features, caps.MaxTextureBindings,
                 m_Shaders.GetTargetFlags() |
                     (caps.ShaderFormat == CKRST_SHADER_FORMAT_BGFX
-                         ? CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM : 0u))) {
+                         ? CKRST_SHADER_TARGET_MANUAL_LOD |
+                               CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+                               CKRST_SHADER_TARGET_MANUAL_BORDER |
+                               CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE
+                         : CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
+                               CKRST_SHADER_TARGET_MANUAL_BORDER))) {
             ClearLayouts();
             m_Shaders.Shutdown(device);
             return false;

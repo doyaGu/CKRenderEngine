@@ -71,20 +71,20 @@
 #define CKFF_SAMPLER2D_SELECT(slot) CKFF_SAMPLER2D_##slot
 #define SAMPLER2D(name, slot) CKFF_SAMPLER2D_SELECT(slot)(name, slot)
 #if CKFF_NATIVE_COMPARE_COUNT > 0
-#define texture2D(name, uv) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, 0.0, 0.0)
-#define texture2DBias(name, uv, bias, minMip) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
-#define texture2DGrad(name, uv, dx, dy, minMip) ckCompareVariantSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip)
+#define texture2D(name, uv) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, 0.0, 0.0, 0.0)
+#define texture2DBias(name, uv, bias, minMip, maxAnisotropy) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip, maxAnisotropy)
+#define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) ckCompareVariantSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip, maxAnisotropy)
 #else
 #define texture2D(name, uv) ckSample2D(name, name##Sampler, name##Slot, uv)
-#define texture2DBias(name, uv, bias, minMip) ckSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
-#define texture2DGrad(name, uv, dx, dy, minMip) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip)
+#define texture2DBias(name, uv, bias, minMip, maxAnisotropy) ckSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip, maxAnisotropy)
+#define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip, maxAnisotropy)
 #endif
 #define texture2DCompare(name, uv, dx, dy, bias, minMip, maxAnisotropy, reference, func) name.SampleCmp(name##Sampler, uv, reference)
 #else
 #define SAMPLER2D(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define texture2D(name, uv) name.Sample(name##Sampler, uv)
-#define texture2DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
-#define texture2DGrad(name, uv, dx, dy, minMip) name.SampleGrad(name##Sampler, uv, dx, dy)
+#define texture2DBias(name, uv, bias, minMip, maxAnisotropy) name.SampleBias(name##Sampler, uv, bias)
+#define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) name.SampleGrad(name##Sampler, uv, dx, dy)
 #endif
 #define SAMPLERCUBE(name, slot) CK_COMBINED TextureCube<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot

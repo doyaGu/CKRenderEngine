@@ -43,7 +43,8 @@ float4 ckMips2D(Texture2D<float4> image, uint slot, float2 uv, float lod, uint l
 }
 
 float4 ckSample2DBias(Texture2D<float4> image, SamplerState state, uint slot,
-                      float2 uv, float bias, float minMip)
+                      float2 uv, float bias, float minMip,
+                      float maxAnisotropy)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
@@ -55,8 +56,10 @@ float4 ckSample2DBias(Texture2D<float4> image, SamplerState state, uint slot,
     if (filter == 7 && lod > 0.0) {
         float2 dx = ddx(uv), dy = ddy(uv);
         float lx = length(dx * float2(width, height)), ly = length(dy * float2(width, height));
-        float major = max(lx, ly), minor = max(min(lx, ly), major / 16.0);
-        uint taps = uint(clamp(ceil(major / max(minor, 1.0)), 1.0, 16.0));
+        float major = max(lx, ly);
+        float tapLimit = max(maxAnisotropy, 1.0);
+        float minor = max(min(lx, ly), major / tapLimit);
+        uint taps = uint(clamp(ceil(major / max(minor, 1.0)), 1.0, tapLimit));
         float2 step = (lx > ly ? dx : dy) / float(taps);
         float4 result = 0.0;
         [loop] for (uint i = 0; i < taps; ++i)
@@ -70,11 +73,12 @@ float4 ckSample2DBias(Texture2D<float4> image, SamplerState state, uint slot,
 
 float4 ckSample2D(Texture2D<float4> image, SamplerState state, uint slot, float2 uv)
 {
-    return ckSample2DBias(image, state, slot, uv, 0.0, 0.0);
+    return ckSample2DBias(image, state, slot, uv, 0.0, 0.0, 0.0);
 }
 
 float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
-                      float2 uv, float2 dx, float2 dy, float minMip)
+                      float2 uv, float2 dx, float2 dy, float minMip,
+                      float maxAnisotropy)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
@@ -86,8 +90,10 @@ float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
     float lod = max(log2(max(max(lx, ly), 0.000001)), minMip);
     uint filter = uint(lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z);
     if (filter == 7 && lod > 0.0) {
-        float major = max(lx, ly), minor = max(min(lx, ly), major / 16.0);
-        uint taps = uint(clamp(ceil(major / max(minor, 1.0)), 1.0, 16.0));
+        float major = max(lx, ly);
+        float tapLimit = max(maxAnisotropy, 1.0);
+        float minor = max(min(lx, ly), major / tapLimit);
+        uint taps = uint(clamp(ceil(major / max(minor, 1.0)), 1.0, tapLimit));
         float2 step = (lx > ly ? dx : dy) / float(taps);
         float4 result = 0.0;
         [loop] for (uint i = 0; i < taps; ++i)
@@ -185,7 +191,7 @@ float4 ckCompareVariantBorderMips2D(Texture2D<float4> image,
 float4 ckCompareVariantBorder2D(Texture2D<float4> image,
                                 SamplerState state, uint slot, float2 uv,
                                 float2 dx, float2 dy, float bias,
-                                float minMip)
+                                float minMip, float maxAnisotropy)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     uint width, height, levels;
@@ -197,10 +203,10 @@ float4 ckCompareVariantBorder2D(Texture2D<float4> image,
                                       ck_samplerInfo[slot].z);
     if (filter == 7 && lod > 0.0) {
         float major = max(lx, ly);
-        float maxAnisotropy = float(max(1u, uint(ck_samplerInfo[slot].w) >> 4));
-        float minor = max(min(lx, ly), major / maxAnisotropy);
+        float tapLimit = max(maxAnisotropy, 1.0);
+        float minor = max(min(lx, ly), major / tapLimit);
         uint taps = uint(clamp(ceil(major / max(minor, 1.0)),
-                               1.0, maxAnisotropy));
+                               1.0, tapLimit));
         float2 step = (lx > ly ? dx : dy) / float(taps);
         float tapLod = max(log2(max(minor, 1.0)) + bias, minMip);
         float4 result = 0.0;
@@ -217,25 +223,27 @@ float4 ckCompareVariantBorder2D(Texture2D<float4> image,
 
 float4 ckCompareVariantSample2DBias(Texture2D<float4> image,
                                     SamplerState state, uint slot,
-                                    float2 uv, float bias, float minMip)
+                                    float2 uv, float bias, float minMip,
+                                    float maxAnisotropy)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
         return image.SampleBias(state, uv, bias);
     return ckCompareVariantBorder2D(image, state, slot, uv,
-                                    ddx(uv), ddy(uv), bias, minMip);
+                                    ddx(uv), ddy(uv), bias, minMip,
+                                    maxAnisotropy);
 }
 
 float4 ckCompareVariantSample2DGrad(Texture2D<float4> image,
                                     SamplerState state, uint slot,
                                     float2 uv, float2 dx, float2 dy,
-                                    float minMip)
+                                    float minMip, float maxAnisotropy)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
     if ((modes & 15) != 4 && ((modes >> 4) & 15) != 4)
         return image.SampleGrad(state, uv, dx, dy);
     return ckCompareVariantBorder2D(image, state, slot, uv,
-                                    dx, dy, 0.0, minMip);
+                                    dx, dy, 0.0, minMip, maxAnisotropy);
 }
 
 float4 ckSample3DBorderLevel(Texture3D<float4> image, SamplerState state,

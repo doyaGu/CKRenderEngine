@@ -71,8 +71,10 @@ CKBOOL CKBgfxRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, in
     }
     if (!m_FFP.Init(backendCaps.Features, backendCaps.MaxTextureBindings,
                     m_ShaderCache.GetTargetFlags() |
-                    CKRST_SHADER_TARGET_BORDER_COLOR_UNIFORM |
-                    CKRST_SHADER_TARGET_SAMPLER_ORDINAL)) {
+                    CKRST_SHADER_TARGET_MANUAL_LOD |
+                    CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+                    CKRST_SHADER_TARGET_MANUAL_BORDER |
+                    CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE)) {
         ClearNativeVertexLayouts();
         ClearNativeFFPrograms();
         Shutdown();

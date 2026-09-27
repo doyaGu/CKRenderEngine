@@ -153,6 +153,138 @@ void ShaderABIConstantsMatchShaderUniformDeclarations() {
               "Fragment shader must declare u_ffProgram with the fragment program ABI count");
 }
 
+void SamplerShaderStateResolvesBackendResponsibilities() {
+    const CKDWORD bgfxFlags =
+        CKRST_SHADER_TARGET_MANUAL_LOD |
+        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+        CKRST_SHADER_TARGET_MANUAL_BORDER |
+        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
+    const CKDWORD sdlFlags =
+        CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
+        CKRST_SHADER_TARGET_MANUAL_BORDER;
+
+    CKSamplerDesc sampler = {};
+    sampler.MinFilter = CKRST_FILTER_ANISOTROPIC;
+    sampler.MagFilter = CKRST_FILTER_LINEAR;
+    sampler.MipFilter = CKRST_FILTER_ANISOTROPIC;
+    sampler.AddressU = CKRST_ADDRESS_WRAP;
+    sampler.AddressV = CKRST_ADDRESS_CLAMP;
+    sampler.AddressW = CKRST_ADDRESS_WRAP;
+    sampler.MinMipLevel = 6;
+    sampler.MaxAnisotropy = 12;
+    sampler.ShaderAnisotropy = 1;
+
+    const CKFFSamplerShaderState bgfx = CKFFBuildSamplerShaderState(
+        sampler, 0, 0, bgfxFlags);
+    const CKFFSamplerShaderState sdl = CKFFBuildSamplerShaderState(
+        sampler, 0, 0, sdlFlags);
+    TestCheck(bgfx.MinimumMipLevel() == 6 &&
+                  bgfx.AnisotropyTapCount() == 12 &&
+                  bgfx.Has(CKFF_SAMPLER_SHADER_MANUAL_LOD) &&
+                  bgfx.Has(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) &&
+                  bgfx.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT),
+              "bgfx must resolve minimum LOD and anisotropy into exact shader work");
+    TestCheck(sdl.MinimumMipLevel() == 6 &&
+                  sdl.AnisotropyTapCount() == 0 &&
+                  !sdl.Has(CKFF_SAMPLER_SHADER_MANUAL_LOD) &&
+                  !sdl.Has(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) &&
+                  !sdl.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT),
+              "SDL GPU ordinary 2D sampling must retain native minimum LOD and anisotropy");
+    TestCheck(bgfx.Has(CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR) &&
+                  bgfx.Has(CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR),
+              "Anisotropic and linear filters must both expose linear footprint filtering");
+
+    const CKFFSamplerShaderState sdlVolume = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_VOLUMEMAP, 0, sdlFlags);
+    TestCheck(sdlVolume.AnisotropyTapCount() == 12 &&
+                  sdlVolume.Has(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) &&
+                  sdlVolume.Has(CKFF_SAMPLER_SHADER_MANUAL_LOD) &&
+                  sdlVolume.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT),
+              "SDL GPU volume anisotropy must resolve to shader taps and explicit gradients");
+
+    sampler.AddressU = CKRST_ADDRESS_BORDER;
+    sampler.AddressV = CKRST_ADDRESS_BORDER;
+    sampler.AddressW = CKRST_ADDRESS_BORDER;
+    const CKFFSamplerShaderState sdlBorder = CKFFBuildSamplerShaderState(
+        sampler, 0, 0, sdlFlags);
+    TestCheck(sdlBorder.BorderAxisMask() == 3 &&
+                  sdlBorder.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER) &&
+                  sdlBorder.Has(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY),
+              "SDL GPU 2D border sampling must preserve both axes and the exact tap cap");
+    const CKFFSamplerShaderState volumeBorder = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_VOLUMEMAP, 0, sdlFlags);
+    TestCheck(volumeBorder.BorderAxisMask() == 7,
+              "Volume border sampling must preserve all three address axes");
+    const CKFFSamplerShaderState cubeBorder = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_CUBEMAP, 0, bgfxFlags);
+    TestCheck(cubeBorder.BorderAxisMask() == 0 &&
+                  !cubeBorder.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
+              "Cube directions must not acquire 2D/3D border-domain handling");
+
+    sampler.MinFilter = CKRST_FILTER_LINEAR;
+    sampler.MagFilter = CKRST_FILTER_NEAREST;
+    sampler.MipFilter = CKRST_FILTER_LINEAR;
+    sampler.ShaderAnisotropy = 0;
+    sampler.CompareFunc = CKRST_COMPARE_LEQUAL;
+    const CKFFSamplerShaderState bgfxDepth = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, bgfxFlags);
+    const CKFFSamplerShaderState sdlDepth = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, sdlFlags);
+    TestCheck(bgfxDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) &&
+                  bgfxDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
+              "bgfx depth comparison and border filtering must remain shader exact");
+    TestCheck(!sdlDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) &&
+                  !sdlDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
+              "SDL GPU padded comparison textures must retain native comparison sampling");
+
+    sampler.AddressU = CKRST_ADDRESS_CLAMP;
+    sampler.AddressV = CKRST_ADDRESS_CLAMP;
+    sampler.MinMipLevel = 0;
+    sampler.CompareFunc = CKRST_COMPARE_NONE;
+    const CKFFSamplerShaderState mirrorOnce = CKFFBuildSamplerShaderState(
+        sampler, 0, CKFF_TTF_MIRRORONCE_U, sdlFlags);
+    TestCheck(mirrorOnce.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) &&
+                  !mirrorOnce.Has(CKFF_SAMPLER_SHADER_MANUAL_LOD),
+              "MIRRORONCE must preserve the original footprint without inventing manual LOD");
+}
+
+void SamplerShaderStateShaderHeaderMatchesCppABI() {
+    const std::string generated = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_shader_state.sh");
+    const std::string generator = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shader_abi_codegen.py");
+    const std::string fragment = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    TestCheck(!generated.empty() && !generator.empty() && !fragment.empty(),
+              "Sampler shader ABI sources must be readable");
+
+    char line[160];
+#define CKFF_CHECK_SAMPLER_SHADER_DEFINE(name, format) \
+    snprintf(line, sizeof(line), "#define " #name " " format, (unsigned)name); \
+    TestCheck(generated.find(line) != std::string::npos, \
+              "Generated sampler shader state must match CKFFShaderABI.h")
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT, "%u");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MIN_MIP_MASK, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT, "%u");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_ANISOTROPY_MASK, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT, "%u");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MANUAL_LOD, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MANUAL_BORDER, "0x%08x");
+    CKFF_CHECK_SAMPLER_SHADER_DEFINE(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE, "0x%08x");
+#undef CKFF_CHECK_SAMPLER_SHADER_DEFINE
+
+    TestCheck(generator.find("CKFFSamplerShaderStateABI") != std::string::npos &&
+                  fragment.find("#include \"ff_sampler_shader_state.sh\"") != std::string::npos &&
+                  fragment.find("packedSamplerLod") == std::string::npos &&
+                  fragment.find("(samplerState >> 5) & 31") == std::string::npos,
+              "Shader code must consume generated sampler ABI names without packed-state literals");
+}
+
 void StageParamsPackThroughABIIndices() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     CKDWORD textures[CKFF_MAX_TEXTURE_STAGES] = {};
@@ -1349,6 +1481,10 @@ int main() {
               &TextureArgModifierRepackRoundTripsBothModifierBits);
     tests.Run("Shader ABI constants match shader uniform declarations",
               &ShaderABIConstantsMatchShaderUniformDeclarations);
+    tests.Run("Sampler shader state resolves backend responsibilities",
+              &SamplerShaderStateResolvesBackendResponsibilities);
+    tests.Run("Sampler shader state shader header matches C++ ABI",
+              &SamplerShaderStateShaderHeaderMatchesCppABI);
     tests.Run("Shader sources declare portable flat and clip-space conventions",
               &ShaderSourcesDeclarePortableFlatAndClipSpaceConventions);
     tests.Run("Stage params pack through ABI indices",
