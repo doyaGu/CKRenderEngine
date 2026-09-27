@@ -1078,6 +1078,78 @@ void FragmentShaderDeclaresAllExactSamplerLayouts() {
               "Vertex shaders keep the clip-distance variant switch");
 }
 
+void TextureDerivativesStayInTypedSamplingPaths() {
+    const std::string stage = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string twoD = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_2d.sc");
+    const std::string cube = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_cube.sc");
+    const std::string volume = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_volume.sc");
+    const std::string depth = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_depth.sc");
+    const std::string common = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_common.sc");
+    const std::string nativeSampling = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKSdlGpuRasterizer/shaders/native_sampling.hlsli");
+    TestCheck(!stage.empty() && !twoD.empty() && !cube.empty() &&
+                  !volume.empty() && !depth.empty() && !common.empty() &&
+                  !nativeSampling.empty(),
+              "Typed sampler shader sources must be readable");
+
+    const std::string::size_type textureDispatch =
+        depth.find("vec4 CKFFSampleTexture(");
+    const std::string dispatch = textureDispatch == std::string::npos
+        ? std::string()
+        : depth.substr(textureDispatch);
+    TestCheck(stage.find("dFdx(") == std::string::npos &&
+                  stage.find("dFdy(") == std::string::npos &&
+                  dispatch.find("dFdx(") == std::string::npos &&
+                  dispatch.find("dFdy(") == std::string::npos,
+              "Texture dispatch must not eagerly evaluate derivatives");
+
+    TestCheck(twoD.find("vec2 originalDx") != std::string::npos &&
+                  twoD.find("dFdx(originalUv)") != std::string::npos &&
+                  twoD.find("dFdy(originalUv)") != std::string::npos &&
+                  twoD.find("if (sampleProgram.RequiresExplicitGradient)") != std::string::npos &&
+                  CountSubstring(twoD, "dFdx(") == 1 &&
+                  CountSubstring(twoD, "dFdy(") == 1,
+              "2D sampling must compute one vec2 footprint only when required");
+    TestCheck(depth.find("vec2 originalDx") != std::string::npos &&
+                  depth.find("dFdx(originalUv)") != std::string::npos &&
+                  depth.find("dFdy(originalUv)") != std::string::npos &&
+                  depth.find("if (sampleProgram.RequiresExplicitGradient)") != std::string::npos &&
+                  CountSubstring(depth, "dFdx(") == 1 &&
+                  CountSubstring(depth, "dFdy(") == 1,
+              "Depth sampling must compute one vec2 footprint only when required");
+    TestCheck(cube.find("vec3 originalDx") != std::string::npos &&
+                  cube.find("dFdx(originalCoord)") != std::string::npos &&
+                  cube.find("dFdy(originalCoord)") != std::string::npos &&
+                  cube.find("if (sampleProgram.RequiresExplicitGradient)") != std::string::npos &&
+                  CountSubstring(cube, "dFdx(") == 1 &&
+                  CountSubstring(cube, "dFdy(") == 1,
+              "Cube sampling must compute one vec3 footprint only when required");
+    TestCheck(volume.find("vec3 originalDx") != std::string::npos &&
+                  volume.find("dFdx(originalCoord)") != std::string::npos &&
+                  volume.find("dFdy(originalCoord)") != std::string::npos &&
+                  volume.find("if (sampleProgram.RequiresExplicitGradient)") != std::string::npos &&
+                  volume.find("CKFF_TEXTURE_3D_BIAS(_sampler, coord.xyz, lodBias)") != std::string::npos &&
+                  CountSubstring(volume, "dFdx(") == 1 &&
+                  CountSubstring(volume, "dFdy(") == 1,
+              "Volume sampling must compute one vec3 footprint and retain implicit bias sampling");
+
+    TestCheck(common.find("if (!requiresExplicitGradient)") != std::string::npos &&
+                  common.find("return image.SampleBias(state, uv, bias);") != std::string::npos,
+              "DXIL volume resource arrays must keep ordinary sampling on the implicit footprint path");
+    TestCheck(nativeSampling.find("float3 uv, float3 dx, float3 dy, float bias") != std::string::npos &&
+                  nativeSampling.find("float3 extent = float3(width, height, depth);") != std::string::npos &&
+                  nativeSampling.find("length(dx * extent)") != std::string::npos &&
+                  nativeSampling.find("length(dy * extent)") != std::string::npos &&
+                  nativeSampling.find("CalculateLevelOfDetailUnclamped(state, originalUv)") == std::string::npos,
+              "SDL volume explicit LOD must consume the original vec3 derivatives");
+}
+
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
 void ShaderCodegenCompilesOneProgramFamily() {
     const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
@@ -1623,6 +1695,8 @@ int main() {
               &VolumeSamplerMaskCanBeDerivedFromShaderKey);
     tests.Run("Fragment shader declares all exact sampler layouts",
               &FragmentShaderDeclaresAllExactSamplerLayouts);
+    tests.Run("Texture derivatives stay in typed sampling paths",
+              &TextureDerivativesStayInTypedSamplingPaths);
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
     tests.Run("Shader codegen compiles one program family",
               &ShaderCodegenCompilesOneProgramFamily);

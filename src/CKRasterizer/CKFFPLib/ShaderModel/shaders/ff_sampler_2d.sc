@@ -1,11 +1,17 @@
 // Fixed-function ordinary 2D texture sampling.
 
-vec4 CKFFSample2D(int stage, vec2 uv, vec2 originalDx, vec2 originalDy,
-                  int ordinal, CKFFSamplerShaderProgram sampleProgram)
+vec4 CKFFSample2D(int stage, vec2 uv, vec2 originalUv, int ordinal,
+                  CKFFSamplerShaderProgram sampleProgram)
 {
     float lodBias = sampleProgram.LodBias;
     float minMip = sampleProgram.MinimumMip;
     float maxAnisotropy = sampleProgram.AnisotropyTaps;
+    vec2 originalDx = vec2_splat(0.0);
+    vec2 originalDy = vec2_splat(0.0);
+    if (sampleProgram.RequiresExplicitGradient) {
+        originalDx = dFdx(originalUv);
+        originalDy = dFdy(originalUv);
+    }
 // CKFF_BGFX_ONLY_BEGIN
 #if !CKFF_NATIVE_SDL_GPU
     bool borderMip = sampleProgram.ManualBorder &&

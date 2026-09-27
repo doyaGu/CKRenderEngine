@@ -121,11 +121,17 @@ float ckffCompareSample2D(int ordinal, vec2 uv,
 #endif
 // CKFF_BGFX_ONLY_END
 
-vec4 CKFFSampleDepth(int stage, vec4 coord, vec2 originalDx,
-                     vec2 originalDy, int ordinal, int compareFunc,
+vec4 CKFFSampleDepth(int stage, vec4 coord, vec2 originalUv,
+                     int ordinal, int compareFunc,
                      CKFFSamplerShaderProgram sampleProgram)
 {
     vec2 uv = coord.xy;
+    vec2 originalDx = vec2_splat(0.0);
+    vec2 originalDy = vec2_splat(0.0);
+    if (sampleProgram.RequiresExplicitGradient) {
+        originalDx = dFdx(originalUv);
+        originalDy = dFdy(originalUv);
+    }
     if (compareFunc != 0) {
 #if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT > 0
 #define CKFF_COMPARE_SAMPLE(_sampler) texture2DCompare( \
@@ -151,7 +157,7 @@ vec4 CKFFSampleDepth(int stage, vec4 coord, vec2 originalDx,
     }
 
     vec4 color = CKFFSample2D(
-        stage, uv, originalDx, originalDy, ordinal, sampleProgram);
+        stage, uv, originalUv, ordinal, sampleProgram);
 #if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
     if (compareFunc != 0)
         return vec4_splat(compareDepth(color.r, coord.z, compareFunc));
@@ -170,26 +176,20 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType,
         return vec4(0.0, 0.0, 0.0, 1.0);
 
     CKFFSamplerShaderProgram sampleProgram = ckffReadSamplerShaderProgram(stage);
-    // Preserve the existing eager footprint evaluation until the derivative
-    // pass moves each derivative into its typed sampling path.
-    vec2 originalDx = dFdx(coord.xy);
-    vec2 originalDy = dFdy(coord.xy);
-    vec3 originalCoord3 = coord.xyz;
-    vec3 originalDx3 = dFdx(coord.xyz);
-    vec3 originalDy3 = dFdy(coord.xyz);
+    vec4 originalCoord = coord;
     coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);
 
     if (samplerType == 1)
         return CKFFSampleCube(
-            coord, originalDx3, originalDy3, samplerOrdinal, sampleProgram);
+            coord, originalCoord.xyz, samplerOrdinal, sampleProgram);
     if (samplerType == 3)
         return CKFFSampleVolume(
-            stage, coord, originalCoord3, originalDx3, originalDy3,
-            samplerOrdinal, mirrorOnceMask, sampleProgram);
+            stage, coord, originalCoord.xyz, samplerOrdinal, mirrorOnceMask,
+            sampleProgram);
     if (samplerType == 2)
         return CKFFSampleDepth(
-            stage, coord, originalDx, originalDy, samplerOrdinal,
-            compareFunc, sampleProgram);
+            stage, coord, originalCoord.xy, samplerOrdinal, compareFunc,
+            sampleProgram);
     return CKFFSample2D(
-        stage, coord.xy, originalDx, originalDy, samplerOrdinal, sampleProgram);
+        stage, coord.xy, originalCoord.xy, samplerOrdinal, sampleProgram);
 }

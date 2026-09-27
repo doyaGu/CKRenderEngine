@@ -1,11 +1,17 @@
 // Fixed-function cube texture sampling.
 
-vec4 CKFFSampleCube(vec4 coord, vec3 originalDx, vec3 originalDy,
-                    int ordinal, CKFFSamplerShaderProgram sampleProgram)
+vec4 CKFFSampleCube(vec4 coord, vec3 originalCoord, int ordinal,
+                    CKFFSamplerShaderProgram sampleProgram)
 {
     float lodBias = sampleProgram.LodBias;
     float minMip = sampleProgram.MinimumMip;
     float maxAnisotropy = sampleProgram.AnisotropyTaps;
+    vec3 originalDx = vec3_splat(0.0);
+    vec3 originalDy = vec3_splat(0.0);
+    if (sampleProgram.RequiresExplicitGradient) {
+        originalDx = dFdx(originalCoord);
+        originalDy = dFdy(originalCoord);
+    }
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_CUBE(_sampler) \
     CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)

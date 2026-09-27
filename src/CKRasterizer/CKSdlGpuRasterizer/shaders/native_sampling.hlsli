@@ -292,16 +292,17 @@ float4 ckSample3D(Texture3D<float4> image, SamplerState state, uint slot, float3
 }
 
 float4 ckSample3DGrad(Texture3D<float4> image, SamplerState state, uint slot,
-                      float3 uv, float3 originalUv, int mirrorOnceMask,
-                      float bias, float minMip)
+                      float3 uv, float3 dx, float3 dy, float bias,
+                      float minMip)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
-    if (mirrorOnceMask == 0 && (modes & 15) != 4 && ((modes >> 4) & 15) != 4 && ((modes >> 8) & 15) != 4)
-        return image.SampleBias(state, uv, bias);
     // Compute mip selection before MIRRORONCE folds the coordinates. Keep the
     // per-tap border path for axes that use BORDER instead of the native clamp.
-    float lod = max(image.CalculateLevelOfDetailUnclamped(state, originalUv) + bias,
-                    minMip);
+    uint width, height, depth, levels;
+    image.GetDimensions(0, width, height, depth, levels);
+    float3 extent = float3(width, height, depth);
+    float footprint = max(length(dx * extent), length(dy * extent));
+    float lod = max(log2(max(footprint, 0.000001)) + bias, minMip);
     if ((modes & 15) == 4 || ((modes >> 4) & 15) == 4 || ((modes >> 8) & 15) == 4)
         return ckSample3DAtLod(image, slot, uv, lod, modes);
     return image.SampleLevel(state, uv, lod);

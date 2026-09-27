@@ -92,4 +92,4 @@
 #define textureCubeBias(name, uv, bias) name.SampleBias(name##Sampler, uv, bias)
 #define texture3D(name, uv) ckSample3D(name, name##Sampler, name##Slot, uv)
 #define texture3DBias(name, uv, bias, minMip) ckSample3DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
-#define texture3DGrad(name, uv, original, mirror, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, original, mirror, bias, minMip)
+#define texture3DGrad(name, uv, dx, dy, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, dx, dy, bias, minMip)

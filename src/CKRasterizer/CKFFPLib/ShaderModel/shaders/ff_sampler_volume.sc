@@ -1,18 +1,26 @@
 // Fixed-function volume texture sampling.
 
 vec4 CKFFSampleVolume(int stage, vec4 coord, vec3 originalCoord,
-                      vec3 originalDx, vec3 originalDy, int ordinal,
-                      int mirrorOnceMask, CKFFSamplerShaderProgram sampleProgram)
+                      int ordinal, int mirrorOnceMask,
+                      CKFFSamplerShaderProgram sampleProgram)
 {
     float lodBias = sampleProgram.LodBias;
     float minMip = sampleProgram.MinimumMip;
     float maxAnisotropy = sampleProgram.AnisotropyTaps;
+    vec3 originalDx = vec3_splat(0.0);
+    vec3 originalDy = vec3_splat(0.0);
+    if (sampleProgram.RequiresExplicitGradient) {
+        originalDx = dFdx(originalCoord);
+        originalDy = dFdy(originalCoord);
+    }
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_3D(_sampler) (sampleProgram.ManualAnisotropy ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx, originalDy, \
         lodBias, minMip, maxAnisotropy) : \
-    CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord, originalDx, \
-        originalDy, mirrorOnceMask, lodBias))
+    (sampleProgram.RequiresExplicitGradient ? \
+        CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalDx, originalDy, \
+            mirrorOnceMask, lodBias) : \
+        CKFF_TEXTURE_3D_BIAS(_sampler, coord.xyz, lodBias)))
 #else
 #define CKFF_SAMPLE_3D(_sampler) (sampleProgram.ManualAnisotropy ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx, originalDy, \
@@ -20,16 +28,18 @@ vec4 CKFFSampleVolume(int stage, vec4 coord, vec3 originalCoord,
     (sampleProgram.ManualLod ? \
         CKFF_TEXTURE_3D_MIN_MIP(_sampler, coord.xyz, originalDx, originalDy, \
             lodBias, minMip) : \
-        CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord, originalDx, \
-            originalDy, mirrorOnceMask, lodBias)))
+        (sampleProgram.RequiresExplicitGradient ? \
+            CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalDx, originalDy, \
+                mirrorOnceMask, lodBias) : \
+            CKFF_TEXTURE_3D_BIAS(_sampler, coord.xyz, lodBias))))
 #endif
 
 #if CKFF_NATIVE_SDL_GPU
 #if CKFF_VOLUME_RESOURCE_ARRAY
     vec4 color = ckffNative3DSample(
         s_textureVolume[ordinal], s_textureVolumeSampler[ordinal],
-        uint(CKFF_VOLUME_SLOT_BASE + ordinal), coord.xyz, originalCoord,
-        originalDx, originalDy, mirrorOnceMask, lodBias, minMip,
+        uint(CKFF_VOLUME_SLOT_BASE + ordinal), coord.xyz, originalDx,
+        originalDy, sampleProgram.RequiresExplicitGradient, lodBias, minMip,
         maxAnisotropy);
 #else
     vec4 color = vec4_splat(0.0);
