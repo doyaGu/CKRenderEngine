@@ -54,6 +54,31 @@ CKDWORD CKFFHashTextureBindingSet(CKDWORD activeTextureCount, const CKFFTextureB
         hash = CKFFHashBytes(&binding.Texture, sizeof(binding.Texture), hash);
         hash = CKFFHashBytes(&binding.TextureFlags, sizeof(binding.TextureFlags), hash);
         hash = CKFFHashBytes(&binding.Sampler, sizeof(binding.Sampler), hash);
+        hash = CKFFHashBytes(&binding.ShaderState.Bits,
+                             sizeof(binding.ShaderState.Bits), hash);
     }
     return hash;
+}
+
+CKFFFragmentSamplingMode CKFFResolveFragmentSamplingMode(
+    const CKFFTextureBindingSet &textures)
+{
+    if (textures.SamplerLayoutPlan.CompareSamplerCount != 0)
+        return CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
+
+    const CKDWORD manualSamplingMask =
+        CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT |
+        CKFF_SAMPLER_SHADER_MANUAL_LOD |
+        CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY |
+        CKFF_SAMPLER_SHADER_MANUAL_BORDER |
+        CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE;
+    const CKDWORD bindingCount = textures.ActiveTextureCount < CKFF_MAX_TEXTURE_STAGES
+        ? textures.ActiveTextureCount : CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < bindingCount; ++stage) {
+        const CKFFTextureBinding &binding = textures.Bindings[stage];
+        if (binding.Texture != 0 &&
+            (binding.ShaderState.Bits & manualSamplingMask) != 0)
+            return CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
+    }
+    return CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT;
 }

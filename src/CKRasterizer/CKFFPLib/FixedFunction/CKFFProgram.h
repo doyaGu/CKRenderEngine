@@ -12,6 +12,12 @@ enum CKFFProgramVariant {
     CKFF_PROGRAM_VARIANT_COUNT = 4
 };
 
+enum CKFFFragmentSamplingMode {
+    CKFF_FRAGMENT_SAMPLING_FULL_EXACT = 0,
+    CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT = 1,
+    CKFF_FRAGMENT_SAMPLING_MODE_COUNT = 2
+};
+
 // Shader selection produced by fixed-function state resolution. Native
 // shader and program objects are deliberately absent.
 struct CKFFProgramContext {

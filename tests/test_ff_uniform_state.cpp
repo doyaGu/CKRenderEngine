@@ -277,6 +277,103 @@ void SamplerShaderStateResolvesBackendResponsibilities() {
               "MIRRORONCE must preserve the original footprint without inventing manual LOD");
 }
 
+void NativeExactSamplingUsesFinalBindingState() {
+    CKFFTextureBindingSet textures;
+    CKFFInitTextureBindingSet(&textures);
+    textures.ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        textures.Bindings[stage].Texture = stage + 1;
+        textures.Bindings[stage].ShaderState = CKFFSamplerShaderState(
+            CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR |
+            CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR);
+    }
+    TestCheck(CKFFResolveFragmentSamplingMode(textures) ==
+                  CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT,
+              "Native-exact sampling must accept states fully represented by native samplers");
+
+    const CKDWORD manualFlags[] = {
+        CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT,
+        CKFF_SAMPLER_SHADER_MANUAL_LOD,
+        CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY,
+        CKFF_SAMPLER_SHADER_MANUAL_BORDER,
+        CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE,
+    };
+    for (CKDWORD flag : manualFlags) {
+        textures.Bindings[5].ShaderState.Bits |= flag;
+        TestCheck(CKFFResolveFragmentSamplingMode(textures) ==
+                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT,
+                  "Every manual sampler responsibility must select the full exact fragment program");
+        textures.Bindings[5].ShaderState.Bits &= ~flag;
+    }
+
+    textures.SamplerLayoutPlan.CompareSamplerCount = 1;
+    TestCheck(CKFFResolveFragmentSamplingMode(textures) ==
+                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT,
+              "Comparison samplers must select the full exact fragment program");
+    textures.SamplerLayoutPlan.CompareSamplerCount = 0;
+
+    const CKDWORD before = CKFFHashTextureBindingSet(
+        textures.ActiveTextureCount, textures.Bindings);
+    textures.Bindings[3].ShaderState.Bits |= CKFF_SAMPLER_SHADER_MANUAL_BORDER;
+    const CKDWORD after = CKFFHashTextureBindingSet(
+        textures.ActiveTextureCount, textures.Bindings);
+    TestCheck(before != after,
+              "Resolved sampler shader state must participate in texture binding identity");
+
+    CKFFStateStore state;
+    state.Reset();
+    state.TextureHandles[0] = 17;
+    CKFFDrawProbes probes;
+    const CKDWORD targetFlags = CKRST_SHADER_TARGET_MANUAL_LOD |
+        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+        CKRST_SHADER_TARGET_MANUAL_BORDER |
+        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
+    CKFFTextureBinder binder(state, targetFlags, probes);
+    CKFFShaderKeyFS key;
+    key.Stages[0].HasTexture = true;
+    const CKFFSamplerLayoutPlan plan = CKFFBuildSamplerLayoutPlan(key);
+    CKFFTextureBindingSet built;
+    binder.BuildBindingSet(&built, 1, 1u, plan);
+    const CKDWORD transformFlags =
+        state.StageStates[0][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
+        CKFFResolveMirrorOnceAddressMask(state.StageStates[0]);
+    const CKFFSamplerShaderState expected = CKFFBuildSamplerShaderState(
+        built.Bindings[0].Sampler, built.Bindings[0].TextureFlags,
+        transformFlags, targetFlags);
+    TestCheck(built.Bindings[0].ShaderState.Bits == expected.Bits,
+              "Texture bindings must retain the shader state resolved from the final sampler descriptor");
+}
+
+void NativeExactShaderKeepsOnlyNativeSamplingWork() {
+    const std::string stage = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string native = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_native_exact.sc");
+    const std::string sdlCompat = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKSdlGpuRasterizer/shaders/native_compat.hlsli");
+    const std::string sdlCompiler = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKSdlGpuRasterizer/shaders/compile_native_shaders.py");
+    TestCheck(!stage.empty() && !native.empty() && !sdlCompat.empty() &&
+                  !sdlCompiler.empty(),
+              "Native-exact shader sources must be readable");
+    TestCheck(stage.find("#if CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT") != std::string::npos &&
+                  stage.find("#include \"ff_sampler_native_exact.sc\"") != std::string::npos,
+              "The fixed-function fragment shader must select the compact native sampler path");
+    TestCheck(native.find("dFdx(") == std::string::npos &&
+                  native.find("dFdy(") == std::string::npos &&
+                  native.find("CKFFSampleNative2D") != std::string::npos &&
+                  native.find("CKFFSampleNativeCube") != std::string::npos &&
+                  native.find("CKFFSampleNativeVolume") != std::string::npos,
+              "Native-exact sampling must retain all texture kinds without explicit gradients");
+    TestCheck(sdlCompat.find("#elif CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT") != std::string::npos &&
+                  sdlCompat.find("name.SampleBias(name##Sampler, uv, bias)") != std::string::npos,
+              "SDL native-exact sampling must bypass manual border and LOD helpers");
+    TestCheck(sdlCompiler.find("fs_ff_stage_native") != std::string::npos &&
+                  sdlCompiler.find("fs_ff_stage_cube_native") != std::string::npos &&
+                  sdlCompiler.find("fs_ff_stage_volume_native") != std::string::npos,
+              "SDL shader generation must emit all three no-compare native-exact layouts");
+}
+
 void SamplerShaderStateShaderHeaderMatchesCppABI() {
     const std::string generated = ReadTextFile(
         "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_shader_state.sh");
@@ -1198,6 +1295,8 @@ void ShaderCodegenCompilesOneProgramFamily() {
     const char *shaderNames[] = {
         "\"vs_ff_3d\"", "\"vs_ff_3d_clip\"", "\"vs_ff_positiont\"", "\"vs_ff_positiont_clip\"",
         "\"fs_ff_stage\"", "\"fs_ff_stage_cube\"", "\"fs_ff_stage_volume\"",
+        "\"fs_ff_stage_native\"", "\"fs_ff_stage_cube_native\"",
+        "\"fs_ff_stage_volume_native\"",
         "\"vs_postprocess\"", "\"fs_postprocess\"",
     };
     for (const char *name : shaderNames) {
@@ -1672,6 +1771,10 @@ int main() {
               &ShaderABIConstantsMatchShaderUniformDeclarations);
     tests.Run("Sampler shader state resolves backend responsibilities",
               &SamplerShaderStateResolvesBackendResponsibilities);
+    tests.Run("Native exact sampling uses final binding state",
+              &NativeExactSamplingUsesFinalBindingState);
+    tests.Run("Native exact shader keeps only native sampling work",
+              &NativeExactShaderKeepsOnlyNativeSamplingWork);
     tests.Run("Sampler shader state shader header matches C++ ABI",
               &SamplerShaderStateShaderHeaderMatchesCppABI);
     tests.Run("Shader sources declare portable flat and clip-space conventions",

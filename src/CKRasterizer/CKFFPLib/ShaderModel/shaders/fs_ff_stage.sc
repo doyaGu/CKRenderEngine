@@ -13,11 +13,18 @@ uniform vec4 u_ffProgram[5];
 
 #include "ff_sampler_layout.sh"
 #include "fs_ff_common.sc"
+#ifndef CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
+#define CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT 0
+#endif
+#if CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
+#include "ff_sampler_native_exact.sc"
+#else
 #include "ff_sampler_common.sc"
 #include "ff_sampler_2d.sc"
 #include "ff_sampler_cube.sc"
 #include "ff_sampler_volume.sc"
 #include "ff_sampler_depth.sc"
+#endif
 #include "ff_texture_ops.sc"
 
 void main()

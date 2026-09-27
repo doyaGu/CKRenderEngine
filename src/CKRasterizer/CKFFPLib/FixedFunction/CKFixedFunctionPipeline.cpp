@@ -19,7 +19,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_MaxTextureBindings(0),
       m_FrameNumber(0),
       m_ShaderTargetFlags(0),
-      m_TextureBinder(m_State, m_Probes),
+      m_TextureBinder(m_State, m_ShaderTargetFlags, m_Probes),
       m_UniformEmitter(m_State, m_State.DrawState,
                        m_ShaderTargetFlags, m_Probes),
       m_StaticUniformRevision(1),
@@ -74,6 +74,7 @@ bool CKFixedFunctionPipeline::Init(uint64_t features,
     m_Features = features;
     m_MaxTextureBindings = maxTextureBindings;
     m_ShaderTargetFlags = shaderTargetFlags;
+    m_TextureBinder.InvalidateAll();
     m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
     m_LastDrawApproximationMask = 0;
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
@@ -98,6 +99,7 @@ bool CKFixedFunctionPipeline::Init(uint64_t features,
 CKERROR CKFixedFunctionPipeline::Shutdown() {
     m_TransientGeometry.Clear();
     m_ShaderTargetFlags = 0;
+    m_TextureBinder.InvalidateAll();
     m_Features = 0;
     m_MaxTextureBindings = 0;
     return CK_OK;
@@ -666,6 +668,7 @@ void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 void CKFixedFunctionPipeline::RestoreState(const CKFFStateStore &state)
 {
     m_State = state;
+    m_TextureBinder.InvalidateAll();
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
 }
 

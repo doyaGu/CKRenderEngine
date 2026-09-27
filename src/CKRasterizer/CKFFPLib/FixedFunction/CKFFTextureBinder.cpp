@@ -1,6 +1,7 @@
 #include "CKFFTextureBinder.h"
 
 #include "CKFFStageState.h"
+#include "CKFFUniformState.h"
 
 static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
                                        CKDWORD activeTextureCount,
@@ -8,6 +9,7 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
                                        const CKDWORD *textureHandles,
                                        const CKDWORD *textureFlags,
                                        const CKSamplerDesc *samplers,
+                                       const CKFFSamplerShaderState *shaderStates,
                                        const CKFFSamplerLayoutPlan &layoutPlan)
 {
     if (!set)
@@ -25,13 +27,16 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         set->Bindings[stage].Texture = textureHandles[stage];
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];
+        set->Bindings[stage].ShaderState = shaderStates[stage];
     }
     set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);
 }
 
 CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
+                                     const CKDWORD &shaderTargetFlags,
                                      CKFFDrawProbes &probes)
     : m_State(state),
+      m_ShaderTargetFlags(shaderTargetFlags),
       m_Probes(probes),
       m_SamplerOverrides()
 {
@@ -43,7 +48,45 @@ CKBOOL CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableM
     if (m_SamplerOverrides == overrides)
         return FALSE;
     m_SamplerOverrides = overrides;
+    InvalidateAll();
     return TRUE;
+}
+
+void CKFFTextureBinder::InvalidateStage(int stage)
+{
+    if (stage >= 0 && stage < CKFF_MAX_TEXTURE_STAGES)
+        m_ResolvedSamplers[stage].Valid = FALSE;
+}
+
+void CKFFTextureBinder::InvalidateAll()
+{
+    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
+        m_ResolvedSamplers[stage].Valid = FALSE;
+}
+
+void CKFFTextureBinder::ResolveSampler(
+    int stage, CKSamplerDesc &sampler,
+    CKFFSamplerShaderState &shaderState) const
+{
+    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) {
+        sampler = CKFFBuildSamplerDesc(nullptr);
+        shaderState = CKFFSamplerShaderState();
+        return;
+    }
+    ResolvedSampler &resolved = m_ResolvedSamplers[stage];
+    if (!resolved.Valid) {
+        resolved.Sampler = CKFFBuildSamplerDesc(
+            m_State.StageStates[stage], m_SamplerOverrides);
+        const CKDWORD transformFlags =
+            m_State.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
+            CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
+        resolved.ShaderState = CKFFBuildSamplerShaderState(
+            resolved.Sampler, m_State.TextureFlags[stage], transformFlags,
+            m_ShaderTargetFlags);
+        resolved.Valid = TRUE;
+    }
+    sampler = resolved.Sampler;
+    shaderState = resolved.ShaderState;
 }
 
 void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
@@ -56,18 +99,20 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
     CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
+    CKFFSamplerShaderState shaderStates[CKFF_MAX_TEXTURE_STAGES];
     for (CKDWORD i = 0; i < activeCount; ++i) {
         if ((sampledTextureMask & (1u << i)) != 0)
-            samplers[i] = BuildSamplerDesc((int)i);
+            ResolveSampler((int)i, samplers[i], shaderStates[i]);
     }
     CKFFBuildTextureBindingSet(out, activeCount, sampledTextureMask,
                                m_State.TextureHandles, m_State.TextureFlags,
-                               samplers, layoutPlan);
+                               samplers, shaderStates, layoutPlan);
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const
 {
-    if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
-        return CKFFBuildSamplerDesc(nullptr);
-    return CKFFBuildSamplerDesc(m_State.StageStates[stage], m_SamplerOverrides);
+    CKSamplerDesc sampler;
+    CKFFSamplerShaderState shaderState;
+    ResolveSampler(stage, sampler, shaderState);
+    return sampler;
 }

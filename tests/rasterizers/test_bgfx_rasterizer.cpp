@@ -878,6 +878,43 @@ void TestShaderBorderMetadata() {
                 "shader metadata preserves address, filter and anisotropy state");
 }
 
+void TestFixedFunctionFragmentSamplingVariants()
+{
+    TEST_SECTION("Fixed-Function Fragment Sampling Variants");
+    const CK_SHADER_PROFILE profiles[] = {
+        CKRST_SHADER_PROFILE_DX11,
+        CKRST_SHADER_PROFILE_DX12,
+        CKRST_SHADER_PROFILE_SPIRV,
+        CKRST_SHADER_PROFILE_GLSL,
+        CKRST_SHADER_PROFILE_ESSL,
+        CKRST_SHADER_PROFILE_MSL,
+    };
+    CKRasterizerDeviceCaps caps;
+    caps.ShaderFormat = CKRST_SHADER_FORMAT_BGFX;
+    for (CK_SHADER_PROFILE profile : profiles) {
+        caps.ShaderProfile = profile;
+        for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
+            CKShaderDesc full, native;
+            TEST_ASSERT(CKBgfxRasterizerFFFragmentShader(
+                            caps, (CKFFSamplerLayout)layout,
+                            CKFF_FRAGMENT_SAMPLING_FULL_EXACT, full) &&
+                            full.Code && full.CodeSize,
+                        "every bgfx profile exposes each full-exact sampler layout");
+            TEST_ASSERT(CKBgfxRasterizerFFFragmentShader(
+                            caps, (CKFFSamplerLayout)layout,
+                            CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT, native) &&
+                            native.Code && native.CodeSize &&
+                            native.Code != full.Code,
+                        "every bgfx profile exposes a distinct native-exact sampler layout");
+        }
+    }
+    CKShaderDesc invalid;
+    TEST_ASSERT(!CKBgfxRasterizerFFFragmentShader(
+                    caps, CKFF_SAMPLER_LAYOUT_WIDE_2D,
+                    CKFF_FRAGMENT_SAMPLING_MODE_COUNT, invalid),
+                "bgfx rejects an invalid fragment sampling mode");
+}
+
 static void TestRejectedShaderTargets()
 {
     TEST_SECTION("Shader Target Selection Before Device Creation");
@@ -911,6 +948,7 @@ int main()
 
     TestBorderPaletteLifetime();
     TestShaderBorderMetadata();
+    TestFixedFunctionFragmentSamplingVariants();
     TestRejectedShaderTargets();
     TestFillModeTopology();
     TestDrawStateBuilderLayout();

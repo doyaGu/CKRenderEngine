@@ -432,22 +432,28 @@ void CKBgfxRasterizerContext::RecordDrawApproximations()
 
 CKFFProgramBinding CKBgfxRasterizerContext::ResolveNativeFFProgram(
     const CKFFShaderKey &Key,
-    const CKFFSamplerLayoutPlan &SamplerLayoutPlan)
+    const CKFFTextureBindingSet &Textures)
 {
+    const CKFFFragmentSamplingMode samplingMode =
+        CKFFResolveFragmentSamplingMode(Textures);
     const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(
-        Key, SamplerLayoutPlan);
+        Key, Textures.SamplerLayoutPlan, samplingMode);
     const CKDWORD variant = (CKDWORD)selection.Variant;
     const CKFFSamplerLayout layout = selection.SamplerLayoutPlan.Layout;
     const CKDWORD samplerLayout = (CKDWORD)layout;
-    if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
+    const CKDWORD sampling = (CKDWORD)selection.SamplingMode;
+    if (variant >= CKFF_PROGRAM_VARIANT_COUNT ||
+        samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        sampling >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT)
         return CKFFProgramBinding();
 
-    if (!m_NativeFFPixelShaders[samplerLayout]) {
+    if (!m_NativeFFPixelShaders[samplerLayout][sampling]) {
         CKShaderDesc pixelShader;
         if (!CKBgfxRasterizerFFFragmentShader(m_Caps, layout,
+                                              selection.SamplingMode,
                                               pixelShader) ||
             CreateShader(&pixelShader,
-                         &m_NativeFFPixelShaders[samplerLayout]) != CK_OK)
+                         &m_NativeFFPixelShaders[samplerLayout][sampling]) != CK_OK)
             return CKFFProgramBinding();
     }
     if (!m_NativeFFVertexShaders[variant] &&
@@ -455,41 +461,48 @@ CKFFProgramBinding CKBgfxRasterizerContext::ResolveNativeFFProgram(
                      &m_NativeFFVertexShaders[variant]) != CK_OK)
         return CKFFProgramBinding();
 
-    if (!m_NativeFFPrograms[variant][samplerLayout]) {
+    if (!m_NativeFFPrograms[variant][samplerLayout][sampling]) {
         const CKBOOL positionT =
             selection.Variant == CKFF_PROGRAM_POSITIONT ||
             selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP;
         const CKFFProgramDesc desc = CKFFBuildProgramInterface(
             m_NativeFFVertexShaders[variant],
-            m_NativeFFPixelShaders[samplerLayout],
+            m_NativeFFPixelShaders[samplerLayout][sampling],
             m_ShaderCache.GetShaderFormat(), FALSE, positionT,
             layout);
         if (CreateProgram(&desc,
-                          &m_NativeFFPrograms[variant][samplerLayout]) != CK_OK)
+                          &m_NativeFFPrograms[variant][samplerLayout][sampling]) != CK_OK)
             return CKFFProgramBinding();
     }
-    return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout],
+    return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout][sampling],
                               selection.FragmentProgram);
 }
 
 void CKBgfxRasterizerContext::ClearNativeFFPrograms()
 {
     for (CKDWORD variant = 0;
-         variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
+        variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
         for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
-            if (m_NativeFFPrograms[variant][layout])
-                DestroyObject(m_NativeFFPrograms[variant][layout],
-                              CKRST_OBJ_PROGRAM);
-            m_NativeFFPrograms[variant][layout] = 0;
+            for (CKDWORD sampling = 0;
+                 sampling < CKFF_FRAGMENT_SAMPLING_MODE_COUNT; ++sampling) {
+                if (m_NativeFFPrograms[variant][layout][sampling])
+                    DestroyObject(m_NativeFFPrograms[variant][layout][sampling],
+                                  CKRST_OBJ_PROGRAM);
+                m_NativeFFPrograms[variant][layout][sampling] = 0;
+            }
         }
         if (m_NativeFFVertexShaders[variant])
             DestroyObject(m_NativeFFVertexShaders[variant], CKRST_OBJ_SHADER);
         m_NativeFFVertexShaders[variant] = 0;
     }
     for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
-        if (m_NativeFFPixelShaders[layout])
-            DestroyObject(m_NativeFFPixelShaders[layout], CKRST_OBJ_SHADER);
-        m_NativeFFPixelShaders[layout] = 0;
+        for (CKDWORD sampling = 0;
+             sampling < CKFF_FRAGMENT_SAMPLING_MODE_COUNT; ++sampling) {
+            if (m_NativeFFPixelShaders[layout][sampling])
+                DestroyObject(m_NativeFFPixelShaders[layout][sampling],
+                              CKRST_OBJ_SHADER);
+            m_NativeFFPixelShaders[layout][sampling] = 0;
+        }
     }
     m_ShaderCache.Shutdown();
 }
@@ -588,7 +601,7 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
     if (draw.SkipSubmit)
         return TRUE;
     const CKFFProgramBinding binding = ResolveNativeFFProgram(
-        draw.ShaderKey, draw.Textures.SamplerLayoutPlan);
+        draw.ShaderKey, draw.Textures);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
     if (!binding.Program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);

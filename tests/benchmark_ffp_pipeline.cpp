@@ -456,7 +456,7 @@ struct ComponentFixture {
         }
         ConfigureState(UniformState, Workload, 0, 1);
         UniformTextureBinder = std::make_unique<CKFFTextureBinder>(
-            UniformState, Probes);
+            UniformState, ShaderTargetFlags, Probes);
         UniformTextureBinder->BuildBindingSet(
             &UniformTextureBindings, 1, 0x1u,
             Contexts[0].SamplerLayoutPlan);
@@ -474,9 +474,9 @@ struct ComponentFixture {
         OneTextureLayoutPlan = CKFFBuildSamplerLayoutPlan(textureKeys[0]);
         FourTextureLayoutPlan = CKFFBuildSamplerLayoutPlan(textureKeys[1]);
         OneTextureBinder = std::make_unique<CKFFTextureBinder>(
-            OneTextureState, Probes);
+            OneTextureState, ShaderTargetFlags, Probes);
         FourTextureBinder = std::make_unique<CKFFTextureBinder>(
-            FourTextureState, Probes);
+            FourTextureState, ShaderTargetFlags, Probes);
     }
 
     ~ComponentFixture()

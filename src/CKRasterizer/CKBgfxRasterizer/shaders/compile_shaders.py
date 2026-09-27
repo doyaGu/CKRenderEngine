@@ -30,6 +30,12 @@ SHADERS = [
      "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=1"]},
     {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_volume",
      "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=2"]},
+    {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_native",
+     "defines": ["CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT=1"]},
+    {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_cube_native",
+     "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=1", "CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT=1"]},
+    {"source": "fs_ff_stage.sc", "stage": "fragment", "name": "fs_ff_stage_volume_native",
+     "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=2", "CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT=1"]},
     {"source": "vs_postprocess.sc", "stage": "vertex", "name": "vs_postprocess"},
     {"source": "fs_postprocess.sc", "stage": "fragment", "name": "fs_postprocess"},
     {"source": "fs_dither_resolve.sc", "stage": "fragment", "name": "fs_dither_resolve"},
@@ -185,7 +191,9 @@ def validate_ff_varyings(compiled: dict[str, bytes], backend_name: str) -> None:
     # bgfx shader blobs store the fragment input hash at byte 4 and the
     # vertex output hash at byte 8; createProgram requires them to match.
     fragments = [compiled[name] for name in
-                 ("fs_ff_stage", "fs_ff_stage_cube", "fs_ff_stage_volume")]
+                 ("fs_ff_stage", "fs_ff_stage_cube", "fs_ff_stage_volume",
+                  "fs_ff_stage_native", "fs_ff_stage_cube_native",
+                  "fs_ff_stage_volume_native")]
     if any(fragment[:4] != b"FSH\x0b" for fragment in fragments):
         raise ValueError(f"{backend_name}: invalid fixed-function fragment shader blob")
     input_hash = fragments[0][4:8]

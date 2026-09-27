@@ -235,16 +235,8 @@ void CKFFUniformEmitter::EmitStageAndFragmentProgramUniforms(const CKFFUniformEm
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         const CKFFTextureBinding &binding = context->Textures->Bindings[stage];
         const CKSamplerDesc &sampler = binding.Sampler;
-        if (binding.Texture != 0) {
-            const CKDWORD transformFlags =
-                m_State.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
-                CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
-            const CKFFSamplerShaderState samplerState =
-                CKFFBuildSamplerShaderState(sampler, binding.TextureFlags,
-                                            transformFlags,
-                                            m_ShaderTargetFlags);
-            bumpEnv[stage * 2 + 1][3] = float(samplerState.Bits);
-        }
+        if (binding.Texture != 0)
+            bumpEnv[stage * 2 + 1][3] = float(binding.ShaderState.Bits);
         CKFFPackColorARGB(sampler.BorderColor, borderColors[stage]);
     }
     Emit(sink, CKRST_BLOCK_BUMP_ENV, bumpEnv,

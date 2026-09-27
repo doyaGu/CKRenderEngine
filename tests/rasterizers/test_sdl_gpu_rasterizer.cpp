@@ -332,6 +332,28 @@ int main()
               "native FFP shaders match variant-specific buffer layouts");
         check(set.Shaders[CKRST_SHADER_FF_FRAGMENT].SamplerCount == 16, "FFP logical slots retained");
         check(set.Shaders[CKRST_SHADER_PRESENT_FRAGMENT].SamplerCount == 1, "presentation uses native slot zero");
+        for (CKDWORD samplerLayout = 0;
+             samplerLayout < CKFF_SAMPLER_LAYOUT_COUNT; ++samplerLayout) {
+            CKShaderDesc fullSampling, nativeSampling;
+            check(CKSdlGpuFFFragmentShader(
+                      format, (CKFFSamplerLayout)samplerLayout, 0,
+                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT, fullSampling) &&
+                      fullSampling.Code && fullSampling.CodeSize,
+                  "SDL exposes every full-exact no-compare sampler layout");
+            check(CKSdlGpuFFFragmentShader(
+                      format, (CKFFSamplerLayout)samplerLayout, 0,
+                      CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT, nativeSampling) &&
+                      nativeSampling.Code && nativeSampling.CodeSize &&
+                      nativeSampling.Code != fullSampling.Code &&
+                      nativeSampling.CodeSize < fullSampling.CodeSize,
+                  "SDL exposes a smaller distinct native-exact sampler layout");
+            CKShaderDesc rejectedNativeCompare;
+            check(!CKSdlGpuFFFragmentShader(
+                      format, (CKFFSamplerLayout)samplerLayout, 1,
+                      CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT,
+                      rejectedNativeCompare),
+                  "SDL rejects comparison samplers in the native-exact family");
+        }
         CKShaderDesc vertex, fragment;
         check(CKSdlGpuNativeClearShaders(format, vertex, fragment) && vertex.UniformBufferCount == 1 &&
               fragment.UniformBufferCount == 1 && !vertex.SamplerCount && !fragment.SamplerCount,

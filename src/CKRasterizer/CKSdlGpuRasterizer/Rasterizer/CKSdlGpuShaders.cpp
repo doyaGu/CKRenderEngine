@@ -8,6 +8,9 @@
 #include "shaders/generated/dxil_vs_ff_positiont_depth_pad.h"
 #include "shaders/generated/dxil_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/dxil_fs_ff_stage.h"
+#include "shaders/generated/dxil_fs_ff_stage_native.h"
+#include "shaders/generated/dxil_fs_ff_stage_cube_native.h"
+#include "shaders/generated/dxil_fs_ff_stage_volume_native.h"
 #include "shaders/generated/dxil_fs_ff_stage_compare1.h"
 #include "shaders/generated/dxil_fs_ff_stage_compare2.h"
 #include "shaders/generated/dxil_fs_ff_stage_compare3.h"
@@ -35,6 +38,9 @@
 #include "shaders/generated/spirv_vs_ff_positiont_depth_pad.h"
 #include "shaders/generated/spirv_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/spirv_fs_ff_stage.h"
+#include "shaders/generated/spirv_fs_ff_stage_native.h"
+#include "shaders/generated/spirv_fs_ff_stage_cube_native.h"
+#include "shaders/generated/spirv_fs_ff_stage_volume_native.h"
 #include "shaders/generated/spirv_fs_ff_stage_compare1.h"
 #include "shaders/generated/spirv_fs_ff_stage_compare2.h"
 #include "shaders/generated/spirv_fs_ff_stage_compare3.h"
@@ -92,12 +98,16 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
                                CKFFSamplerLayout samplerLayout,
                                CKDWORD compareSamplerCount,
+                               CKFFFragmentSamplingMode samplingMode,
                                CKShaderDesc &out)
 {
     const CKDWORD twoDCount = CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D,
                                                        samplerLayout);
     if (samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
-        compareSamplerCount > twoDCount)
+        compareSamplerCount > twoDCount ||
+        samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT ||
+        (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT &&
+         compareSamplerCount != 0))
         return FALSE;
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_PIXEL;
@@ -132,8 +142,18 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
     case 7: CKFF_SET_SHADER(_format, _compare7); break; \
     case 8: CKFF_SET_SHADER(_format, _compare8); break; \
     }
+#define CKFF_SELECT_NATIVE(_format) \
+    if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
+        CKFF_SET_SHADER(_format, _native); \
+    } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) { \
+        CKFF_SET_SHADER(_format, _cube_native); \
+    } else { \
+        CKFF_SET_SHADER(_format, _volume_native); \
+    }
     if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+        if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) {
+            CKFF_SELECT_NATIVE(dxil);
+        } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
             CKFF_SELECT_WIDE_2D(dxil);
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) {
             CKFF_SELECT_COMPARE(dxil, _cube);
@@ -141,7 +161,9 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
             CKFF_SELECT_COMPARE(dxil, _volume);
         }
     } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
-        if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+        if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) {
+            CKFF_SELECT_NATIVE(spirv);
+        } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
             CKFF_SELECT_WIDE_2D(spirv);
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) {
             CKFF_SELECT_COMPARE(spirv, _cube);
@@ -152,6 +174,7 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
         return FALSE;
     }
 #undef CKFF_SELECT_WIDE_2D
+#undef CKFF_SELECT_NATIVE
 #undef CKFF_SELECT_COMPARE
 #undef CKFF_SET_SHADER
     return out.Code && out.CodeSize;
@@ -198,7 +221,8 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
     }
     CKShaderDesc fragment;
     if (!CKSdlGpuFFFragmentShader(format, CKFF_SAMPLER_LAYOUT_WIDE_2D,
-                                  0, fragment))
+                                  0, CKFF_FRAGMENT_SAMPLING_FULL_EXACT,
+                                  fragment))
         return FALSE;
     out.Shaders[CKRST_SHADER_FF_FRAGMENT] = fragment;
     return out.Matches(payload, profile);

@@ -29,6 +29,7 @@ struct CKFFTextureBinding {
     CKDWORD Texture;
     CKDWORD TextureFlags;
     CKSamplerDesc Sampler;
+    CKFFSamplerShaderState ShaderState;
 };
 
 struct CKFFPreparedState {
@@ -144,6 +145,7 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
         set->Bindings[stage].Texture = 0;
         set->Bindings[stage].TextureFlags = 0;
         set->Bindings[stage].Sampler = CKSamplerDesc();
+        set->Bindings[stage].ShaderState = CKFFSamplerShaderState();
     }
 }
 
@@ -154,6 +156,8 @@ CKDWORD CKFFHashBytes(const void *data, CKDWORD size, CKDWORD hash);
 // Texture flags that select the sampler type (and therefore the program).
 CKDWORD CKFFStaticTextureFlags(CKDWORD flags);
 CKDWORD CKFFHashTextureBindingSet(CKDWORD activeTextureCount, const CKFFTextureBinding *textures);
+CKFFFragmentSamplingMode CKFFResolveFragmentSamplingMode(
+    const CKFFTextureBindingSet &textures);
 
 inline CKFFShaderKey CKFFBuildShaderKeyFromPreparedState(const CKFFPreparedState *prepared)
 {

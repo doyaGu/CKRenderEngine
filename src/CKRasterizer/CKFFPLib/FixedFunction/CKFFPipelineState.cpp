@@ -251,18 +251,24 @@ static CKBOOL ResetTextureStageValues(CKFFStateStore &state, int stage,
 void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
-    if (ResetTextureStageValues(m_State, stage, FALSE))
+    if (ResetTextureStageValues(m_State, stage, FALSE)) {
+        m_TextureBinder.InvalidateStage(stage);
         OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
                                     CKFF_CHANGE_STATIC_UNIFORM |
                                     CKFF_CHANGE_DRAW_VALIDATION);
+    }
 }
 
 void CKFixedFunctionPipeline::DisableTextureStagesFrom(int firstStage) {
     if (firstStage < 0)
         firstStage = 0;
     CKBOOL changed = FALSE;
-    for (int stage = firstStage; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
-        changed = ResetTextureStageValues(m_State, stage, FALSE) || changed;
+    for (int stage = firstStage; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (ResetTextureStageValues(m_State, stage, FALSE)) {
+            m_TextureBinder.InvalidateStage(stage);
+            changed = TRUE;
+        }
+    }
     if (changed)
         OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
                                     CKFF_CHANGE_STATIC_UNIFORM |
@@ -275,8 +281,12 @@ void CKFixedFunctionPipeline::ResetTextureStages(int firstStage, int stageCount)
         return;
 
     CKBOOL changed = FALSE;
-    for (int stage = firstStage; stage < firstStage + stageCount; ++stage)
-        changed = ResetTextureStageValues(m_State, stage, TRUE) || changed;
+    for (int stage = firstStage; stage < firstStage + stageCount; ++stage) {
+        if (ResetTextureStageValues(m_State, stage, TRUE)) {
+            m_TextureBinder.InvalidateStage(stage);
+            changed = TRUE;
+        }
+    }
     if (changed)
         OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
                                     CKFF_CHANGE_STATIC_UNIFORM |
@@ -312,6 +322,7 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
             : CKRSTDefaultTextureStageStateValue(stage, (CKRST_TEXTURESTAGESTATETYPE)state);
     }
     m_State.TexMatrix[stage] = snapshot.TextureMatrix;
+    m_TextureBinder.InvalidateStage(stage);
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
                                 CKFF_CHANGE_DRAW_VALIDATION);
 }
@@ -399,6 +410,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
         }
     }
     if (changed) {
+        m_TextureBinder.InvalidateStage(stage);
         OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
                                     CKFF_CHANGE_STATIC_UNIFORM |
                                     CKFF_CHANGE_DRAW_VALIDATION);
@@ -416,6 +428,7 @@ void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTA
         return;
     m_State.StageStates[stage][(int)type] = 0;
     m_State.StageStateSetMasks[stage] &= ~stateBit;
+    m_TextureBinder.InvalidateStage(stage);
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
                                 CKFF_CHANGE_DRAW_VALIDATION);
 }
@@ -747,6 +760,7 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWO
     const CKDWORD newStaticFlags = CKFFStaticTextureFlags(normalizedFlags);
     m_State.TextureHandles[stage] = textureHandle;
     m_State.TextureFlags[stage] = normalizedFlags;
+    m_TextureBinder.InvalidateStage(stage);
     if (oldHasTexture != newHasTexture || oldStaticFlags != newStaticFlags) {
         OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
                                     CKFF_CHANGE_DRAW_VALIDATION);

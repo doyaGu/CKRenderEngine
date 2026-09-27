@@ -3,6 +3,7 @@
 
 #include "CKBuiltinShaders.h"
 #include "CKFFConstants.h"
+#include "CKFFProgram.h"
 #include "CKRasterizer.h"
 
 class CKBgfxRasterizerDriver;
@@ -12,6 +13,7 @@ struct CKRasterizerDeviceCaps;
 CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out);
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
+                                        CKFFFragmentSamplingMode samplingMode,
                                         CKShaderDesc &out);
 CKBOOL CKBgfxRasterizerDitherFragmentShader(
     const CKRasterizerDeviceCaps &caps, CKShaderDesc &out);

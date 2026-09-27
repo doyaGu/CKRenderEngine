@@ -8,6 +8,9 @@
 #include "shaders/generated/dx11/fs_ff_stage.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage_cube.bin.h"
 #include "shaders/generated/dx11/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/dx11/fs_ff_stage_native.bin.h"
+#include "shaders/generated/dx11/fs_ff_stage_cube_native.bin.h"
+#include "shaders/generated/dx11/fs_ff_stage_volume_native.bin.h"
 #include "shaders/generated/dx11/vs_postprocess.bin.h"
 #include "shaders/generated/dx11/fs_postprocess.bin.h"
 #include "shaders/generated/dx11/fs_dither_resolve.bin.h"
@@ -18,6 +21,9 @@
 #include "shaders/generated/dx12/fs_ff_stage.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage_cube.bin.h"
 #include "shaders/generated/dx12/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/dx12/fs_ff_stage_native.bin.h"
+#include "shaders/generated/dx12/fs_ff_stage_cube_native.bin.h"
+#include "shaders/generated/dx12/fs_ff_stage_volume_native.bin.h"
 #include "shaders/generated/dx12/vs_postprocess.bin.h"
 #include "shaders/generated/dx12/fs_postprocess.bin.h"
 #include "shaders/generated/dx12/fs_dither_resolve.bin.h"
@@ -28,6 +34,9 @@
 #include "shaders/generated/spirv/fs_ff_stage.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage_cube.bin.h"
 #include "shaders/generated/spirv/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/spirv/fs_ff_stage_native.bin.h"
+#include "shaders/generated/spirv/fs_ff_stage_cube_native.bin.h"
+#include "shaders/generated/spirv/fs_ff_stage_volume_native.bin.h"
 #include "shaders/generated/spirv/vs_postprocess.bin.h"
 #include "shaders/generated/spirv/fs_postprocess.bin.h"
 #include "shaders/generated/spirv/fs_dither_resolve.bin.h"
@@ -38,6 +47,9 @@
 #include "shaders/generated/glsl/fs_ff_stage.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage_cube.bin.h"
 #include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/glsl/fs_ff_stage_native.bin.h"
+#include "shaders/generated/glsl/fs_ff_stage_cube_native.bin.h"
+#include "shaders/generated/glsl/fs_ff_stage_volume_native.bin.h"
 #include "shaders/generated/glsl/vs_postprocess.bin.h"
 #include "shaders/generated/glsl/fs_postprocess.bin.h"
 #include "shaders/generated/glsl/fs_dither_resolve.bin.h"
@@ -48,6 +60,9 @@
 #include "shaders/generated/essl/fs_ff_stage.bin.h"
 #include "shaders/generated/essl/fs_ff_stage_cube.bin.h"
 #include "shaders/generated/essl/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/essl/fs_ff_stage_native.bin.h"
+#include "shaders/generated/essl/fs_ff_stage_cube_native.bin.h"
+#include "shaders/generated/essl/fs_ff_stage_volume_native.bin.h"
 #include "shaders/generated/essl/vs_postprocess.bin.h"
 #include "shaders/generated/essl/fs_postprocess.bin.h"
 #include "shaders/generated/essl/fs_dither_resolve.bin.h"
@@ -58,22 +73,27 @@
 #include "shaders/generated/metal/fs_ff_stage.bin.h"
 #include "shaders/generated/metal/fs_ff_stage_cube.bin.h"
 #include "shaders/generated/metal/fs_ff_stage_volume.bin.h"
+#include "shaders/generated/metal/fs_ff_stage_native.bin.h"
+#include "shaders/generated/metal/fs_ff_stage_cube_native.bin.h"
+#include "shaders/generated/metal/fs_ff_stage_volume_native.bin.h"
 #include "shaders/generated/metal/vs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_dither_resolve.bin.h"
 
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
+                                        CKFFFragmentSamplingMode samplingMode,
                                         CKShaderDesc &out)
 {
     if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX ||
-        layout >= CKFF_SAMPLER_LAYOUT_COUNT)
+        layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT)
         return FALSE;
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_PIXEL;
     out.Format = caps.ShaderFormat;
     out.Profile = caps.ShaderProfile;
-#define CKFF_SELECT_LAYOUT(_backend) \
+#define CKFF_SELECT_FULL_LAYOUT(_backend) \
     if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
         out.Code = s_##_backend##_fs_ff_stage; \
         out.CodeSize = sizeof(s_##_backend##_fs_ff_stage); \
@@ -83,6 +103,23 @@ CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
     } else { \
         out.Code = s_##_backend##_fs_ff_stage_volume; \
         out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_volume); \
+    }
+#define CKFF_SELECT_NATIVE_LAYOUT(_backend) \
+    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
+        out.Code = s_##_backend##_fs_ff_stage_native; \
+        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_native); \
+    } else if (layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) { \
+        out.Code = s_##_backend##_fs_ff_stage_cube_native; \
+        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_cube_native); \
+    } else { \
+        out.Code = s_##_backend##_fs_ff_stage_volume_native; \
+        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_volume_native); \
+    }
+#define CKFF_SELECT_LAYOUT(_backend) \
+    if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) { \
+        CKFF_SELECT_NATIVE_LAYOUT(_backend) \
+    } else { \
+        CKFF_SELECT_FULL_LAYOUT(_backend) \
     }
     switch (caps.ShaderProfile) {
     case CKRST_SHADER_PROFILE_DX11: CKFF_SELECT_LAYOUT(dx11); break;
@@ -94,6 +131,8 @@ CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
     default: return FALSE;
     }
 #undef CKFF_SELECT_LAYOUT
+#undef CKFF_SELECT_NATIVE_LAYOUT
+#undef CKFF_SELECT_FULL_LAYOUT
     return out.Code && out.CodeSize ? TRUE : FALSE;
 }
 

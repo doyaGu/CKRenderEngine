@@ -319,7 +319,7 @@ private:
     void ClearNativeVertexLayouts();
     CKFFProgramBinding ResolveNativeFFProgram(
         const CKFFShaderKey &Key,
-        const CKFFSamplerLayoutPlan &SamplerLayoutPlan,
+        const CKFFTextureBindingSet &Textures,
         CKBOOL PositionTDepthPad);
     void ClearNativeFFPrograms();
 
@@ -350,11 +350,13 @@ private:
     CKFFShaderCache m_ShaderCache;
     CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT]
                                 [CKFF_SAMPLER_LAYOUT_COUNT]
-                                [CKFF_MAX_TEXTURE_STAGES + 1][2] = {};
+                                [CKFF_MAX_TEXTURE_STAGES + 1]
+                                [CKFF_FRAGMENT_SAMPLING_MODE_COUNT][2] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     CKDWORD m_NativeFFDepthPadVertexShaders[2] = {};
     CKDWORD m_NativeFFPixelShaders[CKFF_SAMPLER_LAYOUT_COUNT]
-                                    [CKFF_MAX_TEXTURE_STAGES + 1] = {};
+                                    [CKFF_MAX_TEXTURE_STAGES + 1]
+                                    [CKFF_FRAGMENT_SAMPLING_MODE_COUNT] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKSdlGpuPresentStage m_Present;
     // Verbatim fixed-function state mirror.

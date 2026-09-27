@@ -396,7 +396,7 @@ private:
     void ClearNativeVertexLayouts();
     CKFFProgramBinding ResolveNativeFFProgram(
         const CKFFShaderKey &Key,
-        const CKFFSamplerLayoutPlan &SamplerLayoutPlan);
+        const CKFFTextureBindingSet &Textures);
     void ClearNativeFFPrograms();
 
     // Readback helpers
@@ -423,9 +423,11 @@ private:
     CKFixedFunctionPipeline m_FFP;
     CKFFShaderCache m_ShaderCache;
     CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT]
-                                [CKFF_SAMPLER_LAYOUT_COUNT] = {};
+                                [CKFF_SAMPLER_LAYOUT_COUNT]
+                                [CKFF_FRAGMENT_SAMPLING_MODE_COUNT] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
-    CKDWORD m_NativeFFPixelShaders[CKFF_SAMPLER_LAYOUT_COUNT] = {};
+    CKDWORD m_NativeFFPixelShaders[CKFF_SAMPLER_LAYOUT_COUNT]
+                                  [CKFF_FRAGMENT_SAMPLING_MODE_COUNT] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKBgfxPresentStage m_Present;
     // Verbatim fixed-function state mirror.
