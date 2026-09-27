@@ -6,26 +6,24 @@
 #include "CKFFStateStore.h"
 
 class CKDrawStateCache;
-class CKFFTextureBinder;
 
 class CKFFUniformEmitter {
 public:
     CKFFUniformEmitter(CKFFStateStore &state,
                        const CKDrawStateCache &drawState,
-                       const CKFFTextureBinder &textureBinder,
                        const CKDWORD &shaderTargetFlags,
                        CKFFDrawProbes &probes);
 
     // Prepares producer-owned blocks for this draw, retaining unchanged revisions.
     CKBOOL UploadUniforms(CKFFConstantSet *constants,
                           const CKFFProgramContext *programContext,
-                          CKDWORD activeTextureCount,
+                          const CKFFTextureBindingSet &textures,
                           uint64_t staticUniformRevision,
                           CKBOOL polygonDepthBias = TRUE,
                           CKBOOL patternedLines = FALSE);
     CKBOOL UploadObjectUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext, CKDWORD activeTextureCount);
     CKBOOL UploadStaticUniforms(CKFFConstantSet *constants, const CKFFProgramContext *programContext,
-                                CKDWORD activeTextureCount, CKBOOL polygonDepthBias = TRUE,
+                                const CKFFTextureBindingSet &textures, CKBOOL polygonDepthBias = TRUE,
                                 CKBOOL patternedLines = FALSE);
     void ResetCache();
 
@@ -36,6 +34,7 @@ private:
                 CKDWORD count, CKDWORD vec4Count, CKBOOL objectUniform);
     void EmitPayloads(CKFFUniformSink *sink,
                       const CKFFProgramContext *programContext,
+                      const CKFFTextureBindingSet *textures,
                       CKDWORD activeTextureCount,
                       CKBOOL polygonDepthBias,
                       CKBOOL patternedLines);
@@ -47,12 +46,12 @@ private:
 
     CKFFStateStore &m_State;
     const CKDrawStateCache &m_DrawState;
-    const CKFFTextureBinder &m_TextureBinder;
     const CKDWORD &m_ShaderTargetFlags;
     CKFFDrawProbes &m_Probes;
     CKBOOL m_StaticUniformCacheValid;
     uint64_t m_LastStaticConstantsIdentity;
     uint64_t m_LastStaticUniformRevision;
+    CKDWORD m_LastStaticTextureBindingHash;
     CKDWORD m_LastStaticActiveTextureCount;
     CKBOOL m_LastStaticPolygonDepthBias;
     CKBOOL m_LastStaticPatternedLines;

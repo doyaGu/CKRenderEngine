@@ -20,7 +20,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_FrameNumber(0),
       m_ShaderTargetFlags(0),
       m_TextureBinder(m_State, m_Probes),
-      m_UniformEmitter(m_State, m_State.DrawState, m_TextureBinder,
+      m_UniformEmitter(m_State, m_State.DrawState,
                        m_ShaderTargetFlags, m_Probes),
       m_StaticUniformRevision(1),
       m_DrawValidationCacheValid(FALSE),
@@ -674,7 +674,8 @@ uint64_t CKFixedFunctionPipeline::GetConstantRevision(CKDWORD block) const
 
 CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                                                CKDWORD activeTextureCount,
-                                                               const CKFFShaderKey &shaderKey)
+                                                               const CKFFShaderKey &shaderKey,
+                                                               const CKFFSamplerLayoutPlan &layoutPlan)
 {
     if (!bindingSet)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
@@ -686,7 +687,8 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
         if (shaderKey.FS.Stages[stage].HasTexture)
             sampledTextureMask |= 1u << stage;
     }
-    m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount, sampledTextureMask);
+    m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount,
+                                    sampledTextureMask, layoutPlan);
     bindingSet->ActiveStageCount = stageCount;
     return TRUE;
 }
@@ -1033,7 +1035,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
 
     CKFFTextureBindingSet textureBindingSet;
     if (!BuildCurrentTextureBindingSet(
-            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey))
+            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey,
+            programContext.SamplerLayoutPlan))
         return FALSE;
 
     CKBOOL prepared = FALSE;
@@ -1230,7 +1233,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     {
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         if (!m_UniformEmitter.UploadUniforms(
-                &m_Constants, programContext, textures->ActiveStageCount,
+                &m_Constants, programContext, *textures,
                 m_StaticUniformRevision, submission.PolygonDepthBias,
                 submission.PatternedLines))
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
@@ -1436,7 +1439,8 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
 
     CKFFTextureBindingSet textureBindingSet;
     if (!BuildCurrentTextureBindingSet(
-            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey))
+            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey,
+            programContext.SamplerLayoutPlan))
         return FALSE;
 
     if (indices) {

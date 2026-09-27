@@ -429,18 +429,23 @@ void CKSdlGpuRasterizerContext::RecordDrawApproximations()
 }
 
 CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
-    const CKFFShaderKey &Key, CKBOOL PositionTDepthPad)
+    const CKFFShaderKey &Key,
+    const CKFFSamplerLayoutPlan &SamplerLayoutPlan,
+    CKBOOL PositionTDepthPad)
 {
-    const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(Key);
+    const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(
+        Key, SamplerLayoutPlan);
     const CKDWORD variant = (CKDWORD)selection.Variant;
-    const CKDWORD samplerLayout = (CKDWORD)selection.SamplerLayout;
-    const CKDWORD compareSamplerCount = CKFFDepthCompareSamplerCount(Key.FS);
+    const CKFFSamplerLayout layout = selection.SamplerLayoutPlan.Layout;
+    const CKDWORD samplerLayout = (CKDWORD)layout;
+    const CKDWORD compareSamplerCount =
+        selection.SamplerLayoutPlan.CompareSamplerCount;
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
         return CKFFProgramBinding();
 
     if (!m_NativeFFPixelShaders[samplerLayout][compareSamplerCount]) {
         CKShaderDesc pixelShader;
-        if (!CKSdlGpuFFFragmentShader(ShaderFormat, selection.SamplerLayout,
+        if (!CKSdlGpuFFFragmentShader(ShaderFormat, layout,
                                      compareSamplerCount,
                                      pixelShader) ||
             CreateShader(&pixelShader,
@@ -479,7 +484,7 @@ CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
             vertexShader,
             m_NativeFFPixelShaders[samplerLayout][compareSamplerCount],
             m_ShaderCache.GetShaderFormat(), FALSE, positionT,
-            selection.SamplerLayout);
+            layout);
         if (CreateProgram(&desc,
                           &m_NativeFFPrograms[variant][samplerLayout]
                                              [compareSamplerCount][pad]) != CK_OK)
@@ -557,7 +562,8 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
         }
     }
     const CKFFProgramBinding binding = ResolveNativeFFProgram(
-        draw.ShaderKey, positionTDepthPad);
+        draw.ShaderKey, draw.Textures.SamplerLayoutPlan,
+        positionTDepthPad);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
     if (!binding.Program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);

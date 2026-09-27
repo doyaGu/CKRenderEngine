@@ -96,11 +96,12 @@ CKFFProgramVariant CKFFShaderCache::ProgramVariantForKey(const CKFFShaderKey &ke
 }
 
 CKFFProgramSelection CKFFShaderCache::ResolveProgram(
-    const CKFFShaderKey &key)
+    const CKFFShaderKey &key,
+    const CKFFSamplerLayoutPlan &samplerLayoutPlan)
 {
     CKFFProgramSelection selection;
     selection.Variant = ProgramVariantForKey(key);
-    selection.SamplerLayout = CKFFSamplerLayoutForKey(key.FS);
+    selection.SamplerLayoutPlan = samplerLayoutPlan;
     const CKFFShaderKeyFS programKey = CKFFProgramFragmentKey(key.FS);
     SpecializationCache &cache = m_Specializations[selection.Variant];
     ++cache.Clock;

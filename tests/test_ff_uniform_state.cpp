@@ -898,16 +898,17 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
     desc.SetStageSamplerType(5, CKFF_SAMPLER_VOLUME);
 
     const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x3Fu);
+    const CKFFSamplerLayoutPlan plan = CKFFBuildSamplerLayoutPlan(key);
     TestCheck(!key.Stages[1].HasTexture && key.Stages[1].SamplerType == CKFF_SAMPLER_2D,
               "A non-sampling stage must normalize to a 2D sampler type");
-    TestCheck(CKFFSamplerOrdinal(key, 0) == 0 && CKFFSamplerOrdinal(key, 3) == 1,
+    TestCheck(plan.Stages[0].Ordinal == 0 && plan.Stages[3].Ordinal == 1,
               "Cube ordinals must count only earlier sampling cube stages");
-    TestCheck(CKFFSamplerOrdinal(key, 2) == 0 && CKFFSamplerOrdinal(key, 5) == 1,
+    TestCheck(plan.Stages[2].Ordinal == 0 && plan.Stages[5].Ordinal == 1,
               "Volume ordinals must count only earlier sampling volume stages");
-    TestCheck(CKFFSamplerOrdinal(key, 4) == 4,
+    TestCheck(plan.Stages[4].Ordinal == 4,
               "The wide-2D layout preserves logical 2D stage slots");
-    TestCheck(CKFFSamplerSlot(CKFF_SAMPLER_CUBE, CKFFSamplerOrdinal(key, 3)) == 9 &&
-                  CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, CKFFSamplerOrdinal(key, 5)) == 13,
+    TestCheck(plan.Stages[3].NativeSlot == 9 &&
+                  plan.Stages[5].NativeSlot == 13,
               "Type ordinals must map onto the cube 8..11 and volume 12..15 slot blocks");
 
     CKFFFSStateDesc comparisonDesc;
@@ -925,11 +926,13 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
     comparisonDesc.SetStageSamplerCompareFunc(3, CKRST_COMPARE_GREATER);
     const CKFFShaderKeyFS comparisonKey =
         CKFFBuildShaderKeyFS(comparisonDesc, 0x0fu);
-    TestCheck(CKFFDepthCompareSamplerCount(comparisonKey) == 2 &&
-                  CKFFSamplerOrdinal(comparisonKey, 1) == 0 &&
-                  CKFFSamplerOrdinal(comparisonKey, 3) == 1 &&
-                  CKFFSamplerOrdinal(comparisonKey, 0) == 2 &&
-                  CKFFSamplerOrdinal(comparisonKey, 2) == 3,
+    const CKFFSamplerLayoutPlan comparisonPlan =
+        CKFFBuildSamplerLayoutPlan(comparisonKey);
+    TestCheck(comparisonPlan.CompareSamplerCount == 2 &&
+                  comparisonPlan.Stages[1].Ordinal == 0 &&
+                  comparisonPlan.Stages[3].Ordinal == 1 &&
+                  comparisonPlan.Stages[0].Ordinal == 2 &&
+                  comparisonPlan.Stages[2].Ordinal == 3,
               "Comparison depth samplers must precede ordinary 2D resources");
 }
 
@@ -946,15 +949,16 @@ void SamplerLayoutsCoverAllEightStages() {
     desc.SetStageSamplerType(5, CKFF_SAMPLER_VOLUME);
 
     const CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0x3Fu);
+    const CKFFSamplerLayoutPlan plan = CKFFBuildSamplerLayoutPlan(key);
     for (CKDWORD stage = 0; stage < 5; ++stage) {
         TestCheck(key.Stages[stage].HasTexture && key.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE &&
-                      CKFFSamplerOrdinal(key, stage) == stage,
+                      plan.Stages[stage].Ordinal == stage,
                   "Every cube stage must keep its cube sampler");
     }
     TestCheck(key.Stages[5].HasTexture && key.Stages[5].SamplerType == CKFF_SAMPLER_VOLUME &&
-                  CKFFSamplerOrdinal(key, 5) == 0,
+                  plan.Stages[5].Ordinal == 0,
               "The mixed volume stage remains bound");
-    TestCheck(CKFFSamplerLayoutForKey(key) == CKFF_SAMPLER_LAYOUT_WIDE_CUBE &&
+    TestCheck(plan.Layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE &&
                   CKFFSamplerSlot(CKFF_SAMPLER_CUBE, 4,
                                   CKFF_SAMPLER_LAYOUT_WIDE_CUBE) == 8 &&
                   CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, 0,
@@ -984,7 +988,9 @@ void SamplerLayoutsCoverAllEightStages() {
         volumeDesc.SetStageSamplerType(stage, stage < 5 ? CKFF_SAMPLER_VOLUME
                                                         : CKFF_SAMPLER_CUBE);
     const CKFFShaderKeyFS volumeKey = CKFFBuildShaderKeyFS(volumeDesc, 0x3fu);
-    TestCheck(CKFFSamplerLayoutForKey(volumeKey) == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME &&
+    const CKFFSamplerLayoutPlan volumePlan =
+        CKFFBuildSamplerLayoutPlan(volumeKey);
+    TestCheck(volumePlan.Layout == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME &&
                   CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, 4,
                                   CKFF_SAMPLER_LAYOUT_WIDE_VOLUME) == 12 &&
                   CKFFSamplerSlot(CKFF_SAMPLER_CUBE, 0,
@@ -1014,13 +1020,90 @@ void SamplerLayoutsCoverAllEightStages() {
                 allStages.SetStageSamplerType(stage, CKFF_SAMPLER_VOLUME);
             }
             const CKFFShaderKeyFS allKey = CKFFBuildShaderKeyFS(allStages, 0xffu);
-            const CKFFSamplerLayout allLayout = CKFFSamplerLayoutForKey(allKey);
+            const CKFFSamplerLayout allLayout =
+                CKFFBuildSamplerLayoutPlan(allKey).Layout;
             TestCheck(twoDCount <= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, allLayout) &&
                           cubeCount <= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_CUBE, allLayout) &&
                           volumeCount <= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_VOLUME, allLayout),
                       "Every eight-stage dimension count has sufficient native slots");
         }
     }
+}
+
+void SamplerLayoutPlanExhaustsEightStageTypeCombinations() {
+    static const CKDWORD kCombinationCount = 390625u; // 5^8
+    CKDWORD checkedStages = 0;
+    for (CKDWORD combination = 0; combination < kCombinationCount;
+         ++combination) {
+        CKFFShaderKeyFS key;
+        CKDWORD code = combination;
+        CKDWORD cubeCount = 0;
+        CKDWORD volumeCount = 0;
+        CKDWORD comparisonCount = 0;
+        for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            const CKDWORD kind = code % 5u;
+            code /= 5u;
+            CKFFShaderKeyFSStage &stageKey = key.Stages[stage];
+            stageKey.HasTexture = true;
+            if (kind == 1u) {
+                stageKey.SamplerType = CKFF_SAMPLER_CUBE;
+                ++cubeCount;
+            } else if (kind == 2u) {
+                stageKey.SamplerType = CKFF_SAMPLER_VOLUME;
+                ++volumeCount;
+            } else if (kind >= 3u) {
+                stageKey.SamplerType = CKFF_SAMPLER_DEPTH;
+                if (kind == 4u) {
+                    stageKey.SamplerCompareFunc = CKRST_COMPARE_LEQUAL;
+                    ++comparisonCount;
+                }
+            } else {
+                stageKey.SamplerType = CKFF_SAMPLER_2D;
+            }
+        }
+
+        const CKFFSamplerLayout expectedLayout =
+            cubeCount > CKFF_NARROW_SAMPLER_COUNT
+                ? CKFF_SAMPLER_LAYOUT_WIDE_CUBE
+                : volumeCount > CKFF_NARROW_SAMPLER_COUNT
+                      ? CKFF_SAMPLER_LAYOUT_WIDE_VOLUME
+                      : CKFF_SAMPLER_LAYOUT_WIDE_2D;
+        const CKFFSamplerLayoutPlan plan =
+            CKFFBuildSamplerLayoutPlan(key);
+        TestCheck(plan.Layout == expectedLayout &&
+                      plan.CompareSamplerCount == comparisonCount,
+                  "Every sampler combination must resolve layout and compare count");
+
+        CKDWORD comparisonOrdinal = 0;
+        CKDWORD ordinaryOrdinal = comparisonCount;
+        CKDWORD cubeOrdinal = 0;
+        CKDWORD volumeOrdinal = 0;
+        for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            const CKFFShaderKeyFSStage &stageKey = key.Stages[stage];
+            CKDWORD expectedOrdinal = 0;
+            if (stageKey.SamplerType == CKFF_SAMPLER_CUBE) {
+                expectedOrdinal = cubeOrdinal++;
+            } else if (stageKey.SamplerType == CKFF_SAMPLER_VOLUME) {
+                expectedOrdinal = volumeOrdinal++;
+            } else if (stageKey.SamplerType == CKFF_SAMPLER_DEPTH &&
+                       stageKey.SamplerCompareFunc != CKRST_COMPARE_NONE) {
+                expectedOrdinal = comparisonOrdinal++;
+            } else if (comparisonCount == 0 &&
+                       expectedLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+                expectedOrdinal = stage;
+            } else {
+                expectedOrdinal = ordinaryOrdinal++;
+            }
+            const CKDWORD expectedNativeSlot = CKFFSamplerSlot(
+                stageKey.SamplerType, expectedOrdinal, expectedLayout);
+            TestCheck(plan.Stages[stage].Ordinal == expectedOrdinal &&
+                          plan.Stages[stage].NativeSlot == expectedNativeSlot,
+                      "Every sampler combination must resolve ordinal and native slot");
+            ++checkedStages;
+        }
+    }
+    TestCheck(checkedStages == kCombinationCount * CKFF_MAX_TEXTURE_STAGES,
+              "Every eight-stage sampler type combination must be checked");
 }
 
 void TextureStageCompareFuncReachesSamplerDesc() {
@@ -1293,6 +1376,8 @@ int main() {
               &SamplerOrdinalCountsOnlySamplingStagesOfTheSameType);
     tests.Run("Sampler layouts cover all eight stages",
               &SamplerLayoutsCoverAllEightStages);
+    tests.Run("Sampler layout plan exhausts eight-stage type combinations",
+              &SamplerLayoutPlanExhaustsEightStageTypeCombinations);
     tests.Run("Texture stage compare func reaches sampler desc",
               &TextureStageCompareFuncReachesSamplerDesc);
     tests.Run("Texture filter linear does not request mip sampling",

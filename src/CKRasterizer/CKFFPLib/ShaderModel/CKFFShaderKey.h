@@ -65,6 +65,26 @@ struct CKFFShaderKeyFS {
     bool operator!=(const CKFFShaderKeyFS &other) const { return !(*this == other); }
 };
 
+struct CKFFSamplerStageSlot {
+    CKBYTE Ordinal;
+    CKBYTE NativeSlot;
+
+    CKFFSamplerStageSlot() : Ordinal(0), NativeSlot(0) {}
+};
+
+// Complete sampler placement for one fixed-function fragment program. The
+// shader key is resolved once into this plan; texture binding, native program
+// selection and fragment constants all consume the same result.
+struct CKFFSamplerLayoutPlan {
+    CKFFSamplerLayout Layout;
+    CKBYTE CompareSamplerCount;
+    CKFFSamplerStageSlot Stages[CKFF_MAX_TEXTURE_STAGES];
+
+    CKFFSamplerLayoutPlan()
+        : Layout(CKFF_SAMPLER_LAYOUT_WIDE_2D),
+          CompareSamplerCount(0), Stages() {}
+};
+
 struct CKFFShaderKey {
     CKFFShaderKeyVS VS;
     CKFFShaderKeyFS FS;
@@ -85,11 +105,7 @@ bool CKFFShaderKeyStageUsesTexture(const CKFFShaderKeyFSStage &stage,
                                    CKDWORD previousColorOp,
                                    CKDWORD previousAlphaOp);
 CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textureBoundMask);
-// Resource ordinal for a sampling stage. Comparison depth stages lead the 2D
-// block, followed by ordinary 2D/depth stages; cube and volume keep type order.
-CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage);
-CKDWORD CKFFDepthCompareSamplerCount(const CKFFShaderKeyFS &key);
-CKFFSamplerLayout CKFFSamplerLayoutForKey(const CKFFShaderKeyFS &key);
+CKFFSamplerLayoutPlan CKFFBuildSamplerLayoutPlan(const CKFFShaderKeyFS &key);
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask);
 CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key);
 

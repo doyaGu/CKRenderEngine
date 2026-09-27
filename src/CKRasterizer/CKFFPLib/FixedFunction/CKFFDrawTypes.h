@@ -55,6 +55,7 @@ struct CKFFTextureBindingSet {
     CKDWORD ActiveStageCount;
     CKDWORD ActiveTextureCount;
     CKDWORD Hash;
+    CKFFSamplerLayoutPlan SamplerLayoutPlan;
     CKFFTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
 };
 
@@ -102,6 +103,7 @@ struct CKFFDraw {
 struct CKFFUniformEmissionContext {
     CKFFUniformSink *Uniforms;
     const CKFFProgramContext *ProgramContext;
+    const CKFFTextureBindingSet *Textures;
     CKFFShaderKey ShaderKey;
     CKFFSpecializationInfo Specialization;
     CKDWORD ActiveTextureCount;
@@ -136,6 +138,7 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
     set->ActiveStageCount = 0;
     set->ActiveTextureCount = 0;
     set->Hash = 0;
+    set->SamplerLayoutPlan = CKFFSamplerLayoutPlan();
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         set->Bindings[stage].Stage = stage;
         set->Bindings[stage].Texture = 0;

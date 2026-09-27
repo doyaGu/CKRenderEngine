@@ -13,7 +13,8 @@ public:
 
     CKBOOL SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso);
     void BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
-                         CKDWORD sampledTextureMask) const;
+                         CKDWORD sampledTextureMask,
+                         const CKFFSamplerLayoutPlan &layoutPlan) const;
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 
 private:

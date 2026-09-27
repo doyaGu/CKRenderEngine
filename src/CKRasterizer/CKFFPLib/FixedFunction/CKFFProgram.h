@@ -17,8 +17,10 @@ enum CKFFProgramVariant {
 struct CKFFProgramContext {
     CKFFShaderKey ShaderKey;
     CKFFSpecializationInfo Specialization;
+    CKFFSamplerLayoutPlan SamplerLayoutPlan;
 
-    CKFFProgramContext() : ShaderKey(), Specialization() {}
+    CKFFProgramContext()
+        : ShaderKey(), Specialization(), SamplerLayoutPlan() {}
 };
 
 inline void CKFFInitProgramContext(CKFFProgramContext *context,
@@ -29,6 +31,7 @@ inline void CKFFInitProgramContext(CKFFProgramContext *context,
         return;
     context->ShaderKey = key;
     context->Specialization = specialization;
+    context->SamplerLayoutPlan = CKFFBuildSamplerLayoutPlan(key.FS);
 }
 
 #endif // CKFFPROGRAM_H

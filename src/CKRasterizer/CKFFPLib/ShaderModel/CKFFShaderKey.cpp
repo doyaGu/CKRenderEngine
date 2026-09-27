@@ -229,53 +229,11 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     return key;
 }
 
-CKDWORD CKFFSamplerOrdinal(const CKFFShaderKeyFS &key, CKDWORD stage) {
-    if (stage >= CKFF_STATE_DESC_TEXTURE_STAGES)
-        return 0;
-    const CKDWORD samplerType = key.Stages[stage].SamplerType;
-    const bool twoDimensional = samplerType == CKFF_SAMPLER_2D ||
-                                samplerType == CKFF_SAMPLER_DEPTH;
-    const bool comparison = samplerType == CKFF_SAMPLER_DEPTH &&
-        key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE;
-    const CKDWORD compareCount = CKFFDepthCompareSamplerCount(key);
-    if (twoDimensional && compareCount == 0 &&
-        CKFFSamplerLayoutForKey(key) == CKFF_SAMPLER_LAYOUT_WIDE_2D)
-        return stage;
-    CKDWORD ordinal = 0;
-    if (twoDimensional && !comparison)
-        ordinal = compareCount;
-    for (CKDWORD previous = 0; previous < stage; ++previous) {
-        if (!key.Stages[previous].HasTexture)
-            continue;
-        const CKDWORD previousType = key.Stages[previous].SamplerType;
-        if (!twoDimensional) {
-            if (previousType == samplerType)
-                ++ordinal;
-            continue;
-        }
-        const bool previous2D = previousType == CKFF_SAMPLER_2D ||
-                                previousType == CKFF_SAMPLER_DEPTH;
-        const bool previousComparison = previousType == CKFF_SAMPLER_DEPTH &&
-            key.Stages[previous].SamplerCompareFunc != CKRST_COMPARE_NONE;
-        if (previous2D && previousComparison == comparison)
-            ++ordinal;
-    }
-    return ordinal;
-}
-
-CKDWORD CKFFDepthCompareSamplerCount(const CKFFShaderKeyFS &key) {
-    CKDWORD count = 0;
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage)
-        if (key.Stages[stage].HasTexture &&
-            key.Stages[stage].SamplerType == CKFF_SAMPLER_DEPTH &&
-            key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE)
-            ++count;
-    return count;
-}
-
-CKFFSamplerLayout CKFFSamplerLayoutForKey(const CKFFShaderKeyFS &key) {
+CKFFSamplerLayoutPlan CKFFBuildSamplerLayoutPlan(const CKFFShaderKeyFS &key) {
+    CKFFSamplerLayoutPlan plan;
     CKDWORD cubeCount = 0;
     CKDWORD volumeCount = 0;
+    CKDWORD comparison2DCount = 0;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         if (!key.Stages[stage].HasTexture)
             continue;
@@ -283,12 +241,46 @@ CKFFSamplerLayout CKFFSamplerLayoutForKey(const CKFFShaderKeyFS &key) {
             ++cubeCount;
         else if (key.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME)
             ++volumeCount;
+        else if (key.Stages[stage].SamplerType == CKFF_SAMPLER_DEPTH &&
+                 key.Stages[stage].SamplerCompareFunc != CKRST_COMPARE_NONE)
+            ++comparison2DCount;
     }
     if (cubeCount > CKFF_NARROW_SAMPLER_COUNT)
-        return CKFF_SAMPLER_LAYOUT_WIDE_CUBE;
-    if (volumeCount > CKFF_NARROW_SAMPLER_COUNT)
-        return CKFF_SAMPLER_LAYOUT_WIDE_VOLUME;
-    return CKFF_SAMPLER_LAYOUT_WIDE_2D;
+        plan.Layout = CKFF_SAMPLER_LAYOUT_WIDE_CUBE;
+    else if (volumeCount > CKFF_NARROW_SAMPLER_COUNT)
+        plan.Layout = CKFF_SAMPLER_LAYOUT_WIDE_VOLUME;
+    plan.CompareSamplerCount = (CKBYTE)comparison2DCount;
+
+    CKDWORD comparison2DOrdinal = 0;
+    CKDWORD ordinary2DOrdinal = comparison2DCount;
+    CKDWORD cubeOrdinal = 0;
+    CKDWORD volumeOrdinal = 0;
+    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
+        const CKFFShaderKeyFSStage &stageKey = key.Stages[stage];
+        if (!stageKey.HasTexture)
+            continue;
+
+        CKDWORD ordinal = 0;
+        if (stageKey.SamplerType == CKFF_SAMPLER_CUBE) {
+            ordinal = cubeOrdinal++;
+        } else if (stageKey.SamplerType == CKFF_SAMPLER_VOLUME) {
+            ordinal = volumeOrdinal++;
+        } else if (stageKey.SamplerType == CKFF_SAMPLER_DEPTH &&
+                   stageKey.SamplerCompareFunc != CKRST_COMPARE_NONE) {
+            ordinal = comparison2DOrdinal++;
+        } else if (comparison2DCount == 0 &&
+                   plan.Layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+            // D3D12 requires the common wide-2D shader to select resources by
+            // logical texture stage. Preserve that sparse static placement.
+            ordinal = stage;
+        } else {
+            ordinal = ordinary2DOrdinal++;
+        }
+        plan.Stages[stage].Ordinal = (CKBYTE)ordinal;
+        plan.Stages[stage].NativeSlot = (CKBYTE)CKFFSamplerSlot(
+            stageKey.SamplerType, ordinal, plan.Layout);
+    }
+    return plan;
 }
 
 CKFFShaderKey CKFFBuildShaderKey(const CKFFStateDesc &desc, CKDWORD textureBoundMask) {

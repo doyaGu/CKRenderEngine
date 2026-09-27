@@ -1,5 +1,4 @@
 #include "CKFFUniformEmitter.h"
-#include "CKFFTextureBinder.h"
 
 #include "CKDrawStateCache.h"
 #include "CKFFShaderABI.h"
@@ -60,6 +59,7 @@ static void CKFFInitUniformSink(CKFFUniformSink *sink,
 static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
                                            CKFFUniformSink *sink,
                                            const CKFFProgramContext *programContext,
+                                           const CKFFTextureBindingSet *textures,
                                            CKDWORD activeTextureCount,
                                            CKBOOL polygonDepthBias,
                                            CKBOOL patternedLines)
@@ -69,6 +69,7 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     memset(context, 0, sizeof(CKFFUniformEmissionContext));
     context->Uniforms = sink;
     context->ProgramContext = programContext;
+    context->Textures = textures;
     context->ShaderKey = programContext->ShaderKey;
     context->Specialization = programContext->Specialization;
     context->ActiveTextureCount = activeTextureCount;
@@ -83,17 +84,16 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
 
 CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
                                        const CKDrawStateCache &drawState,
-                                       const CKFFTextureBinder &textureBinder,
                                        const CKDWORD &shaderTargetFlags,
                                        CKFFDrawProbes &probes)
     : m_State(state),
       m_DrawState(drawState),
-      m_TextureBinder(textureBinder),
       m_ShaderTargetFlags(shaderTargetFlags),
       m_Probes(probes),
       m_StaticUniformCacheValid(FALSE),
       m_LastStaticConstantsIdentity(0),
       m_LastStaticUniformRevision(0),
+      m_LastStaticTextureBindingHash(0),
       m_LastStaticActiveTextureCount(0),
       m_LastStaticPolygonDepthBias(FALSE),
       m_LastStaticPatternedLines(FALSE)
@@ -105,6 +105,7 @@ void CKFFUniformEmitter::ResetCache()
     m_StaticUniformCacheValid = FALSE;
     m_LastStaticConstantsIdentity = 0;
     m_LastStaticUniformRevision = 0;
+    m_LastStaticTextureBindingHash = 0;
     m_LastStaticActiveTextureCount = 0;
     m_LastStaticPolygonDepthBias = FALSE;
     m_LastStaticPatternedLines = FALSE;
@@ -222,7 +223,7 @@ void CKFFUniformEmitter::EmitTextureMatrixUniforms(const CKFFUniformEmissionCont
 
 void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionContext *context)
 {
-    if (!context || !context->Uniforms)
+    if (!context || !context->Uniforms || !context->Textures)
         return;
 
     CKFFUniformSink *sink = context->Uniforms;
@@ -231,13 +232,14 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
     float borderColors[CKFF_MAX_TEXTURE_STAGES][4] = {};
     CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
+    const CKFFSamplerLayoutPlan &layoutPlan =
+        context->Textures->SamplerLayoutPlan;
     const CKBOOL packSamplerOrdinal =
         (m_ShaderTargetFlags & CKRST_SHADER_TARGET_SAMPLER_ORDINAL) != 0 ||
-        CKFFDepthCompareSamplerCount(context->ShaderKey.FS) != 0 ||
-        CKFFSamplerLayoutForKey(context->ShaderKey.FS) !=
-            CKFF_SAMPLER_LAYOUT_WIDE_2D;
+        layoutPlan.CompareSamplerCount != 0 ||
+        layoutPlan.Layout != CKFF_SAMPLER_LAYOUT_WIDE_2D;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const CKSamplerDesc sampler = m_TextureBinder.BuildSamplerDesc((int)stage);
+        const CKSamplerDesc &sampler = context->Textures->Bindings[stage].Sampler;
         const CKDWORD anisotropy = sampler.ShaderAnisotropy
             ? sampler.MaxAnisotropy : 0;
         CKDWORD borderMask = 0;
@@ -255,7 +257,7 @@ void CKFFUniformEmitter::EmitStageAndSpecUniforms(const CKFFUniformEmissionConte
             (borderMask != 0 || sampler.CompareFunc != CKRST_COMPARE_NONE) ?
             minLinear * 8192u + magLinear * 16384u : 0u;
         const CKDWORD samplerOrdinal = packSamplerOrdinal ?
-            (CKFFSamplerOrdinal(context->ShaderKey.FS, stage) & 7u) * 32768u : 0u;
+            (layoutPlan.Stages[stage].Ordinal & 7u) * 32768u : 0u;
         bumpEnv[stage * 2 + 1][3] = float(sampler.MinMipLevel +
             anisotropy * 32u + borderMask * 1024u +
             comparisonFilter + samplerOrdinal);
@@ -335,6 +337,7 @@ void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext 
 
 void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
                                       const CKFFProgramContext *programContext,
+                                      const CKFFTextureBindingSet *textures,
                                       CKDWORD activeTextureCount,
                                       CKBOOL polygonDepthBias,
                                       CKBOOL patternedLines)
@@ -342,7 +345,8 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
     if (!sink || !programContext)
         return;
     CKFFUniformEmissionContext context;
-    CKFFInitUniformEmissionContext(&context, sink, programContext, activeTextureCount,
+    CKFFInitUniformEmissionContext(&context, sink, programContext, textures,
+                                   activeTextureCount,
                                    polygonDepthBias, patternedLines);
     const bool emitStatic = sink->EmitStatic;
     const bool emitObject = sink->EmitObject;
@@ -380,32 +384,35 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 
 CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
                                           const CKFFProgramContext *programContext,
-                                          CKDWORD activeTextureCount,
+                                          const CKFFTextureBindingSet &textures,
                                           uint64_t staticUniformRevision,
                                           CKBOOL polygonDepthBias,
                                           CKBOOL patternedLines)
 {
     if (!constants || !programContext)
         return FALSE;
-    if (!UploadObjectUniforms(constants, programContext, activeTextureCount))
+    if (!UploadObjectUniforms(constants, programContext,
+                              textures.ActiveStageCount))
         return FALSE;
     if (m_StaticUniformCacheValid &&
         m_LastStaticConstantsIdentity == constants->Identity() &&
         m_LastStaticUniformRevision == staticUniformRevision &&
-        m_LastStaticActiveTextureCount == activeTextureCount &&
+        m_LastStaticTextureBindingHash == textures.Hash &&
+        m_LastStaticActiveTextureCount == textures.ActiveStageCount &&
         m_LastStaticPolygonDepthBias == polygonDepthBias &&
         m_LastStaticPatternedLines == patternedLines &&
         m_LastStaticShaderKey == programContext->ShaderKey &&
         m_LastStaticSpecialization == programContext->Specialization) {
         return TRUE;
     }
-    if (!UploadStaticUniforms(constants, programContext, activeTextureCount,
+    if (!UploadStaticUniforms(constants, programContext, textures,
                               polygonDepthBias, patternedLines))
         return FALSE;
     m_StaticUniformCacheValid = TRUE;
     m_LastStaticConstantsIdentity = constants->Identity();
     m_LastStaticUniformRevision = staticUniformRevision;
-    m_LastStaticActiveTextureCount = activeTextureCount;
+    m_LastStaticTextureBindingHash = textures.Hash;
+    m_LastStaticActiveTextureCount = textures.ActiveStageCount;
     m_LastStaticPolygonDepthBias = polygonDepthBias;
     m_LastStaticPatternedLines = patternedLines;
     m_LastStaticShaderKey = programContext->ShaderKey;
@@ -421,13 +428,14 @@ CKBOOL CKFFUniformEmitter::UploadObjectUniforms(CKFFConstantSet *constants,
         return FALSE;
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, constants, FALSE, TRUE);
-    EmitPayloads(&sink, programContext, activeTextureCount, FALSE, FALSE);
+    EmitPayloads(&sink, programContext, NULL, activeTextureCount,
+                 FALSE, FALSE);
     return sink.Failed ? FALSE : TRUE;
 }
 
 CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKFFConstantSet *constants,
                                                 const CKFFProgramContext *programContext,
-                                                CKDWORD activeTextureCount,
+                                                const CKFFTextureBindingSet &textures,
                                                 CKBOOL polygonDepthBias,
                                                 CKBOOL patternedLines)
 {
@@ -435,7 +443,8 @@ CKBOOL CKFFUniformEmitter::UploadStaticUniforms(CKFFConstantSet *constants,
         return FALSE;
     CKFFUniformSink sink;
     CKFFInitUniformSink(&sink, constants, TRUE, FALSE);
-    EmitPayloads(&sink, programContext, activeTextureCount,
+    EmitPayloads(&sink, programContext, &textures,
+                 textures.ActiveStageCount,
                  polygonDepthBias, patternedLines);
     return sink.Failed ? FALSE : TRUE;
 }

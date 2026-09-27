@@ -282,7 +282,8 @@ private:
 
     CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
                                          CKDWORD activeTextureCount,
-                                         const CKFFShaderKey &shaderKey);
+                                         const CKFFShaderKey &shaderKey,
+                                         const CKFFSamplerLayoutPlan &layoutPlan);
     float ComputeDepthKey() const;
     CKBOOL PrepareVertexBufferImmediate(const CKFFProgramPreparation &preparation,
                                         VXPRIMITIVETYPE type,

@@ -394,7 +394,9 @@ private:
                                       uint64_t &ApproximationMask);
     CKDWORD GetNativeVertexLayout(CKDWORD FormatFlags);
     void ClearNativeVertexLayouts();
-    CKFFProgramBinding ResolveNativeFFProgram(const CKFFShaderKey &Key);
+    CKFFProgramBinding ResolveNativeFFProgram(
+        const CKFFShaderKey &Key,
+        const CKFFSamplerLayoutPlan &SamplerLayoutPlan);
     void ClearNativeFFPrograms();
 
     // Readback helpers

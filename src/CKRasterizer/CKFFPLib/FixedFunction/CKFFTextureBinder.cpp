@@ -1,33 +1,14 @@
 #include "CKFFTextureBinder.h"
 
-#include "CKFFShaderABI.h"
 #include "CKFFStageState.h"
-
-static CKDWORD CKFFSamplerTypeFromTextureFlags(CKDWORD textureFlags)
-{
-    if ((textureFlags & CKRST_TEXTURE_CUBEMAP) != 0)
-        return CKFF_SAMPLER_CUBE;
-    if ((textureFlags & CKRST_TEXTURE_VOLUMEMAP) != 0)
-        return CKFF_SAMPLER_VOLUME;
-    if ((textureFlags & CKRST_TEXTURE_DEPTHSTENCIL) != 0)
-        return CKFF_SAMPLER_DEPTH;
-    return CKFF_SAMPLER_2D;
-}
-
-static CKDWORD CKFFTextureBindingSamplerType(CKDWORD samplerType)
-{
-    if (samplerType == CKFF_SAMPLER_CUBE || samplerType == CKFF_SAMPLER_VOLUME)
-        return samplerType;
-    return CKFF_SAMPLER_2D;
-}
-
 
 static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
                                        CKDWORD activeTextureCount,
                                        CKDWORD sampledTextureMask,
                                        const CKDWORD *textureHandles,
                                        const CKDWORD *textureFlags,
-                                       const CKSamplerDesc *samplers)
+                                       const CKSamplerDesc *samplers,
+                                       const CKFFSamplerLayoutPlan &layoutPlan)
 {
     if (!set)
         return;
@@ -35,55 +16,12 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     CKDWORD stageCount = activeTextureCount;
     if (stageCount > CKFF_MAX_TEXTURE_STAGES)
         stageCount = CKFF_MAX_TEXTURE_STAGES;
-    // Comparison-enabled depth stages occupy the front of the 2D block and
-    // ordinary 2D/depth stages follow them. SDL can therefore select one of
-    // nine native shaders whose first N sampler declarations are comparison
-    // samplers, while bgfx keeps the same logical binding order.
-    CKDWORD compare2DCount = 0;
-    CKDWORD cubeCount = 0;
-    CKDWORD volumeCount = 0;
-    for (CKDWORD stage = 0; stage < stageCount; ++stage) {
-        if ((sampledTextureMask & (1u << stage)) == 0)
-            continue;
-        const CKDWORD samplerType = CKFFTextureBindingSamplerType(
-            CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
-        if (samplerType == CKFF_SAMPLER_CUBE)
-            ++cubeCount;
-        else if (samplerType == CKFF_SAMPLER_VOLUME)
-            ++volumeCount;
-        else if ((textureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
-                 samplers[stage].CompareFunc != CKRST_COMPARE_NONE)
-            ++compare2DCount;
-    }
-    const CKFFSamplerLayout layout = cubeCount > CKFF_NARROW_SAMPLER_COUNT
-        ? CKFF_SAMPLER_LAYOUT_WIDE_CUBE
-        : volumeCount > CKFF_NARROW_SAMPLER_COUNT
-              ? CKFF_SAMPLER_LAYOUT_WIDE_VOLUME
-              : CKFF_SAMPLER_LAYOUT_WIDE_2D;
-    CKDWORD compare2DOrdinal = 0;
-    CKDWORD ordinary2DOrdinal = compare2DCount;
-    CKDWORD cubeOrdinal = 0;
-    CKDWORD volumeOrdinal = 0;
+    set->SamplerLayoutPlan = layoutPlan;
     for (CKDWORD stage = 0; stage < stageCount; ++stage) {
         if ((sampledTextureMask & (1u << stage)) == 0)
             continue;
         set->ActiveTextureCount = stage + 1;
-        const CKDWORD samplerType = CKFFTextureBindingSamplerType(
-            CKFFSamplerTypeFromTextureFlags(textureFlags[stage]));
-        CKDWORD slotIndex;
-        if (samplerType == CKFF_SAMPLER_CUBE)
-            slotIndex = cubeOrdinal++;
-        else if (samplerType == CKFF_SAMPLER_VOLUME)
-            slotIndex = volumeOrdinal++;
-        else if ((textureFlags[stage] & CKRST_TEXTURE_DEPTHSTENCIL) != 0 &&
-                 samplers[stage].CompareFunc != CKRST_COMPARE_NONE)
-            slotIndex = compare2DOrdinal++;
-        else if (compare2DCount == 0 &&
-                 layout == CKFF_SAMPLER_LAYOUT_WIDE_2D)
-            slotIndex = stage;
-        else
-            slotIndex = ordinary2DOrdinal++;
-        set->Bindings[stage].Stage = CKFFSamplerSlot(samplerType, slotIndex, layout);
+        set->Bindings[stage].Stage = layoutPlan.Stages[stage].NativeSlot;
         set->Bindings[stage].Texture = textureHandles[stage];
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];
@@ -109,7 +47,8 @@ CKBOOL CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableM
 }
 
 void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
-                                        CKDWORD sampledTextureMask) const
+                                        CKDWORD sampledTextureMask,
+                                        const CKFFSamplerLayoutPlan &layoutPlan) const
 {
     if (!out)
         return;
@@ -122,7 +61,8 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
             samplers[i] = BuildSamplerDesc((int)i);
     }
     CKFFBuildTextureBindingSet(out, activeCount, sampledTextureMask,
-                               m_State.TextureHandles, m_State.TextureFlags, samplers);
+                               m_State.TextureHandles, m_State.TextureFlags,
+                               samplers, layoutPlan);
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const

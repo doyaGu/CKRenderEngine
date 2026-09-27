@@ -25,12 +25,12 @@ struct CKFFProgramBinding {
 
 struct CKFFProgramSelection {
     CKFFProgramVariant Variant;
-    CKFFSamplerLayout SamplerLayout;
+    CKFFSamplerLayoutPlan SamplerLayoutPlan;
     CKFFSpecializationInfo Specialization;
 
     CKFFProgramSelection()
         : Variant(CKFF_PROGRAM_3D),
-          SamplerLayout(CKFF_SAMPLER_LAYOUT_WIDE_2D), Specialization() {}
+          SamplerLayoutPlan(), Specialization() {}
 };
 
 struct CKFFProgramSamplerBinding {
@@ -58,7 +58,12 @@ public:
 
     // Resolve CPU-only program choice and specialization. Concrete contexts
     // own and cache the native shader/program objects for the chosen variant.
-    CKFFProgramSelection ResolveProgram(const CKFFShaderKey &key);
+    CKFFProgramSelection ResolveProgram(
+        const CKFFShaderKey &key,
+        const CKFFSamplerLayoutPlan &samplerLayoutPlan);
+    CKFFProgramSelection ResolveProgram(const CKFFShaderKey &key) {
+        return ResolveProgram(key, CKFFBuildSamplerLayoutPlan(key.FS));
+    }
     static CKFFProgramVariant ProgramVariantForKey(const CKFFShaderKey &key);
     const CKShaderDesc &GetVertexShader(CKFFProgramVariant variant) const;
     const CKShaderDesc &GetPixelShader() const;

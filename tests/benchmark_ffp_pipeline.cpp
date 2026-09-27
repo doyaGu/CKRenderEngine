@@ -414,9 +414,12 @@ struct ComponentFixture {
     CKFFConstantSet FullConstants;
     CKDWORD ShaderTargetFlags = 0;
     std::unique_ptr<CKFFTextureBinder> UniformTextureBinder;
+    CKFFTextureBindingSet UniformTextureBindings;
     std::unique_ptr<CKFFUniformEmitter> UniformEmitter;
     CKFFStateStore OneTextureState;
     CKFFStateStore FourTextureState;
+    CKFFSamplerLayoutPlan OneTextureLayoutPlan;
+    CKFFSamplerLayoutPlan FourTextureLayoutPlan;
     std::unique_ptr<CKFFTextureBinder> OneTextureBinder;
     std::unique_ptr<CKFFTextureBinder> FourTextureBinder;
     bool Valid = false;
@@ -451,11 +454,22 @@ struct ComponentFixture {
         ConfigureState(UniformState, Workload, 0, 1);
         UniformTextureBinder = std::make_unique<CKFFTextureBinder>(
             UniformState, Probes);
+        UniformTextureBinder->BuildBindingSet(
+            &UniformTextureBindings, 1, 0x1u,
+            Contexts[0].SamplerLayoutPlan);
         UniformEmitter = std::make_unique<CKFFUniformEmitter>(
-            UniformState, UniformState.DrawState, *UniformTextureBinder,
-            ShaderTargetFlags, Probes);
+            UniformState, UniformState.DrawState, ShaderTargetFlags, Probes);
         ConfigureState(OneTextureState, Workload, 0, 1);
         ConfigureState(FourTextureState, Workload, 0, 4);
+        CKFFShaderKeyFS textureKeys[2];
+        for (CKDWORD stage = 0; stage < 4; ++stage) {
+            textureKeys[1].Stages[stage].HasTexture = true;
+            textureKeys[1].Stages[stage].SamplerType = CKFF_SAMPLER_2D;
+            if (stage == 0)
+                textureKeys[0].Stages[stage] = textureKeys[1].Stages[stage];
+        }
+        OneTextureLayoutPlan = CKFFBuildSamplerLayoutPlan(textureKeys[0]);
+        FourTextureLayoutPlan = CKFFBuildSamplerLayoutPlan(textureKeys[1]);
         OneTextureBinder = std::make_unique<CKFFTextureBinder>(
             OneTextureState, Probes);
         FourTextureBinder = std::make_unique<CKFFTextureBinder>(
@@ -689,7 +703,9 @@ private:
             const CKDWORD profile = static_cast<CKDWORD>(i & 7u);
             m_Fixture->SetUniformProfile(profile);
             ok = m_Fixture->UniformEmitter->UploadStaticUniforms(
-                     &m_Fixture->StaticConstants, &m_Fixture->Contexts[profile], 1) != FALSE;
+                     &m_Fixture->StaticConstants,
+                     &m_Fixture->Contexts[profile],
+                     m_Fixture->UniformTextureBindings) != FALSE;
             hash = Mix(hash, ConstantsChecksum(m_Fixture->StaticConstants));
         }
         return {ok, count, 0, hash};
@@ -706,7 +722,7 @@ private:
                 static_cast<size_t>(i % CKFFBenchmark::DrawsPerFrame)];
             ok = m_Fixture->UniformEmitter->UploadUniforms(
                      &m_Fixture->FullConstants, &m_Fixture->Contexts[profile],
-                     1, i + 1) != FALSE;
+                     m_Fixture->UniformTextureBindings, i + 1) != FALSE;
             hash = Mix(hash, ConstantsChecksum(m_Fixture->FullConstants));
         }
         return {ok, count, 0, hash};
@@ -718,9 +734,12 @@ private:
         CKFFTextureBindingSet set;
         CKFFTextureBinder &binder = textureCount == 1
             ? *m_Fixture->OneTextureBinder : *m_Fixture->FourTextureBinder;
+        const CKFFSamplerLayoutPlan &layoutPlan = textureCount == 1
+            ? m_Fixture->OneTextureLayoutPlan
+            : m_Fixture->FourTextureLayoutPlan;
         const CKDWORD mask = textureCount == 1 ? 0x1u : 0xFu;
         for (uint64_t i = 0; i < count; ++i) {
-            binder.BuildBindingSet(&set, textureCount, mask);
+            binder.BuildBindingSet(&set, textureCount, mask, layoutPlan);
             hash = Mix(hash, set.Hash);
             hash = Mix(hash, set.Bindings[textureCount - 1].Texture);
         }
