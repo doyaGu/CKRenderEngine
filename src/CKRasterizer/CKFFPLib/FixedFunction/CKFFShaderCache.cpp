@@ -7,6 +7,21 @@
 #include <stdio.h>
 #include <string.h>
 
+namespace {
+
+CKFFShaderKeyFS CKFFProgramFragmentKey(const CKFFShaderKeyFS &key)
+{
+    CKFFShaderKeyFS result = key;
+    // Output-target conversion is performed after the core fragment program.
+    // Do not spend specialization-cache or native pipeline entries on state
+    // that does not change this program's code or uniforms.
+    result.DitherEnable = false;
+    result.ColorTargetFormat = CKFF_COLOR_TARGET_RGBA8;
+    return result;
+}
+
+} // namespace
+
 CKFFShaderCache::CKFFShaderCache()
     : m_Target(), m_Shaders(), m_SamplerLayout() {
 }
@@ -86,6 +101,7 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
     CKFFProgramSelection selection;
     selection.Variant = ProgramVariantForKey(key);
     selection.SamplerLayout = CKFFSamplerLayoutForKey(key.FS);
+    const CKFFShaderKeyFS programKey = CKFFProgramFragmentKey(key.FS);
     SpecializationCache &cache = m_Specializations[selection.Variant];
     ++cache.Clock;
     if (cache.Clock == 0) {
@@ -96,7 +112,7 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
 
     for (CKDWORD i = 0; i < cache.Count; ++i) {
         SpecializationEntry &entry = cache.Entries[i];
-        if (entry.Key == key.FS) {
+        if (entry.Key == programKey) {
             entry.LastUse = cache.Clock;
             selection.Specialization = entry.Value;
             return selection;
@@ -115,8 +131,8 @@ CKFFProgramSelection CKFFShaderCache::ResolveProgram(
     }
 
     SpecializationEntry &entry = cache.Entries[entryIndex];
-    entry.Value = CKFFBuildSpecializationInfo(key.FS);
-    entry.Key = key.FS;
+    entry.Value = CKFFBuildSpecializationInfo(programKey);
+    entry.Key = programKey;
     entry.LastUse = cache.Clock;
     selection.Specialization = entry.Value;
     return selection;
@@ -137,8 +153,9 @@ CKBOOL CKFFShaderCache::HasCachedSpecialization(CKFFProgramVariant variant, cons
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
         return FALSE;
     const SpecializationCache &specializations = m_Specializations[variant];
+    const CKFFShaderKeyFS programKey = CKFFProgramFragmentKey(key);
     for (CKDWORD i = 0; i < specializations.Count; ++i)
-        if (specializations.Entries[i].Key == key)
+        if (specializations.Entries[i].Key == programKey)
             return TRUE;
     return FALSE;
 }

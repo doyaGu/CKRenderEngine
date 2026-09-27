@@ -3632,6 +3632,123 @@ void CheckRenderTargetReadback(Backend &b)
                "window readback after the target");
 }
 
+void CheckDithered16BitTarget(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_16_RGB565, desc.Format);
+    desc.Format.Width = 16;
+    desc.Format.Height = 16;
+    desc.Format.BytesPerLine = 16 * 2;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                 CKRST_TEXTURE_RENDERTARGET;
+    desc.MipMapCount = 1;
+    CKDWORD rt = 0;
+    TestCheck(ctx->CreateTexture(&desc, &rt) && rt != 0,
+              "RGB565 dither render target");
+    if (!rt)
+        return;
+    TestCheck(ctx->SetTargetTexture(rt, 16, 16, CKRST_CUBEFACE_XPOS),
+              "bind RGB565 dither target");
+    CKViewportData viewport;
+    viewport.ViewX = 0;
+    viewport.ViewY = 0;
+    viewport.ViewWidth = 16;
+    viewport.ViewHeight = 16;
+    viewport.ViewZMin = 0.0f;
+    viewport.ViewZMax = 1.0f;
+    TestCheck(ctx->SetViewport(&viewport), "RGB565 dither viewport");
+
+    const VxVector cover[3] = {
+        VxVector(-3.0f, -3.0f, 0.5f),
+        VxVector(3.0f, -3.0f, 0.5f),
+        VxVector(0.0f, 3.0f, 0.5f),
+    };
+    const CKDWORD nearHalfRed[3] = {
+        0xFF040000u, 0xFF040000u, 0xFF040000u,
+    };
+    Pixels plain;
+    ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, cover, nearHalfRed),
+                  "non-dithered RGB565 fill");
+    }, plain);
+
+    int plainRaised = 0;
+    for (int y = 6; y < 10; ++y) {
+        for (int x = 6; x < 10; ++x) {
+            CKBYTE bgra[4];
+            GetPixel(plain, x, y, bgra);
+            if (bgra[2] >= 4)
+                ++plainRaised;
+        }
+    }
+    TestCheck(plainRaised == 0,
+              "RGB565 conversion rounds the sub-half red value down without dithering");
+
+    Pixels dithered;
+    ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, cover, nearHalfRed),
+                  "dithered RGB565 fill");
+    }, dithered);
+    int raised = 0;
+    int lowered = 0;
+    for (int y = 6; y < 10; ++y) {
+        for (int x = 6; x < 10; ++x) {
+            CKBYTE bgra[4];
+            GetPixel(dithered, x, y, bgra);
+            if (bgra[2] >= 4)
+                ++raised;
+            else
+                ++lowered;
+            TestCheck(bgra[1] == 0 && bgra[0] == 0,
+                      "RGB565 dithering must not leak into zero green or blue channels");
+        }
+    }
+    TestCheckf(raised == 8 && lowered == 8,
+               "4x4 ordered dithering must split a half-step RGB565 value evenly "
+               "(raised=%d lowered=%d)", raised, lowered);
+
+    const CKDWORD blendedHalfRed[3] = {
+        0x80080000u, 0x80080000u, 0x80080000u,
+    };
+    ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
+    ctx->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
+    Pixels blended;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, cover, blendedHalfRed),
+                  "blended dithered RGB565 fill");
+    }, blended);
+    int blendedRaised = 0;
+    for (int y = 6; y < 10; ++y) {
+        for (int x = 6; x < 10; ++x) {
+            CKBYTE bgra[4];
+            GetPixel(blended, x, y, bgra);
+            if (bgra[2] >= 4)
+                ++blendedRaised;
+        }
+    }
+    TestCheckf(blendedRaised == 8,
+               "RGB565 dithering must quantize the blended result "
+               "(raised=%d)", blendedRaised);
+    ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_DITHER] == 0,
+              "dithered RGB565 draws must not report ignored state");
+
+    ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
+    TestCheck(ctx->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS),
+              "release RGB565 dither target");
+    const CKRasterizerContextDesc contextDesc = ReadContextDesc(ctx);
+    viewport.ViewWidth = contextDesc.Width;
+    viewport.ViewHeight = contextDesc.Height;
+    TestCheck(ctx->SetViewport(&viewport), "restore window viewport after dither");
+    TestCheck(ctx->DeleteObject(rt, CKRST_OBJ_TEXTURE),
+              "delete RGB565 dither target");
+}
+
 void CheckTypedPersistentBufferUpdates(Backend &b)
 {
 #ifdef CKRE_PIXEL_SDL_GPU
@@ -3771,6 +3888,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckPresentation(backend);
         CheckViewport(backend);
         CheckRenderTargetReadback(backend);
+        CheckDithered16BitTarget(backend);
 #ifndef CKRE_PIXEL_SDL_GPU
         CheckViewExhaustionFailsWithoutOpeningAFrame(backend);
 #endif

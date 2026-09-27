@@ -179,7 +179,7 @@ static bool CheckGenericProgram(CKSdlGpuRasterizerContext &backend)
     CKDWORD vs = 0, fs = 0, program = 0, texture = 0, output = 0, target = 0;
     if (!CKSdlGpuNativeVolumeShaders(format, vertex, fragment) ||
         backend.CreateShader(&vertex, &vs) != CK_OK || backend.CreateShader(&fragment, &fs) != CK_OK) return false;
-    auto desc = CKSdlGpuNativeProgram(vs, fs, true);
+    auto desc = CKSdlGpuNativeProgram(vs, fs, CKSDL_NATIVE_VOLUME);
     desc.Uniforms[0].Slot = 28; desc.Uniforms[1].Slot = 29;
     desc.Samplers[0].Slot = 7; // one sampler is an ordinary volume input, at an arbitrary logical slot
     if (backend.CreateProgram(&desc, &program) != CK_OK) return false;

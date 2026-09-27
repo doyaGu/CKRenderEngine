@@ -43,6 +43,7 @@ void CKSdlGpuRasterizerContext::UpdateAlphaTestPrecision()
             ? m_PublicResources.FindTexture(m_TargetState.Texture) : NULL;
     m_FFP.SetAlphaTestPrecision(
         CKFFTargetAlphaTestPrecision(texture, m_Bpp));
+    m_FFP.SetColorTargetFormat(CKFFTargetColorFormat(texture, m_Bpp));
 }
 
 CKBOOL CKSdlGpuRasterizerContext::SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face)

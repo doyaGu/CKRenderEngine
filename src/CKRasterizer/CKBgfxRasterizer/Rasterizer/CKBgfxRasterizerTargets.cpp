@@ -14,6 +14,7 @@ CKBOOL CKBgfxRasterizerContext::ReleaseTarget()
     if (m_TargetDepthTexture &&
         !IsNativeObjectAlive(m_TargetDepthTexture, CKRST_OBJ_TEXTURE))
         return FALSE;
+    m_Present.ReleaseDitherTarget();
     if (m_TargetFrameBuffer &&
         DestroyObject(m_TargetFrameBuffer, CKRST_OBJ_RENDERTARGET) != CK_OK)
         return FALSE;
@@ -43,6 +44,7 @@ void CKBgfxRasterizerContext::UpdateAlphaTestPrecision()
             ? m_PublicResources.FindTexture(m_Target.Texture) : NULL;
     m_FFP.SetAlphaTestPrecision(
         CKFFTargetAlphaTestPrecision(texture, m_Bpp));
+    m_FFP.SetColorTargetFormat(CKFFTargetColorFormat(texture, m_Bpp));
 }
 
 CKBOOL CKBgfxRasterizerContext::SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face)

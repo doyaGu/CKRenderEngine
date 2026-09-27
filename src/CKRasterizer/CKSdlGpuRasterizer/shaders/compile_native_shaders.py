@@ -37,6 +37,7 @@ SHADERS = [
     ("vs_clear", "vs_clear", False, 0, 0),
     ("fs_clear", "fs_clear", False, 0, 0),
     ("fs_volume_mip", "fs_volume_mip", False, 0, 0),
+    ("fs_dither_resolve", "fs_dither_resolve", False, 0, 0),
 ]
 BLOCKS = [
     ("float4x4", "u_ffMatrices", 8),
@@ -136,6 +137,8 @@ def uniform_layout(source: str):
         return [("CKNativeClear", [("float4", "ckClear", 1)], 16)]
     if source == "fs_volume_mip":
         return [("CKNativeVolume", [("float4", "ckVolumeParams", 2)], 32)]
+    if source == "fs_dither_resolve":
+        return [("CKNativeDither", [("float4", "ckDitherParams", 1)], 16)]
     if source == "vs_postprocess":
         return []
     group = "PRESENT" if source == "fs_postprocess" else "VERTEX" if source.startswith("vs_") else "FRAGMENT"
@@ -154,7 +157,7 @@ def uniform_layout(source: str):
 
 def shader_resources(source: str):
     vertex = source.startswith("vs_")
-    samplers = 0 if vertex or source == "fs_clear" else (1 if source in ("fs_postprocess", "fs_volume_mip") else 16)
+    samplers = 0 if vertex or source == "fs_clear" else (1 if source in ("fs_postprocess", "fs_volume_mip", "fs_dither_resolve") else 16)
     return len(uniform_layout(source)), samplers
 
 
@@ -177,6 +180,8 @@ def make_source(shader_name: str, source: str, clipping: bool,
     vertex = source.startswith("vs_")
     if source == "fs_volume_mip":
         return "\n".join([uniform_declaration(source), HERE.joinpath("volume_mip.hlsl").read_text(encoding="utf-8")])
+    if source == "fs_dither_resolve":
+        return "\n".join([uniform_declaration(source), HERE.joinpath("dither_resolve.hlsl").read_text(encoding="utf-8")])
     if source.endswith("_clear"):
         body = ("float4 main(uint vertex : SV_VertexID) : SV_Position { "
                 "float2 p = vertex == 0 ? float2(-1,-1) : (vertex == 1 ? float2(3,-1) : float2(-1,3)); "
@@ -192,7 +197,7 @@ def make_source(shader_name: str, source: str, clipping: bool,
     if clipping:
         declarations += ["    float4 v_clipDistance0 : SV_ClipDistance0;",
                          "    float4 v_clipDistance1 : SV_ClipDistance1;"]
-    declarations += ["};", "static float4 gl_Position, gl_FragColor;"]
+    declarations += ["};", "static float4 gl_Position, gl_FragColor, gl_FragCoord;"]
     globals_ = varying + (["v_clipDistance0", "v_clipDistance1"] if clipping else [])
     declarations += [f"static float4 {name};" for name in globals_]
     if vertex:
@@ -210,6 +215,7 @@ def make_source(shader_name: str, source: str, clipping: bool,
     else:
         entry = ["float4 main(CKVaryings input) : SV_Target0 {"]
         entry += [f"    {name} = input.{name};" for name in varying]
+        entry += ["    gl_FragCoord = input.position;"]
         entry += ["    ckffEvaluate();", "    return gl_FragColor;", "}"]
     return "\n".join([f"#define CKFF_VS_CLIP_DISTANCE {int(clipping)}",
                        f"#define CKFF_VS_DEPTH_PAD {int(shader_name.endswith('_depth_pad'))}",
@@ -258,7 +264,7 @@ def validate_spirv(reflection, source, vertex, samplers, uniforms, sampler_layou
     assert sorted(t["binding"] for t in textures) == list(range(samplers))
     if source == "fs_volume_mip":
         dimensions = ["sampler3D"]
-    elif source == "fs_postprocess":
+    elif source in ("fs_postprocess", "fs_dither_resolve"):
         dimensions = ["sampler2D"]
     elif sampler_layout == 1:
         dimensions = ["sampler2D"] * 4 + ["samplerCube"] * 8 + ["sampler3D"] * 4

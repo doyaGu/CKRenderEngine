@@ -134,22 +134,32 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
 
     // Only context-private image operations are created here. Shader-family
     // completeness and FFP variants are the caller's initialization policy.
-    for (bool volume : {false, true}) {
+    for (CKSdlGpuNativeProgramKind kind :
+         {CKSDL_NATIVE_CLEAR, CKSDL_NATIVE_VOLUME, CKSDL_NATIVE_DITHER}) {
         CKShaderDesc vertex, fragment;
         CKDWORD vs = 0, fs = 0, program = 0;
-        const bool available = volume ? CKSdlGpuNativeVolumeShaders(ShaderFormat, vertex, fragment) :
-                                        CKSdlGpuNativeClearShaders(ShaderFormat, vertex, fragment);
+        const bool available = kind == CKSDL_NATIVE_VOLUME
+            ? CKSdlGpuNativeVolumeShaders(ShaderFormat, vertex, fragment)
+            : (kind == CKSDL_NATIVE_DITHER
+                ? CKSdlGpuNativeDitherShaders(ShaderFormat, vertex, fragment)
+                : CKSdlGpuNativeClearShaders(ShaderFormat, vertex, fragment));
         if (!available || CreateShader(&vertex, &vs) != CK_OK || CreateShader(&fragment, &fs) != CK_OK) {
             Shutdown(); return CKERR_INVALIDOPERATION;
         }
-        const auto programDesc = CKSdlGpuNativeProgram(vs, fs, volume);
+        const auto programDesc = CKSdlGpuNativeProgram(vs, fs, kind);
         if (CreateProgram(&programDesc, &program) != CK_OK) { Shutdown(); return CKERR_INVALIDOPERATION; }
-        if (volume) VolumeMipProgram = Programs.Get(program);
+        if (kind == CKSDL_NATIVE_VOLUME) VolumeMipProgram = Programs.Get(program);
+        else if (kind == CKSDL_NATIVE_DITHER) DitherProgram = Programs.Get(program);
         else ClearProgram = Programs.Get(program);
         DestroyObject(program, CKRST_OBJ_PROGRAM);
         DestroyObject(vs, CKRST_OBJ_SHADER);
         DestroyObject(fs, CKRST_OBJ_SHADER);
     }
+    CKSamplerDesc ditherSampler = {CKRST_FILTER_NEAREST, CKRST_FILTER_NEAREST,
+        CKRST_FILTER_NONE, CKRST_ADDRESS_CLAMP, CKRST_ADDRESS_CLAMP,
+        CKRST_ADDRESS_CLAMP, 0, CKRST_COMPARE_NONE};
+    DitherSampler = Sampler(ditherSampler);
+    if (!DitherSampler) { Shutdown(); return CKERR_INVALIDOPERATION; }
     SDL_Log("SDL_gpu ready: driver=%s format=0x%x window=%u thread=%llu size=%ux%u gpu=%s",
         SDL_GetGPUDeviceDriver(Device), unsigned(ShaderFormat), SDL_GetWindowID(Window),
         static_cast<unsigned long long>(Thread), Width, Height,
@@ -288,7 +298,12 @@ void CKSdlGpuRasterizerContext::Shutdown()
          it != Samplers.End(); ++it)
         (*it).reset();
     Samplers.Clear();
-    ClearProgram.reset(); VolumeMipProgram.reset();
+    ClearProgram.reset(); VolumeMipProgram.reset(); DitherProgram.reset();
+    DitherSampler.reset(); DitherScratch.reset();
+    DitherMultisample.reset(); DitherResolved.reset(); DitherSource.reset();
+    DitherSourceFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    DitherScratchWidth = DitherScratchHeight = 0;
+    DitherScratchSamples = 1;
     DefaultVertexBuffers.Clear(); DefaultTextures.Clear();
     Uniforms.Clear();
     Target.reset(); Targets.Clear(); Programs.Clear(); ShaderObjects.Clear();

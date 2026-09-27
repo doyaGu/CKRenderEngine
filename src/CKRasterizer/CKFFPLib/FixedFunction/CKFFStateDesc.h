@@ -364,12 +364,16 @@ struct CKFFFSStateDesc {
     void SetFogEnabled(bool v)      { SetBit(2, v); }
     void SetRangeFog(bool v)        { SetBit(11, v); }
     void SetFlatShade(bool v)       { SetBit(13, v); }
+    void SetDitherEnabled(bool v)   { SetBit(14, v); }
+    void SetColorTargetFormat(uint32_t v) { SetField(15, 2, v); }
 
     bool GetSpecularAdd() const      { return GetBit(0); }
     bool GetAlphaTestEnabled() const { return GetBit(1); }
     bool GetFogEnabled() const       { return GetBit(2); }
     bool GetRangeFog() const         { return GetBit(11); }
     bool GetFlatShade() const        { return GetBit(13); }
+    bool GetDitherEnabled() const    { return GetBit(14); }
+    uint32_t GetColorTargetFormat() const { return GetField(15, 2); }
 
     // --- Alpha func (bits 3-6) ---
     void SetAlphaFunc(uint32_t func) { SetField(3, 4, func); }

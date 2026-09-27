@@ -318,6 +318,8 @@ struct CKSdlGpuDraw {
     unsigned UniformOffsets[2 * CKFF_UNIFORM_BUFFER_COUNT] = {};
     unsigned VertexOffset = 0, VertexOffset1 = 0, IndexOffset = 0;
     bool Index32 = false;
+    bool DitherEnable = false;
+    CKDWORD ColorTargetFormat = 0;
     // Ordinary Release draws keep this empty; diagnostics and profiling copy
     // the caller's label into the queued packet.
     XString Marker;

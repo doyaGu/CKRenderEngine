@@ -56,6 +56,8 @@ struct CKFFShaderKeyFS {
     bool FogEnable;
     bool RangeFog;
     bool FlatShade;
+    bool DitherEnable;
+    CKDWORD ColorTargetFormat;
 
     CKFFShaderKeyFS();
 

@@ -10,6 +10,7 @@
 #include "shaders/generated/dx11/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/dx11/vs_postprocess.bin.h"
 #include "shaders/generated/dx11/fs_postprocess.bin.h"
+#include "shaders/generated/dx11/fs_dither_resolve.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
@@ -19,6 +20,7 @@
 #include "shaders/generated/dx12/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/dx12/vs_postprocess.bin.h"
 #include "shaders/generated/dx12/fs_postprocess.bin.h"
+#include "shaders/generated/dx12/fs_dither_resolve.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
@@ -28,6 +30,7 @@
 #include "shaders/generated/spirv/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/spirv/vs_postprocess.bin.h"
 #include "shaders/generated/spirv/fs_postprocess.bin.h"
+#include "shaders/generated/spirv/fs_dither_resolve.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
@@ -37,6 +40,7 @@
 #include "shaders/generated/glsl/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/glsl/vs_postprocess.bin.h"
 #include "shaders/generated/glsl/fs_postprocess.bin.h"
+#include "shaders/generated/glsl/fs_dither_resolve.bin.h"
 #include "shaders/generated/essl/vs_ff_3d.bin.h"
 #include "shaders/generated/essl/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/essl/vs_ff_positiont.bin.h"
@@ -46,6 +50,7 @@
 #include "shaders/generated/essl/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/essl/vs_postprocess.bin.h"
 #include "shaders/generated/essl/fs_postprocess.bin.h"
+#include "shaders/generated/essl/fs_dither_resolve.bin.h"
 #include "shaders/generated/metal/vs_ff_3d.bin.h"
 #include "shaders/generated/metal/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/metal/vs_ff_positiont.bin.h"
@@ -55,6 +60,7 @@
 #include "shaders/generated/metal/fs_ff_stage_volume.bin.h"
 #include "shaders/generated/metal/vs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_postprocess.bin.h"
+#include "shaders/generated/metal/fs_dither_resolve.bin.h"
 
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
@@ -88,6 +94,31 @@ CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
     default: return FALSE;
     }
 #undef CKFF_SELECT_LAYOUT
+    return out.Code && out.CodeSize ? TRUE : FALSE;
+}
+
+CKBOOL CKBgfxRasterizerDitherFragmentShader(
+    const CKRasterizerDeviceCaps &caps, CKShaderDesc &out)
+{
+    if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX)
+        return FALSE;
+    out = CKShaderDesc();
+    out.Stage = CKRST_SHADER_PIXEL;
+    out.Format = caps.ShaderFormat;
+    out.Profile = caps.ShaderProfile;
+#define CKFF_SELECT_DITHER(_backend) \
+    out.Code = s_##_backend##_fs_dither_resolve; \
+    out.CodeSize = sizeof(s_##_backend##_fs_dither_resolve)
+    switch (caps.ShaderProfile) {
+    case CKRST_SHADER_PROFILE_DX11: CKFF_SELECT_DITHER(dx11); break;
+    case CKRST_SHADER_PROFILE_DX12: CKFF_SELECT_DITHER(dx12); break;
+    case CKRST_SHADER_PROFILE_SPIRV: CKFF_SELECT_DITHER(spirv); break;
+    case CKRST_SHADER_PROFILE_GLSL: CKFF_SELECT_DITHER(glsl); break;
+    case CKRST_SHADER_PROFILE_ESSL: CKFF_SELECT_DITHER(essl); break;
+    case CKRST_SHADER_PROFILE_MSL: CKFF_SELECT_DITHER(metal); break;
+    default: return FALSE;
+    }
+#undef CKFF_SELECT_DITHER
     return out.Code && out.CodeSize ? TRUE : FALSE;
 }
 

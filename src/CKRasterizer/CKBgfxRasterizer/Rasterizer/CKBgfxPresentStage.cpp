@@ -1,10 +1,15 @@
 #include "CKBgfxPresentStage.h"
+#include "CKBgfxRasterizer.h"
 #include "CKBgfxRasterizerContext.h"
 
 #include <string.h>
 
 CKBgfxPresentStage::CKBgfxPresentStage()
-    : m_Context(nullptr), m_ReadbackTexture(0), m_ReadbackWidth(0), m_ReadbackHeight(0),
+    : m_Context(nullptr), m_ReadbackTexture(0), m_ReadbackRenderTexture(0),
+      m_ReadbackFrameBuffer(0), m_ReadbackWidth(0), m_ReadbackHeight(0),
+      m_DitherTexture(0), m_DitherFrameBuffer(0), m_DitherDepthTexture(0),
+      m_DitherSourceTexture(0), m_DitherSourceFormat(UNKNOWN_PF),
+      m_DitherWidth(0), m_DitherHeight(0), m_DitherSamples(0),
       m_ShaderFormat(CKRST_SHADER_FORMAT_UNKNOWN),
       m_ShaderProfile(CKRST_SHADER_PROFILE_UNKNOWN) {}
 
@@ -54,6 +59,7 @@ CKBOOL CKBgfxPresentStage::EnsureNativeTarget(CKDWORD width, CKDWORD height)
 
 void CKBgfxPresentStage::DestroyTargets()
 {
+    DestroyDitherTarget();
     DestroyTarget(m_Scene);
     DestroyTarget(m_Native);
     DestroyReadbackTexture();
@@ -63,7 +69,8 @@ CKDWORD CKBgfxPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height
 {
     if (!m_Context || width == 0 || height == 0)
         return 0;
-    if (m_ReadbackTexture && m_ReadbackWidth == width && m_ReadbackHeight == height)
+    if (m_ReadbackTexture && m_ReadbackWidth == width &&
+        m_ReadbackHeight == height)
         return m_ReadbackTexture;
     DestroyReadbackTexture();
     CKTextureDesc desc;
@@ -83,12 +90,135 @@ CKDWORD CKBgfxPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height
     return m_ReadbackTexture;
 }
 
+CKDWORD CKBgfxPresentStage::AcquireReadbackFrameBuffer()
+{
+    if (!m_Context || !m_ReadbackTexture || !m_ReadbackWidth ||
+        !m_ReadbackHeight)
+        return 0;
+    if (m_ReadbackRenderTexture && m_ReadbackFrameBuffer)
+        return m_ReadbackFrameBuffer;
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = (int)m_ReadbackWidth;
+    desc.Format.Height = (int)m_ReadbackHeight;
+    desc.MipMapCount = 1;
+    desc.Depth = 1;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                 CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+    if (m_Context->CreateTexture(
+            &desc, nullptr, &m_ReadbackRenderTexture) != CK_OK) {
+        m_ReadbackRenderTexture = 0;
+        return 0;
+    }
+    CKRenderTargetDesc target;
+    target.ColorTexture = m_ReadbackRenderTexture;
+    if (m_Context->CreateRenderTarget(&target, &m_ReadbackFrameBuffer) != CK_OK) {
+        m_Context->DestroyObject(
+            m_ReadbackRenderTexture, CKRST_OBJ_TEXTURE);
+        m_ReadbackRenderTexture = 0;
+        m_ReadbackFrameBuffer = 0;
+    }
+    return m_ReadbackFrameBuffer;
+}
+
 void CKBgfxPresentStage::DestroyReadbackTexture()
 {
+    if (m_Context && m_ReadbackFrameBuffer)
+        m_Context->DestroyObject(m_ReadbackFrameBuffer, CKRST_OBJ_RENDERTARGET);
+    if (m_Context && m_ReadbackRenderTexture)
+        m_Context->DestroyObject(m_ReadbackRenderTexture, CKRST_OBJ_TEXTURE);
     if (m_Context && m_ReadbackTexture)
         m_Context->DestroyObject(m_ReadbackTexture, CKRST_OBJ_TEXTURE);
-    m_ReadbackTexture = 0;
+    m_ReadbackTexture = m_ReadbackRenderTexture = m_ReadbackFrameBuffer = 0;
     m_ReadbackWidth = m_ReadbackHeight = 0;
+}
+
+CKBOOL CKBgfxPresentStage::EnsureDitherTarget(
+    CKDWORD width, CKDWORD height, CKDWORD samples, CKDWORD depthTexture)
+{
+    if (!m_Context || !width || !height || !depthTexture)
+        return FALSE;
+    if (m_DitherTexture && m_DitherFrameBuffer &&
+        m_DitherWidth == width && m_DitherHeight == height &&
+        m_DitherSamples == samples && m_DitherDepthTexture == depthTexture)
+        return TRUE;
+    DestroyDitherTarget();
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
+    desc.Format.Width = (int)width;
+    desc.Format.Height = (int)height;
+    desc.MipMapCount = 1;
+    desc.Depth = 1;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                 CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET |
+                 CKRSTTextureMSAAFlag(samples);
+    if (m_Context->CreateTexture(&desc, nullptr, &m_DitherTexture) != CK_OK)
+        return FALSE;
+    CKRenderTargetDesc target;
+    target.ColorTexture = m_DitherTexture;
+    target.DepthTexture = depthTexture;
+    if (m_Context->CreateRenderTarget(&target, &m_DitherFrameBuffer) != CK_OK) {
+        DestroyDitherTarget();
+        return FALSE;
+    }
+    m_DitherDepthTexture = depthTexture;
+    m_DitherWidth = width;
+    m_DitherHeight = height;
+    m_DitherSamples = samples;
+    return TRUE;
+}
+
+CKDWORD CKBgfxPresentStage::AcquireDitherSource(
+    const CKTextureDesc &source)
+{
+    if (!m_Context || !m_DitherWidth || !m_DitherHeight)
+        return 0;
+    const VX_PIXELFORMAT format = VxImageDesc2PixelFormat(source.Format);
+    if (format == UNKNOWN_PF)
+        return 0;
+    if (m_DitherSourceTexture && m_DitherSourceFormat == format)
+        return m_DitherSourceTexture;
+    if (m_DitherSourceTexture)
+        m_Context->DestroyObject(m_DitherSourceTexture, CKRST_OBJ_TEXTURE);
+    m_DitherSourceTexture = 0;
+    m_DitherSourceFormat = UNKNOWN_PF;
+
+    CKTextureDesc desc = source;
+    desc.Format.Width = (int)m_DitherWidth;
+    desc.Format.Height = (int)m_DitherHeight;
+    desc.MipMapCount = 1;
+    desc.Depth = 1;
+    desc.Flags &= ~(CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP |
+                    CKRST_TEXTURE_RENDERTARGET |
+                    CKRST_TEXTURE_MSAA_MASK | CKRST_TEXTURE_READBACK |
+                    CKRST_TEXTURE_COMPUTE_WRITE);
+    desc.Flags |= CKRST_TEXTURE_VALID | CKRST_TEXTURE_BLIT_DST;
+    if (m_Context->CreateTexture(
+            &desc, nullptr, &m_DitherSourceTexture) != CK_OK) {
+        m_DitherSourceTexture = 0;
+        return 0;
+    }
+    m_DitherSourceFormat = format;
+    return m_DitherSourceTexture;
+}
+
+void CKBgfxPresentStage::ReleaseDitherTarget()
+{
+    DestroyDitherTarget();
+}
+
+void CKBgfxPresentStage::DestroyDitherTarget()
+{
+    if (m_Context && m_DitherFrameBuffer)
+        m_Context->DestroyObject(m_DitherFrameBuffer, CKRST_OBJ_RENDERTARGET);
+    if (m_Context && m_DitherTexture)
+        m_Context->DestroyObject(m_DitherTexture, CKRST_OBJ_TEXTURE);
+    if (m_Context && m_DitherSourceTexture)
+        m_Context->DestroyObject(m_DitherSourceTexture, CKRST_OBJ_TEXTURE);
+    m_DitherTexture = m_DitherFrameBuffer = m_DitherDepthTexture = 0;
+    m_DitherSourceTexture = 0;
+    m_DitherSourceFormat = UNKNOWN_PF;
+    m_DitherWidth = m_DitherHeight = m_DitherSamples = 0;
 }
 
 CKBOOL CKBgfxPresentStage::CreateTarget(CKBgfxPresentTarget &target, CKDWORD width, CKDWORD height,
@@ -145,6 +275,8 @@ CKBOOL CKBgfxPresentStage::CreateTarget(CKBgfxPresentTarget &target, CKDWORD wid
 
 void CKBgfxPresentStage::DestroyTarget(CKBgfxPresentTarget &target)
 {
+    if (target.DepthTexture && target.DepthTexture == m_DitherDepthTexture)
+        DestroyDitherTarget();
     if (m_Context) {
         if (target.FrameBuffer)
             m_Context->DestroyObject(target.FrameBuffer, CKRST_OBJ_RENDERTARGET);
@@ -188,7 +320,6 @@ CKBOOL CKBgfxPresentStage::EnsureResources()
         DestroyResources();
         return FALSE;
     }
-
     CKVertexElementDesc elements[2];
     memset(elements, 0, sizeof(elements));
     elements[0].Attrib = CKRST_ATTRIB_POSITION;
@@ -218,15 +349,56 @@ CKBOOL CKBgfxPresentStage::EnsureResources()
     return TRUE;
 }
 
+CKBOOL CKBgfxPresentStage::EnsureDitherResources()
+{
+    if (!EnsureResources())
+        return FALSE;
+    if (m_Context->IsNativeObjectAlive(
+            m_ResourceIds.DitherProgram, CKRST_OBJ_PROGRAM) &&
+        m_Context->IsNativeObjectAlive(
+            m_ResourceIds.DitherPixelShader, CKRST_OBJ_SHADER))
+        return TRUE;
+
+    if (m_ResourceIds.DitherProgram)
+        m_Context->DestroyObject(
+            m_ResourceIds.DitherProgram, CKRST_OBJ_PROGRAM);
+    if (m_ResourceIds.DitherPixelShader)
+        m_Context->DestroyObject(
+            m_ResourceIds.DitherPixelShader, CKRST_OBJ_SHADER);
+    m_ResourceIds.DitherProgram = 0;
+    m_ResourceIds.DitherPixelShader = 0;
+
+    CKShaderDesc shader;
+    if (!CKBgfxRasterizerDitherFragmentShader(m_Context->GetCaps(), shader) ||
+        m_Context->CreateShader(
+            &shader, &m_ResourceIds.DitherPixelShader) != CK_OK)
+        return FALSE;
+    const CKFFProgramDesc program = CKFFBuildProgramInterface(
+        m_ResourceIds.VertexShader, m_ResourceIds.DitherPixelShader,
+        m_Context->GetCaps().ShaderFormat, TRUE);
+    if (m_Context->CreateProgram(
+            &program, &m_ResourceIds.DitherProgram) != CK_OK) {
+        m_Context->DestroyObject(
+            m_ResourceIds.DitherPixelShader, CKRST_OBJ_SHADER);
+        m_ResourceIds.DitherPixelShader = 0;
+        return FALSE;
+    }
+    return TRUE;
+}
+
 void CKBgfxPresentStage::DestroyResources()
 {
     if (m_Context) {
         if (m_ResourceIds.Program)
             m_Context->DestroyObject(m_ResourceIds.Program, CKRST_OBJ_PROGRAM);
+        if (m_ResourceIds.DitherProgram)
+            m_Context->DestroyObject(m_ResourceIds.DitherProgram, CKRST_OBJ_PROGRAM);
         if (m_ResourceIds.VertexShader)
             m_Context->DestroyObject(m_ResourceIds.VertexShader, CKRST_OBJ_SHADER);
         if (m_ResourceIds.PixelShader)
             m_Context->DestroyObject(m_ResourceIds.PixelShader, CKRST_OBJ_SHADER);
+        if (m_ResourceIds.DitherPixelShader)
+            m_Context->DestroyObject(m_ResourceIds.DitherPixelShader, CKRST_OBJ_SHADER);
         if (m_ResourceIds.VertexLayout)
             m_Context->DestroyObject(m_ResourceIds.VertexLayout, CKRST_OBJ_VERTEXLAYOUT);
     }
@@ -259,9 +431,23 @@ CKERROR CKBgfxPresentStage::SubmitCopy(CKDWORD texture, CKDWORD width, CKDWORD h
     return SubmitTexture(texture, width, height, FALSE, FALSE, 0.0f, flipV);
 }
 
+CKERROR CKBgfxPresentStage::SubmitDither(
+    CKDWORD texture, CKDWORD width, CKDWORD height,
+    CKDWORD format, CKBOOL enabled, CKBOOL flipV)
+{
+    if (format < CKFF_COLOR_TARGET_RGB565 ||
+        format > CKFF_COLOR_TARGET_RGBA4)
+        return CKERR_INVALIDPARAMETER;
+    if (!EnsureDitherResources())
+        return CKERR_NOTIMPLEMENTED;
+    return SubmitTexture(texture, width, height, FALSE, enabled,
+                         (float)format, flipV,
+                         m_ResourceIds.DitherProgram);
+}
+
 CKERROR CKBgfxPresentStage::SubmitTexture(CKDWORD texture, CKDWORD width, CKDWORD height,
                                      CKBOOL linear, CKBOOL fxaa, float sharpness,
-                                     CKBOOL flipV)
+                                     CKBOOL flipV, CKDWORD program)
 {
     if (!m_Context || !texture || !width || !height || !EnsureResources())
         return CKERR_NOTIMPLEMENTED;
@@ -274,6 +460,7 @@ CKERROR CKBgfxPresentStage::SubmitTexture(CKDWORD texture, CKDWORD width, CKDWOR
     CKDrawCommand draw;
     const CKERROR prepared = m_Draw.Prepare(
         texture, width, height, linear, fxaa, sharpness, flipV,
-        m_ResourceIds.Program, m_ResourceIds.VertexLayout, tvb, draw);
+        program ? program : m_ResourceIds.Program,
+        m_ResourceIds.VertexLayout, tvb, draw);
     return prepared == CK_OK ? m_Context->Draw(&draw) : prepared;
 }

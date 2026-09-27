@@ -9,7 +9,9 @@ int main()
 {
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
-    check(CKSdlGpuTextureFormat(_DXT1) == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM &&
+    check(CKSdlGpuTextureFormat(_16_RGB565) == SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM &&
+          CKSdlGpuTextureFormat(_16_ARGB1555) == SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM &&
+          CKSdlGpuTextureFormat(_DXT1) == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM &&
           CKSdlGpuTextureFormat(_DXT3) == SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM &&
           CKSdlGpuTextureFormat(_DXT5) == SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM &&
           CKSdlGpuTextureFormat(_DXT2) == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM &&
@@ -334,7 +336,7 @@ int main()
         check(CKSdlGpuNativeClearShaders(format, vertex, fragment) && vertex.UniformBufferCount == 1 &&
               fragment.UniformBufferCount == 1 && !vertex.SamplerCount && !fragment.SamplerCount,
               "clear shaders have private uniforms and no samplers");
-        auto clearProgram = CKSdlGpuNativeProgram(1, 2, false);
+        auto clearProgram = CKSdlGpuNativeProgram(1, 2, CKSDL_NATIVE_CLEAR);
         check(CKFFValidateProgram(clearProgram, vertex, fragment) == CK_OK &&
               clearProgram.UniformBuffers.Size() == 2 && clearProgram.UniformBuffers[0].Size == 16 &&
               clearProgram.UniformBuffers[1].Size == 16 && clearProgram.Uniforms.Size() == 2 &&
@@ -344,7 +346,7 @@ int main()
         check(CKSdlGpuNativeVolumeShaders(format, vertex, fragment) && vertex.UniformBufferCount == 1 &&
               fragment.UniformBufferCount == 1 && fragment.SamplerCount == 1,
               "volume mip helper exposes its own native shader family");
-        auto volumeProgram = CKSdlGpuNativeProgram(1, 2, true);
+        auto volumeProgram = CKSdlGpuNativeProgram(1, 2, CKSDL_NATIVE_VOLUME);
         check(CKFFValidateProgram(volumeProgram, vertex, fragment) == CK_OK &&
               volumeProgram.UniformBuffers[0].Size == 16 && volumeProgram.UniformBuffers[1].Size == 32 &&
               volumeProgram.Uniforms[1].Name == "ckVolumeParams" && volumeProgram.Uniforms[1].Count == 2 &&

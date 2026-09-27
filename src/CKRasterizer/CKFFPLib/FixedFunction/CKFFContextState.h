@@ -3,6 +3,7 @@
 
 #include "CKRasterizer.h"
 #include "CKRasterizerContextEnums.h"
+#include "CKFFConstants.h"
 
 class CKFixedFunctionPipeline;
 class CKFFBufferUseTracker;
@@ -102,6 +103,8 @@ struct CKFFRenderTargetState {
 
 CKDWORD CKFFTargetAlphaTestPrecision(const CKTextureDesc *TargetTexture,
                                      int BackBufferBpp);
+CKFFColorTargetFormat CKFFTargetColorFormat(
+    const CKTextureDesc *TargetTexture, int BackBufferBpp);
 
 // Shared CPU-side implementation of the fixed-function state portion of the
 // private CKRasterizerContext API. Concrete contexts still own the pipeline,

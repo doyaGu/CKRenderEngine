@@ -124,6 +124,10 @@ public:
     void SetDrawMarker(const char *marker) { m_DrawMarker = marker; }
     void SetAlphaTestPrecision(CKDWORD precision);
     CKDWORD GetAlphaTestPrecision() const;
+    void SetColorTargetFormat(CKFFColorTargetFormat format);
+    CKFFColorTargetFormat GetColorTargetFormat() const {
+        return m_State.ColorTargetFormat;
+    }
     void SetDepthBiasFormat(CK_DEPTH_FORMAT format);
     CK_DEPTH_FORMAT GetDepthBiasFormat() const { return m_State.DepthBiasFormat; }
     CKBOOL SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix);

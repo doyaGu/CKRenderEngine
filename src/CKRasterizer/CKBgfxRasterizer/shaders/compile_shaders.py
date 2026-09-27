@@ -32,6 +32,7 @@ SHADERS = [
      "defines": ["CKFF_NATIVE_SAMPLER_LAYOUT=2"]},
     {"source": "vs_postprocess.sc", "stage": "vertex", "name": "vs_postprocess"},
     {"source": "fs_postprocess.sc", "stage": "fragment", "name": "fs_postprocess"},
+    {"source": "fs_dither_resolve.sc", "stage": "fragment", "name": "fs_dither_resolve"},
 ]
 
 BACKENDS = [

@@ -41,7 +41,7 @@ bool CKFFShaderKeyVS::operator==(const CKFFShaderKeyVS &other) const {
 CKFFShaderKeyFS::CKFFShaderKeyFS()
     : Stages{}, LastActiveTextureStage(0), AlphaFunc(0), VertexFogMode(0), PixelFogMode(0),
       GlobalSpecularEnable(false), AlphaTestEnable(false), FogEnable(false), RangeFog(false),
-      FlatShade(false) {}
+      FlatShade(false), DitherEnable(false), ColorTargetFormat(CKFF_COLOR_TARGET_RGBA8) {}
 
 bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
     if (LastActiveTextureStage != other.LastActiveTextureStage ||
@@ -52,7 +52,9 @@ bool CKFFShaderKeyFS::operator==(const CKFFShaderKeyFS &other) const {
         AlphaTestEnable != other.AlphaTestEnable ||
         FogEnable != other.FogEnable ||
         RangeFog != other.RangeFog ||
-        FlatShade != other.FlatShade)
+        FlatShade != other.FlatShade ||
+        DitherEnable != other.DitherEnable ||
+        ColorTargetFormat != other.ColorTargetFormat)
         return false;
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &a = Stages[stage];
@@ -94,6 +96,8 @@ size_t CKFFShaderKeyHash::operator()(const CKFFShaderKey &key) const {
     seed = HashCombine(seed, key.FS.FogEnable ? 1u : 0u);
     seed = HashCombine(seed, key.FS.RangeFog ? 1u : 0u);
     seed = HashCombine(seed, key.FS.FlatShade ? 1u : 0u);
+    seed = HashCombine(seed, key.FS.DitherEnable ? 1u : 0u);
+    seed = HashCombine(seed, key.FS.ColorTargetFormat);
     for (const CKFFShaderKeyFSStage &stage : key.FS.Stages) {
         seed = HashCombine(seed, stage.ColorOp);
         seed = HashCombine(seed, stage.ColorArg0);
@@ -179,6 +183,8 @@ CKFFShaderKeyFS CKFFBuildShaderKeyFS(const CKFFFSStateDesc &desc, CKDWORD textur
     key.PixelFogMode = key.FogEnable ? desc.GetPixelFogMode() : 0;
     key.RangeFog = key.FogEnable && desc.GetRangeFog();
     key.FlatShade = desc.GetFlatShade();
+    key.DitherEnable = desc.GetDitherEnabled();
+    key.ColorTargetFormat = desc.GetColorTargetFormat();
 
     CKDWORD activeCount = 0;
     CKDWORD previousColorOp = 0;
@@ -303,7 +309,6 @@ CKFFSpecializationInfo CKFFBuildSpecializationInfo(const CKFFShaderKeyFS &key) {
     info.Set(CKFF_SPEC_PIXEL_FOG_MODE, key.PixelFogMode);
     info.Set(CKFF_SPEC_RANGE_FOG, key.RangeFog ? 1u : 0u);
     info.Set(CKFF_SPEC_FLAT_SHADE, key.FlatShade ? 1u : 0u);
-
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];
         info.SetStage(stage, CKFF_SPEC_STAGE_COLOR_OP, src.ColorOp);

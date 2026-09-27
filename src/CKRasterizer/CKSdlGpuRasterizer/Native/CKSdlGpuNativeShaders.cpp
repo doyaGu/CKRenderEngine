@@ -5,6 +5,8 @@
 #include "shaders/generated/spirv_fs_clear.h"
 #include "shaders/generated/dxil_fs_volume_mip.h"
 #include "shaders/generated/spirv_fs_volume_mip.h"
+#include "shaders/generated/dxil_fs_dither_resolve.h"
+#include "shaders/generated/spirv_fs_dither_resolve.h"
 
 CKBOOL CKSdlGpuNativeClearShaders(SDL_GPUShaderFormat format, CKShaderDesc &vertex, CKShaderDesc &fragment)
 {
@@ -37,7 +39,22 @@ CKBOOL CKSdlGpuNativeVolumeShaders(SDL_GPUShaderFormat format, CKShaderDesc &ver
     return TRUE;
 }
 
-CKFFProgramDesc CKSdlGpuNativeProgram(CKDWORD vertex, CKDWORD fragment, bool volume)
+CKBOOL CKSdlGpuNativeDitherShaders(SDL_GPUShaderFormat format, CKShaderDesc &vertex, CKShaderDesc &fragment)
+{
+    if (!CKSdlGpuNativeClearShaders(format, vertex, fragment)) return FALSE;
+    fragment.SamplerCount = 1;
+    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
+        fragment.Code = s_sdl_dxil_fs_dither_resolve;
+        fragment.CodeSize = sizeof(s_sdl_dxil_fs_dither_resolve);
+    } else {
+        fragment.Code = s_sdl_spirv_fs_dither_resolve;
+        fragment.CodeSize = sizeof(s_sdl_spirv_fs_dither_resolve);
+    }
+    return TRUE;
+}
+
+CKFFProgramDesc CKSdlGpuNativeProgram(CKDWORD vertex, CKDWORD fragment,
+                                      CKSdlGpuNativeProgramKind kind)
 {
     CKFFProgramDesc program;
     program.VertexShader = vertex; program.PixelShader = fragment;
@@ -46,18 +63,19 @@ CKFFProgramDesc CKSdlGpuNativeProgram(CKDWORD vertex, CKDWORD fragment, bool vol
     buffer.Size = 16;
     program.UniformBuffers.PushBack(buffer);
     buffer.Stage = CKRST_SHADER_PIXEL;
-    buffer.Size = volume ? 32u : 16u;
+    buffer.Size = kind == CKSDL_NATIVE_VOLUME ? 32u : 16u;
     program.UniformBuffers.PushBack(buffer);
     CKFFUniformBinding uniform;
     uniform.Name = "ckClear";
     program.Uniforms.PushBack(uniform);
     uniform.Slot = 1; uniform.Stage = CKRST_SHADER_PIXEL;
-    uniform.Name = volume ? "ckVolumeParams" : "ckClear";
-    uniform.Count = volume ? 2 : 1;
+    uniform.Name = kind == CKSDL_NATIVE_VOLUME ? "ckVolumeParams" :
+                   (kind == CKSDL_NATIVE_DITHER ? "ckDitherParams" : "ckClear");
+    uniform.Count = kind == CKSDL_NATIVE_VOLUME ? 2 : 1;
     program.Uniforms.PushBack(uniform);
-    if (volume) {
+    if (kind != CKSDL_NATIVE_CLEAR) {
         CKFFSamplerBinding sampler;
-        sampler.Dimension = CKFF_TEXTURE_3D;
+        sampler.Dimension = kind == CKSDL_NATIVE_VOLUME ? CKFF_TEXTURE_3D : CKFF_TEXTURE_2D;
         sampler.Name = "ck_source";
         program.Samplers.PushBack(sampler);
     }

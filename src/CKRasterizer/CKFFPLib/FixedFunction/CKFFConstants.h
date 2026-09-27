@@ -22,6 +22,17 @@ enum CKFFSamplerLayout {
     CKFF_SAMPLER_LAYOUT_COUNT,
 };
 
+// Logical colour precision of the active D3D-compatible render target. Modern
+// backends may store the packed 16-bit formats in a wider native texture; the
+// fixed-function fragment stage still has to expose the declared precision.
+enum CKFFColorTargetFormat {
+    CKFF_COLOR_TARGET_RGBA8 = 0,
+    CKFF_COLOR_TARGET_RGB565,
+    CKFF_COLOR_TARGET_RGB5A1,
+    CKFF_COLOR_TARGET_RGBA4,
+    CKFF_COLOR_TARGET_COUNT,
+};
+
 // ============================================================================
 // Light data for shader upload (view-space)
 // ============================================================================

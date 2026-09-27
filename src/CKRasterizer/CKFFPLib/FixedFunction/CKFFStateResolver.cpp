@@ -201,6 +201,9 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     stateDesc.FS.SetSpecularAdd(specular != 0);
     stateDesc.FS.SetFogEnabled(fogEnable != 0);
     stateDesc.FS.SetFlatShade(drawState.GetRenderState(VXRENDERSTATE_SHADEMODE) == VXSHADE_FLAT);
+    stateDesc.FS.SetDitherEnabled(
+        drawState.GetRenderState(VXRENDERSTATE_DITHERENABLE) != 0);
+    stateDesc.FS.SetColorTargetFormat((CKDWORD)state.ColorTargetFormat);
 
     CKBOOL alphaTest = drawState.GetRenderState(VXRENDERSTATE_ALPHATESTENABLE);
     if (alphaTest) {

@@ -55,6 +55,7 @@ struct CKFFStateStore {
     CKBOOL ScissorEnabled;
     VxPlane UserClipPlanes[6];
     CKDWORD AlphaTestPrecision;
+    CKFFColorTargetFormat ColorTargetFormat;
     CK_DEPTH_FORMAT DepthBiasFormat;
 
     CKBOOL EnsureViewProjection();

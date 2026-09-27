@@ -17,6 +17,8 @@ SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format)
     switch (format) {
     case _32_ARGB8888: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
     case _32_ABGR8888: return SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    case _16_RGB565: return SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM;
+    case _16_ARGB1555: return SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM;
     case _DXT1: return SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM;
     // DXT2/4 store premultiplied colors; decode to straight-alpha BGRA for SDL shaders and blending.
     case _DXT2: return SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;

@@ -34,10 +34,13 @@ struct CKBgfxPresentResources {
     CKDWORD VertexShader;
     CKDWORD PixelShader;
     CKDWORD Program;
+    CKDWORD DitherPixelShader;
+    CKDWORD DitherProgram;
     CKDWORD VertexLayout;
 
     CKBgfxPresentResources()
-        : VertexShader(0), PixelShader(0), Program(0), VertexLayout(0) {}
+        : VertexShader(0), PixelShader(0), Program(0), DitherPixelShader(0),
+          DitherProgram(0), VertexLayout(0) {}
 };
 
 // Presentation stage of the virtual backbuffer: the scene renders
@@ -72,8 +75,17 @@ public:
     // the size changes; 0 when the backend cannot blit or read textures back.
     // Render targets cannot be read directly, readbacks blit into this one.
     CKDWORD AcquireReadbackTexture(CKDWORD width, CKDWORD height);
+    CKDWORD AcquireReadbackFrameBuffer();
     CKDWORD GetReadbackTexture() const { return m_ReadbackTexture; }
+    CKDWORD GetReadbackRenderTexture() const { return m_ReadbackRenderTexture; }
+    CKDWORD GetReadbackFrameBuffer() const { return m_ReadbackFrameBuffer; }
     const CKBgfxPresentResources &GetResourceIds() const { return m_ResourceIds; }
+    CKBOOL EnsureDitherTarget(CKDWORD width, CKDWORD height,
+                              CKDWORD samples, CKDWORD depthTexture);
+    CKDWORD AcquireDitherSource(const CKTextureDesc &source);
+    void ReleaseDitherTarget();
+    CKDWORD GetDitherTexture() const { return m_DitherTexture; }
+    CKDWORD GetDitherFrameBuffer() const { return m_DitherFrameBuffer; }
 
     // Draws the scene color as a fullscreen triangle into the current pass (the resolve).
     CKERROR SubmitResolve(CKBOOL fxaa, float sharpness);
@@ -83,15 +95,19 @@ public:
     // Destination pixel centers select source texels, including when scaled.
     CKERROR SubmitCopy(CKDWORD texture, CKDWORD width, CKDWORD height,
                        CKBOOL flipV);
+    CKERROR SubmitDither(CKDWORD texture, CKDWORD width, CKDWORD height,
+                         CKDWORD format, CKBOOL enabled, CKBOOL flipV);
 
 private:
     CKBOOL CreateTarget(CKBgfxPresentTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples);
     void DestroyTarget(CKBgfxPresentTarget &target);
     void DestroyReadbackTexture();
+    void DestroyDitherTarget();
+    CKBOOL EnsureDitherResources();
     CKERROR Submit(const CKBgfxPresentTarget &source, CKBOOL fxaa, float sharpness);
     CKERROR SubmitTexture(CKDWORD texture, CKDWORD width, CKDWORD height,
                           CKBOOL linear, CKBOOL fxaa, float sharpness,
-                          CKBOOL flipV);
+                          CKBOOL flipV, CKDWORD program = 0);
 
     CKBgfxRasterizerContext *m_Context;
     CKFFPresentDraw m_Draw;
@@ -100,8 +116,18 @@ private:
     CKBgfxPresentTarget m_Scene;
     CKBgfxPresentTarget m_Native;
     CKDWORD m_ReadbackTexture;    // BLIT_DST | READBACK copy target for readbacks
+    CKDWORD m_ReadbackRenderTexture;
+    CKDWORD m_ReadbackFrameBuffer;
     CKDWORD m_ReadbackWidth;
     CKDWORD m_ReadbackHeight;
+    CKDWORD m_DitherTexture;
+    CKDWORD m_DitherFrameBuffer;
+    CKDWORD m_DitherDepthTexture;
+    CKDWORD m_DitherSourceTexture;
+    VX_PIXELFORMAT m_DitherSourceFormat;
+    CKDWORD m_DitherWidth;
+    CKDWORD m_DitherHeight;
+    CKDWORD m_DitherSamples;
     CK_SHADER_FORMAT m_ShaderFormat;
     CK_SHADER_PROFILE m_ShaderProfile;
 };

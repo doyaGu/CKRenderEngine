@@ -60,7 +60,29 @@ CKBOOL CKBgfxRasterizerContext::BlitForReadback()
     }
     if (!source || !readbackTexture)
         return FALSE;
-    return Blit(readbackTexture, 0, 0, 0, 0, source, 0, 0, NULL) == CK_OK ? TRUE : FALSE;
+    const CKERROR copied = Blit(readbackTexture, 0, 0, 0, 0,
+                                source, 0, 0, NULL);
+    if (copied == CK_OK)
+        return TRUE;
+    if (copied != CKERR_NOTIMPLEMENTED)
+        return FALSE;
+
+    CKBOOL sourceBottomLeft = FALSE;
+    if (!GetTextureBottomLeft(source, sourceBottomLeft))
+        return FALSE;
+    CKRenderPassDesc pass;
+    pass.RenderTarget = m_Present.AcquireReadbackFrameBuffer();
+    if (!pass.RenderTarget)
+        return FALSE;
+    pass.Rect = CKFFMakeRect((int)m_Target.Width, (int)m_Target.Height);
+    pass.Name = "readback-convert";
+    if (BeginPass(&pass) != CK_OK ||
+        m_Present.SubmitCopy(source, m_Target.Width, m_Target.Height,
+            sourceBottomLeft == GetCaps().OriginBottomLeft) != CK_OK)
+        return FALSE;
+    return Blit(readbackTexture, 0, 0, 0, 0,
+                m_Present.GetReadbackRenderTexture(), 0, 0, NULL) == CK_OK
+        ? TRUE : FALSE;
 }
 
 CKBOOL CKBgfxRasterizerContext::IssueTextureReadback(PendingReadback &Readback)

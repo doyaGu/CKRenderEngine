@@ -259,6 +259,39 @@ CKDWORD CKFFTargetAlphaTestPrecision(const CKTextureDesc *TargetTexture,
     return CKFFAlphaTestPrecisionForFormat(backBuffer);
 }
 
+static CKDWORD CKFFMaskBitCount(CKDWORD mask)
+{
+    CKDWORD count = 0;
+    while (mask != 0) {
+        count += mask & 1u;
+        mask >>= 1;
+    }
+    return count;
+}
+
+CKFFColorTargetFormat CKFFTargetColorFormat(
+    const CKTextureDesc *TargetTexture, int BackBufferBpp)
+{
+    VxImageDescEx backBuffer;
+    const VxImageDescEx *format = TargetTexture ? &TargetTexture->Format : &backBuffer;
+    if (!TargetTexture) {
+        VxPixelFormat2ImageDesc(
+            BackBufferBpp == 16 ? _16_RGB565 : _32_ARGB8888, backBuffer);
+    }
+
+    const CKDWORD red = CKFFMaskBitCount(format->RedMask);
+    const CKDWORD green = CKFFMaskBitCount(format->GreenMask);
+    const CKDWORD blue = CKFFMaskBitCount(format->BlueMask);
+    const CKDWORD alpha = CKFFMaskBitCount(format->AlphaMask);
+    if (red == 5 && green == 6 && blue == 5 && alpha == 0)
+        return CKFF_COLOR_TARGET_RGB565;
+    if (red == 5 && green == 5 && blue == 5 && alpha == 1)
+        return CKFF_COLOR_TARGET_RGB5A1;
+    if (red == 4 && green == 4 && blue == 4 && alpha == 4)
+        return CKFF_COLOR_TARGET_RGBA4;
+    return CKFF_COLOR_TARGET_RGBA8;
+}
+
 static void CKFFRecordDiagnostic(CKRenderStats &Stats,
                                  CKRST_DIAGNOSTIC Diagnostic)
 {

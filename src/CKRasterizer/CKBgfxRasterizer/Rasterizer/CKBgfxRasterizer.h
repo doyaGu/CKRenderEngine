@@ -13,6 +13,8 @@ CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderS
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
                                         CKShaderDesc &out);
+CKBOOL CKBgfxRasterizerDitherFragmentShader(
+    const CKRasterizerDeviceCaps &caps, CKShaderDesc &out);
 
 class CKBgfxRasterizer final : public CKRasterizer {
 public:

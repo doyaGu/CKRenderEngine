@@ -225,6 +225,15 @@ void ShaderCacheRetainsAlternatingSpecializations()
                       CKFFBuildSpecializationInfo(key.FS),
                   "retained specialization values must survive alternation");
     }
+    CKFFShaderKey outputOnly = keys[0];
+    outputOnly.FS.DitherEnable = true;
+    outputOnly.FS.ColorTargetFormat = CKFF_COLOR_TARGET_RGB565;
+    const CKFFProgramBinding outputBinding =
+        cache.GetProgram(&backend, outputOnly);
+    TestCheck(cache.GetCachedSpecializationCount(CKFF_PROGRAM_3D) == 8 &&
+                  outputBinding.Specialization ==
+                      CKFFBuildSpecializationInfo(keys[0].FS),
+              "output conversion must not allocate a core specialization");
     cache.Shutdown(&backend);
 }
 
@@ -497,7 +506,6 @@ void IgnoredRenderStatesReportDiagnostics() {
         CKRST_DIAGNOSTIC Diagnostic;
     };
     const IgnoredStateCase cases[] = {
-        {VXRENDERSTATE_DITHERENABLE, TRUE, FALSE, CKRST_DIAG_IGNORE_DITHER},
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
         {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
         {VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE, FALSE, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING},
@@ -1216,6 +1224,74 @@ void DrawVertexBufferUploadsAlphaPrecision() {
               "FFP draw params must upload alpha-test compare function");
     TestCheck(((alphaFuncPrecision >> 4) & 0xFu) == 0x2,
               "FFP draw params must upload current alpha-test precision");
+
+    ffp.Shutdown();
+}
+
+void DrawVertexBufferRoutesTargetDithering() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    ffp.SetColorTargetFormat(CKFF_COLOR_TARGET_RGB565);
+    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "dithered RGB565 draw submits");
+    CKFFSpecializationInfo spec = CurrentDrawSpecialization(ffp, context);
+    TestCheck(ffp.GetDraw().ShaderKey.FS.DitherEnable &&
+                  ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
+                      CKFF_COLOR_TARGET_RGB565,
+              "dither and RGB565 precision reach output routing");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_IGNORE_DITHER) == 0,
+              "implemented dithering must not report an approximation");
+
+    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "disabling RGB565 dithering submits");
+    const CKFFSpecializationInfo disabledSpec =
+        CurrentDrawSpecialization(ffp, context);
+    TestCheck(!ffp.GetDraw().ShaderKey.FS.DitherEnable &&
+                  ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
+                      CKFF_COLOR_TARGET_RGB565 &&
+                  disabledSpec == spec,
+              "changing only dither state reuses the core specialization");
+
+    ffp.SetColorTargetFormat(CKFF_COLOR_TARGET_RGBA4);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "non-dithered RGBA4 draw submits");
+    const CKFFSpecializationInfo rgba4Spec =
+        CurrentDrawSpecialization(ffp, context);
+    TestCheck(ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
+                  CKFF_COLOR_TARGET_RGBA4 &&
+                  rgba4Spec == spec,
+              "target format routing reuses the core specialization");
+
+    CKTextureDesc target;
+    VxPixelFormat2ImageDesc(_16_RGB565, target.Format);
+    TestCheck(CKFFTargetColorFormat(&target, 32) ==
+                  CKFF_COLOR_TARGET_RGB565,
+              "RGB565 render targets select 5:6:5 precision");
+    VxPixelFormat2ImageDesc(_16_ARGB1555, target.Format);
+    TestCheck(CKFFTargetColorFormat(&target, 32) ==
+                  CKFF_COLOR_TARGET_RGB5A1,
+              "ARGB1555 render targets select 5:5:5:1 precision");
+    VxPixelFormat2ImageDesc(_16_ARGB4444, target.Format);
+    TestCheck(CKFFTargetColorFormat(&target, 32) ==
+                  CKFF_COLOR_TARGET_RGBA4,
+              "ARGB4444 render targets select 4:4:4:4 precision");
+    TestCheck(CKFFTargetColorFormat(NULL, 16) ==
+                  CKFF_COLOR_TARGET_RGB565 &&
+                  CKFFTargetColorFormat(NULL, 32) ==
+                  CKFF_COLOR_TARGET_RGBA8,
+              "backbuffer depth selects its declared color precision");
 
     ffp.Shutdown();
 }
@@ -2762,7 +2838,7 @@ void DrawValidationCacheInvalidatesOnStateChanges() {
     TestCheck(firstDraw && cachedDraw && context.Log.DrawCount == 2,
               "unchanged valid draw state remains submit-ready");
 
-    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);
     const CKBOOL firstApproximation = ffp.DrawVertexBuffer(
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
@@ -2773,11 +2849,11 @@ void DrawValidationCacheInvalidatesOnStateChanges() {
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
     TestCheck(firstApproximation && cachedApproximation &&
                   ffp.GetLastDrawApproximationMask() ==
-                      (1ull << CKRST_DIAG_IGNORE_DITHER) &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_IGNORE_DITHER) == 2 &&
+                      (1ull << CKRST_DIAG_IGNORE_ANTIALIAS) &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_IGNORE_ANTIALIAS) == 2 &&
                   context.Log.DrawCount == 4,
               "cached validation replays per-draw approximation diagnostics");
-    ffp.SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, FALSE);
 
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, 99);
     TestCheck(!ffp.DrawVertexBuffer(
@@ -4325,6 +4401,8 @@ int main() {
               &ViewportMappingRemapsClipSpaceAndScissors);
     tests.Run("DrawVertexBuffer uploads alpha precision",
               &DrawVertexBufferUploadsAlphaPrecision);
+    tests.Run("DrawVertexBuffer routes target dithering",
+              &DrawVertexBufferRoutesTargetDithering);
     tests.Run("DrawVertexBuffer uses depth-format-aware polygon ZBIAS",
               &DrawVertexBufferUsesDepthFormatAwarePolygonZBias);
     tests.Run("DrawVertexBuffer sets flat shade specialization",

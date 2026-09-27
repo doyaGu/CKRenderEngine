@@ -223,6 +223,28 @@ private:
                       SDL_GPUTextureFormat ColorFormat,
                       SDL_GPUTextureFormat DepthFormat,
                       SDL_GPUSampleCount Samples);
+    CKERROR ConvertColorTexture(SDL_GPUTexture *Source,
+                                SDL_GPUTexture *Destination,
+                                SDL_GPUTextureFormat DestinationFormat,
+                                unsigned Width, unsigned Height);
+    CKERROR DrawColorTexture(SDL_GPURenderPass *Pass,
+                             SDL_GPUTexture *Source,
+                             SDL_GPUTextureFormat ColorFormat,
+                             SDL_GPUTextureFormat DepthFormat,
+                             SDL_GPUSampleCount Samples,
+                             unsigned Width, unsigned Height,
+                             const SDL_Rect &Scissor,
+                             CKDWORD ColorTargetFormat,
+                             CKBOOL Dither,
+                             CKBOOL ExplicitQuantize);
+    CKERROR EnsureDitherTargets(unsigned Width, unsigned Height,
+                                unsigned Samples,
+                                SDL_GPUTextureFormat SourceFormat);
+    CKERROR SnapshotDitherSource(SDL_GPUTexture *Source,
+                                SDL_GPUTextureType SourceType,
+                                unsigned SourceMip, unsigned SourceLayer,
+                                unsigned Width, unsigned Height,
+                                SDL_GPUTexture **Snapshot);
     SDL_GPUGraphicsPipeline *Pipeline(
         const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
         SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples);
@@ -404,6 +426,16 @@ private:
     CKSdlGpuDefaultVertexTable DefaultVertexBuffers;
     std::shared_ptr<CKSdlGpuProgram> ClearProgram;
     std::shared_ptr<CKSdlGpuProgram> VolumeMipProgram;
+    std::shared_ptr<CKSdlGpuProgram> DitherProgram;
+    std::shared_ptr<SDL_GPUSampler> DitherSampler;
+    std::shared_ptr<SDL_GPUTexture> DitherScratch;
+    std::shared_ptr<SDL_GPUTexture> DitherMultisample;
+    std::shared_ptr<SDL_GPUTexture> DitherResolved;
+    std::shared_ptr<SDL_GPUTexture> DitherSource;
+    SDL_GPUTextureFormat DitherSourceFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    unsigned DitherScratchWidth = 0;
+    unsigned DitherScratchHeight = 0;
+    unsigned DitherScratchSamples = 1;
     CKSdlGpuDefaultTextureTable DefaultTextures;
     XClassArray<std::shared_ptr<CKSdlGpuReadback>> Readbacks;
     XClassArray<CKSdlGpuSubmission> Submissions;

@@ -388,6 +388,10 @@ private:
                               CKDWORD VertexCount, CKDWORD StartIndex, CKDWORD IndexCount,
                               const CKWORD *Indices = NULL);
     CKBOOL SubmitPreparedDraw();
+    CKERROR SubmitOutputConvertedDraw(const CKDrawCommand &Draw,
+                                      CKBOOL Dither,
+                                      CKDWORD TargetFormat,
+                                      uint64_t &ApproximationMask);
     CKDWORD GetNativeVertexLayout(CKDWORD FormatFlags);
     void ClearNativeVertexLayouts();
     CKFFProgramBinding ResolveNativeFFProgram(const CKFFShaderKey &Key);

@@ -32,6 +32,7 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
     case VXRENDERSTATE_FOGPIXELMODE:
     case VXRENDERSTATE_RANGEFOGENABLE:
     case VXRENDERSTATE_SHADEMODE:
+    case VXRENDERSTATE_DITHERENABLE:
     case VXRENDERSTATE_ALPHATESTENABLE:
     case VXRENDERSTATE_ALPHAFUNC:
     case VXRENDERSTATE_CLIPPING:
@@ -60,6 +61,16 @@ void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
 
 CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
     return m_State.AlphaTestPrecision;
+}
+
+void CKFixedFunctionPipeline::SetColorTargetFormat(CKFFColorTargetFormat format) {
+    if (format < CKFF_COLOR_TARGET_RGBA8 || format >= CKFF_COLOR_TARGET_COUNT)
+        format = CKFF_COLOR_TARGET_RGBA8;
+    if (m_State.ColorTargetFormat == format)
+        return;
+    m_State.ColorTargetFormat = format;
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
+                                CKFF_CHANGE_DRAW_VALIDATION);
 }
 
 void CKFixedFunctionPipeline::SetDepthBiasFormat(CK_DEPTH_FORMAT format) {

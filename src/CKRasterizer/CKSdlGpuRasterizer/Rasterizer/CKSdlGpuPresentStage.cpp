@@ -72,7 +72,8 @@ CKDWORD CKSdlGpuPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD heig
     desc.MipMapCount = 1;
     desc.Depth = 1;
     desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA |
-                 CKRST_TEXTURE_BLIT_DST | CKRST_TEXTURE_READBACK;
+                 CKRST_TEXTURE_RENDERTARGET | CKRST_TEXTURE_BLIT_DST |
+                 CKRST_TEXTURE_READBACK;
     if (m_Context->CreateTexture(&desc, nullptr, &m_ReadbackTexture) != CK_OK) {
         m_ReadbackTexture = 0;
         return 0;

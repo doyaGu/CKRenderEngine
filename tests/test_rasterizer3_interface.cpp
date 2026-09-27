@@ -1041,7 +1041,6 @@ void SetupBlendWithoutWeights(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRende
 void TestApproximationsKeepDrawing()
 {
     const ApproximationCase cases[] = {
-        {"dither", CKRST_DIAG_IGNORE_DITHER, &SetupDither},
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
         {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
@@ -1076,6 +1075,18 @@ void TestApproximationsKeepDrawing()
                       Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 0,
                   "approximations must not count as rejections");
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
+    }
+
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        SetupDither(ctx, 0);
+        TestCheck(ctx->BeginScene(), "BeginScene (dither)");
+        DrawTexturedTriangle(ctx);
+        TestCheck(ctx->EndScene(), "EndScene (dither)");
+        TestCheck(CountDraws(f) == 1, "dithered draw must reach the device");
+        TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_DITHER) == 0,
+                  "dithering must not count an approximation diagnostic");
     }
 
     {

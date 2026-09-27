@@ -118,6 +118,48 @@ void CKSdlGpuBindVertexBuffer(SDL_GPURenderPass *pass,
     bound.Valid = true;
 }
 
+bool CKSdlGpuNativePackedColor(SDL_GPUTextureFormat nativeFormat,
+                               CKDWORD logicalFormat)
+{
+    return (logicalFormat == CKFF_COLOR_TARGET_RGB565 &&
+            nativeFormat == SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM) ||
+           (logicalFormat == CKFF_COLOR_TARGET_RGB5A1 &&
+            nativeFormat == SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM);
+}
+
+bool CKSdlGpuNeedsOutputResolve(const std::shared_ptr<CKSdlGpuTarget> &target,
+                                CKDWORD logicalFormat, bool dither)
+{
+    if (!target || logicalFormat == CKFF_COLOR_TARGET_RGBA8)
+        return false;
+    const bool nativePacked = CKSdlGpuNativePackedColor(
+        target->Color->Info.format, logicalFormat);
+    // A converted MSAA pass must keep using the converted attachment. Returning
+    // to the texture's native MSAA image would load samples that predate the
+    // last output resolve.
+    return dither || !nativePacked || target->Color->Samples > 1;
+}
+
+CKDWORD CKSdlGpuQuantizeClearColor(CKDWORD color, CKDWORD format)
+{
+    if (format == CKFF_COLOR_TARGET_RGBA8)
+        return color;
+    const unsigned rbLevels = format == CKFF_COLOR_TARGET_RGBA4 ? 15u : 31u;
+    const unsigned greenLevels = format == CKFF_COLOR_TARGET_RGB565 ? 63u : rbLevels;
+    const unsigned alphaLevels = format == CKFF_COLOR_TARGET_RGB565 ? 0u :
+        (format == CKFF_COLOR_TARGET_RGB5A1 ? 1u : 15u);
+    const auto quantize = [](unsigned value, unsigned levels) {
+        if (!levels)
+            return 255u;
+        const unsigned level = (value * levels + 127u) / 255u;
+        return (level * 255u + levels / 2u) / levels;
+    };
+    return (quantize((color >> 24) & 255u, alphaLevels) << 24) |
+           (quantize((color >> 16) & 255u, rbLevels) << 16) |
+           (quantize((color >> 8) & 255u, greenLevels) << 8) |
+           quantize(color & 255u, rbLevels);
+}
+
 const CKFFUniformBinding *CKSdlGpuFindUniform(
     const CKSdlGpuProgram &program, CK_SHADER_STAGE stage,
     CKFFConstantBlock block)
@@ -352,12 +394,24 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     CKRE_PROFILE_SCOPE("CKRE.SDL.RecordDraw");
     if (!Ready() || !PassOpen) return CKERR_INVALIDOPERATION;
     if (!desc || !desc->VertexCount) return CKERR_INVALIDPARAMETER;
+    const bool isolateBlendedOutput = CKSdlGpuNeedsOutputResolve(
+        Target, desc->ColorTargetFormat, desc->DitherEnable != FALSE) &&
+        ((desc->Pipeline.State.Lo >> 16) & 15u) != 0;
+    if (Draws.Size() != 0 &&
+        (Draws.Back().DitherEnable != (desc->DitherEnable != FALSE) ||
+         Draws.Back().ColorTargetFormat != desc->ColorTargetFormat ||
+         isolateBlendedOutput)) {
+        const CKERROR flushed = Flush(false);
+        if (flushed != CK_OK) return flushed;
+    }
     CKSdlGpuDraw draw;
     draw.State = desc->Pipeline;
     draw.LayoutHandle = desc->Layout; draw.Layout1Handle = desc->Stream1Layout;
     draw.StartVertex = desc->StartVertex; draw.Stream1StartVertex = desc->Stream1StartVertex;
     draw.VertexCount = desc->VertexCount; draw.StartIndex = desc->StartIndex;
     draw.IndexCount = desc->IndexCount;
+    draw.DitherEnable = desc->DitherEnable != FALSE;
+    draw.ColorTargetFormat = desc->ColorTargetFormat;
 #if (defined(CKRE_ENABLE_PROFILING) && CKRE_ENABLE_PROFILING) || \
     (defined(CKRE_ENABLE_FFP_DIAGNOSTICS) && CKRE_ENABLE_FFP_DIAGNOSTICS)
     draw.Marker = desc->Marker ? desc->Marker : "";
@@ -555,7 +609,176 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     Draws.PushBack(draw);
     ++FrameStats.Draws;
     // Bound packet retention independently of the number of engine draws.
-    return Draws.Size() >= 256 ? Flush() : CK_OK;
+    return isolateBlendedOutput || Draws.Size() >= 256 ? Flush(false) : CK_OK;
+}
+
+CKERROR CKSdlGpuRasterizerContext::DrawColorTexture(
+    SDL_GPURenderPass *pass, SDL_GPUTexture *source,
+    SDL_GPUTextureFormat colorFormat, SDL_GPUTextureFormat depthFormat,
+    SDL_GPUSampleCount samples, unsigned width, unsigned height,
+    const SDL_Rect &scissor, CKDWORD colorTargetFormat, CKBOOL dither,
+    CKBOOL explicitQuantize)
+{
+    if (!pass || !source || !width || !height || !DitherProgram ||
+        !DitherSampler)
+        return CKERR_INVALIDPARAMETER;
+    CKSdlGpuDraw draw;
+    draw.Program = DitherProgram.get();
+    draw.State.State.Lo = CKRST_STATE_WRITE_RGBA;
+    draw.State.State.Mid = CKRST_STATE_PT(VX_TRIANGLELIST);
+    SDL_GPUGraphicsPipeline *pipeline = Pipeline(
+        draw, colorFormat, depthFormat, samples);
+    if (!pipeline)
+        return Error;
+    SDL_GPUViewport viewport = {0, 0, float(width), float(height), 0, 1};
+    SDL_SetGPUViewport(pass, &viewport);
+    SDL_SetGPUScissor(pass, &scissor);
+    SDL_BindGPUGraphicsPipeline(pass, pipeline);
+    SDL_GPUTextureSamplerBinding binding = {source, DitherSampler.get()};
+    SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+    const float vertexParams[4] = {};
+    const float fragmentParams[4] = {
+        1.0f / float(width), 1.0f / float(height),
+        float(colorTargetFormat + (explicitQuantize ? 4u : 0u)),
+        dither ? 1.0f : 0.0f};
+    SDL_PushGPUVertexUniformData(Commands, 0, vertexParams,
+                                 unsigned(sizeof(vertexParams)));
+    SDL_PushGPUFragmentUniformData(Commands, 0, fragmentParams,
+                                   unsigned(sizeof(fragmentParams)));
+    SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+    return CK_OK;
+}
+
+CKERROR CKSdlGpuRasterizerContext::ConvertColorTexture(
+    SDL_GPUTexture *source, SDL_GPUTexture *destination,
+    SDL_GPUTextureFormat destinationFormat, unsigned width, unsigned height)
+{
+    if (!source || !destination || !width || !height)
+        return CKERR_INVALIDPARAMETER;
+    SDL_GPUColorTargetInfo target = {};
+    target.texture = destination;
+    target.load_op = SDL_GPU_LOADOP_DONT_CARE;
+    target.store_op = SDL_GPU_STOREOP_STORE;
+    SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(
+        Commands, &target, 1, nullptr);
+    if (!pass) return Fail("BeginGPURenderPass.colorConvert");
+    const SDL_Rect scissor = {0, 0, int(width), int(height)};
+    const CKERROR error = DrawColorTexture(
+        pass, source, destinationFormat, SDL_GPU_TEXTUREFORMAT_INVALID,
+        SDL_GPU_SAMPLECOUNT_1, width, height, scissor,
+        CKFF_COLOR_TARGET_RGBA8, FALSE, FALSE);
+    SDL_EndGPURenderPass(pass);
+    return error;
+}
+
+CKERROR CKSdlGpuRasterizerContext::EnsureDitherTargets(
+    unsigned width, unsigned height, unsigned samples,
+    SDL_GPUTextureFormat sourceFormat)
+{
+    if (!width || !height || !samples ||
+        sourceFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
+        return CKERR_INVALIDPARAMETER;
+    const bool sizeChanged = DitherScratchWidth != width ||
+        DitherScratchHeight != height;
+    if (sizeChanged) {
+        DitherScratch.reset();
+        DitherMultisample.reset();
+        DitherResolved.reset();
+        DitherSource.reset();
+        DitherScratchWidth = width;
+        DitherScratchHeight = height;
+        DitherScratchSamples = 1;
+        DitherSourceFormat = SDL_GPU_TEXTUREFORMAT_INVALID;
+    }
+    if (DitherSourceFormat != sourceFormat) {
+        DitherSource.reset();
+        DitherSourceFormat = sourceFormat;
+    }
+    auto createTexture = [&](SDL_GPUTextureFormat format,
+                             SDL_GPUTextureUsageFlags usage,
+                             unsigned sampleCount,
+                             const char *operation,
+                             std::shared_ptr<SDL_GPUTexture> &texture) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = format;
+        info.usage = usage;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = CKSdlGpuSampleCount(sampleCount);
+        texture = CKSdlGpuOwn(Device, SDL_CreateGPUTexture(Device, &info),
+                              SDL_ReleaseGPUTexture);
+        return texture ? CK_OK : Fail(operation);
+    };
+    const SDL_GPUTextureUsageFlags scratchUsage =
+        SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    if (!DitherScratch && createTexture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+            scratchUsage, 1, "CreateGPUTexture.ditherScratch",
+            DitherScratch) != CK_OK)
+        return Error;
+    if (samples > 1 &&
+        (!DitherMultisample || !DitherResolved ||
+         DitherScratchSamples != samples)) {
+        DitherMultisample.reset();
+        DitherResolved.reset();
+        if (createTexture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, samples,
+                "CreateGPUTexture.ditherMultisample",
+                DitherMultisample) != CK_OK ||
+            createTexture(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT,
+                scratchUsage, 1, "CreateGPUTexture.ditherResolved",
+                DitherResolved) != CK_OK)
+            return Error;
+        DitherScratchSamples = samples;
+    }
+    return CK_OK;
+}
+
+CKERROR CKSdlGpuRasterizerContext::SnapshotDitherSource(
+    SDL_GPUTexture *source, SDL_GPUTextureType sourceType,
+    unsigned sourceMip, unsigned sourceLayer, unsigned width, unsigned height,
+    SDL_GPUTexture **snapshot)
+{
+    if (snapshot) *snapshot = nullptr;
+    if (!source || !snapshot || !width || !height)
+        return CKERR_INVALIDPARAMETER;
+    if (sourceType == SDL_GPU_TEXTURETYPE_2D &&
+        sourceMip == 0 && sourceLayer == 0) {
+        *snapshot = source;
+        return CK_OK;
+    }
+    if (!DitherSource) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = DitherSourceFormat;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        info.width = DitherScratchWidth;
+        info.height = DitherScratchHeight;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        DitherSource = CKSdlGpuOwn(Device,
+            SDL_CreateGPUTexture(Device, &info), SDL_ReleaseGPUTexture);
+        if (!DitherSource)
+            return Fail("CreateGPUTexture.ditherSource");
+    }
+    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Commands);
+    if (!copy)
+        return Fail("BeginGPUCopyPass.ditherSource");
+    SDL_GPUTextureLocation from = {}, to = {};
+    from.texture = source;
+    from.mip_level = sourceMip;
+    if (sourceType == SDL_GPU_TEXTURETYPE_3D)
+        from.z = sourceLayer;
+    else
+        from.layer = sourceLayer;
+    to.texture = DitherSource.get();
+    SDL_CopyGPUTextureToTexture(copy, &from, &to, width, height, 1, false);
+    SDL_EndGPUCopyPass(copy);
+    *snapshot = DitherSource.get();
+    return CK_OK;
 }
 
 CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
@@ -586,13 +809,24 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
     const unsigned width = Target ? std::max(1u, Target->Color->Info.width >> Target->Desc.ColorMip) : SwapWidth;
     const unsigned height = Target ? std::max(1u, Target->Color->Info.height >> Target->Desc.ColorMip) : SwapHeight;
     const bool fullRect = Pass.Rect.left == 0 && Pass.Rect.top == 0 && unsigned(Pass.Rect.right) == width && unsigned(Pass.Rect.bottom) == height;
+    const bool hasDepth = Target && Target->Depth;
+    const auto samples = CKSdlGpuSampleCount(Target ? Target->Color->Samples : 1);
+    const CKDWORD logicalColorFormat = Draws.Size() != 0
+        ? Draws[0].ColorTargetFormat : Pass.ColorTargetFormat;
+    const bool ditherEnabled = Draws.Size() != 0 && Draws[0].DitherEnable;
+    const bool outputResolve = CKSdlGpuNeedsOutputResolve(
+        Target, logicalColorFormat, ditherEnabled);
+    CKRenderPassDesc routedPass = Pass;
+    if (outputResolve && (routedPass.ClearFlags & CKRST_CTXCLEAR_COLOR))
+        routedPass.ClearColor = CKSdlGpuQuantizeClearColor(
+            routedPass.ClearColor, logicalColorFormat);
     SDL_GPUColorTargetInfo color = {};
     color.texture = Target ? (Target->Color->Multisample ? Target->Color->Multisample.get() : Target->Color->Image.get()) : Swapchain;
     color.mip_level = Target ? Target->Desc.ColorMip : 0;
     color.layer_or_depth_plane = Target ? Target->Desc.ColorLayer : 0;
-    color.clear_color = {float((Pass.ClearColor >> 16) & 255) / 255, float((Pass.ClearColor >> 8) & 255) / 255,
-                         float(Pass.ClearColor & 255) / 255, float(Pass.ClearColor >> 24) / 255};
-    color.load_op = fullRect && (Pass.ClearFlags & CKRST_CTXCLEAR_COLOR) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+    color.clear_color = {float((routedPass.ClearColor >> 16) & 255) / 255, float((routedPass.ClearColor >> 8) & 255) / 255,
+                         float(routedPass.ClearColor & 255) / 255, float(routedPass.ClearColor >> 24) / 255};
+    color.load_op = fullRect && (routedPass.ClearFlags & CKRST_CTXCLEAR_COLOR) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
     color.store_op = SDL_GPU_STOREOP_STORE;
     if (Target && Target->VolumeSlice) {
         if (color.load_op == SDL_GPU_LOADOP_LOAD) {
@@ -604,16 +838,56 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         }
         color.texture = Target->VolumeSlice.get(); color.mip_level = color.layer_or_depth_plane = 0;
     }
-    if (Target && Target->Color->Multisample) {
+    SDL_GPUTexture *finalColorTexture = Target
+        ? (Target->VolumeSlice ? Target->VolumeSlice.get() : Target->Color->Image.get())
+        : Swapchain;
+    const unsigned finalColorMip = Target && !Target->VolumeSlice
+        ? Target->Desc.ColorMip : 0;
+    const unsigned finalColorLayer = Target && !Target->VolumeSlice
+        ? Target->Desc.ColorLayer : 0;
+    const SDL_GPUTextureType finalColorType = Target && !Target->VolumeSlice
+        ? Target->Color->Info.type : SDL_GPU_TEXTURETYPE_2D;
+    const SDL_GPUTextureFormat finalColorFormat = Target ? Target->Color->Info.format
+        : SDL_GetGPUSwapchainTextureFormat(Device, Window);
+    const bool nativeLowBit = CKSdlGpuNativePackedColor(
+        finalColorFormat, logicalColorFormat);
+    const SDL_GPUTextureFormat scratchFormat =
+        SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+    const SDL_GPULoadOp originalColorLoad = color.load_op;
+    bool seedMultisample = false;
+    if (outputResolve) {
+        if (EnsureDitherTargets(width, height, Target->Color->Samples,
+                                finalColorFormat) != CK_OK)
+            return Error;
+        if (originalColorLoad == SDL_GPU_LOADOP_LOAD) {
+            SDL_GPUTexture *snapshot = nullptr;
+            if (SnapshotDitherSource(finalColorTexture, finalColorType,
+                    finalColorMip, finalColorLayer, width, height,
+                    &snapshot) != CK_OK ||
+                ConvertColorTexture(snapshot, DitherScratch.get(),
+                    scratchFormat, width, height) != CK_OK)
+                return Error;
+        }
+        if (Target->Color->Samples > 1) {
+            color.texture = DitherMultisample.get();
+            color.resolve_texture = DitherResolved.get();
+            color.store_op = SDL_GPU_STOREOP_RESOLVE_AND_STORE;
+            color.load_op = SDL_GPU_LOADOP_DONT_CARE;
+            seedMultisample = originalColorLoad == SDL_GPU_LOADOP_LOAD;
+        } else {
+            color.texture = DitherScratch.get();
+            color.load_op = originalColorLoad;
+        }
+        color.mip_level = color.layer_or_depth_plane = 0;
+    } else if (Target && Target->Color->Multisample) {
         color.resolve_texture = Target->Color->Image.get();
         color.resolve_mip_level = color.mip_level; color.resolve_layer = color.layer_or_depth_plane;
         color.store_op = SDL_GPU_STOREOP_RESOLVE_AND_STORE;
     }
     SDL_GPUDepthStencilTargetInfo ds = {};
-    const bool hasDepth = Target && Target->Depth;
-    const SDL_GPUTextureFormat colorFormat = Target ? Target->Color->Info.format : SDL_GetGPUSwapchainTextureFormat(Device, Window);
+    const SDL_GPUTextureFormat colorFormat = outputResolve
+        ? scratchFormat : finalColorFormat;
     const SDL_GPUTextureFormat depthFormat = hasDepth ? Target->Depth->Info.format : SDL_GPU_TEXTUREFORMAT_INVALID;
-    const auto samples = CKSdlGpuSampleCount(Target ? Target->Color->Samples : 1);
     if (hasDepth) {
         ds.texture = Target->Depth->Image.get(); ds.clear_depth = Pass.ClearZ; ds.clear_stencil = Uint8(Pass.ClearStencil);
         ds.load_op = fullRect && (Pass.ClearFlags & CKRST_CTXCLEAR_DEPTH) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
@@ -630,7 +904,19 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         std::max(0, std::min(int(height), Pass.Rect.bottom) - std::max(0, Pass.Rect.top))};
     if (!Target) passRect = {0, 0, int(width), int(height)};
     SDL_SetGPUViewport(pass, &viewport); SDL_SetGPUScissor(pass, &passRect);
-    if (!fullRect && Pass.ClearFlags && ClearRect(pass, Pass, colorFormat, depthFormat, samples) != CK_OK) {
+    if (seedMultisample) {
+        const SDL_Rect fullTarget = {0, 0, int(width), int(height)};
+        if (DrawColorTexture(pass, DitherScratch.get(), colorFormat,
+                depthFormat, samples, width, height, fullTarget,
+                CKFF_COLOR_TARGET_RGBA8, FALSE, FALSE) != CK_OK) {
+            SDL_EndGPURenderPass(pass);
+            return Error;
+        }
+        SDL_SetGPUViewport(pass, &viewport);
+        SDL_SetGPUScissor(pass, &passRect);
+    }
+    if (!fullRect && routedPass.ClearFlags &&
+        ClearRect(pass, routedPass, colorFormat, depthFormat, samples) != CK_OK) {
         SDL_EndGPURenderPass(pass); return Error;
     }
     SDL_GPUGraphicsPipeline *boundPipeline = nullptr;
@@ -730,6 +1016,29 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         }
     }
     SDL_EndGPURenderPass(pass);
+    if (outputResolve) {
+        SDL_GPUColorTargetInfo resolved = {};
+        resolved.texture = finalColorTexture;
+        resolved.mip_level = finalColorMip;
+        resolved.layer_or_depth_plane = finalColorLayer;
+        resolved.load_op = SDL_GPU_LOADOP_LOAD;
+        resolved.store_op = SDL_GPU_STOREOP_STORE;
+        SDL_GPURenderPass *resolvePass = SDL_BeginGPURenderPass(
+            Commands, &resolved, 1, nullptr);
+        if (!resolvePass) return Fail("BeginGPURenderPass.ditherResolve");
+        const bool explicitQuantize = ditherEnabled || !nativeLowBit;
+        SDL_GPUTexture *resolveSource = Target->Color->Samples > 1
+            ? DitherResolved.get() : DitherScratch.get();
+        if (DrawColorTexture(resolvePass, resolveSource, finalColorFormat,
+                SDL_GPU_TEXTUREFORMAT_INVALID, SDL_GPU_SAMPLECOUNT_1,
+                width, height, passRect, logicalColorFormat,
+                ditherEnabled ? TRUE : FALSE,
+                explicitQuantize ? TRUE : FALSE) != CK_OK) {
+            SDL_EndGPURenderPass(resolvePass);
+            return Error;
+        }
+        SDL_EndGPURenderPass(resolvePass);
+    }
     if (Target) {
         if (Target->VolumeSlice && CopyVolumeSlice(*Target->Color, Target->Desc.ColorMip,
             Target->Desc.ColorLayer, Target->VolumeSlice.get(), true) != CK_OK) return Error;
@@ -834,7 +1143,7 @@ CKERROR CKSdlGpuRasterizerContext::Blit(CKDWORD dstHandle, CKDWORD dstMip, CKDWO
     if (!Ready()) return CKERR_INVALIDOPERATION;
     auto src = Textures.Get(srcHandle), dst = Textures.Get(dstHandle);
     if (!src || !dst || src->Depth || dst->Depth || dst->Multisample || src == dst ||
-        src->Info.format != dst->Info.format || srcMip >= src->Info.num_levels || dstMip >= dst->Info.num_levels ||
+        srcMip >= src->Info.num_levels || dstMip >= dst->Info.num_levels ||
         srcLayer >= CKSdlGpuTextureLayers(*src, srcMip) || dstLayer >= CKSdlGpuTextureLayers(*dst, dstMip)) return CKERR_INVALIDPARAMETER;
     const unsigned sw = std::max(1u, src->Info.width >> srcMip), sh = std::max(1u, src->Info.height >> srcMip);
     const unsigned dw = std::max(1u, dst->Info.width >> dstMip), dh = std::max(1u, dst->Info.height >> dstMip);
@@ -849,15 +1158,27 @@ CKERROR CKSdlGpuRasterizerContext::Blit(CKDWORD dstHandle, CKDWORD dstMip, CKDWO
     error = PreserveTexture(*dst);
     if (error != CK_OK) return error;
     if (!EnsureCommands()) return Error;
-    SDL_GPUTextureLocation source = {}, destination = {};
-    source.texture = src->Image.get(); source.mip_level = srcMip; source.x = sx; source.y = sy;
-    if (src->Info.type == SDL_GPU_TEXTURETYPE_3D) source.z = srcLayer; else source.layer = srcLayer;
-    destination.texture = dst->Image.get(); destination.mip_level = dstMip; destination.x = dx; destination.y = dy;
-    if (dst->Info.type == SDL_GPU_TEXTURETYPE_3D) destination.z = dstLayer; else destination.layer = dstLayer;
-    auto *copy = SDL_BeginGPUCopyPass(Commands);
-    if (!copy) return Fail("BeginGPUCopyPass.blit");
-    SDL_CopyGPUTextureToTexture(copy, &source, &destination, w, h, 1, false);
-    SDL_EndGPUCopyPass(copy);
+    if (src->Info.format == dst->Info.format) {
+        SDL_GPUTextureLocation source = {}, destination = {};
+        source.texture = src->Image.get(); source.mip_level = srcMip; source.x = sx; source.y = sy;
+        if (src->Info.type == SDL_GPU_TEXTURETYPE_3D) source.z = srcLayer; else source.layer = srcLayer;
+        destination.texture = dst->Image.get(); destination.mip_level = dstMip; destination.x = dx; destination.y = dy;
+        if (dst->Info.type == SDL_GPU_TEXTURETYPE_3D) destination.z = dstLayer; else destination.layer = dstLayer;
+        auto *copy = SDL_BeginGPUCopyPass(Commands);
+        if (!copy) return Fail("BeginGPUCopyPass.blit");
+        SDL_CopyGPUTextureToTexture(copy, &source, &destination, w, h, 1, false);
+        SDL_EndGPUCopyPass(copy);
+    } else {
+        if (src->Info.type != SDL_GPU_TEXTURETYPE_2D ||
+            dst->Info.type != SDL_GPU_TEXTURETYPE_2D ||
+            srcMip != 0 || dstMip != 0 || srcLayer != 0 || dstLayer != 0 ||
+            sx != 0 || sy != 0 || dx != 0 || dy != 0 ||
+            w != sw || h != sh || w != dw || h != dh)
+            return CKERR_NOTIMPLEMENTED;
+        error = ConvertColorTexture(src->Image.get(), dst->Image.get(),
+                                    dst->Info.format, w, h);
+        if (error != CK_OK) return error;
+    }
     src->Referenced = true;
     dst->Defined.Set((int)(dstMip * dst->Info.layer_count_or_depth + dstLayer));
     ++FrameStats.Blits;

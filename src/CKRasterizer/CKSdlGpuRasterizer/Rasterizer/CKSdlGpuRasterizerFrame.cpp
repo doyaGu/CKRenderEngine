@@ -155,6 +155,7 @@ CKBOOL CKSdlGpuRasterizerContext::OpenPass(CKDWORD RenderTarget, const CKRECT &R
     pass.ClearColor = Color;
     pass.ClearZ = Z;
     pass.ClearStencil = Stencil;
+    pass.ColorTargetFormat = m_FFP.GetColorTargetFormat();
     pass.Name = Name;
     if (BeginPass(&pass) != CK_OK)
         return FALSE;
@@ -585,6 +586,8 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
     nativeDraw.StartIndex = draw.StartIndex;
     nativeDraw.IndexCount = draw.IndexCount;
     nativeDraw.SortKey = draw.SortKey;
+    nativeDraw.DitherEnable = draw.ShaderKey.FS.DitherEnable ? TRUE : FALSE;
+    nativeDraw.ColorTargetFormat = draw.ShaderKey.FS.ColorTargetFormat;
 
     CKTransientVertexData vertices;
     CKTransientIndexData indices;

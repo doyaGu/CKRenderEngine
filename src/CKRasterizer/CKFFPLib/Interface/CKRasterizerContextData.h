@@ -141,10 +141,12 @@ struct CKRenderPassDesc {
     CKDWORD ClearColor;            // ARGB
     float ClearZ;
     CKDWORD ClearStencil;
+    CKDWORD ColorTargetFormat;     // CKFFColorTargetFormat used for clear/output conversion
     const char *Name;              // debug name, may be NULL
 
     CKRenderPassDesc()
-        : RenderTarget(0), ClearFlags(0), ClearColor(0), ClearZ(1.0f), ClearStencil(0), Name(NULL) {
+        : RenderTarget(0), ClearFlags(0), ClearColor(0), ClearZ(1.0f),
+          ClearStencil(0), ColorTargetFormat(0), Name(NULL) {
         Rect.left = Rect.top = Rect.right = Rect.bottom = 0;
     }
 };
@@ -195,6 +197,8 @@ struct CKDrawCommand {
     const CKTransientVertexData *Stream1Transient;
     CKDWORD Stream1StartVertex;
     CKDWORD SortKey;                           // draw order key inside the pass (0 = submission order)
+    CKBOOL DitherEnable;                       // legacy target-color dithering for this draw
+    CKDWORD ColorTargetFormat;                 // CKFFColorTargetFormat
 
     CKDrawCommand()
         : Program(0), Layout(0), VertexBuffer(0),
@@ -202,7 +206,8 @@ struct CKDrawCommand {
           IndexBuffer(0), TransientIndices(NULL),
           StartIndex(0), IndexCount(0), Stream1Layout(0),
           Stream1VertexBuffer(0),
-          Stream1Transient(NULL), Stream1StartVertex(0), SortKey(0) {}
+          Stream1Transient(NULL), Stream1StartVertex(0), SortKey(0),
+          DitherEnable(FALSE), ColorTargetFormat(0) {}
 };
 
 enum CKPresentSync {

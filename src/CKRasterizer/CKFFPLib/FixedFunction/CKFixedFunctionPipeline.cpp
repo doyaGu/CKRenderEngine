@@ -412,8 +412,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
     const CKBOOL lines = CKFFUsesLineRasterization(topology, m_State.DrawState);
     // Render states the backends cannot express are reported only when they
     // affect the primitives actually submitted by this draw.
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_DITHERENABLE))
-        RecordDrawApproximation(CKRST_DIAG_IGNORE_DITHER);
     if ((triangles || lines) &&
         m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);

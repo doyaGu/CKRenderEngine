@@ -95,7 +95,11 @@ CKRECT CKBgfxRasterizerContext::CurrentPassRect() const
 // fall back to the swap chain. A requested sample count must be preserved.
 CKBOOL CKBgfxRasterizerContext::PrepareFrameTarget()
 {
-    const bool required = GetCaps().RequiresIntermediateTarget && !m_Target.IsActive();
+    const bool packedBackbuffer = !m_Target.IsActive() &&
+        m_FFP.GetColorTargetFormat() != CKFF_COLOR_TARGET_RGBA8;
+    const bool required =
+        (GetCaps().RequiresIntermediateTarget || packedBackbuffer) &&
+        !m_Target.IsActive();
     const bool msaaRequired = m_Options.MSAASamples > 1 && !m_Target.IsActive();
     if (m_Frame.TargetDecided)
         return (!required && !msaaRequired) || m_Frame.InternalTargets;
@@ -153,6 +157,7 @@ CKBOOL CKBgfxRasterizerContext::OpenPass(CKDWORD RenderTarget, const CKRECT &Rec
     pass.ClearColor = Color;
     pass.ClearZ = Z;
     pass.ClearStencil = Stencil;
+    pass.ColorTargetFormat = m_FFP.GetColorTargetFormat();
     pass.Name = Name;
     if (BeginPass(&pass) != CK_OK)
         return FALSE;
@@ -486,6 +491,94 @@ void CKBgfxRasterizerContext::ClearNativeFFPrograms()
     m_ShaderCache.Shutdown();
 }
 
+CKERROR CKBgfxRasterizerContext::SubmitOutputConvertedDraw(
+    const CKDrawCommand &draw, CKBOOL dither, CKDWORD targetFormat,
+    uint64_t &approximationMask)
+{
+    CKDWORD colorTexture = 0;
+    CKDWORD frameBuffer = m_PassTarget;
+    CKDWORD depthTexture = 0;
+    CKDWORD width = 0;
+    CKDWORD height = 0;
+    CKDWORD samples = 0;
+    CKDWORD sourceLayer = 0;
+    const CKTextureDesc *publicTarget = NULL;
+
+    if (m_Target.IsActive()) {
+        publicTarget = m_PublicResources.FindTexture(m_Target.Texture);
+        if (!publicTarget)
+            return CKERR_INVALIDOPERATION;
+        colorTexture = m_Target.Texture;
+        depthTexture = m_TargetDepthTexture;
+        width = m_Target.Width;
+        height = m_Target.Height;
+        samples = CKRSTTextureMSAASamples(publicTarget->Flags);
+        sourceLayer = (CKDWORD)m_Target.Face;
+    } else if (m_Frame.InternalTargets) {
+        const CKBgfxPresentTarget &target =
+            (m_Frame.IsOverlayActive() || m_Frame.SceneUsesNative)
+                ? m_Present.NativeTarget() : m_Present.SceneTarget();
+        colorTexture = target.ColorTexture;
+        depthTexture = target.DepthTexture;
+        width = target.Width;
+        height = target.Height;
+        samples = target.Samples;
+    }
+    if (!colorTexture || !frameBuffer || !depthTexture || !width || !height ||
+        !m_Present.EnsureDitherTarget(
+            width, height, samples, depthTexture))
+        return CKERR_NOTIMPLEMENTED;
+
+    CKDWORD sourceTexture = colorTexture;
+    if (publicTarget &&
+        (publicTarget->Flags &
+         (CKRST_TEXTURE_CUBEMAP | CKRST_TEXTURE_VOLUMEMAP)) != 0) {
+        // The compact conversion program has one 2D sampler. Snapshot a cube
+        // face or volume layer into the same packed format before expanding it
+        // into the shared RGBA8 scratch target.
+        if (samples > 1)
+            return CKERR_NOTIMPLEMENTED;
+        sourceTexture = m_Present.AcquireDitherSource(*publicTarget);
+        const CKRECT sourceRect = CKFFMakeRect((int)width, (int)height);
+        if (!sourceTexture ||
+            Blit(sourceTexture, 0, 0, 0, 0, colorTexture, 0,
+                 sourceLayer, &sourceRect) != CK_OK)
+            return CKERR_NOTIMPLEMENTED;
+    }
+
+    const CKRECT passRect = m_Frame.PassRect;
+    auto sourceFlip = [&](CKDWORD texture) -> CKBOOL {
+        CKBOOL bottomLeft = GetCaps().OriginBottomLeft ? TRUE : FALSE;
+        GetTextureBottomLeft(texture, bottomLeft);
+        return bottomLeft == GetCaps().OriginBottomLeft ? TRUE : FALSE;
+    };
+    auto resumeTarget = [&]() -> CKBOOL {
+        return OpenPass(frameBuffer, passRect, 0, 0, 1.0f, 0,
+                        "dither-resume");
+    };
+
+    if (!OpenPass(m_Present.GetDitherFrameBuffer(), passRect,
+                  0, 0, 1.0f, 0, "dither-expand")) {
+        resumeTarget();
+        return CKERR_INVALIDOPERATION;
+    }
+    CKERROR status = m_Present.SubmitCopy(
+        sourceTexture, width, height, sourceFlip(sourceTexture));
+    if (status == CK_OK) {
+        status = Draw(&draw);
+        approximationMask = GetDrawApproximationMask();
+    }
+    if (!resumeTarget())
+        return status == CK_OK ? CKERR_INVALIDOPERATION : status;
+    if (status != CK_OK)
+        return status;
+
+    return m_Present.SubmitDither(
+        m_Present.GetDitherTexture(), width, height,
+        targetFormat, dither,
+        sourceFlip(m_Present.GetDitherTexture()));
+}
+
 CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
 {
     const CKFFDraw &draw = m_FFP.GetDraw();
@@ -519,6 +612,8 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
     nativeDraw.StartIndex = draw.StartIndex;
     nativeDraw.IndexCount = draw.IndexCount;
     nativeDraw.SortKey = draw.SortKey;
+    nativeDraw.DitherEnable = draw.ShaderKey.FS.DitherEnable ? TRUE : FALSE;
+    nativeDraw.ColorTargetFormat = draw.ShaderKey.FS.ColorTargetFormat;
 
     CKTransientVertexData vertices;
     CKTransientIndexData indices;
@@ -544,8 +639,20 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
         nativeDraw.TransientIndices = &indices;
     }
 
-    const CKERROR error = Draw(&nativeDraw);
-    return m_FFP.FinishDraw(error, GetDrawApproximationMask());
+    const CKBOOL packedOutput =
+        nativeDraw.ColorTargetFormat != CKFF_COLOR_TARGET_RGBA8;
+    const CKBOOL nativePackedTarget = m_Target.IsActive() ? TRUE : FALSE;
+    const CKBOOL convertOutput = packedOutput &&
+        (nativeDraw.DitherEnable || !nativePackedTarget);
+    uint64_t approximationMask = 0;
+    const CKERROR error = convertOutput
+        ? SubmitOutputConvertedDraw(
+              nativeDraw, nativeDraw.DitherEnable,
+              nativeDraw.ColorTargetFormat, approximationMask)
+        : Draw(&nativeDraw);
+    if (!convertOutput)
+        approximationMask = GetDrawApproximationMask();
+    return m_FFP.FinishDraw(error, approximationMask);
 }
 
 CKBOOL CKBgfxRasterizerContext::DrawPrimitive(VXPRIMITIVETYPE Type, CKWORD *Indices, int IndexCount, VxDrawPrimitiveData *Data)
