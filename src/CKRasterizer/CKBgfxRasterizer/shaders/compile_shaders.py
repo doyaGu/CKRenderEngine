@@ -187,6 +187,68 @@ def write_header(path: Path, var_name: str, data: bytes) -> None:
         f.write("};\n")
 
 
+def add_static_gl_prologue(data: bytes, backend_name: str,
+                           stage: str) -> bytes:
+    """Make generated GL source self-contained before bgfx uploads it.
+
+    bgfx otherwise prepends this prologue through a source-sized stack
+    allocation on its render thread.  The exact fixed-function fragment
+    programs can exceed the default thread stack, so keep the immutable
+    shader blob ready for glShaderSource instead.
+    """
+    if backend_name not in ("glsl", "essl"):
+        return data
+    if len(data) < 14 or data[:3] not in (b"VSH", b"FSH"):
+        raise ValueError(f"{backend_name}: invalid bgfx shader blob")
+
+    version = data[3]
+    cursor = 8 if version < 6 else 12
+    if cursor + 2 > len(data):
+        raise ValueError(f"{backend_name}: truncated bgfx shader header")
+    uniform_count = int.from_bytes(data[cursor:cursor + 2], "little")
+    cursor += 2
+    for _ in range(uniform_count):
+        if cursor >= len(data):
+            raise ValueError(f"{backend_name}: truncated bgfx uniform table")
+        name_size = data[cursor]
+        cursor += 1 + name_size + 6
+        if version >= 8:
+            cursor += 2
+        if version >= 10:
+            cursor += 2
+        if cursor > len(data):
+            raise ValueError(f"{backend_name}: truncated bgfx uniform entry")
+
+    if cursor + 4 > len(data):
+        raise ValueError(f"{backend_name}: missing bgfx shader source size")
+    source_size_offset = cursor
+    source_size = int.from_bytes(data[cursor:cursor + 4], "little")
+    source_offset = cursor + 4
+    source_end = source_offset + source_size
+    if source_end >= len(data) or data[source_end] != 0:
+        raise ValueError(f"{backend_name}: invalid bgfx shader source payload")
+    source = data[source_offset:source_end]
+    if source.startswith(b"#version"):
+        return data
+
+    if backend_name == "glsl":
+        prologue = b"#version 150\n"
+        if stage == "fragment" and b"gl_FragColor" in source:
+            prologue += (b"out vec4 bgfx_FragColor;\n"
+                         b"#define gl_FragColor bgfx_FragColor\n")
+    else:
+        prologue = b"#version 300 es\n"
+
+    # Generated headers wrap twelve bytes per line.  Keeping the insertion a
+    # multiple of twelve leaves the existing payload lines stable in diffs.
+    prologue += b" " * (-len(prologue) % 12)
+    source = prologue + source
+    return (data[:source_size_offset]
+            + len(source).to_bytes(4, "little")
+            + source
+            + data[source_end:])
+
+
 def validate_ff_varyings(compiled: dict[str, bytes], backend_name: str) -> None:
     # bgfx shader blobs store the fragment input hash at byte 4 and the
     # vertex output hash at byte 8; createProgram requires them to match.
@@ -391,7 +453,8 @@ def main() -> int:
                 bin_path = tmp_dir / backend["name"] / (shader["name"] + ".bin")
                 bin_path.parent.mkdir(parents=True, exist_ok=True)
                 run_shaderc(shaderc, source_dir, shader, backend, bin_path, args.bgfx_source)
-                compiled[shader["name"]] = bin_path.read_bytes()
+                compiled[shader["name"]] = add_static_gl_prologue(
+                    bin_path.read_bytes(), backend["name"], shader["stage"])
             validate_ff_varyings(compiled, backend["name"])
             for shader in SHADERS:
                 var_name = f"s_{backend['name']}_{shader['name']}"

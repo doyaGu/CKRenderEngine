@@ -79,6 +79,51 @@ static bool DisplayModesAreSorted(CKRasterizerDriver *driver)
     return true;
 }
 
+static const char *GetBgfxShaderSource(const CKShaderDesc &shader,
+                                       CKDWORD &sourceSize)
+{
+    sourceSize = 0;
+    const CKBYTE *data = static_cast<const CKBYTE *>(shader.Code);
+    const CKDWORD dataSize = shader.CodeSize;
+    if (!data || dataSize < 14 ||
+        !((data[0] == 'V' || data[0] == 'F') &&
+          data[1] == 'S' && data[2] == 'H'))
+        return NULL;
+
+    const CKDWORD version = data[3];
+    CKDWORD cursor = version < 6 ? 8 : 12;
+    if (cursor + 2 > dataSize)
+        return NULL;
+    const CKDWORD uniformCount = CKDWORD(data[cursor]) |
+        (CKDWORD(data[cursor + 1]) << 8);
+    cursor += 2;
+    for (CKDWORD uniform = 0; uniform < uniformCount; ++uniform) {
+        if (cursor >= dataSize)
+            return NULL;
+        CKDWORD entrySize = 1 + data[cursor] + 6;
+        if (version >= 8)
+            entrySize += 2;
+        if (version >= 10)
+            entrySize += 2;
+        if (entrySize > dataSize - cursor)
+            return NULL;
+        cursor += entrySize;
+    }
+
+    if (cursor + 4 > dataSize)
+        return NULL;
+    sourceSize = CKDWORD(data[cursor]) |
+        (CKDWORD(data[cursor + 1]) << 8) |
+        (CKDWORD(data[cursor + 2]) << 16) |
+        (CKDWORD(data[cursor + 3]) << 24);
+    cursor += 4;
+    if (sourceSize >= dataSize - cursor || data[cursor + sourceSize] != 0) {
+        sourceSize = 0;
+        return NULL;
+    }
+    return reinterpret_cast<const char *>(data + cursor);
+}
+
 // ============================================================================
 // Fill mode / topology interaction
 // ============================================================================
@@ -906,6 +951,24 @@ void TestFixedFunctionFragmentSamplingVariants()
                             native.Code && native.CodeSize &&
                             native.Code != full.Code,
                         "every bgfx profile exposes a distinct native-exact sampler layout");
+            if (profile == CKRST_SHADER_PROFILE_GLSL ||
+                profile == CKRST_SHADER_PROFILE_ESSL) {
+                const char *expected = profile == CKRST_SHADER_PROFILE_GLSL
+                    ? "#version 150\n"
+                    : "#version 300 es\n";
+                const CKDWORD expectedSize = (CKDWORD)strlen(expected);
+                CKDWORD fullSourceSize = 0;
+                CKDWORD nativeSourceSize = 0;
+                const char *fullSource = GetBgfxShaderSource(
+                    full, fullSourceSize);
+                const char *nativeSource = GetBgfxShaderSource(
+                    native, nativeSourceSize);
+                TEST_ASSERT(fullSource && fullSourceSize >= expectedSize &&
+                                memcmp(fullSource, expected, expectedSize) == 0 &&
+                                nativeSource && nativeSourceSize >= expectedSize &&
+                                memcmp(nativeSource, expected, expectedSize) == 0,
+                            "GL fixed-function shaders carry a static version prologue");
+            }
         }
     }
     CKShaderDesc invalid;
