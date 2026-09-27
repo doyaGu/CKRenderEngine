@@ -1150,6 +1150,43 @@ void TextureDerivativesStayInTypedSamplingPaths() {
               "SDL volume explicit LOD must consume the original vec3 derivatives");
 }
 
+void VertexTexcoordGenerationSkipsUntexturedStages() {
+    const std::string vs3d = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
+    const std::string vsPositionT = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc");
+    TestCheck(!vs3d.empty() && !vsPositionT.empty(),
+              "Fixed-function vertex shader sources must be readable");
+
+    const std::string *sources[] = {&vs3d, &vsPositionT};
+    for (const std::string *source : sources) {
+        TestCheck(source->find("return u_stageParams[stage * 2].z > 0.5;") != std::string::npos,
+                  "Vertex texcoord generation must consume CKFF_STAGE_PARAM_COORD HasTexture");
+        TestCheck(CountSubstring(*source, "if (ckffVsStageHasTexture(") ==
+                      CKFF_MAX_TEXTURE_STAGES,
+                  "Every fixed-function texture stage must guard texcoord work with HasTexture");
+        TestCheck(source->find("v_texcoord0 = vec4_splat(0.0);") != std::string::npos &&
+                      source->find("v_texcoord7Fog = vec4_splat(0.0);") != std::string::npos,
+                  "Skipped vertex texture stages must still initialize their varyings");
+        for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            char guard[64];
+            snprintf(guard, sizeof(guard), "if (ckffVsStageHasTexture(%d))", stage);
+            TestCheck(source->find(guard) != std::string::npos,
+                      "Each fixed-function vertex texture stage must have a HasTexture guard");
+        }
+
+        const std::string::size_type stage7Guard =
+            source->find("if (ckffVsStageHasTexture(7))");
+        const std::string::size_type stage7Fog =
+            source->find("v_texcoord7Fog.z =", stage7Guard);
+        TestCheck(stage7Guard != std::string::npos &&
+                      stage7Fog != std::string::npos && stage7Fog > stage7Guard,
+                  "Stage 7 must write fog after its optional texture-coordinate path");
+    }
+    TestCheck(vs3d.find("for (int i = 0; i < 8; ++i)") != std::string::npos,
+              "Texcoord gating must preserve the original eight-light accumulation loop");
+}
+
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
 void ShaderCodegenCompilesOneProgramFamily() {
     const std::string script = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKBgfxRasterizer/shaders/compile_shaders.py");
@@ -1697,6 +1734,8 @@ int main() {
               &FragmentShaderDeclaresAllExactSamplerLayouts);
     tests.Run("Texture derivatives stay in typed sampling paths",
               &TextureDerivativesStayInTypedSamplingPaths);
+    tests.Run("Vertex texcoord generation skips untextured stages",
+              &VertexTexcoordGenerationSkipsUntexturedStages);
 #ifdef CKRE_TEST_BGFX_ARTIFACTS
     tests.Run("Shader codegen compiles one program family",
               &ShaderCodegenCompilesOneProgramFamily);

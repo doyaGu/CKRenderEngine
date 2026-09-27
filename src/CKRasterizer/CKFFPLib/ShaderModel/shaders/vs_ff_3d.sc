@@ -151,6 +151,11 @@ vec4 transformTexcoord(int stage, vec4 coord)
     return transformed;
 }
 
+bool ckffVsStageHasTexture(int stage)
+{
+    return u_stageParams[stage * 2].z > 0.5;
+}
+
 void main()
 {
     vec4 localPos = vec4(a_position.xyz, 1.0);
@@ -307,22 +312,30 @@ void main()
     v_flatColor0 = v_color0;
     v_flatColor1 = v_color1;
 
-    int tc0 = int(u_stageParams[0 * 2].x);
-    int tc1 = int(u_stageParams[1 * 2].x);
-    int tc2 = int(u_stageParams[2 * 2].x);
-    int tc3 = int(u_stageParams[3 * 2].x);
-    int tc4 = int(u_stageParams[4 * 2].x);
-    int tc5 = int(u_stageParams[5 * 2].x);
-    int tc6 = int(u_stageParams[6 * 2].x);
-    int tc7 = int(u_stageParams[7 * 2].x);
-    v_texcoord0 = transformTexcoord(0, generateTexcoord(tc0, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord1 = transformTexcoord(1, generateTexcoord(tc1, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord2 = transformTexcoord(2, generateTexcoord(tc2, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord3 = transformTexcoord(3, generateTexcoord(tc3, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord4 = transformTexcoord(4, generateTexcoord(tc4, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord5 = transformTexcoord(5, generateTexcoord(tc5, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord6 = transformTexcoord(6, generateTexcoord(tc6, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
-    v_texcoord7Fog = transformTexcoord(7, generateTexcoord(tc7, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    v_texcoord0 = vec4_splat(0.0);
+    v_texcoord1 = vec4_splat(0.0);
+    v_texcoord2 = vec4_splat(0.0);
+    v_texcoord3 = vec4_splat(0.0);
+    v_texcoord4 = vec4_splat(0.0);
+    v_texcoord5 = vec4_splat(0.0);
+    v_texcoord6 = vec4_splat(0.0);
+    v_texcoord7Fog = vec4_splat(0.0);
+    if (ckffVsStageHasTexture(0))
+        v_texcoord0 = transformTexcoord(0, generateTexcoord(int(u_stageParams[0 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(1))
+        v_texcoord1 = transformTexcoord(1, generateTexcoord(int(u_stageParams[1 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(2))
+        v_texcoord2 = transformTexcoord(2, generateTexcoord(int(u_stageParams[2 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(3))
+        v_texcoord3 = transformTexcoord(3, generateTexcoord(int(u_stageParams[3 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(4))
+        v_texcoord4 = transformTexcoord(4, generateTexcoord(int(u_stageParams[4 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(5))
+        v_texcoord5 = transformTexcoord(5, generateTexcoord(int(u_stageParams[5 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(6))
+        v_texcoord6 = transformTexcoord(6, generateTexcoord(int(u_stageParams[6 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
+    if (ckffVsStageHasTexture(7))
+        v_texcoord7Fog = transformTexcoord(7, generateTexcoord(int(u_stageParams[7 * 2].x), a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, viewPos.xyz, viewNormal));
     float fogDepth = u_ffDrawParams[7].z > 0.5 ? length(viewPos.xyz) : abs(viewPos.z);
     v_texcoord7Fog.z = ckffFogFactor(fogDepth, int(u_ffDrawParams[10].w + 0.5), u_ffDrawParams[10]);
     if (u_ffDrawParams[4].z > 0.5) {
