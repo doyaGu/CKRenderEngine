@@ -16,9 +16,10 @@
 #define CKFF_WIDE_SAMPLER_COUNT 8
 
 enum CKFFSamplerLayout {
-    CKFF_SAMPLER_LAYOUT_WIDE_2D = 0,
-    CKFF_SAMPLER_LAYOUT_WIDE_CUBE,
-    CKFF_SAMPLER_LAYOUT_WIDE_VOLUME,
+#define CKFF_SAMPLER_LAYOUT(name, value, twoD, cube, volume) \
+    CKFF_SAMPLER_LAYOUT_##name = value,
+#include "../ShaderModel/CKFFSamplerLayout.def"
+#undef CKFF_SAMPLER_LAYOUT
     CKFF_SAMPLER_LAYOUT_COUNT,
 };
 

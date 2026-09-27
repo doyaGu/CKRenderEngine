@@ -69,6 +69,7 @@ set(CKFFP_LIB_HEADERS
     ShaderModel/CKFFShaderABI.h
     ShaderModel/CKFFShaderInterface.h
     ShaderModel/CKFFShaderKey.h
+    ShaderModel/CKFFSamplerLayout.def
     ShaderModel/CKFFFragmentProgram.h
     ShaderModel/CKFFFragmentProgramLayout.def
     ShaderModel/CKFFFragmentProgramLayout.h

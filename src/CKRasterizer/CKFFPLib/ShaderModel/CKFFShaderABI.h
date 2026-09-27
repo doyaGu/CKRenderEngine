@@ -135,14 +135,19 @@ enum CKFFSamplerSlotABI {
 inline CKDWORD CKFFSamplerTypeSlotCount(CKDWORD samplerType,
                                         CKFFSamplerLayout layout =
                                             CKFF_SAMPLER_LAYOUT_WIDE_2D) {
-    if (samplerType == CKFF_SAMPLER_CUBE)
-        return layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE
-            ? CKFF_WIDE_SAMPLER_COUNT : CKFF_NARROW_SAMPLER_COUNT;
-    if (samplerType == CKFF_SAMPLER_VOLUME)
-        return layout == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME
-            ? CKFF_WIDE_SAMPLER_COUNT : CKFF_NARROW_SAMPLER_COUNT;
-    return layout == CKFF_SAMPLER_LAYOUT_WIDE_2D
-        ? CKFF_WIDE_SAMPLER_COUNT : CKFF_NARROW_SAMPLER_COUNT;
+    const CKDWORD typeIndex = samplerType == CKFF_SAMPLER_CUBE ? 1u :
+                              samplerType == CKFF_SAMPLER_VOLUME ? 2u : 0u;
+    switch (layout) {
+#define CKFF_SAMPLER_LAYOUT(name, value, twoD, cube, volume) \
+    case CKFF_SAMPLER_LAYOUT_##name: { \
+        static const CKBYTE counts[3] = {twoD, cube, volume}; \
+        return counts[typeIndex]; \
+    }
+#include "CKFFSamplerLayout.def"
+#undef CKFF_SAMPLER_LAYOUT
+    default:
+        return 0;
+    }
 }
 
 inline CKDWORD CKFFSamplerTypeSlotBase(CKDWORD samplerType,

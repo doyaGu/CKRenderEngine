@@ -21,7 +21,10 @@ CKFF_ROOT = HERE.parent.parent / "CKFFPLib"
 SHARED = CKFF_ROOT / "ShaderModel" / "shaders"
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(CKFF_ROOT / "ShaderModel"))
-from shader_abi_codegen import sync_sampler_shader_state
+from shader_abi_codegen import sampler_layouts, sync_sampler_layout, sync_sampler_shader_state
+SAMPLER_LAYOUT_DEF = CKFF_ROOT / "ShaderModel" / "CKFFSamplerLayout.def"
+SAMPLER_LAYOUT_SHADER = SHARED / "ff_sampler_layout.sh"
+SAMPLER_LAYOUTS = sampler_layouts(SAMPLER_LAYOUT_DEF)
 SHADERS = [
     ("vs_ff_3d", "vs_ff_3d", False, 0, 0),
     ("vs_ff_3d_clip", "vs_ff_3d", True, 0, 0),
@@ -270,12 +273,13 @@ def validate_spirv(reflection, source, vertex, samplers, uniforms, sampler_layou
         dimensions = ["sampler3D"]
     elif source in ("fs_postprocess", "fs_dither_resolve"):
         dimensions = ["sampler2D"]
-    elif sampler_layout == 1:
-        dimensions = ["sampler2D"] * 4 + ["samplerCube"] * 8 + ["sampler3D"] * 4
-    elif sampler_layout == 2:
-        dimensions = ["sampler2D"] * 4 + ["samplerCube"] * 4 + ["sampler3D"] * 8
+    elif samplers:
+        counts = SAMPLER_LAYOUTS[sampler_layout].counts
+        dimensions = (["sampler2D"] * counts[0] +
+                      ["samplerCube"] * counts[1] +
+                      ["sampler3D"] * counts[2])
     else:
-        dimensions = ["sampler2D"] * 8 + ["samplerCube"] * 4 + ["sampler3D"] * 4 if samplers else []
+        dimensions = []
     assert [t["type"] for t in sorted(textures, key=lambda t: t["binding"])] == dimensions
 
 
@@ -354,6 +358,8 @@ def main() -> None:
         SHARED / "ff_sampler_shader_state.sh",
         verify=args.verify,
     )
+    sync_sampler_layout(
+        SAMPLER_LAYOUT_DEF, SAMPLER_LAYOUT_SHADER, verify=args.verify)
     if args.verify:
         verify_artifacts(args.output_dir, abi, abi_hash)
         return

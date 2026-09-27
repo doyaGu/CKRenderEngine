@@ -47,10 +47,18 @@ set(_ckbgfx_shader_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/vs_postprocess.sc
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_postprocess.sc
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/fs_ff_common.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_common.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_2d.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_cube.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_volume.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_depth.sc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_texture_ops.sc
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fog_common.sc
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_fragment_program_layout.sh
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_shader_state.sh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shaders/ff_sampler_layout.sh
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/CKFFFragmentProgramLayout.def
+    ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/CKFFSamplerLayout.def
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/CKFFShaderABI.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel/shader_abi_codegen.py
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py

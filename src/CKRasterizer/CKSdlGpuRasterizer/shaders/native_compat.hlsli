@@ -90,12 +90,6 @@
 #define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define textureCube(name, uv) name.Sample(name##Sampler, uv)
 #define textureCubeBias(name, uv, bias) name.SampleBias(name##Sampler, uv, bias)
-#if CKFF_NATIVE_FFP_STAGE && CKFF_NATIVE_COMPARE_COUNT > 0
-#define texture3D(name, uv) name.Sample(name##Sampler, uv)
-#define texture3DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
-#define texture3DGrad(name, uv, original, mirror, bias, minMip) name.SampleGrad(name##Sampler, uv, ddx(original) * exp2(bias), ddy(original) * exp2(bias))
-#else
 #define texture3D(name, uv) ckSample3D(name, name##Sampler, name##Slot, uv)
 #define texture3DBias(name, uv, bias, minMip) ckSample3DBias(name, name##Sampler, name##Slot, uv, bias, minMip)
 #define texture3DGrad(name, uv, original, mirror, bias, minMip) ckSample3DGrad(name, name##Sampler, name##Slot, uv, original, mirror, bias, minMip)
-#endif

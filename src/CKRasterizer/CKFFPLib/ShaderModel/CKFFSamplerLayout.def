@@ -1,0 +1,6 @@
+// NAME, numeric id, 2D/depth slots, cube slots, volume slots.
+// The three blocks always occupy the sixteen fragment sampler slots in this
+// order. Keep numeric ids stable: they are part of the shader artifact ABI.
+CKFF_SAMPLER_LAYOUT(WIDE_2D,     0, 8, 4, 4)
+CKFF_SAMPLER_LAYOUT(WIDE_CUBE,   1, 4, 8, 4)
+CKFF_SAMPLER_LAYOUT(WIDE_VOLUME, 2, 4, 4, 8)

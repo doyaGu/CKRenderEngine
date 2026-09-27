@@ -79,6 +79,35 @@ std::string ReadTextFile(const char *path) {
     return contents;
 }
 
+std::string ReadFragmentShaderSources() {
+    static const char *const paths[] = {
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_common.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_2d.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_cube.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_volume.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_depth.sc",
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_texture_ops.sc",
+    };
+    std::string contents;
+    for (const char *path : paths) {
+        contents += ReadTextFile(path);
+        contents += '\n';
+    }
+    return contents;
+}
+
+size_t CountSubstring(const std::string &contents, const char *needle) {
+    size_t count = 0;
+    size_t offset = 0;
+    while ((offset = contents.find(needle, offset)) != std::string::npos) {
+        ++count;
+        offset += std::strlen(needle);
+    }
+    return count;
+}
+
 void BumpEnvUniformsPackEachStageIndependently() {
     CKDWORD stages[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES] = {};
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
@@ -255,7 +284,10 @@ void SamplerShaderStateShaderHeaderMatchesCppABI() {
         "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shader_abi_codegen.py");
     const std::string fragment = ReadTextFile(
         "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
-    TestCheck(!generated.empty() && !generator.empty() && !fragment.empty(),
+    const std::string sampling = ReadTextFile(
+        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_common.sc");
+    TestCheck(!generated.empty() && !generator.empty() && !fragment.empty() &&
+                  !sampling.empty(),
               "Sampler shader ABI sources must be readable");
 
     char line[160];
@@ -280,8 +312,9 @@ void SamplerShaderStateShaderHeaderMatchesCppABI() {
 
     TestCheck(generator.find("CKFFSamplerShaderStateABI") != std::string::npos &&
                   fragment.find("#include \"ff_sampler_shader_state.sh\"") != std::string::npos &&
-                  fragment.find("packedSamplerLod") == std::string::npos &&
-                  fragment.find("(samplerState >> 5) & 31") == std::string::npos,
+                  sampling.find("CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT") != std::string::npos &&
+                  sampling.find("packedSamplerLod") == std::string::npos &&
+                  sampling.find("(samplerState >> 5) & 31") == std::string::npos,
               "Shader code must consume generated sampler ABI names without packed-state literals");
 }
 
@@ -442,20 +475,23 @@ void LastActiveTextureStageFragmentProgramRoundTrips() {
 void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
     const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
     const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
+    const std::string sampling = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_common.sc") +
+        ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_depth.sc");
     const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
     const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc");
 
-    TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
+    TestCheck(!fs.empty() && !common.empty() && !sampling.empty() &&
+                  !vs3d.empty() && !vsPositionT.empty(),
               "FFP shader sources must be readable");
     TestCheck(common.find("int MirrorOnceMask;") != std::string::npos &&
                   common.find("params.MirrorOnceMask = (flags >> 9) & 7;") != std::string::npos &&
                   common.find("MIRRORONCE_SAMPLER_MASK") == std::string::npos,
               "Fragment common shader must read MIRRORONCE masks only from texture-transform flags");
-    TestCheck(fs.find("vec4 applyMirrorOnceCoord") != std::string::npos &&
-                  fs.find("if (samplerType == 1 || mirrorOnceMask == 0) return coord") != std::string::npos &&
-                  fs.find("samplerType == 3 && (mirrorOnceMask & 4)") != std::string::npos,
+    TestCheck(sampling.find("vec4 applyMirrorOnceCoord") != std::string::npos &&
+                  sampling.find("if (samplerType == 1 || mirrorOnceMask == 0) return coord") != std::string::npos &&
+                  sampling.find("samplerType == 3 && (mirrorOnceMask & 4)") != std::string::npos,
               "Fragment shader must remap 2D/volume coordinates while leaving cube coordinates untouched");
-    TestCheck(fs.find("coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);") != std::string::npos,
+    TestCheck(sampling.find("coord = applyMirrorOnceCoord(coord, mirrorOnceMask, samplerType);") != std::string::npos,
               "MIRRORONCE remap must happen inside texture sampling after projected coordinate preparation");
     TestCheck(vs3d.find("int count = flags & 0xff;") != std::string::npos &&
                   vsPositionT.find("int count = flags & 0xff;") != std::string::npos,
@@ -463,7 +499,7 @@ void MirrorOnceShaderSourceAppliesOnlyTo2DAndVolume() {
 }
 
 void TextureCombinerOpFormulasStayDxvkCompatible() {
-    const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string fs = ReadFragmentShaderSources();
 
     TestCheck(!fs.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -622,8 +658,7 @@ void TextureCombinerPreservesTempDestination() {
     TestCheck(key.Stages[1].ResultIsTemp,
               "a final TEMP write must leave CURRENT unchanged");
 
-    const std::string fs = ReadTextFile(
-        "Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string fs = ReadFragmentShaderSources();
     TestCheck(fs.find("vec4 stageResult = resultArg == 5 ? temp : current") !=
                   std::string::npos &&
                   fs.find("if (op == 1) return dst") != std::string::npos &&
@@ -718,7 +753,7 @@ void TextureCombinerTempInitializesAlphaToZero() {
 }
 
 void DepthTextureCompareUsesSamplerCompareOrdering() {
-    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
+    const std::string contents = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_depth.sc");
 
     TestCheck(!contents.empty(),
               "FFP fragment shader source must be readable from the test working directory");
@@ -945,43 +980,88 @@ void VolumeSamplerMaskCanBeDerivedFromShaderKey() {
 void FragmentShaderDeclaresAllExactSamplerLayouts() {
     const std::string fs = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_stage.sc");
     const std::string common = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/fs_ff_common.sc");
+    const std::string layout = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/ff_sampler_layout.sh");
+    const std::string layoutDef = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/CKFFSamplerLayout.def");
+    const std::string generator = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shader_abi_codegen.py");
+    const std::string nativeCompiler = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKSdlGpuRasterizer/shaders/compile_native_shaders.py");
+    const std::string samplers = ReadFragmentShaderSources();
     const std::string vs3d = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_3d.sc");
     const std::string vsPositionT = ReadTextFile("Source/RenderEngine/src/CKRasterizer/CKFFPLib/ShaderModel/shaders/vs_ff_positiont.sc");
-    TestCheck(!fs.empty() && !common.empty() && !vs3d.empty() && !vsPositionT.empty(),
+    TestCheck(!fs.empty() && !common.empty() && !layout.empty() &&
+                  !layoutDef.empty() && !generator.empty() &&
+                  !nativeCompiler.empty() && !samplers.empty() &&
+                  !vs3d.empty() && !vsPositionT.empty(),
               "FFP shader sources must be readable");
 
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         char decl[64];
         snprintf(decl, sizeof(decl), "SAMPLER2D(s_texture%d, %d);", stage, stage);
-        TestCheck(fs.find(decl) != std::string::npos,
+        TestCheck(layout.find(decl) != std::string::npos,
                   "Fragment shader must declare one 2D sampler per texture stage on slots 0..7");
     }
     for (int ordinal = 0; ordinal < CKFF_NARROW_SAMPLER_COUNT; ++ordinal) {
         char decl[64];
         snprintf(decl, sizeof(decl), "SAMPLERCUBE(s_textureCube%d, %d);", ordinal,
                  (int)CKFFSamplerSlot(CKFF_SAMPLER_CUBE, ordinal));
-        TestCheck(fs.find(decl) != std::string::npos,
+        TestCheck(layout.find(decl) != std::string::npos,
                   "Fragment shader must declare the cube samplers on slots 8..11");
     }
     for (int ordinal = 0; ordinal < CKFF_NARROW_SAMPLER_COUNT; ++ordinal) {
         char decl[64];
         snprintf(decl, sizeof(decl), "SAMPLER3D(s_textureVolume%d, %d);", ordinal,
                  (int)CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, ordinal));
-        TestCheck(fs.find(decl) != std::string::npos,
+        TestCheck(layout.find(decl) != std::string::npos,
                   "Fragment shader must declare the volume samplers on slots 12..15");
     }
-    TestCheck(fs.find("SAMPLERCUBE(s_textureCube4, 8);") != std::string::npos &&
-                  fs.find("SAMPLERCUBE(s_textureCube7, 11);") != std::string::npos &&
-                  fs.find("SAMPLER3D(s_textureVolume4, 12);") != std::string::npos &&
-                  fs.find("SAMPLER3D(s_textureVolume7, 15);") != std::string::npos &&
-                  fs.find("CKFF_NATIVE_SAMPLER_LAYOUT") != std::string::npos,
+    TestCheck(layout.find("SAMPLERCUBE(s_textureCube4, 8);") != std::string::npos &&
+                  layout.find("SAMPLERCUBE(s_textureCube7, 11);") != std::string::npos &&
+                  layout.find("SAMPLER3D(s_textureVolume4, 12);") != std::string::npos &&
+                  layout.find("SAMPLER3D(s_textureVolume7, 15);") != std::string::npos &&
+                  layout.find("CKFF_NATIVE_SAMPLER_LAYOUT") != std::string::npos,
               "Fragment shader must declare the wide cube and volume layouts");
-    TestCheck(fs.find("int ckffSamplerOrdinal(int stage, int samplerType)") == std::string::npos &&
+    TestCheck(samplers.find("int ckffSamplerOrdinal(int stage, int samplerType)") == std::string::npos &&
                   common.find("program.SamplerOrdinal = (samplerOrdinals >> (stage * 3)) & 7;") != std::string::npos &&
-                  fs.find("int ordinal = samplerOrdinal;") != std::string::npos,
+                  samplers.find("int samplerOrdinal") != std::string::npos,
               "Fragment shader must consume CPU-resolved sampler ordinals from the fragment program");
 
-    const std::string *sources[] = {&fs, &common, &vs3d, &vsPositionT};
+    const CKDWORD expectedCounts[CKFF_SAMPLER_LAYOUT_COUNT][3] = {
+        { 8, 4, 4 }, { 4, 8, 4 }, { 4, 4, 8 },
+    };
+    for (CKDWORD samplerLayout = 0;
+         samplerLayout < CKFF_SAMPLER_LAYOUT_COUNT; ++samplerLayout) {
+        for (CKDWORD type = 0; type < 3; ++type) {
+            const CKDWORD samplerType = type == 1 ? CKFF_SAMPLER_CUBE :
+                                        type == 2 ? CKFF_SAMPLER_VOLUME :
+                                                    CKFF_SAMPLER_2D;
+            TestCheck(CKFFSamplerTypeSlotCount(
+                          samplerType, (CKFFSamplerLayout)samplerLayout) ==
+                          expectedCounts[samplerLayout][type],
+                      "C++ sampler slot helpers must be generated from the layout definition");
+        }
+    }
+    TestCheck(layoutDef.find("CKFF_SAMPLER_LAYOUT(WIDE_2D,     0, 8, 4, 4)") != std::string::npos &&
+                  layoutDef.find("CKFF_SAMPLER_LAYOUT(WIDE_CUBE,   1, 4, 8, 4)") != std::string::npos &&
+                  layoutDef.find("CKFF_SAMPLER_LAYOUT(WIDE_VOLUME, 2, 4, 4, 8)") != std::string::npos &&
+                  generator.find("def sampler_layouts") != std::string::npos &&
+                  nativeCompiler.find("SAMPLER_LAYOUTS[sampler_layout].counts") != std::string::npos,
+              "C++, generated shader declarations and SDL reflection must share one sampler layout definition");
+    TestCheck(layout.find("CKFF_DISPATCH_2D_ORDINARY") != std::string::npos &&
+                  layout.find("CKFF_DISPATCH_DEPTH_COMPARE") != std::string::npos &&
+                  layout.find("CKFF_DISPATCH_CUBE") != std::string::npos &&
+                  layout.find("CKFF_DISPATCH_VOLUME") != std::string::npos &&
+                  samplers.find("CKFF_DISPATCH_2D_ORDINARY") != std::string::npos &&
+                  samplers.find("CKFF_DISPATCH_DEPTH_COMPARE") != std::string::npos &&
+                  samplers.find("CKFF_DISPATCH_CUBE") != std::string::npos &&
+                  samplers.find("CKFF_DISPATCH_VOLUME") != std::string::npos,
+              "Sampler declaration, ordinal dispatch and size queries must consume the generated layout");
+    TestCheck(samplers.find("vec4 CKFFSample2D") != std::string::npos &&
+                  samplers.find("vec4 CKFFSampleCube") != std::string::npos &&
+                  samplers.find("vec4 CKFFSampleVolume") != std::string::npos &&
+                  samplers.find("vec4 CKFFSampleDepth") != std::string::npos &&
+                  CountSubstring(samplers, "vec4 applyOp(") == 1,
+              "Fragment shader responsibilities must be split with one authoritative texture combiner");
+
+    const std::string *sources[] = {&samplers, &vs3d, &vsPositionT};
     const char *retiredMacros[] = {
         "CKFF_FULL_SPECIALIZED", "CKFF_STATIC_SAMPLER_LAYOUT", "CKFF_VOLUME_SAMPLER_LAYOUT",
         "CKFF_MIXED_SAMPLER_LAYOUT", "CKFF_VS_INSTANCED", "CKFF_VS_ACTIVE_TEXCOORD_COUNT",

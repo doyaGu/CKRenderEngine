@@ -48,6 +48,8 @@ ABI_HEADER = "CKFFShaderABI.generated.h"
 FRAGMENT_PROGRAM_LAYOUT_DEF = "CKFFFragmentProgramLayout.def"      # in CKFFPLib/ShaderModel
 FRAGMENT_PROGRAM_LAYOUT_SHADER = "ff_fragment_program_layout.sh"    # generated next to the shader sources
 SAMPLER_SHADER_STATE_SHADER = "ff_sampler_shader_state.sh"
+SAMPLER_LAYOUT_DEF = "CKFFSamplerLayout.def"
+SAMPLER_LAYOUT_SHADER = "ff_sampler_layout.sh"
 
 
 def _exe_name(name: str) -> str:
@@ -351,7 +353,7 @@ def main() -> int:
     source_dir = ckff_root / "ShaderModel" / "shaders"
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(ckff_root / "ShaderModel"))
-    from shader_abi_codegen import sync_sampler_shader_state
+    from shader_abi_codegen import sync_sampler_layout, sync_sampler_shader_state
     interface_dir = ckff_root / "Interface"
     generated_dir = rasterizer_shader_dir / "generated"
     fragment_program_layout = write_fragment_program_layout_shader(source_dir)
@@ -360,6 +362,10 @@ def main() -> int:
     sync_sampler_shader_state(
         ckff_root / "ShaderModel" / "CKFFShaderABI.h", sampler_shader_state)
     print(f"Wrote {sampler_shader_state.name} from CKFFShaderABI.h")
+    sampler_layout = source_dir / SAMPLER_LAYOUT_SHADER
+    sync_sampler_layout(
+        ckff_root / "ShaderModel" / SAMPLER_LAYOUT_DEF, sampler_layout)
+    print(f"Wrote {sampler_layout.name} from {SAMPLER_LAYOUT_DEF}")
     if args.command == "gen-fragment-program-layout":
         return 0
 

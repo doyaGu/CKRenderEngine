@@ -82,34 +82,29 @@ const CKFFConstantBlockDesc &CKFFConstantBlockInfo(CKFFConstantBlock block)
 
 const char *CKFFSamplerSlotName(CKDWORD slot, CKFFSamplerLayout layout)
 {
-    static const char *const wide2DNames[CKFF_SLOT_COUNT] = {
+    static const char *const twoDNames[CKFF_WIDE_SAMPLER_COUNT] = {
         "s_texture0", "s_texture1", "s_texture2", "s_texture3",
         "s_texture4", "s_texture5", "s_texture6", "s_texture7",
-        "s_textureCube0", "s_textureCube1", "s_textureCube2", "s_textureCube3",
-        "s_textureVolume0", "s_textureVolume1", "s_textureVolume2", "s_textureVolume3",
-        "s_sceneColor",
     };
-    static const char *const wideCubeNames[CKFF_SLOT_COUNT] = {
-        "s_texture0", "s_texture1", "s_texture2", "s_texture3",
+    static const char *const cubeNames[CKFF_WIDE_SAMPLER_COUNT] = {
         "s_textureCube0", "s_textureCube1", "s_textureCube2", "s_textureCube3",
         "s_textureCube4", "s_textureCube5", "s_textureCube6", "s_textureCube7",
-        "s_textureVolume0", "s_textureVolume1", "s_textureVolume2", "s_textureVolume3",
-        "s_sceneColor",
     };
-    static const char *const wideVolumeNames[CKFF_SLOT_COUNT] = {
-        "s_texture0", "s_texture1", "s_texture2", "s_texture3",
-        "s_textureCube0", "s_textureCube1", "s_textureCube2", "s_textureCube3",
+    static const char *const volumeNames[CKFF_WIDE_SAMPLER_COUNT] = {
         "s_textureVolume0", "s_textureVolume1", "s_textureVolume2", "s_textureVolume3",
         "s_textureVolume4", "s_textureVolume5", "s_textureVolume6", "s_textureVolume7",
-        "s_sceneColor",
     };
-    if (slot >= CKFF_SLOT_COUNT)
+    if (slot == CKFF_SLOT_PRESENT)
+        return "s_sceneColor";
+    if (slot >= CKFF_SAMPLER_SLOT_COUNT)
         return NULL;
-    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE)
-        return wideCubeNames[slot];
-    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_VOLUME)
-        return wideVolumeNames[slot];
-    return wide2DNames[slot];
+    const CKDWORD cubeBase = CKFFSamplerTypeSlotBase(CKFF_SAMPLER_CUBE, layout);
+    const CKDWORD volumeBase = CKFFSamplerTypeSlotBase(CKFF_SAMPLER_VOLUME, layout);
+    if (slot < cubeBase)
+        return twoDNames[slot];
+    if (slot < volumeBase)
+        return cubeNames[slot - cubeBase];
+    return volumeNames[slot - volumeBase];
 }
 
 CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
