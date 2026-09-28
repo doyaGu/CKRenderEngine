@@ -1331,8 +1331,10 @@ void CKTransientGeometry::InterleaveVertices(
     const bool position3 = formatFlags == (common | CKFF_VF_POSITION);
     const bool positionNormal = formatFlags == (common | CKFF_VF_POSITION | CKFF_VF_NORMAL);
     const bool positionT = formatFlags == (common | CKFF_VF_POSITIONT);
-    if (data && (position3 || positionNormal || positionT) &&
-        TexcoordComponentCount(texcoordComponentCounts, 0) == 2) {
+    if (data && (position3 || positionNormal || positionT)) {
+        const CKDWORD texcoordComponentCount =
+            TexcoordComponentCount(texcoordComponentCounts, 0);
+        const CKDWORD texcoordBytes = texcoordComponentCount * sizeof(float);
         const CKDWORD positionBytes = positionT ? 16 : 12;
         const CKDWORD normalOffset = positionBytes;
         const CKDWORD texcoordOffset = normalOffset + (positionNormal ? 12 : 0);
@@ -1341,7 +1343,7 @@ void CKTransientGeometry::InterleaveVertices(
         const float defaultPosition3[3] = {0.0f, 0.0f, 0.0f};
         const float defaultPositionT[4] = {0.0f, 0.0f, 0.0f, 1.0f};
         const float defaultNormal[3] = {0.0f, 0.0f, 1.0f};
-        const float defaultTexcoord[2] = {0.0f, 0.0f};
+        const float defaultTexcoord[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         const CKBYTE *positions = data->PositionPtr
             ? (const CKBYTE *)data->PositionPtr
             : (const CKBYTE *)(positionT ? (const void *)defaultPositionT : (const void *)defaultPosition3);
@@ -1358,12 +1360,45 @@ void CKTransientGeometry::InterleaveVertices(
             ? (const CKBYTE *)data->SpecularColorPtr : nullptr;
         const CKDWORD defaultSpecular = positionT ? 0xFF000000u : 0x00000000u;
         CKBYTE *out = (CKBYTE *)dst;
+        if (texcoordComponentCount == 2) {
+            for (CKDWORD i = 0; i < vertexCount; ++i) {
+                memcpy(out, positions, positionBytes);
+                if (positionNormal)
+                    memcpy(out + normalOffset, normals, 12);
+                memcpy(out + texcoordOffset, texcoords, 8);
+                memset(out + texcoordOffset + 8, 0, 8);
+
+                CKDWORD color0 = 0xFFFFFFFFu;
+                if (colors) {
+                    memcpy(&color0, colors, 4);
+                    color0 = ConvertArgbToAbgr(color0);
+                }
+                memcpy(out + color0Offset, &color0, 4);
+                CKDWORD color1 = defaultSpecular;
+                if (specular) {
+                    memcpy(&color1, specular, 4);
+                    color1 = ConvertArgbToAbgr(color1);
+                }
+                memcpy(out + color1Offset, &color1, 4);
+
+                out += stride;
+                positions += positionStride;
+                normals += normalStride;
+                texcoords += texcoordStride;
+                if (colors) colors += data->ColorStride;
+                if (specular) specular += data->SpecularColorStride;
+            }
+            return;
+        }
+
         for (CKDWORD i = 0; i < vertexCount; ++i) {
             memcpy(out, positions, positionBytes);
             if (positionNormal)
                 memcpy(out + normalOffset, normals, 12);
-            memcpy(out + texcoordOffset, texcoords, 8);
-            memset(out + texcoordOffset + 8, 0, 8);
+            memcpy(out + texcoordOffset, texcoords, texcoordBytes);
+            if (texcoordBytes < 16)
+                memset(out + texcoordOffset + texcoordBytes, 0,
+                       16 - texcoordBytes);
 
             CKDWORD color0 = 0xFFFFFFFFu;
             if (colors) {
