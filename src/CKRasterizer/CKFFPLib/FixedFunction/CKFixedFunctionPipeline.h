@@ -261,7 +261,8 @@ private:
                                             CKBOOL pointSprite = FALSE);
     CKFFProgramPrepareStatus PrepareVertexBufferProgram(const CKFFProgramPreparation **preparation,
                                                         CKDWORD dpFlags,
-                                                        CKDWORD formatFlags);
+                                                        CKDWORD formatFlags,
+                                                        CKDWORD activeTextureCount);
     CKFFProgramPrepareStatus PrepareSoftwareProgram(const CKFFProgramPreparation **preparation,
                                                     CKDWORD dpFlags,
                                                     CKDWORD activeTextureCount,

@@ -721,15 +721,13 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
 CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareVertexBufferProgram(
     const CKFFProgramPreparation **preparation,
     CKDWORD dpFlags,
-    CKDWORD formatFlags)
+    CKDWORD formatFlags,
+    CKDWORD activeTextureCount)
 {
     if (!preparation)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
     *preparation = NULL;
 
-    const CKDWORD activeTextureCount =
-        (CKDWORD)CKFFResolveActiveTextureStageCount(
-            m_State.TextureHandles, m_State.StageStates);
     if (m_VertexBufferProgramCacheValid &&
         m_VertexBufferProgramCacheDPFlags == dpFlags &&
         m_VertexBufferProgramCacheFormatFlags == formatFlags &&
@@ -1220,7 +1218,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     const CKFFProgramPreparation *preparation = NULL;
     const CKFFProgramPrepareStatus prepareStatus =
         PrepareVertexBufferProgram(
-            &preparation, dpFlags, formatFlags);
+            &preparation, dpFlags, formatFlags, activeTextureCount);
     if (prepareStatus != CKFF_PROGRAM_PREPARE_OK) {
         if (prepareStatus == CKFF_PROGRAM_PREPARE_PROGRAM_MISSING)
             CKFF_PROBE(m_Probes, OnProgramMiss());
