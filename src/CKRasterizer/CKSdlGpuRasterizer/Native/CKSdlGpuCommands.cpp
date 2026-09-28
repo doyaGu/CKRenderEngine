@@ -172,30 +172,6 @@ const CKFFUniformBinding *CKSdlGpuFindUniform(
     return nullptr;
 }
 
-bool CKSdlGpuRefreshVertexBlock(const CKSdlGpuProgram &program,
-                                CKFFProgramLayout &layout,
-                                const CKFFConstantSet &constants,
-                                CKFFConstantBlock block)
-{
-    const CKFFUniformBinding *binding = CKSdlGpuFindUniform(
-        program, CKRST_SHADER_VERTEX, block);
-    if (!binding)
-        return true;
-    const CKDWORD buffer = layout.BufferOffset(
-        binding->Stage, binding->BufferSlot);
-    if (buffer == UINT32_MAX)
-        return false;
-    const CKDWORD offset = buffer + binding->Offset;
-    const CKFFConstantValue &source = constants[(CKDWORD)block];
-    const CKDWORD size = XMin(binding->Size(), (CKDWORD)source.Bytes.Size());
-    if (size)
-        std::memcpy(layout.Data.Begin() + offset, source.Bytes.Begin(), size);
-    if (size < binding->Size())
-        std::memset(layout.Data.Begin() + offset + size, 0,
-                    binding->Size() - size);
-    return layout.MarkDataChanged(offset, binding->Size());
-}
-
 bool CKSdlGpuPatchDepthPad(const CKSdlGpuProgram &program,
                            CKFFProgramLayout &layout, CKDWORD stage,
                            const float transform[4])
@@ -488,14 +464,12 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     const CKFFConstantSet &constantValues =
         desc->Constants ? *desc->Constants : emptyConstants;
     uniforms.Update(constantValues);
-    if (!CKSdlGpuRefreshVertexBlock(*draw.Program, uniforms, constantValues,
-                                    CKRST_BLOCK_TEX_MATRICES) ||
-        !CKSdlGpuRefreshVertexBlock(*draw.Program, uniforms, constantValues,
-                                    CKRST_BLOCK_STAGE_PARAMS))
-        return CKERR_INVALIDPARAMETER;
     CKSdlGpuBindingBatch::Inputs bindingInputs;
     bindingInputs.Hash = draw.Program->Identity;
     std::shared_ptr<CKSdlGpuTexture> paddedOwners[CKFF_TEXTURE_SLOT_COUNT];
+    bool depthPadStages[CKFF_MAX_TEXTURE_STAGES] = {};
+    float depthPadTransforms[CKFF_MAX_TEXTURE_STAGES][4];
+    bool hasDepthPad = false;
     for (unsigned slot = 0; slot < (unsigned)draw.Program->Interface.Samplers.Size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
         const bool nativeComparisonSampler =
@@ -526,9 +500,12 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                 return padError;
             textureOwner = &paddedOwners[slot];
             texture = paddedOwners[slot].get();
-            if (!CKSdlGpuPatchDepthPad(*draw.Program, uniforms,
-                                       binding.FixedStage, transform))
+            if (binding.FixedStage >= CKFF_MAX_TEXTURE_STAGES)
                 return CKERR_INVALIDPARAMETER;
+            depthPadStages[binding.FixedStage] = true;
+            std::memcpy(depthPadTransforms[binding.FixedStage], transform,
+                        sizeof(transform));
+            hasDepthPad = true;
         }
         CKSamplerDesc hardwareSampler = binding.Sampler;
         if (!nativeComparisonSampler)
@@ -588,6 +565,21 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         const CKDWORD last = (std::max)(decl.BorderColorOffset, decl.SamplerStateOffset) + sizeof(rgba);
         if (!uniforms.MarkDataChanged(metadata + first, last - first)) return CKERR_INVALIDPARAMETER;
     }
+    std::unique_ptr<CKFFProgramLayout> drawUniforms;
+    if (hasDepthPad) {
+        // Depth-border padding changes texture coordinates for this draw only.
+        // Keep the program layout immutable so ordinary draws can continue to
+        // reuse its revision-tracked uniform snapshots.
+        drawUniforms = std::make_unique<CKFFProgramLayout>(uniforms);
+        for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            if (depthPadStages[stage] &&
+                !CKSdlGpuPatchDepthPad(*draw.Program, *drawUniforms, stage,
+                                       depthPadTransforms[stage]))
+                return CKERR_INVALIDPARAMETER;
+        }
+    }
+    const CKFFProgramLayout &snapshotUniforms = drawUniforms
+        ? *drawUniforms : uniforms;
     // Snapshot directly into the batch only after validating the entire draw.
     // Offsets survive arena growth; caller-owned transient data may change as
     // soon as Draw returns. XArray and native GPU offsets are both bounded here
@@ -597,11 +589,17 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             CKSdlGpuAlignedEnd((uint64_t)BatchVertices.Size(), vertices.Size, 4u),
             vertices1.Size, 4u) > kArraySizeLimit ||
         CKSdlGpuAlignedEnd((uint64_t)BatchIndices.Size(), indices.Size, 4u) > kArraySizeLimit ||
-        uint64_t(Uniforms.Data.Size()) + uniforms.Data.Size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
+        uint64_t(Uniforms.Data.Size()) + snapshotUniforms.Data.Size() > UINT32_MAX) return CKERR_OUTOFMEMORY;
     CKSdlGpuAppendBytes(BatchVertices, vertices, 4u, draw.VertexOffset);
     CKSdlGpuAppendBytes(BatchVertices, vertices1, 4u, draw.VertexOffset1);
     CKSdlGpuAppendBytes(BatchIndices, indices, 4u, draw.IndexOffset);
-    Uniforms.Snapshot(uniforms, draw.Program->UniformCursor, draw.UniformOffsets);
+    if (drawUniforms) {
+        CKSdlGpuUniformCursor drawCursor;
+        Uniforms.Snapshot(snapshotUniforms, drawCursor, draw.UniformOffsets);
+    } else {
+        Uniforms.Snapshot(uniforms, draw.Program->UniformCursor,
+                          draw.UniformOffsets);
+    }
     draw.Bindings = Bindings.Intern(*draw.Program, bindingInputs);
     DrawResources.Retain(programOwner);
     DrawResources.Retain(layoutOwner); DrawResources.Retain(layout1Owner);
