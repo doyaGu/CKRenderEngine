@@ -398,8 +398,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
     if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
-    if (m_State.DrawState.GetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING))
-        RecordDrawApproximation(CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING);
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,

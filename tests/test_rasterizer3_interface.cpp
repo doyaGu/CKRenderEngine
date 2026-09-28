@@ -1010,7 +1010,6 @@ void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD)
 }
 void SetupEdgeAntialias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE); }
 void SetupClippingOff(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE); }
-void SetupSoftwareVP(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE); }
 void SetupFillPoint(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT); }
 void SetupAffineTexcoords(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE); }
 void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
@@ -1037,7 +1036,6 @@ void TestApproximationsKeepDrawing()
     const ApproximationCase cases[] = {
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
         {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
-        {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
@@ -1068,6 +1066,19 @@ void TestApproximationsKeepDrawing()
                       Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 0,
                   "approximations must not count as rejections");
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
+    }
+
+    {
+        Fixture f;
+        CKRasterizerContext *ctx = f.Context;
+        ctx->SetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE);
+        TestCheck(ctx->BeginScene(), "BeginScene (software vertex processing)");
+        DrawTexturedTriangle(ctx);
+        TestCheck(ctx->EndScene(), "EndScene (software vertex processing)");
+        TestCheck(CountDraws(f) == 1,
+                  "software vertex processing must reach the fixed-function shader pipeline");
+        TestCheck(Diag(f.Context, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING) == 0,
+                  "software vertex processing must not report an approximation");
     }
 
     {

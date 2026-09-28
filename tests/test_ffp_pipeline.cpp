@@ -442,6 +442,34 @@ void DrawVertexBufferPreservesSupportedStencilWriteMasks() {
     ffp.Shutdown();
 }
 
+void SoftwareVertexProcessingUsesExactFixedFunctionProgram() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "baseline fixed-function draw");
+    const CKFFShaderKey baselineKey = ffp.GetDraw().ProgramContext->ShaderKey;
+    const CKDrawState baselineState = ffp.GetDraw().Pipeline.State;
+
+    ffp.SetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST,
+                                   1, 0, 0, 3, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
+              "software vertex-processing draw");
+    TestCheck(ffp.GetDraw().ProgramContext->ShaderKey == baselineKey &&
+                  CKFFDrawStateEquals(ffp.GetDraw().Pipeline.State, baselineState),
+              "software vertex processing uses the same fixed-function math and pipeline state");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING) == 0,
+              "software vertex processing is exact in the shader fixed-function pipeline");
+
+    ffp.Shutdown();
+}
+
 void DrawVertexBufferSubmitsRepresentableStencilMasks() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
@@ -513,7 +541,6 @@ void IgnoredRenderStatesReportDiagnostics() {
     const IgnoredStateCase cases[] = {
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
         {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
-        {VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE, FALSE, CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING},
     };
 
     FFPRecordingDriver driver;
@@ -4414,6 +4441,8 @@ int main() {
               &DrawVertexBufferPreservesStencilWriteMasks);
     tests.Run("DrawVertexBuffer preserves supported stencil write masks",
               &DrawVertexBufferPreservesSupportedStencilWriteMasks);
+    tests.Run("Software vertex processing uses exact fixed-function program",
+              &SoftwareVertexProcessingUsesExactFixedFunctionProgram);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
     tests.Run("Ignored render states report diagnostics",
