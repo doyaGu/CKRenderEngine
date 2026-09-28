@@ -265,12 +265,28 @@ void StageFragmentProgramPacksAllOpsAndArgs()
 
             CKFFShaderKeyFS key = CKFFBuildShaderKeyFS(desc, 0);
             CKFFFragmentProgram program = BuildTestFragmentProgram(key);
-            TestCheckf(program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == kFFPCoverageTextureOps[opIndex].Value,
-                       "Stage %u color op %s must pack into the fragment program",
-                       stage, kFFPCoverageTextureOps[opIndex].Name);
-            TestCheckf(program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP) == kFFPCoverageTextureOps[opIndex].Value,
-                       "Stage %u alpha op %s must pack into the fragment program",
-                       stage, kFFPCoverageTextureOps[opIndex].Name);
+            const CKDWORD op = kFFPCoverageTextureOps[opIndex].Value;
+            if (op == CKRST_TOP_DISABLE && stage > 0) {
+                TestCheckf(key.Stages[stage].ColorOp == CKRST_TOP_DISABLE &&
+                               key.LastActiveTextureStage == stage - 1,
+                           "Stage %u DISABLE must terminate the resolved stage chain",
+                           stage);
+                TestCheckf(program.GetStage(
+                               stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == 0 &&
+                               program.GetStage(
+                               stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP) == 0,
+                           "Stage %u terminal words must remain canonical zero",
+                           stage);
+            } else {
+                TestCheckf(program.GetStage(
+                               stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == op,
+                           "Stage %u color op %s must pack into the fragment program",
+                           stage, kFFPCoverageTextureOps[opIndex].Name);
+                TestCheckf(program.GetStage(
+                               stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP) == op,
+                           "Stage %u alpha op %s must pack into the fragment program",
+                           stage, kFFPCoverageTextureOps[opIndex].Name);
+            }
             checkedOps += 2;
         }
 
