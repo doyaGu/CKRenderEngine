@@ -66,14 +66,14 @@ enum CKFFDrawSource {
 };
 
 // Fully resolved FFP output consumed immediately by a concrete rasterizer.
-// CPU geometry points into CKFixedFunctionPipeline scratch arrays and remains
-// valid until that pipeline prepares another draw.
+// Program, texture and CPU geometry data remain owned by
+// CKFixedFunctionPipeline and are valid until it prepares another draw.
 struct CKFFDraw {
     CKFFPipelineState Pipeline;
-    CKFFTextureBindingSet Textures;
+    const CKFFProgramContext *ProgramContext;
+    const CKFFTextureBindingSet *Textures;
     const CKFFConstantSet *Constants;
     const char *Marker;
-    CKFFShaderKey ShaderKey;
     CKDWORD VertexFormat;
     CKDWORD VertexBuffer;
     const CKBYTE *Vertices;
@@ -98,6 +98,8 @@ struct CKFFDraw {
 
     void ResetSubmissionFields()
     {
+        ProgramContext = NULL;
+        Textures = NULL;
         Constants = NULL;
         Marker = NULL;
         VertexFormat = 0;

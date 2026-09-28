@@ -234,15 +234,20 @@ private:
         const CKFFDraw &draw = GetDraw();
         if (draw.SkipSubmit)
             return TRUE;
+        if (!draw.ProgramContext || !draw.Textures)
+            return FinishDraw(CKERR_INVALIDOPERATION, 0);
+        const CKFFProgramContext &programContext = *draw.ProgramContext;
+        const CKFFTextureBindingSet &drawTextures = *draw.Textures;
         const CKFFProgramBinding binding = m_Shaders.GetProgram(
-            m_Device, draw.ShaderKey, draw.Textures.SamplerLayoutPlan);
+            m_Device, programContext.ShaderKey,
+            drawTextures.SamplerLayoutPlan);
         const CKDWORD layout = GetLayout(draw.VertexFormat);
         if (!binding.Program || !layout)
             return FinishDraw(CKERR_INVALIDOPERATION, 0);
 
         CKFFTextureBindings textures;
-        for (CKDWORD i = 0; i < draw.Textures.ActiveTextureCount; ++i) {
-            const CKFFTextureBinding &source = draw.Textures.Bindings[i];
+        for (CKDWORD i = 0; i < drawTextures.ActiveTextureCount; ++i) {
+            const CKFFTextureBinding &source = drawTextures.Bindings[i];
             if (!source.Texture || source.Stage >= CKFF_TEXTURE_SLOT_COUNT)
                 continue;
             textures[source.Stage].Texture = source.Texture;

@@ -838,7 +838,7 @@ void ExpandedPointFillPreservesPointCenterSemantics() {
     TestCheck(ffp.GetLastDrawApproximationMask() == 0,
               "lighting, range fog, texgen and clip planes must use the exact point center");
     TestCheck((ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET) != 0 &&
-                  ffp.GetDraw().ShaderKey.VS.GetPointOffset(),
+                  ffp.GetDraw().ProgramContext->ShaderKey.VS.GetPointOffset(),
               "expanded point fill must enable the internal final-position offset path");
     bool hasPointOffset = false;
     bool hasRedundantPointOffset = false;
@@ -931,7 +931,7 @@ void ExpandedPointFillPreservesBlendAndTweenInputs() {
               "tweened point fill must expand");
     TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
                   (ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET_WEIGHT) != 0 &&
-                  ffp.GetDraw().ShaderKey.VS.GetPointOffsetWeight(),
+                  ffp.GetDraw().ProgramContext->ShaderKey.VS.GetPointOffsetWeight(),
               "tweened point fill must use the inactive weight input for exact offsets");
     stride = CKFFVertexLayout::ComputeStride(ffp.GetDraw().VertexFormat);
     TestCheck(context.Log.LastVertexBytes.size() == stride * 12,
@@ -1248,8 +1248,8 @@ void DrawVertexBufferRoutesTargetDithering() {
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "dithered RGB565 draw submits");
     CKFFFragmentProgram spec = CurrentDrawFragmentProgram(ffp, context);
-    TestCheck(ffp.GetDraw().ShaderKey.FS.DitherEnable &&
-                  ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
+    TestCheck(ffp.GetDraw().ProgramContext->ShaderKey.FS.DitherEnable &&
+                  ffp.GetDraw().ProgramContext->ShaderKey.FS.ColorTargetFormat ==
                       CKFF_COLOR_TARGET_RGB565,
               "dither and RGB565 precision reach output routing");
     TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
@@ -1263,8 +1263,8 @@ void DrawVertexBufferRoutesTargetDithering() {
               "disabling RGB565 dithering submits");
     const CKFFFragmentProgram disabledSpec =
         CurrentDrawFragmentProgram(ffp, context);
-    TestCheck(!ffp.GetDraw().ShaderKey.FS.DitherEnable &&
-                  ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
+    TestCheck(!ffp.GetDraw().ProgramContext->ShaderKey.FS.DitherEnable &&
+                  ffp.GetDraw().ProgramContext->ShaderKey.FS.ColorTargetFormat ==
                       CKFF_COLOR_TARGET_RGB565 &&
                   disabledSpec == spec,
               "changing only dither state reuses the core fragment program");
@@ -1276,7 +1276,7 @@ void DrawVertexBufferRoutesTargetDithering() {
               "non-dithered RGBA4 draw submits");
     const CKFFFragmentProgram rgba4Spec =
         CurrentDrawFragmentProgram(ffp, context);
-    TestCheck(ffp.GetDraw().ShaderKey.FS.ColorTargetFormat ==
+    TestCheck(ffp.GetDraw().ProgramContext->ShaderKey.FS.ColorTargetFormat ==
                   CKFF_COLOR_TARGET_RGBA4 &&
                   rgba4Spec == spec,
               "target format routing reuses the core fragment program");
@@ -1554,7 +1554,7 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
                                    1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "DrawVertexBuffer with clipping disabled");
-    TestCheck(!ffp.GetDraw().ShaderKey.VS.GetVertexClipping(),
+    TestCheck(!ffp.GetDraw().ProgramContext->ShaderKey.VS.GetVertexClipping(),
               "Clipping off must select the shader without user clip planes");
     params = context.Log.FloatUniforms.find(paramsUniform);
     TestCheck(params != context.Log.FloatUniforms.end() &&
@@ -1568,7 +1568,7 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1),
               "DrawVertexBuffer with clipping restored");
     params = context.Log.FloatUniforms.find(paramsUniform);
-    TestCheck(ffp.GetDraw().ShaderKey.VS.GetVertexClipping() &&
+    TestCheck(ffp.GetDraw().ProgramContext->ShaderKey.VS.GetVertexClipping() &&
                   params != context.Log.FloatUniforms.end() &&
                   params->second[0] == 2.0f,
               "Restoring clipping must reactivate the selected user planes");

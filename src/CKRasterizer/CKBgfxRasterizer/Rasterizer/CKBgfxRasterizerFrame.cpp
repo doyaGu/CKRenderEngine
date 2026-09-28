@@ -600,15 +600,19 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
     const CKFFDraw &draw = m_FFP.GetDraw();
     if (draw.SkipSubmit)
         return TRUE;
+    if (!draw.ProgramContext || !draw.Textures)
+        return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);
+    const CKFFProgramContext &programContext = *draw.ProgramContext;
+    const CKFFTextureBindingSet &drawTextures = *draw.Textures;
     const CKFFProgramBinding binding = ResolveNativeFFProgram(
-        draw.ShaderKey, draw.Textures);
+        programContext.ShaderKey, drawTextures);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
     if (!binding.Program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);
 
     CKFFTextureBindings textures;
-    for (CKDWORD i = 0; i < draw.Textures.ActiveTextureCount; ++i) {
-        const CKFFTextureBinding &source = draw.Textures.Bindings[i];
+    for (CKDWORD i = 0; i < drawTextures.ActiveTextureCount; ++i) {
+        const CKFFTextureBinding &source = drawTextures.Bindings[i];
         if (!source.Texture || source.Stage >= CKFF_TEXTURE_SLOT_COUNT)
             continue;
         textures[source.Stage].Texture = source.Texture;
@@ -629,8 +633,8 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
     nativeDraw.StartIndex = draw.StartIndex;
     nativeDraw.IndexCount = draw.IndexCount;
     nativeDraw.SortKey = draw.SortKey;
-    nativeDraw.DitherEnable = draw.ShaderKey.FS.DitherEnable ? TRUE : FALSE;
-    nativeDraw.ColorTargetFormat = draw.ShaderKey.FS.ColorTargetFormat;
+    nativeDraw.DitherEnable = programContext.ShaderKey.FS.DitherEnable ? TRUE : FALSE;
+    nativeDraw.ColorTargetFormat = programContext.ShaderKey.FS.ColorTargetFormat;
 
     CKTransientVertexData vertices;
     CKTransientIndexData indices;

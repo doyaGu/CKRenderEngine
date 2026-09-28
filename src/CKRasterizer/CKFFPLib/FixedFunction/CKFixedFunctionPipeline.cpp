@@ -1284,9 +1284,10 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
         : 1.0f;
     m_Draw.ResetSubmissionFields();
     m_Draw.Pipeline = pipeline;
+    m_Draw.ProgramContext = programContext;
+    m_Draw.Textures = textures;
     m_Draw.Constants = &m_Constants;
     m_Draw.Marker = m_DrawMarker;
-    m_Draw.ShaderKey = programContext->ShaderKey;
     m_Draw.Source = submission.Source;
     if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());
@@ -1324,7 +1325,6 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     // Textures.
     {
         CKFF_SCOPE_TIME(m_Probes, TextureUs);
-        m_Draw.Textures = *textures;
         CKDWORD desiredTextures[CKFF_MAX_TEXTURE_STAGES] = {};
         for (CKDWORD i = 0; i < textures->ActiveTextureCount; ++i) {
             desiredTextures[i] = textures->Bindings[i].Texture;
