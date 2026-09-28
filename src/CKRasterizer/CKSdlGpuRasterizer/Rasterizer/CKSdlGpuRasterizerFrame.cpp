@@ -625,6 +625,11 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
 
     CKTransientVertexData vertices;
     CKTransientIndexData indices;
+    CKTransientIndexData edgeQuadIndices;
+    const CKBOOL patternedEdge =
+        (draw.VertexFormat &
+         (CKFF_VF_LINEPATTERN | CKFF_VF_EDGEANTIALIAS)) ==
+        (CKFF_VF_LINEPATTERN | CKFF_VF_EDGEANTIALIAS);
     if (draw.Vertices) {
         if (!AllocTransientVertices(
                 draw.VertexCount, vertexLayout, &vertices) ||
@@ -636,7 +641,7 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
         nativeDraw.StartVertex = 0;
         nativeDraw.TransientVertices = &vertices;
     }
-    if (draw.Indices) {
+    if (draw.Indices && !patternedEdge) {
         if (!AllocTransientIndices(
                 draw.IndexCount, draw.Index32, &indices))
             return m_FFP.FinishDraw(CKERR_OUTOFMEMORY, 0);
@@ -646,6 +651,12 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
         nativeDraw.StartIndex = 0;
         nativeDraw.TransientIndices = &indices;
     }
+    if (patternedEdge) {
+        static const CKWORD quadIndices[6] = {0, 1, 2, 0, 2, 3};
+        if (!AllocTransientIndices(6, FALSE, &edgeQuadIndices))
+            return m_FFP.FinishDraw(CKERR_OUTOFMEMORY, 0);
+        memcpy(edgeQuadIndices.Data, quadIndices, sizeof(quadIndices));
+    }
 
     CKERROR error = CK_OK;
     if ((draw.VertexFormat & CKFF_VF_LINEPATTERN) != 0) {
@@ -653,12 +664,24 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
                             i < draw.LinePatternSpanCount; ++i) {
             const CKFFLinePatternSpan &span = draw.LinePatternSpans[i];
             CKDrawCommand patternedDraw = nativeDraw;
-            patternedDraw.StartVertex = span.FirstVertex;
-            patternedDraw.VertexCount = 2;
-            patternedDraw.IndexBuffer = 0;
-            patternedDraw.TransientIndices = NULL;
-            patternedDraw.StartIndex = 0;
-            patternedDraw.IndexCount = 0;
+            if (patternedEdge) {
+                // Snapshot only this line's four expanded vertices. Local
+                // quad indices avoid recopying the complete expanded batch
+                // for every enabled pattern run.
+                patternedDraw.StartVertex = span.FirstVertex;
+                patternedDraw.VertexCount = 4;
+                patternedDraw.IndexBuffer = 0;
+                patternedDraw.TransientIndices = &edgeQuadIndices;
+                patternedDraw.StartIndex = 0;
+                patternedDraw.IndexCount = 6;
+            } else {
+                patternedDraw.StartVertex = span.FirstVertex;
+                patternedDraw.VertexCount = 2;
+                patternedDraw.IndexBuffer = 0;
+                patternedDraw.TransientIndices = NULL;
+                patternedDraw.StartIndex = 0;
+                patternedDraw.IndexCount = 0;
+            }
             CKRECT scissor = span.Scissor;
             if (draw.Pipeline.ScissorEnabled) {
                 scissor.left = (std::max)(scissor.left, draw.Pipeline.Scissor.left);
@@ -759,6 +782,7 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD 
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
         m_FFP.NeedsVertexBufferLinePattern(Type) ||
+        m_FFP.NeedsVertexBufferEdgeAntialias(Type) ||
         m_FFP.NeedsVertexBufferPointFillExpansion(Type, vb->Desc.m_VertexFormat) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
@@ -819,6 +843,7 @@ CKBOOL CKSdlGpuRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWOR
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
         m_FFP.NeedsVertexBufferLinePattern(Type) ||
+        m_FFP.NeedsVertexBufferEdgeAntialias(Type) ||
         m_FFP.NeedsVertexBufferPointFillExpansion(Type, vb->Desc.m_VertexFormat) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {

@@ -531,41 +531,11 @@ void DrawVertexBufferPropagatesBackendFailure() {
     ffp.Shutdown();
 }
 
-void IgnoredRenderStatesReportDiagnostics() {
-    struct IgnoredStateCase {
-        VXRENDERSTATETYPE State;
-        CKDWORD Value;
-        CKDWORD ResetValue;
-        CKRST_DIAGNOSTIC Diagnostic;
-    };
-    const IgnoredStateCase cases[] = {
-        {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
-    };
-
+void LegacyLineAndPointStatesUseExactPaths() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend(), context.ShaderSet());
-
-    CKBOOL allDrawn = TRUE;
-    CKBOOL allReported = TRUE;
-    for (CKDWORD i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        ffp.SetRenderState(cases[i].State, cases[i].Value);
-        const CKBOOL drawn = ffp.DrawVertexBuffer(
-            VX_TRIANGLELIST,
-            1, 0, 0, 3, 0, 0,
-            CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-        allDrawn = allDrawn && drawn;
-        allReported = allReported &&
-            ffp.GetLastDrawApproximationMask() == (1ull << cases[i].Diagnostic) &&
-            ffp.GetApproximatedDrawCount(cases[i].Diagnostic) == 1;
-        ffp.SetRenderState(cases[i].State, cases[i].ResetValue);
-    }
-
-    TestCheck(allDrawn && context.Log.DrawCount == sizeof(cases) / sizeof(cases[0]),
-              "Ignored or approximated render states must keep submitting draws");
-    TestCheck(allReported,
-              "Each ignored or approximated render state must report exactly its own diagnostic");
 
     ffp.SetRenderState(VXRENDERSTATE_CULLMODE, VXCULL_NONE);
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
@@ -626,12 +596,195 @@ void IgnoredRenderStatesReportDiagnostics() {
 
     ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
-    TestCheck(ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+    TestCheck(!ffp.DrawVertexBuffer(VX_LINELIST, 1, 0, 0, 2, 0, 0,
+                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
+                  ffp.GetLastDrawRejectReason() ==
+                      CKFF_DRAW_REJECT_PREPARE_FAILED &&
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.NeedsVertexBufferEdgeAntialias(VX_LINELIST),
+              "an antialiased direct line routes through its CPU shadow");
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
+    TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
                                    CKRST_DP_CL_V, CKRST_DP_CL_V, 1) &&
-                  ffp.GetLastDrawApproximationMask() ==
-                      (1ull << CKRST_DIAG_IGNORE_ANTIALIAS) &&
-                  ((ffp.GetDraw().Pipeline.State.Lo >> 12) & 3u) == 0u,
-              "An explicit line reports unsupported edge AA but ignores polygon point fill");
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  !ffp.NeedsVertexBufferEdgeAntialias(VX_TRIANGLELIST),
+              "edge antialias state has no defined effect on triangles");
+
+    ffp.Shutdown();
+}
+
+void EdgeAntialiasExpandsExplicitLines() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    ffp.Init(context.StartedBackend(), context.ShaderSet());
+
+    CKViewportData viewport = {};
+    viewport.ViewWidth = 64;
+    viewport.ViewHeight = 64;
+    viewport.ViewZMax = 1.0f;
+    ffp.SetViewport(viewport);
+    ffp.SetTargetExtents(64, 64, 64, 64);
+    ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);
+    ffp.SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT);
+
+    VxVector positions[3] = {
+        VxVector(-0.75f, 0.0f, 0.5f),
+        VxVector(0.75f, 0.0f, 0.5f),
+        VxVector(0.75f, 0.75f, 0.5f),
+    };
+    CKDWORD colors[3] = {0xffffffffu, 0xffffffffu, 0xffffffffu};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 2;
+    data.Flags = CKRST_DP_TR_VC;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = colors;
+    data.ColorStride = sizeof(CKDWORD);
+
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+              "edge-antialiased line list submits through transient geometry");
+    const CKFFDraw &line = ffp.GetDraw();
+    TestCheck(line.VertexCount == 4 && line.IndexCount == 6 &&
+                  DrawStateTopology(line.Pipeline.State) == VX_TRIANGLELIST &&
+                  ((line.Pipeline.State.Lo >> 12) & 3u) == 0u,
+              "one explicit line expands into one solid indexed quad");
+    TestCheck((line.VertexFormat & CKFF_VF_EDGEANTIALIAS) != 0 &&
+                  (line.VertexFormat & CKFF_VF_EDGEANTIALIAS_WEIGHT) == 0 &&
+                  line.ProgramContext->ShaderKey.VS.GetEdgeAntialias() &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "edge coverage reaches the fixed-function shader without diagnostics");
+    TestCheck((line.Pipeline.State.Lo & (0xffffu << 16)) ==
+                  CKRST_STATE_BLEND_SEPARATE(
+                      VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA,
+                      VXBLEND_ONE, VXBLEND_INVSRCALPHA) &&
+                  (line.Pipeline.State.Mid & 0x3fu) ==
+                  CKRST_STATE_BLEND_EQ_SEPARATE(
+                      VXBLENDOP_ADD, VXBLENDOP_ADD),
+              "single-sample edge coverage uses alpha-smoothed line blending");
+
+    const CKDWORD stride = line.VertexStride;
+    bool offsetsValid = context.Log.LastVertexBytes.size() == stride * 4u;
+    const float expectedOffsets[4][2] = {
+        {0.0f, -1.0f}, {0.0f, 1.0f},
+        {0.0f, 1.0f}, {0.0f, -1.0f},
+    };
+    for (CKDWORD corner = 0; offsetsValid && corner < 4; ++corner) {
+        float auxiliary[3] = {};
+        memcpy(auxiliary,
+               &context.Log.LastVertexBytes[corner * stride + stride - 12u],
+               sizeof(auxiliary));
+        offsetsValid = fabsf(auxiliary[0] - expectedOffsets[corner][0]) < 0.0001f &&
+                       fabsf(auxiliary[1] - expectedOffsets[corner][1]) < 0.0001f &&
+                       auxiliary[2] == 0.0f;
+    }
+    TestCheck(offsetsValid,
+              "expanded vertices carry signed one-pixel offsets and zero solid phase");
+    bool tangentLayout = false;
+    for (size_t i = 0; i < context.LastVertexLayoutElements.size(); ++i) {
+        const CKVertexElementDesc &element =
+            context.LastVertexLayoutElements[i];
+        tangentLayout |= element.Attrib == CKRST_ATTRIB_TANGENT &&
+                         element.Count == 3;
+    }
+    TestCheck(tangentLayout,
+              "the edge offset and optional pattern phase share one float3 attribute");
+    const CKDWORD drawParamsUniform =
+        context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const std::vector<float> &drawParams =
+        context.Log.FloatUniforms[drawParamsUniform];
+    TestCheck(drawParams.size() == CKFF_DRAW_PARAM_VEC4_COUNT * 4u &&
+                  drawParams[CKFF_DRAW_PARAM_MATERIAL_POWER * 4u + 3u] == 3.0f,
+              "the shader receives the tangent-backed line expansion mode");
+
+    data.VertexCount = 3;
+    TestCheck(ffp.DrawPrimitive(VX_LINESTRIP, NULL, 0, &data) &&
+                  ffp.GetDraw().VertexCount == 8 &&
+                  ffp.GetDraw().IndexCount == 12 &&
+                  DrawStateTopology(ffp.GetDraw().Pipeline.State) ==
+                      VX_TRIANGLELIST,
+              "a two-segment line strip expands into two independent coverage quads");
+
+    ffp.SetMultisampledTarget(TRUE);
+    data.VertexCount = 2;
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data) &&
+                  (ffp.GetDraw().Pipeline.State.Lo &
+                   CKRST_STATE_ALPHA_COVERAGE) != 0 &&
+                  (ffp.GetDraw().Pipeline.State.Lo & (0xffffu << 16)) == 0,
+              "multisample edge coverage uses alpha-to-coverage and preserves blending");
+
+    ffp.SetMultisampledTarget(FALSE);
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xcc000002u);
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+              "patterned antialiased lines retain exact pattern preparation");
+    const CKFFDraw &patterned = ffp.GetDraw();
+    bool spansValid = patterned.LinePatternSpans != NULL &&
+                      patterned.LinePatternSpanCount >= 2;
+    for (CKDWORD i = 0; spansValid && i < patterned.LinePatternSpanCount; ++i) {
+        const CKFFLinePatternSpan &span = patterned.LinePatternSpans[i];
+        spansValid = span.FirstVertex == 0 &&
+                     span.Scissor.left < span.Scissor.right;
+    }
+    float lastPhase = 0.0f;
+    if (context.Log.LastVertexBytes.size() == patterned.VertexStride * 4u) {
+        memcpy(&lastPhase,
+               &context.Log.LastVertexBytes[
+                   patterned.VertexStride * 4u - sizeof(lastPhase)],
+               sizeof(lastPhase));
+    }
+    TestCheck(spansValid &&
+                  (patterned.VertexFormat & CKFF_VF_LINEPATTERN) != 0 &&
+                  lastPhase > 23.99f && lastPhase < 24.01f,
+              "pattern spans select the expanded quad and preserve perspective phase");
+
+    ffp.SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
+    float positionT[2][4] = {
+        {8.0f, 32.0f, 0.5f, 1.0f},
+        {56.0f, 32.0f, 0.5f, 1.0f},
+    };
+    data.Flags = CKRST_DP_CL_VC;
+    data.PositionPtr = positionT;
+    data.PositionStride = sizeof(positionT[0]);
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data) &&
+                  (ffp.GetDraw().VertexFormat & CKFF_VF_POSITIONT) != 0 &&
+                  ffp.GetDraw().ProgramContext->ShaderKey.VS.GetEdgeAntialias(),
+              "POSITIONT lines use the same analytic edge coverage path");
+
+    VxVector tweenPositions[2] = {
+        VxVector(-0.75f, 0.4f, 0.5f),
+        VxVector(0.75f, 0.4f, 0.5f),
+    };
+    data.Flags = CKRST_DP_TR_VC | CKRST_DP_TWEEN;
+    data.PositionPtr = positions;
+    data.PositionStride = sizeof(VxVector);
+    data.TweenPositionPtr = tweenPositions;
+    data.TweenPositionStride = sizeof(VxVector);
+    ffp.SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+    ffp.SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatStageState(1.0f));
+    TestCheck(ffp.DrawPrimitive(VX_LINELIST, NULL, 0, &data) &&
+                  (ffp.GetDraw().VertexFormat &
+                   CKFF_VF_EDGEANTIALIAS_WEIGHT) != 0 &&
+                  ffp.GetDraw().ProgramContext->ShaderKey.VS.
+                      GetExpansionUsesWeight(),
+              "tweened lines carry coverage through the idle weight attribute");
+    const CKFFDraw &tweened = ffp.GetDraw();
+    bool tweenStreamsValid =
+        context.Log.LastVertexBytes.size() ==
+        tweened.VertexStride * tweened.VertexCount;
+    if (tweenStreamsValid) {
+        VxVector preservedTween;
+        float tweenOffset[3] = {};
+        memcpy(&preservedTween, &context.Log.LastVertexBytes[12],
+               sizeof(preservedTween));
+        memcpy(tweenOffset,
+               &context.Log.LastVertexBytes[tweened.VertexStride - 12u],
+               sizeof(tweenOffset));
+        tweenStreamsValid = preservedTween == tweenPositions[0] &&
+            fabsf(tweenOffset[0]) < 0.0001f &&
+            fabsf(fabsf(tweenOffset[1]) - 1.0f) < 0.0001f;
+    }
+    TestCheck(tweenStreamsValid,
+              "line expansion preserves tween positions while appending coverage data");
 
     ffp.Shutdown();
 }
@@ -955,7 +1108,7 @@ void ExpandedPointFillPreservesBlendAndTweenInputs() {
               "tweened point fill must expand");
     TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
                   (ffp.GetDraw().VertexFormat & CKFF_VF_POINTOFFSET_WEIGHT) != 0 &&
-                  ffp.GetDraw().ProgramContext->ShaderKey.VS.GetPointOffsetWeight(),
+                  ffp.GetDraw().ProgramContext->ShaderKey.VS.GetExpansionUsesWeight(),
               "tweened point fill must use the inactive weight input for exact offsets");
     stride = CKFFVertexLayout::ComputeStride(ffp.GetDraw().VertexFormat);
     TestCheck(context.Log.LastVertexBytes.size() == stride * 12,
@@ -2889,20 +3042,20 @@ void DrawValidationCacheInvalidatesOnStateChanges() {
               "unchanged valid draw state remains submit-ready");
 
     ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);
-    const CKBOOL firstApproximation = ffp.DrawVertexBuffer(
+    const CKBOOL firstUndefinedPrimitive = ffp.DrawVertexBuffer(
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    const CKBOOL cachedApproximation = ffp.DrawVertexBuffer(
+    const CKBOOL cachedUndefinedPrimitive = ffp.DrawVertexBuffer(
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    TestCheck(firstApproximation && cachedApproximation &&
-                  ffp.GetLastDrawApproximationMask() ==
-                      (1ull << CKRST_DIAG_IGNORE_ANTIALIAS) &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_IGNORE_ANTIALIAS) == 2 &&
+    TestCheck(firstUndefinedPrimitive && cachedUndefinedPrimitive &&
+                  ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(
+                      CKRST_DIAG_IGNORE_ANTIALIAS) == 0 &&
                   context.Log.DrawCount == 4,
-              "cached validation replays per-draw approximation diagnostics");
+              "edge antialias state remains inert for undefined triangle primitives");
     ffp.SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, FALSE);
 
     ffp.SetRenderState(VXRENDERSTATE_FILLMODE, 99);
@@ -4449,8 +4602,10 @@ int main() {
               &SoftwareVertexProcessingUsesExactFixedFunctionProgram);
     tests.Run("DrawVertexBuffer submits representable stencil masks",
               &DrawVertexBufferSubmitsRepresentableStencilMasks);
-    tests.Run("Ignored render states report diagnostics",
-              &IgnoredRenderStatesReportDiagnostics);
+    tests.Run("Legacy line and point states use exact paths",
+              &LegacyLineAndPointStatesUseExactPaths);
+    tests.Run("Edge antialias expands explicit lines",
+              &EdgeAntialiasExpandsExplicitLines);
     tests.Run("Patterned lines use exact screen phases",
               &PatternedLinesUseExactScreenPhases);
     tests.Run("Expanded point fill preserves point center semantics",

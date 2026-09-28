@@ -1,4 +1,4 @@
-$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
+$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_lineOffset, v_clipDistance0, v_clipDistance1
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -39,6 +39,13 @@ void main()
         v_clipDistance1.z < 0.0 || v_clipDistance1.w < 0.0)
         discard;
 // CKFF_BGFX_ONLY_END
+    float edgeCoverage = 1.0;
+    if (u_ffDrawParams[4].w > 2.5) {
+        vec2 lineOffset = v_lineOffset * gl_FragCoord.w;
+        edgeCoverage = clamp(1.0 - length(lineOffset), 0.0, 1.0);
+        if (edgeCoverage <= 0.0)
+            discard;
+    }
 #if !CKFF_NATIVE_SDL_GPU
     int linePattern = int(u_ffDrawParams[3].w);
     int lineRepeat = int(u_ffDrawParams[11].w);
@@ -176,5 +183,6 @@ void main()
             : computePixelFogFactor(v_fogPos.z / v_fogPos.w, pixelFogMode, v_texcoord7Fog.z);
         current.rgb = mix(u_ffDrawParams[11].rgb, current.rgb, fogFactor);
     }
+    current.a *= edgeCoverage;
     gl_FragColor = clamp(current, 0.0, 1.0);
 }

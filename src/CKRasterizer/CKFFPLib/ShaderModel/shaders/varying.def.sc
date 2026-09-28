@@ -11,6 +11,7 @@ vec4 v_texcoord5  : TEXCOORD5 = vec4(0.0, 0.0, 0.0, 0.0);
 vec4 v_texcoord6  : TEXCOORD6 = vec4(0.0, 0.0, 0.0, 0.0);
 vec4 v_texcoord7Fog : TEXCOORD7 = vec4(0.0, 0.0, 1.0, 0.0);
 vec4 v_fogPos     : TEXCOORD8 = vec4(0.0, 0.0, 0.0, 1.0);
+vec2 v_lineOffset : TEXCOORD9 = vec2(0.0, 0.0);
 vec4 v_clipDistance0 : SV_ClipDistance0 = vec4(0.0, 0.0, 0.0, 0.0);
 vec4 v_clipDistance1 : SV_ClipDistance1 = vec4(0.0, 0.0, 0.0, 0.0);
 

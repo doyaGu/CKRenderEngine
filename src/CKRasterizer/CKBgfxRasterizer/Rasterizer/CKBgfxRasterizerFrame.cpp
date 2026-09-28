@@ -754,6 +754,7 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVB(VXPRIMITIVETYPE Type, CKDWORD VB
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
         m_FFP.NeedsVertexBufferLinePattern(Type) ||
+        m_FFP.NeedsVertexBufferEdgeAntialias(Type) ||
         m_FFP.NeedsVertexBufferPointFillExpansion(Type, vb->Desc.m_VertexFormat) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {
@@ -814,6 +815,7 @@ CKBOOL CKBgfxRasterizerContext::DrawPrimitiveVBIB(VXPRIMITIVETYPE Type, CKDWORD 
     if (m_FFP.NeedsVertexBufferWrap(vb->Layout.TexcoordCount) ||
         m_FFP.NeedsVertexBufferBlendValidation(vb->FormatFlags) ||
         m_FFP.NeedsVertexBufferLinePattern(Type) ||
+        m_FFP.NeedsVertexBufferEdgeAntialias(Type) ||
         m_FFP.NeedsVertexBufferPointFillExpansion(Type, vb->Desc.m_VertexFormat) ||
         (Type == VX_POINTLIST &&
          m_FFP.NeedsVertexBufferPointExpansion(vb->Desc.m_VertexFormat))) {

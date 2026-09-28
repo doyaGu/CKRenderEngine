@@ -2,7 +2,7 @@
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
 $input a_position, a_normal, a_tangent, a_bitangent, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_lineOffset, v_clipDistance0, v_clipDistance1
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -227,11 +227,23 @@ void main()
     if (u_ffDrawParams[7].y > 0.5) {
         viewNormal = normalize(viewNormal);
     }
+    float expansionMode = u_ffDrawParams[4].w;
+    bool expansionUsesWeight =
+        (expansionMode > 1.5 && expansionMode < 2.5) ||
+        expansionMode > 3.5;
+    vec3 expansionData = expansionUsesWeight ? a_weight : a_tangent;
+    bool edgeAntialias = expansionMode > 2.5;
     // The CPU supplies screen phase multiplied by clip W. Perspective
     // interpolation and fragment reciprocal W reconstruct affine phase.
-    float linePhase = vertexBlendMode == 2 ? a_weight.x : a_tangent.x;
+    float linePhase = edgeAntialias
+        ? expansionData.z
+        : (vertexBlendMode == 2 ? a_weight.x : a_tangent.x);
     v_fogPos = vec4(gl_Position.w, linePhase,
                     abs(viewPos.z), 1.0);
+    // The expanded quad carries its signed pixel offset at each side. Store
+    // offset * W so the fragment shader reconstructs a screen-linear value.
+    v_lineOffset = edgeAntialias
+        ? expansionData.xy * gl_Position.w : vec2(0.0, 0.0);
 
     vec4 matDiffuse  = selectMaterialSource(u_ffDrawParams[5].x, u_ffDrawParams[0], a_color0, a_color1);
     vec4 matAmbient  = selectMaterialSource(u_ffDrawParams[5].y, u_ffDrawParams[1], a_color0, a_color1);
@@ -365,9 +377,8 @@ void main()
     // Expanded point-filled triangles retain the source point for lighting,
     // fog, texgen and user clipping. The active vertex mode leaves either
     // tangent or blend weight available for the final pixel-space offset.
-    if (u_ffDrawParams[4].w > 0.5) {
-        vec2 pointOffset = u_ffDrawParams[4].w > 1.5
-            ? a_weight.xy : a_tangent.xy;
+    if (expansionMode > 0.5) {
+        vec2 pointOffset = expansionData.xy;
         gl_Position.xy += pointOffset * u_viewport.xy * gl_Position.w;
     }
 #if !CKFF_NATIVE_SDL_GPU

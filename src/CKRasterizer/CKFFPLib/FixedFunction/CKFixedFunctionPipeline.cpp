@@ -260,6 +260,15 @@ static bool CKFFUsesLineRasterization(VXPRIMITIVETYPE topology,
            drawState.GetRenderState(VXRENDERSTATE_FILLMODE) == VXFILL_WIREFRAME;
 }
 
+static bool CKFFUsesEdgeAntialiasedLines(
+    VXPRIMITIVETYPE topology, const CKDrawStateCache &drawState)
+{
+    // D3D8 defines EDGEANTIALIAS only for explicit line primitives. Drawing
+    // triangles or points with the state enabled is explicitly undefined.
+    return (topology == VX_LINELIST || topology == VX_LINESTRIP) &&
+           drawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS) != 0;
+}
+
 static bool CKFFUsesPolygonDepthBias(VXPRIMITIVETYPE topology)
 {
     return topology == VX_TRIANGLELIST || topology == VX_TRIANGLESTRIP ||
@@ -387,15 +396,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
         return RecordDrawReject(CKFF_DRAW_REJECT_STATE_VALUE);
     }
 
-    const CKBOOL triangles = topology == VX_TRIANGLELIST ||
-                             topology == VX_TRIANGLESTRIP ||
-                             topology == VX_TRIANGLEFAN;
-    const CKBOOL lines = CKFFUsesLineRasterization(topology, m_State.DrawState);
-    // Render states the backends cannot express are reported only when they
-    // affect the primitives actually submitted by this draw.
-    if ((triangles || lines) &&
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
-        RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
@@ -539,6 +539,13 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferLinePattern(
     VXPRIMITIVETYPE type) const
 {
     return CKFFUsesPatternedLines(type, m_State.DrawState) ? TRUE : FALSE;
+}
+
+CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferEdgeAntialias(
+    VXPRIMITIVETYPE type) const
+{
+    return CKFFUsesEdgeAntialiasedLines(type, m_State.DrawState)
+        ? TRUE : FALSE;
 }
 
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
@@ -885,8 +892,10 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         ? fabsf(2.0f / m_State.Viewport[1]) : 1.0f;
     const CKBOOL patternedLines =
         CKFFUsesPatternedLines(type, m_State.DrawState) ? TRUE : FALSE;
+    const CKBOOL antialiasedLines =
+        CKFFUsesEdgeAntialiasedLines(type, m_State.DrawState) ? TRUE : FALSE;
     CKFFLinePatternParams lineParams = {};
-    if (patternedLines) {
+    if (patternedLines || antialiasedLines) {
         lineParams.World = m_State.World;
         m_State.EnsureViewProjection();
         lineParams.ViewProjection = m_State.ViewProjection();
@@ -942,6 +951,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
                            m_State.ViewportData.ViewHeight;
         lineParams.TargetWidth = targetWidth ? (float)targetWidth : 1.0f;
         lineParams.TargetHeight = targetHeight ? (float)targetHeight : 1.0f;
+        lineParams.DepthClipEnabled =
+            m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING) != 0;
     }
     const CKFFProgramPreparation *programPreparation = NULL;
     const CKDWORD pointOffsetFlags = pointFillExpansion
@@ -954,8 +965,14 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
             (pointParams.BlendMode == CKFF_VERTEX_BLEND_TWEEN
                 ? CKFF_VF_LINEPATTERN_WEIGHT : 0)
         : 0;
+    const CKDWORD edgeAntialiasFlags = antialiasedLines
+        ? CKFF_VF_EDGEANTIALIAS |
+            (pointParams.BlendMode == CKFF_VERTEX_BLEND_TWEEN
+                ? CKFF_VF_EDGEANTIALIAS_WEIGHT : 0)
+        : 0;
     const CKDWORD programFormatFlags =
-        formatFlags | pointOffsetFlags | linePatternFlags;
+        formatFlags | pointOffsetFlags | linePatternFlags |
+        edgeAntialiasFlags;
     const CKFFProgramPrepareStatus prepareStatus = PrepareSoftwareProgram(
         &programPreparation, data->Flags, activeTextureCount, programFormatFlags,
         m_State.TexcoordComponentCounts, pointSprites);
@@ -1090,7 +1107,19 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
             return TRUE;
         }
     }
-    if (patternedLines) {
+    if (antialiasedLines) {
+        const VXPRIMITIVETYPE lineSourceType =
+            type == VX_LINESTRIP && wrapsTexcoords ? VX_LINELIST : type;
+        if (!m_TransientGeometry.ExpandAntialiasedLines(
+                lineSourceType, lineParams, patternedLines))
+            return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
+        if (m_TransientGeometry.GetVertexCount() == 0) {
+            m_Draw = CKFFDraw();
+            m_Draw.SkipSubmit = TRUE;
+            m_LastDrawRejectReason = CKFF_DRAW_REJECT_NONE;
+            return TRUE;
+        }
+    } else if (patternedLines) {
         const VXPRIMITIVETYPE lineSourceType =
             type == VX_LINESTRIP && wrapsTexcoords ? VX_LINELIST : type;
         if (!m_TransientGeometry.ExpandPatternedLines(
@@ -1114,7 +1143,9 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
                                              m_TransientGeometry.GetLastIndexBytes()));
 
     VXPRIMITIVETYPE drawStateType = type;
-    if (patternedLines) {
+    if (antialiasedLines) {
+        drawStateType = VX_TRIANGLELIST;
+    } else if (patternedLines) {
         drawStateType = VX_LINELIST;
     } else if (type == VX_TRIANGLEFAN || type == VX_TRIANGLESTRIP ||
         type == VX_POINTLIST) {
@@ -1125,9 +1156,10 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     CKFFDrawSubmission submission = {};
     submission.DrawStateType = drawStateType;
     submission.ForceSolidFill = expandedPointFill || type == VX_POINTLIST ||
-                                patternedWireframe;
+                                patternedWireframe || antialiasedLines;
     submission.PolygonDepthBias = CKFFUsesPolygonDepthBias(type) ? TRUE : FALSE;
     submission.PatternedLines = patternedLines;
+    submission.EdgeAntialias = antialiasedLines;
     submission.ProgramContext = &programContext;
     submission.Textures = textureBindingSet;
     submission.VertexFormat = m_TransientGeometry.GetFormatFlags();
@@ -1168,7 +1200,8 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     // as a point list and omit repeated vertices.
     if (NeedsVertexBufferPointFillExpansion(type, dpFlags))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
-    if (NeedsVertexBufferLinePattern(type))
+    if (NeedsVertexBufferLinePattern(type) ||
+        NeedsVertexBufferEdgeAntialias(type))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     // Callers with WRAPn route through the transient primitive path, which
     // can adjust coordinates independently for each primitive.
@@ -1228,6 +1261,23 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
             // The source triangle's face cull has already run in transient
             // geometry. Expanded point quads must be solid and unculled.
             pipeline.State.Lo &= ~(CKRST_STATE_FILLMODE(3) | CKRST_STATE_CULL(3));
+        }
+        if (submission.EdgeAntialias) {
+            if (m_State.DrawState.GetMultisampledTarget()) {
+                // Preserve the caller's blend equation on a multisample
+                // target; sample coverage performs the neighbor average.
+                pipeline.State.Lo |= CKRST_STATE_ALPHA_COVERAGE;
+            } else {
+                // A single-sample target needs the classic alpha-smoothed
+                // line blend used by D3D8-era hardware.
+                pipeline.State.Lo &= ~(0xffffu << 16);
+                pipeline.State.Lo |= CKRST_STATE_BLEND_SEPARATE(
+                    VXBLEND_SRCALPHA, VXBLEND_INVSRCALPHA,
+                    VXBLEND_ONE, VXBLEND_INVSRCALPHA);
+                pipeline.State.Mid &= ~0x3fu;
+                pipeline.State.Mid |= CKRST_STATE_BLEND_EQ_SEPARATE(
+                    VXBLENDOP_ADD, VXBLENDOP_ADD);
+            }
         }
     }
     CKFF_PROBE(m_Probes, OnDrawState(pipeline.State));

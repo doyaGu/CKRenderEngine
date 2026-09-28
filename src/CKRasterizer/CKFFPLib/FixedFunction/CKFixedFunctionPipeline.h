@@ -63,6 +63,7 @@ public:
     CKBOOL NeedsVertexBufferPointFillExpansion(VXPRIMITIVETYPE type,
                                                CKDWORD dpFlags) const;
     CKBOOL NeedsVertexBufferLinePattern(VXPRIMITIVETYPE type) const;
+    CKBOOL NeedsVertexBufferEdgeAntialias(VXPRIMITIVETYPE type) const;
     CKBOOL NeedsVertexBufferBlendValidation(CKDWORD formatFlags) const;
     CKDWORD QueryRenderState(VXRENDERSTATETYPE state) const { return m_State.DrawState.QueryRenderState(state); }
     void InitDefaultStates();
@@ -193,6 +194,7 @@ private:
         CKBOOL ForceSolidFill;
         CKBOOL PolygonDepthBias;
         CKBOOL PatternedLines;
+        CKBOOL EdgeAntialias;
         const CKFFProgramContext *ProgramContext;
         const CKFFTextureBindingSet *Textures;
         CKDWORD VertexBuffer;

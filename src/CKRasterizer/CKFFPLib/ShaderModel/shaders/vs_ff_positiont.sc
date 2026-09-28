@@ -5,7 +5,7 @@ $input a_position, a_tangent, a_bitangent, a_weight, a_texcoord0, a_texcoord1, a
 #ifndef CKFF_VS_DEPTH_PAD
 #define CKFF_VS_DEPTH_PAD 0
 #endif
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_clipDistance0, v_clipDistance1
+$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_lineOffset, v_clipDistance0, v_clipDistance1
 
 #include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
@@ -122,9 +122,13 @@ void main()
     float clipY = (a_position.y + 0.5) * u_viewport.y + u_viewport.w;
     gl_Position = vec4(clipX * clipW, clipY * clipW, a_position.z * clipW, clipW);
     vec4 worldClipPos = vec4(a_position.xyz, 1.0);
+    float expansionMode = u_ffDrawParams[4].w;
+    bool edgeAntialias = expansionMode > 2.5;
     v_fogPos = gl_Position;
     v_fogPos.x = clipW;
-    v_fogPos.y = a_tangent.x;
+    v_fogPos.y = edgeAntialias ? a_tangent.z : a_tangent.x;
+    v_lineOffset = edgeAntialias
+        ? a_tangent.xy * clipW : vec2(0.0, 0.0);
 #if CKFF_VS_CLIP_DISTANCE
     int clipCount = int(u_clipParams.x);
     v_clipDistance0.x = clipCount > 0 ? dot(worldClipPos, u_clipPlanes[0]) : 0.0;
@@ -181,8 +185,8 @@ void main()
     }
     // D3D8 ZBIAS compatibility offset, resolved for the active depth format.
     gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
-    if (u_ffDrawParams[4].w > 0.5) {
-        vec2 pointOffset = u_ffDrawParams[4].w > 1.5
+    if (expansionMode > 0.5) {
+        vec2 pointOffset = expansionMode > 1.5 && expansionMode < 2.5
             ? a_weight.xy : a_tangent.xy;
         gl_Position.xy += pointOffset * u_viewport.xy * gl_Position.w;
     }

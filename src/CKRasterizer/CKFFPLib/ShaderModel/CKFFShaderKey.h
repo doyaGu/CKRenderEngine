@@ -23,7 +23,8 @@ struct CKFFShaderKeyVS {
     bool GetVertexClipping() const { return (Bits & (1ull << 34)) != 0; }
     bool GetPointSprite() const { return (Bits & (1ull << 40)) != 0; }
     bool GetPointOffset() const { return (Bits & (1ull << 41)) != 0; }
-    bool GetPointOffsetWeight() const { return (Bits & (1ull << 42)) != 0; }
+    bool GetExpansionUsesWeight() const { return (Bits & (1ull << 42)) != 0; }
+    bool GetEdgeAntialias() const { return (Bits & (1ull << 43)) != 0; }
     bool operator==(const CKFFShaderKeyVS &other) const;
     bool operator!=(const CKFFShaderKeyVS &other) const { return !(*this == other); }
 };

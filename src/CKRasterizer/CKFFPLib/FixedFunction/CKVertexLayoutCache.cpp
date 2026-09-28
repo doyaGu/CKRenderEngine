@@ -40,7 +40,15 @@ CKDWORD CKFFVertexLayout::ComputeStride(CKDWORD formatFlags) {
         if (!reusesAttribute)
             stride += 8; // float2 pixel offset
     }
-    if (formatFlags & CKFF_VF_LINEPATTERN) {
+    if (formatFlags & CKFF_VF_EDGEANTIALIAS) {
+        const bool useWeight =
+            (formatFlags & CKFF_VF_EDGEANTIALIAS_WEIGHT) != 0;
+        const bool reusesAttribute = useWeight
+            ? (formatFlags & CKFF_VF_BLENDWEIGHT) != 0
+            : (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        if (!reusesAttribute)
+            stride += 12; // float2 pixel offset + line-pattern phase
+    } else if (formatFlags & CKFF_VF_LINEPATTERN) {
         const bool useWeight =
             (formatFlags & CKFF_VF_LINEPATTERN_WEIGHT) != 0;
         const bool reusesAttribute = useWeight
@@ -260,7 +268,26 @@ CKBOOL CKFFVertexLayout::BuildLayout(
             offset += 8;
         }
     }
-    if ((formatFlags & CKFF_VF_LINEPATTERN) != 0) {
+    if ((formatFlags & CKFF_VF_EDGEANTIALIAS) != 0) {
+        const bool useWeight =
+            (formatFlags & CKFF_VF_EDGEANTIALIAS_WEIGHT) != 0;
+        const bool reusesAttribute = useWeight
+            ? (formatFlags & CKFF_VF_BLENDWEIGHT) != 0
+            : (formatFlags & CKFF_VF_TWEENPOSITION) != 0;
+        if (!reusesAttribute) {
+            // Analytic line AA uses the idle blend attribute for a pixel
+            // offset plus the optional stipple phase.
+            elements[count].Attrib = useWeight
+                ? CKRST_ATTRIB_WEIGHT : CKRST_ATTRIB_TANGENT;
+            elements[count].Type = CKRST_ATTRIBTYPE_FLOAT;
+            elements[count].Count = 3;
+            elements[count].Normalized = FALSE;
+            elements[count].AsInt = FALSE;
+            elements[count].Offset = offset;
+            count++;
+            offset += 12;
+        }
+    } else if ((formatFlags & CKFF_VF_LINEPATTERN) != 0) {
         const bool useWeight =
             (formatFlags & CKFF_VF_LINEPATTERN_WEIGHT) != 0;
         const bool reusesAttribute = useWeight

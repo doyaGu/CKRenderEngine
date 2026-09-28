@@ -1135,6 +1135,119 @@ void CheckLineTopologyWithPointFill(Backend &b)
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_SOLID);
 }
 
+void CheckEdgeAntialiasedLines(Backend &b)
+{
+    CKRasterizerContext *ctx = b.Context;
+    SetDiffuseState(ctx);
+    const CKDWORD ignoredBefore =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_ANTIALIAS];
+    const VxVector positions[2] = {
+        VxVector(-0.82f, -0.63f, 0.5f),
+        VxVector(0.77f, 0.58f, 0.5f),
+    };
+    const CKDWORD colors[2] = {0xff00ff00u, 0xff00ff00u};
+    VxDrawPrimitiveData data = {};
+    data.VertexCount = 2;
+    data.Flags = CKRST_DP_TR_VC;
+    data.PositionPtr = const_cast<VxVector *>(positions);
+    data.PositionStride = sizeof(VxVector);
+    data.ColorPtr = const_cast<CKDWORD *>(colors);
+    data.ColorStride = sizeof(CKDWORD);
+
+    auto coverageCounts = [](const Pixels &pixels,
+                             int &lit, int &partial, int &strong) {
+        lit = partial = strong = 0;
+        for (int y = 0; y < pixels.Height; ++y) {
+            for (int x = 0; x < pixels.Width; ++x) {
+                CKBYTE bgra[4];
+                GetPixel(pixels, x, y, bgra);
+                if (bgra[1] >= 8 && bgra[0] <= kTolerance &&
+                    bgra[2] <= kTolerance) {
+                    ++lit;
+                    if (bgra[1] < 247)
+                        ++partial;
+                    if (bgra[1] >= 200)
+                        ++strong;
+                }
+            }
+        }
+    };
+
+    Pixels aliased;
+    ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, FALSE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw aliased reference line");
+    }, aliased);
+    int aliasedLit = 0, aliasedPartial = 0, aliasedStrong = 0;
+    coverageCounts(aliased, aliasedLit, aliasedPartial, aliasedStrong);
+
+    Pixels antialiased;
+    ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw analytically antialiased line");
+    }, antialiased);
+    int aaLit = 0, aaPartial = 0, aaStrong = 0;
+    coverageCounts(antialiased, aaLit, aaPartial, aaStrong);
+    TestCheckf(aaLit > 35 && aaPartial > aliasedPartial + 8 && aaStrong > 8,
+               "edge AA must emit partial box-filter coverage "
+               "(aliased lit=%d partial=%d, AA lit=%d partial=%d strong=%d)",
+               aliasedLit, aliasedPartial, aaLit, aaPartial, aaStrong);
+    TestCheck(PixelNear(antialiased, 2, 2, 0, 0, 0) &&
+                  PixelNear(antialiased, 61, 2, 0, 0, 0),
+              "edge coverage remains confined to the expanded line quad");
+
+    struct LineVertex { VxVector Position; CKDWORD Color; };
+    const LineVertex vertices[2] = {
+        {positions[0], colors[0]}, {positions[1], colors[1]},
+    };
+    CKVertexBufferDesc vbDesc;
+    vbDesc.m_VertexFormat = CKRST_DP_TR_VC;
+    vbDesc.m_MaxVertexCount = 2;
+    CKDWORD vb = 0;
+    TestCheck(ctx->CreateVertexBuffer(&vbDesc, vertices, &vb),
+              "create antialiased-line VB");
+    Pixels vertexBufferPixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_LINELIST, vb, 0, 2, NULL, 0),
+                  "draw antialiased VB line through its CPU shadow");
+    }, vertexBufferPixels);
+    int vbLit = 0, vbPartial = 0, vbStrong = 0;
+    coverageCounts(vertexBufferPixels, vbLit, vbPartial, vbStrong);
+    TestCheckf(vbPartial > 8 && abs(vbLit - aaLit) <= 2,
+               "VB edge AA must match transient coverage "
+               "(transient lit=%d partial=%d, VB lit=%d partial=%d)",
+               aaLit, aaPartial, vbLit, vbPartial);
+    TestCheck(ctx->DeleteObject(vb, CKRST_OBJ_VERTEXBUFFER),
+              "delete antialiased-line VB");
+
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0xf0000002u);
+    const VxVector horizontal[2] = {
+        VxVector(-0.8f, 0.0f, 0.5f), VxVector(0.8f, 0.0f, 0.5f),
+    };
+    data.PositionPtr = const_cast<VxVector *>(horizontal);
+    Pixels patterned;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitive(VX_LINELIST, NULL, 0, &data),
+                  "draw patterned antialiased line");
+    }, patterned);
+    CKBYTE enabledEdge[4];
+    GetPixel(patterned, 10, 31, enabledEdge);
+    CKBYTE enabledCenter[4];
+    GetPixel(patterned, 10, 32, enabledCenter);
+    TestCheck((enabledEdge[1] > 0 || enabledCenter[1] > 0) &&
+                  PixelNear(patterned, 24, 32, 0, 0, 0),
+              "line pattern clipping preserves enabled coverage and disabled runs");
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_ANTIALIAS] ==
+                  ignoredBefore,
+              "edge-antialiased lines report no ignored-state diagnostic");
+
+    ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0);
+    ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, FALSE);
+    printf("  explicit, patterned and VB edge-antialiased lines: passed\n");
+}
+
 void CheckVertexBufferPointFilledStripsAndFans(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
@@ -3978,6 +4091,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckVertexBufferWrapPixels(backend);
         CheckVertexBufferPointSizePixels(backend);
         CheckLineTopologyWithPointFill(backend);
+        CheckEdgeAntialiasedLines(backend);
         CheckVertexBufferPointFilledStripsAndFans(backend);
         CheckPointFillTriangleCulling(backend);
         CheckPointFilledTriangleSizes(backend);

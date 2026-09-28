@@ -57,6 +57,7 @@ struct CKFFLinePatternParams {
     float PositionTViewport[4];
     float TargetWidth;
     float TargetHeight;
+    CKBOOL DepthClipEnabled;
 };
 
 struct CKFFLinePatternSpan {
@@ -106,6 +107,14 @@ public:
     CKBOOL ExpandPatternedLines(VXPRIMITIVETYPE sourceType,
                                 CKBOOL wireframeTriangles,
                                 const CKFFLinePatternParams &params);
+
+    // Convert explicit line primitives into solid triangle quads carrying a
+    // screen-linear perpendicular offset. The fragment shader turns that
+    // offset into exact one-pixel box-filter coverage. Patterned lines retain
+    // their phase and SDL scissor spans in the same auxiliary attribute.
+    CKBOOL ExpandAntialiasedLines(VXPRIMITIVETYPE sourceType,
+                                  const CKFFLinePatternParams &params,
+                                  CKBOOL patterned);
 
     CKDWORD GetFormatFlags() const { return m_FormatFlags; }
     CKDWORD GetVertexCount() const { return m_VertexCount; }

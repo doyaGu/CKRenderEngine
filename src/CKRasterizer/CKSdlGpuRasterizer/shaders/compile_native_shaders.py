@@ -70,7 +70,12 @@ ATTRIBUTES = [
     ("uint4", "a_indices"), ("float3", "a_weight"),
 ] + [("float4", f"a_texcoord{i}") for i in range(8)]
 VARYINGS = ["v_color0", "v_color1", "v_flatColor0", "v_flatColor1"] + [
-    f"v_texcoord{i}" for i in range(7)] + ["v_texcoord7Fog", "v_fogPos"]
+    f"v_texcoord{i}" for i in range(7)] + [
+        "v_texcoord7Fog", "v_fogPos", "v_lineOffset"]
+
+
+def varying_type(name: str) -> str:
+    return "float2" if name == "v_lineOffset" else "float4"
 
 
 def source_body(path: Path) -> str:
@@ -201,13 +206,17 @@ def make_source(shader_name: str, source: str, clipping: bool,
     declarations = ["struct CKVaryings {", "    float4 position : SV_Position;"]
     for i, name in enumerate(varying):
         qualifier = "nointerpolation " if name.startswith("v_flat") else ""
-        declarations.append(f"    CK_LOCATION({i}) {qualifier}float4 {name} : TEXCOORD{i};")
+        declarations.append(
+            f"    CK_LOCATION({i}) {qualifier}{varying_type(name)} {name} : TEXCOORD{i};")
     if clipping:
         declarations += ["    float4 v_clipDistance0 : SV_ClipDistance0;",
                          "    float4 v_clipDistance1 : SV_ClipDistance1;"]
     declarations += ["};", "static float4 gl_Position, gl_FragColor, gl_FragCoord;"]
-    globals_ = varying + (["v_clipDistance0", "v_clipDistance1"] if clipping else [])
-    declarations += [f"static float4 {name};" for name in globals_]
+    globals_ = [(name, varying_type(name)) for name in varying]
+    if clipping:
+        globals_ += [("v_clipDistance0", "float4"),
+                     ("v_clipDistance1", "float4")]
+    declarations += [f"static {kind} {name};" for name, kind in globals_]
     if vertex:
         declarations += ["struct CKInput {"]
         used = [(i, kind, name) for i, (kind, name) in enumerate(ATTRIBUTES)
@@ -218,7 +227,7 @@ def make_source(shader_name: str, source: str, clipping: bool,
         entry = ["CKVaryings main(CKInput input) {"]
         entry += [f"    {name} = input.{name};" for _, _, name in used]
         entry += ["    ckffEvaluate();", "    CKVaryings output;", "    output.position = gl_Position;"]
-        entry += [f"    output.{name} = {name};" for name in globals_]
+        entry += [f"    output.{name} = {name};" for name, _ in globals_]
         entry += ["    return output;", "}"]
     else:
         entry = ["float4 main(CKVaryings input) : SV_Target0 {"]

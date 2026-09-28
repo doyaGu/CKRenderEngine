@@ -159,7 +159,7 @@ struct CKFFVSStateDesc {
     uint32_t GetSpecularSource() const { return GetField(29, 2); }
     uint32_t GetEmissiveSource() const { return GetField(31, 2); }
 
-    // --- Vertex clipping, blend, and point config (bits 34-42) ---
+    // --- Vertex clipping, blend, point, and line config (bits 34-43) ---
     void SetVertexClipping(bool v)          { SetBit(34, v); }
     bool GetVertexClipping() const          { return GetBit(34); }
     void SetVertexBlendMode(uint32_t mode)  { SetField(35, 2, mode); }
@@ -172,8 +172,10 @@ struct CKFFVSStateDesc {
     bool GetPointSprite() const             { return GetBit(40); }
     void SetPointOffset(bool v)             { SetBit(41, v); }
     bool GetPointOffset() const              { return GetBit(41); }
-    void SetPointOffsetWeight(bool v)       { SetBit(42, v); }
-    bool GetPointOffsetWeight() const        { return GetBit(42); }
+    void SetExpansionUsesWeight(bool v)     { SetBit(42, v); }
+    bool GetExpansionUsesWeight() const      { return GetBit(42); }
+    void SetEdgeAntialias(bool v)           { SetBit(43, v); }
+    bool GetEdgeAntialias() const            { return GetBit(43); }
 
     bool operator==(const CKFFVSStateDesc &o) const {
         if (bits != o.bits)

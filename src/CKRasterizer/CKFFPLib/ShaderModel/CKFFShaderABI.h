@@ -83,7 +83,9 @@ enum CKFFDrawParamSlot {
     CKFF_DRAW_PARAM_MATERIAL_SPECULAR = 2,
     // rgb = emissive material, w = 16-bit line pattern.
     CKFF_DRAW_PARAM_MATERIAL_EMISSIVE = 3,
-    CKFF_DRAW_PARAM_MATERIAL_POWER = 4, // x = specular power, y = ZBIAS, z = affine interpolation, w = point offset source
+    // x = specular power, y = ZBIAS, z = affine interpolation,
+    // w = geometry expansion mode (point offset or antialiased line).
+    CKFF_DRAW_PARAM_MATERIAL_POWER = 4,
     CKFF_DRAW_PARAM_MATERIAL_SOURCES = 5,
     CKFF_DRAW_PARAM_LIGHTING = 6,
     CKFF_DRAW_PARAM_LIGHT_FLAGS = 7,

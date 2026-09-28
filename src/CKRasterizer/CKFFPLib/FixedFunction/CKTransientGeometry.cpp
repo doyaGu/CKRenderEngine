@@ -444,6 +444,7 @@ static bool LinePatternClipPosition(const CKBYTE *vertex, CKDWORD formatFlags,
 
 static bool ClipLinePatternSegment(const CKFFLineClipPosition &first,
                                    const CKFFLineClipPosition &second,
+                                   bool depthClipEnabled,
                                    double &enter, double &leave)
 {
     const double planes[6][2] = {
@@ -456,7 +457,8 @@ static bool ClipLinePatternSegment(const CKFFLineClipPosition &first,
     };
     enter = 0.0;
     leave = 1.0;
-    for (int plane = 0; plane < 6; ++plane) {
+    const int planeCount = depthClipEnabled ? 6 : 4;
+    for (int plane = 0; plane < planeCount; ++plane) {
         const double a = planes[plane][0];
         const double b = planes[plane][1];
         if (a < 0.0 && b < 0.0)
@@ -800,7 +802,8 @@ CKBOOL CKTransientGeometry::ExpandPatternedLines(
             return FALSE;
         double clipEnter = 0.0, clipLeave = 1.0;
         const bool visible = ClipLinePatternSegment(
-            firstClip, secondClip, clipEnter, clipLeave);
+            firstClip, secondClip, params.DepthClipEnabled != FALSE,
+            clipEnter, clipLeave);
         double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
         if (visible) {
             const CKFFLineClipPosition clippedFirst =
@@ -905,6 +908,231 @@ CKBOOL CKTransientGeometry::ExpandPatternedLines(
     m_Index32 = FALSE;
     m_LastVertexBytes = emitted * expandedStride;
     m_LastIndexBytes = 0;
+    return TRUE;
+}
+
+CKBOOL CKTransientGeometry::ExpandAntialiasedLines(
+    VXPRIMITIVETYPE sourceType, const CKFFLinePatternParams &params,
+    CKBOOL patterned)
+{
+    m_LinePatternSpans.Resize(0);
+    if (m_VertexData.IsEmpty() || m_VertexStride == 0 ||
+        params.TargetWidth <= 0.0f || params.TargetHeight <= 0.0f)
+        return FALSE;
+
+    const CKDWORD elementCount = m_IndexCount ? m_IndexCount : m_VertexCount;
+    CKDWORD lineCount = 0;
+    if (sourceType == VX_LINELIST)
+        lineCount = elementCount / 2u;
+    else if (sourceType == VX_LINESTRIP)
+        lineCount = elementCount > 1u ? elementCount - 1u : 0u;
+    else
+        return FALSE;
+    if (lineCount == 0)
+        return FALSE;
+
+    const CKDWORD sourceStride = m_VertexStride;
+    const bool useWeight = (m_FormatFlags & CKFF_VF_POSITIONT) == 0 &&
+        params.BlendMode == CKFF_VERTEX_BLEND_TWEEN;
+    const bool reusesAttribute = useWeight
+        ? (m_FormatFlags & CKFF_VF_BLENDWEIGHT) != 0
+        : (m_FormatFlags & CKFF_VF_TWEENPOSITION) != 0;
+    CKDWORD auxiliaryOffset = sourceStride;
+    if (reusesAttribute) {
+        auxiliaryOffset = (m_FormatFlags & CKFF_VF_POSITIONT) ? 16u : 12u;
+        if (m_FormatFlags & CKFF_VF_NORMAL)
+            auxiliaryOffset += 12u;
+        if (useWeight) {
+            if (m_FormatFlags & CKFF_VF_TWEENPOSITION)
+                auxiliaryOffset += 12u;
+            if (m_FormatFlags & CKFF_VF_TWEENNORMAL)
+                auxiliaryOffset += 12u;
+        }
+    }
+    const CKDWORD expandedStride = sourceStride +
+        (reusesAttribute ? 0u : 3u * (CKDWORD)sizeof(float));
+    if (lineCount > 0x7fffffffu / 4u / expandedStride ||
+        lineCount > 0x7fffffffu / 6u / (CKDWORD)sizeof(CKDWORD))
+        return FALSE;
+
+    const CKDWORD vertexCapacity = lineCount * 4u;
+    const CKBOOL index32 = vertexCapacity > 0x10000u ? TRUE : FALSE;
+    const CKDWORD indexSize = index32 ? 4u : 2u;
+    XArray<CKBYTE> quads;
+    XArray<CKBYTE> quadIndices;
+    quads.Resize((int)(vertexCapacity * expandedStride));
+    quadIndices.Resize((int)(lineCount * 6u * indexSize));
+
+    auto elementIndex = [this](CKDWORD element) -> CKDWORD {
+        if (!m_IndexCount)
+            return element;
+        return m_Index32
+            ? ((const CKDWORD *)m_IndexData.Begin())[element]
+            : ((const CKWORD *)m_IndexData.Begin())[element];
+    };
+
+    CKDWORD emitted = 0;
+    for (CKDWORD line = 0; line < lineCount; ++line) {
+        const CKDWORD firstElement = sourceType == VX_LINELIST
+            ? line * 2u : line;
+        const CKDWORD secondElement = firstElement + 1u;
+        const CKDWORD firstIndex = elementIndex(firstElement);
+        const CKDWORD secondIndex = elementIndex(secondElement);
+        if (firstIndex >= m_VertexCount || secondIndex >= m_VertexCount)
+            return FALSE;
+        const CKBYTE *first =
+            m_VertexData.Begin() + firstIndex * sourceStride;
+        const CKBYTE *second =
+            m_VertexData.Begin() + secondIndex * sourceStride;
+
+        CKFFLineClipPosition firstClip, secondClip;
+        if (!LinePatternClipPosition(
+                first, m_FormatFlags, params, firstClip) ||
+            !LinePatternClipPosition(
+                second, m_FormatFlags, params, secondClip))
+            return FALSE;
+        double clipEnter = 0.0, clipLeave = 1.0;
+        if (!ClipLinePatternSegment(
+                firstClip, secondClip, params.DepthClipEnabled != FALSE,
+                clipEnter, clipLeave))
+            continue;
+        const CKFFLineClipPosition clippedFirst =
+            InterpolateLineClipPosition(firstClip, secondClip, clipEnter);
+        const CKFFLineClipPosition clippedSecond =
+            InterpolateLineClipPosition(firstClip, secondClip, clipLeave);
+        double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
+        if (!LinePatternScreenPosition(clippedFirst, params, x0, y0) ||
+            !LinePatternScreenPosition(clippedSecond, params, x1, y1))
+            continue;
+
+        const double dx = x1 - x0;
+        const double dy = y1 - y0;
+        const double length = sqrt(dx * dx + dy * dy);
+        if (!(length > 1.0e-9) || !std::isfinite(length))
+            continue;
+        const float normalX = (float)(-dy / length);
+        const float normalY = (float)( dx / length);
+
+        float firstPhase = 0.0f;
+        float secondPhase = 0.0f;
+        if (patterned) {
+            const bool xMajor = fabs(dx) >= fabs(dy);
+            const double firstMajor = xMajor ? x0 : y0;
+            const double secondMajor = xMajor ? x1 : y1;
+            const double majorLow = (std::min)(firstMajor, secondMajor);
+            const double majorHigh = (std::max)(firstMajor, secondMajor);
+            const double phaseDirection =
+                secondMajor >= firstMajor ? 1.0 : -1.0;
+            const int majorLimit =
+                (int)(xMajor ? params.TargetWidth : params.TargetHeight);
+            int firstPixel = (int)floor(majorLow - 1.0);
+            int lastPixel = (int)ceil(majorHigh + 1.0);
+            firstPixel = (std::max)(0, (std::min)(majorLimit, firstPixel));
+            lastPixel = (std::max)(0, (std::min)(majorLimit, lastPixel));
+            int runStart = -1;
+            for (int pixel = firstPixel; pixel <= lastPixel; ++pixel) {
+                bool enabled = false;
+                if (pixel < lastPixel) {
+                    const double phase =
+                        fabs((double)pixel + 0.5 - firstMajor) /
+                        (double)(params.RepeatFactor
+                            ? params.RepeatFactor : 1u);
+                    const int bit = 15 - ((int)phase & 15);
+                    enabled = (params.Pattern & (1u << bit)) != 0;
+                }
+                if (enabled && runStart < 0) {
+                    runStart = pixel;
+                } else if (!enabled && runStart >= 0) {
+                    if (m_LinePatternSpans.Size() == 0x7fffffff)
+                        return FALSE;
+                    CKFFLinePatternSpan span = {};
+                    span.FirstVertex = emitted * 4u;
+                    if (xMajor) {
+                        span.Scissor.left = runStart;
+                        span.Scissor.top = 0;
+                        span.Scissor.right = pixel;
+                        span.Scissor.bottom = (int)params.TargetHeight;
+                    } else {
+                        span.Scissor.left = 0;
+                        span.Scissor.top = runStart;
+                        span.Scissor.right = (int)params.TargetWidth;
+                        span.Scissor.bottom = pixel;
+                    }
+                    m_LinePatternSpans.PushBack(span);
+                    runStart = -1;
+                }
+            }
+
+            const double repeat =
+                (double)(params.RepeatFactor ? params.RepeatFactor : 1u);
+            if (xMajor) {
+                const double halfWidth = params.TargetWidth * 0.5;
+                firstPhase = (float)(phaseDirection *
+                    (halfWidth * firstClip.X +
+                     (halfWidth - firstMajor) * firstClip.W) / repeat);
+                secondPhase = (float)(phaseDirection *
+                    (halfWidth * secondClip.X +
+                     (halfWidth - firstMajor) * secondClip.W) / repeat);
+            } else {
+                const double halfHeight = params.TargetHeight * 0.5;
+                firstPhase = (float)(phaseDirection *
+                    (-halfHeight * firstClip.Y +
+                     (halfHeight - firstMajor) * firstClip.W) / repeat);
+                secondPhase = (float)(phaseDirection *
+                    (-halfHeight * secondClip.Y +
+                     (halfHeight - firstMajor) * secondClip.W) / repeat);
+            }
+        }
+
+        const CKDWORD base = emitted * 4u;
+        const CKBYTE *sources[4] = {first, first, second, second};
+        const float phases[4] = {
+            firstPhase, firstPhase, secondPhase, secondPhase};
+        const float offsets[4][2] = {
+            {-normalX, -normalY}, { normalX,  normalY},
+            { normalX,  normalY}, {-normalX, -normalY}
+        };
+        for (int corner = 0; corner < 4; ++corner) {
+            CKBYTE *dst = quads.Begin() +
+                (base + (CKDWORD)corner) * expandedStride;
+            memcpy(dst, sources[corner], sourceStride);
+            float auxiliary[3] = {
+                offsets[corner][0], offsets[corner][1], phases[corner]};
+            memcpy(dst + auxiliaryOffset, auxiliary, sizeof(auxiliary));
+        }
+        if (index32) {
+            CKDWORD *dst =
+                (CKDWORD *)quadIndices.Begin() + emitted * 6u;
+            dst[0] = base; dst[1] = base + 1u; dst[2] = base + 2u;
+            dst[3] = base; dst[4] = base + 2u; dst[5] = base + 3u;
+        } else {
+            CKWORD *dst = (CKWORD *)quadIndices.Begin() + emitted * 6u;
+            dst[0] = (CKWORD)base; dst[1] = (CKWORD)(base + 1u);
+            dst[2] = (CKWORD)(base + 2u); dst[3] = (CKWORD)base;
+            dst[4] = (CKWORD)(base + 2u); dst[5] = (CKWORD)(base + 3u);
+        }
+        ++emitted;
+    }
+
+    quads.Resize((int)(emitted * 4u * expandedStride));
+    quadIndices.Resize((int)(emitted * 6u * indexSize));
+    m_VertexData.Swap(quads);
+    m_IndexData.Swap(quadIndices);
+    m_SourceVertexIndices.Resize(0);
+    m_FormatFlags |= CKFF_VF_EDGEANTIALIAS;
+    if (useWeight)
+        m_FormatFlags |= CKFF_VF_EDGEANTIALIAS_WEIGHT;
+    if (patterned) {
+        m_FormatFlags |= CKFF_VF_LINEPATTERN;
+        if (useWeight)
+            m_FormatFlags |= CKFF_VF_LINEPATTERN_WEIGHT;
+    }
+    m_VertexStride = expandedStride;
+    m_VertexCount = emitted * 4u;
+    m_IndexCount = emitted * 6u;
+    m_Index32 = index32;
+    m_LastVertexBytes = m_VertexCount * m_VertexStride;
+    m_LastIndexBytes = m_IndexCount * indexSize;
     return TRUE;
 }
 

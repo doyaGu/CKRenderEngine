@@ -973,15 +973,8 @@ void TestDrawPrimitiveValidation()
 }
 
 // ---------------------------------------------------------------------------
-// Approximations (spec 1.4 item 7, appendices C / D): states the backends
-// cannot express still draw and count one APPROX_* / IGNORE_* diagnostic.
+// Legacy fixed-function states implemented by the shared pipeline.
 // ---------------------------------------------------------------------------
-
-struct ApproximationCase {
-    const char *Name;
-    CKRST_DIAGNOSTIC Diagnostic;
-    void (*Setup)(CKRasterizerContext *ctx, CKDWORD texture);
-};
 
 void DrawTexturedTriangle(CKRasterizerContext *ctx)
 {
@@ -1008,7 +1001,6 @@ void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD)
     ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_WIREFRAME);
     ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u);
 }
-void SetupEdgeAntialias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE); }
 void SetupFillPoint(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT); }
 void SetupAffineTexcoords(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE); }
 void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
@@ -1030,42 +1022,8 @@ void SetupBumpWithoutDuDv(CKRasterizerContext *ctx, CKDWORD)
 void SetupTweenWithoutStreams(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING); }
 void SetupBlendWithoutWeights(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_1WEIGHTS); }
 
-void TestApproximationsKeepDrawing()
+void TestImplementedLegacyStatesKeepDrawing()
 {
-    const ApproximationCase cases[] = {
-        {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
-    };
-
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        Fixture f;
-        CKRasterizerContext *ctx = f.Context;
-        const CKDWORD texture = CreateTexture2D(ctx, 8, 8, 0, 0);
-        TestCheck(ctx->SetTexture(texture, 0), "bind texture");
-        ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_MODULATE);
-        ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        ctx->SetTextureStageState(0, CKRST_TSS_ARG2, CKRST_TA_DIFFUSE);
-        cases[i].Setup(ctx, texture);
-
-        TestCheck(ctx->BeginScene(), "BeginScene");
-        const int drawsBefore = CountDraws(f);
-        DrawTexturedTriangle(ctx);
-        TestCheck(ctx->EndScene(), "EndScene");
-
-        printf("  approximation: %s\n", cases[i].Name);
-        TestCheck(CountDraws(f) == drawsBefore + 1, "the approximated draw must reach the device");
-        TestCheck(Diag(f.Context, cases[i].Diagnostic) == 1, "the approximation diagnostic must count once");
-        CKDWORD others = 0;
-        for (CKDWORD code = CKRST_DIAG_APPROX_FILLMODE_POINT; code < CKRST_DIAG_COUNT; ++code) {
-            if (code != (CKDWORD)cases[i].Diagnostic)
-                others += Diag(f.Context, (CKRST_DIAGNOSTIC)code);
-        }
-        TestCheck(others == 0, "no other approximation diagnostic must count");
-        TestCheck(Diag(f.Context, CKRST_DIAG_REJECT_UNSUPPORTED_STATE) == 0 &&
-                      Diag(f.Context, CKRST_DIAG_REJECT_INVALID_PARAMETER) == 0,
-                  "approximations must not count as rejections");
-        TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE), "delete texture");
-    }
-
     {
         Fixture f;
         CKRasterizerContext *ctx = f.Context;
@@ -2143,7 +2101,8 @@ int main()
     framework.Run("volume slice uploads", TestVolumeSliceUploads);
     framework.Run("buffers", TestBuffers);
     framework.Run("draw primitive validation", TestDrawPrimitiveValidation);
-    framework.Run("approximations keep drawing", TestApproximationsKeepDrawing);
+    framework.Run("implemented legacy states keep drawing",
+                  TestImplementedLegacyStatesKeepDrawing);
     framework.Run("invalid bump inputs rejected", TestInvalidBumpInputsRejected);
     framework.Run("tween without second stream rejected", TestTweenWithoutSecondStreamRejected);
     framework.Run("blend without weights rejected", TestBlendWithoutWeightsRejected);
