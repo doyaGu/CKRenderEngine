@@ -280,7 +280,7 @@ private:
     CKBOOL PrepareDraw(const CKFFDrawSubmission &submission);
     void LogAndResetFrameStats();
 
-    CKBOOL BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
+    CKBOOL BuildCurrentTextureBindingSet(const CKFFTextureBindingSet **bindingSet,
                                          CKDWORD activeTextureCount,
                                          const CKFFShaderKey &shaderKey,
                                          const CKFFSamplerLayoutPlan &layoutPlan);

@@ -18,6 +18,10 @@ public:
     void BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
                          CKDWORD sampledTextureMask,
                          const CKFFSamplerLayoutPlan &layoutPlan) const;
+    const CKFFTextureBindingSet &ResolveBindingSet(
+        CKDWORD activeTextureCount,
+        CKDWORD sampledTextureMask,
+        const CKFFSamplerLayoutPlan &layoutPlan) const;
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 
 private:

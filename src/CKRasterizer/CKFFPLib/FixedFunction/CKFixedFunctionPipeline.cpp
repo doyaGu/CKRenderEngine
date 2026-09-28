@@ -677,7 +677,7 @@ uint64_t CKFixedFunctionPipeline::GetConstantRevision(CKDWORD block) const
     return block < CKFF_CONSTANT_SLOT_COUNT ? m_Constants[block].Change : 0;
 }
 
-CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBindingSet *bindingSet,
+CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(const CKFFTextureBindingSet **bindingSet,
                                                                CKDWORD activeTextureCount,
                                                                const CKFFShaderKey &shaderKey,
                                                                const CKFFSamplerLayoutPlan &layoutPlan)
@@ -692,9 +692,8 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(CKFFTextureBinding
         if (shaderKey.FS.Stages[stage].HasTexture)
             sampledTextureMask |= 1u << stage;
     }
-    m_TextureBinder.BuildBindingSet(bindingSet, activeTextureCount,
-                                    sampledTextureMask, layoutPlan);
-    bindingSet->ActiveStageCount = stageCount;
+    *bindingSet = &m_TextureBinder.ResolveBindingSet(
+        activeTextureCount, sampledTextureMask, layoutPlan);
     return TRUE;
 }
 
@@ -1045,7 +1044,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     }
 #endif
 
-    CKFFTextureBindingSet textureBindingSet;
+    const CKFFTextureBindingSet *textureBindingSet = NULL;
     if (!BuildCurrentTextureBindingSet(
             &textureBindingSet, preparedState.ActiveTextureCount, shaderKey,
             programContext.SamplerLayoutPlan))
@@ -1162,7 +1161,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     submission.PolygonDepthBias = CKFFUsesPolygonDepthBias(type) ? TRUE : FALSE;
     submission.PatternedLines = patternedLines;
     submission.ProgramContext = &programContext;
-    submission.Textures = &textureBindingSet;
+    submission.Textures = textureBindingSet;
     submission.VertexFormat = m_TransientGeometry.GetFormatFlags();
     submission.Source = CKFF_DRAW_PRIMITIVE;
     return PrepareDraw(submission);
@@ -1449,7 +1448,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
     }
 #endif
 
-    CKFFTextureBindingSet textureBindingSet;
+    const CKFFTextureBindingSet *textureBindingSet = NULL;
     if (!BuildCurrentTextureBindingSet(
             &textureBindingSet, preparedState.ActiveTextureCount, shaderKey,
             programContext.SamplerLayoutPlan))
@@ -1469,7 +1468,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
     submission.DrawStateType = type;
     submission.PolygonDepthBias = CKFFUsesPolygonDepthBias(type) ? TRUE : FALSE;
     submission.ProgramContext = &programContext;
-    submission.Textures = &textureBindingSet;
+    submission.Textures = textureBindingSet;
     submission.VertexBuffer = vb;
     submission.IndexBuffer = ib;
     submission.Indices = indices ? (const CKBYTE *)m_ImmediateIndices.Begin() : NULL;

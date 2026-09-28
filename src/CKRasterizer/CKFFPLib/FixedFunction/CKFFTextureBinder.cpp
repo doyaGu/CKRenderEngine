@@ -18,6 +18,7 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
     CKDWORD stageCount = activeTextureCount;
     if (stageCount > CKFF_MAX_TEXTURE_STAGES)
         stageCount = CKFF_MAX_TEXTURE_STAGES;
+    set->ActiveStageCount = stageCount;
     set->SamplerLayoutPlan = layoutPlan;
     for (CKDWORD stage = 0; stage < stageCount; ++stage) {
         if ((sampledTextureMask & (1u << stage)) == 0)
@@ -124,6 +125,15 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
 {
     if (!out)
         return;
+    *out = ResolveBindingSet(activeTextureCount, sampledTextureMask,
+                             layoutPlan);
+}
+
+const CKFFTextureBindingSet &CKFFTextureBinder::ResolveBindingSet(
+    CKDWORD activeTextureCount,
+    CKDWORD sampledTextureMask,
+    const CKFFSamplerLayoutPlan &layoutPlan) const
+{
     CKDWORD activeCount = activeTextureCount;
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
@@ -133,8 +143,7 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
         m_BindingSetActiveTextureCount == activeCount &&
         m_BindingSetSampledTextureMask == sampledTextureMask &&
         LayoutPlansEqual(m_BindingSetLayoutPlan, layoutPlan)) {
-        *out = m_BindingSet;
-        return;
+        return m_BindingSet;
     }
     CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
     CKFFSamplerShaderState shaderStates[CKFF_MAX_TEXTURE_STAGES];
@@ -149,7 +158,7 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
     m_BindingSetSampledTextureMask = sampledTextureMask;
     m_BindingSetLayoutPlan = layoutPlan;
     m_BindingSetValid = TRUE;
-    *out = m_BindingSet;
+    return m_BindingSet;
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const
