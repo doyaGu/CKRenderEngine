@@ -1282,7 +1282,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     pipeline.PointSize = submission.DrawStateType == VX_POINTLIST
         ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_State.DrawState))
         : 1.0f;
-    m_Draw = CKFFDraw();
+    m_Draw.ResetSubmissionFields();
     m_Draw.Pipeline = pipeline;
     m_Draw.Constants = &m_Constants;
     m_Draw.Marker = m_DrawMarker;
