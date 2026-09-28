@@ -384,8 +384,11 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
         m_DrawValidationCacheTopology == topology &&
         m_DrawValidationCacheFormatFlags == formatFlags &&
         m_DrawValidationCacheActiveTextureCount == activeTextureCount) {
-        for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i) {
-            if ((m_DrawValidationCacheApproximationMask & (1ull << i)) != 0)
+        uint64_t approximationMask = m_DrawValidationCacheApproximationMask;
+        for (unsigned i = 0;
+             approximationMask != 0 && i < CKRST_DIAG_COUNT;
+             ++i, approximationMask >>= 1) {
+            if ((approximationMask & 1ull) != 0)
                 RecordDrawApproximation((CKRST_DIAGNOSTIC)i);
         }
         return TRUE;
@@ -1356,8 +1359,10 @@ CKBOOL CKFixedFunctionPipeline::FinishDraw(CKERROR error, uint64_t approximation
 {
     if (error != CK_OK)
         return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
-    for (unsigned i = 0; i < CKRST_DIAG_COUNT; ++i) {
-        if ((approximationMask & (1ull << i)) != 0)
+    for (unsigned i = 0;
+         approximationMask != 0 && i < CKRST_DIAG_COUNT;
+         ++i, approximationMask >>= 1) {
+        if ((approximationMask & 1ull) != 0)
             RecordDrawApproximation((CKRST_DIAGNOSTIC)i);
     }
     if (m_Draw.Source == CKFF_DRAW_PRIMITIVE)
