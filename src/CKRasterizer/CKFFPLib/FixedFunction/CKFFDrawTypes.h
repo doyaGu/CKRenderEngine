@@ -56,6 +56,7 @@ struct CKFFTextureBindingSet {
     CKDWORD ActiveStageCount;
     CKDWORD ActiveTextureCount;
     CKDWORD Hash;
+    CKFFFragmentSamplingMode SamplingMode;
     CKFFSamplerLayoutPlan SamplerLayoutPlan;
     CKFFTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
 };
@@ -157,6 +158,7 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
     set->ActiveStageCount = 0;
     set->ActiveTextureCount = 0;
     set->Hash = 0;
+    set->SamplingMode = CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
     set->SamplerLayoutPlan = CKFFSamplerLayoutPlan();
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         set->Bindings[stage].Stage = stage;

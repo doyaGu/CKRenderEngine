@@ -31,6 +31,7 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         set->Bindings[stage].ShaderState = shaderStates[stage];
     }
     set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);
+    set->SamplingMode = CKFFResolveFragmentSamplingMode(*set);
 }
 
 CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,

@@ -248,6 +248,8 @@ void NativeExactSamplingUsesFinalBindingState() {
         transformFlags, targetFlags);
     TestCheck(built.Bindings[0].ShaderState.Bits == expected.Bits,
               "Texture bindings must retain the shader state resolved from the final sampler descriptor");
+    TestCheck(built.SamplingMode == CKFFResolveFragmentSamplingMode(built),
+              "Texture bindings must cache the fragment sampling mode resolved from final sampler state");
 }
 
 void TextureBindingCacheInvalidatesEveryBindingDependency() {

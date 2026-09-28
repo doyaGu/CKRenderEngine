@@ -433,8 +433,7 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     const CKFFTextureBindingSet &Textures,
     CKBOOL PositionTDepthPad)
 {
-    const CKFFFragmentSamplingMode samplingMode =
-        CKFFResolveFragmentSamplingMode(Textures);
+    const CKFFFragmentSamplingMode samplingMode = Textures.SamplingMode;
     const CKFFProgramVariant programVariant =
         CKFFShaderCache::ProgramVariantForKey(ProgramContext.ShaderKey);
     const CKDWORD variant = (CKDWORD)programVariant;
