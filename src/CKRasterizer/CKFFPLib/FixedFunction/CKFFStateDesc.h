@@ -170,11 +170,14 @@ struct CKFFVSStateDesc {
     uint32_t GetVertexBlendCount() const    { return GetField(38, 2); }
     void SetPointSprite(bool v)             { SetBit(40, v); }
     bool GetPointSprite() const             { return GetBit(40); }
-    void SetPointOffset(bool v)             { SetBit(41, v); }
+    void SetGeometryExpansion(bool pointOffset, bool usesWeight,
+                              bool edgeAntialias) {
+        SetField(41, 3, (pointOffset ? 1u : 0u) |
+                        (usesWeight ? 2u : 0u) |
+                        (edgeAntialias ? 4u : 0u));
+    }
     bool GetPointOffset() const              { return GetBit(41); }
-    void SetExpansionUsesWeight(bool v)     { SetBit(42, v); }
     bool GetExpansionUsesWeight() const      { return GetBit(42); }
-    void SetEdgeAntialias(bool v)           { SetBit(43, v); }
     bool GetEdgeAntialias() const            { return GetBit(43); }
 
     bool operator==(const CKFFVSStateDesc &o) const {

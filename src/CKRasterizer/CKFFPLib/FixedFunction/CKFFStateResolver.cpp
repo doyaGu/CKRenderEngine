@@ -63,13 +63,11 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     const bool positionT = hasFormat ? ((formatFlags & CKFF_VF_POSITIONT) != 0) : ((dpFlags & CKRST_DP_TRANSFORM) == 0);
     out->PositionT = positionT ? TRUE : FALSE;
     stateDesc.VS.SetPointSprite(pointSprite != FALSE);
-    stateDesc.VS.SetPointOffset(
-        hasFormat && (formatFlags & CKFF_VF_POINTOFFSET) != 0);
-    stateDesc.VS.SetExpansionUsesWeight(
+    stateDesc.VS.SetGeometryExpansion(
+        hasFormat && (formatFlags & CKFF_VF_POINTOFFSET) != 0,
         hasFormat &&
-        (formatFlags & (CKFF_VF_POINTOFFSET_WEIGHT |
-                        CKFF_VF_EDGEANTIALIAS_WEIGHT)) != 0);
-    stateDesc.VS.SetEdgeAntialias(
+            (formatFlags & (CKFF_VF_POINTOFFSET_WEIGHT |
+                            CKFF_VF_EDGEANTIALIAS_WEIGHT)) != 0,
         hasFormat && (formatFlags & CKFF_VF_EDGEANTIALIAS) != 0);
 
     // Vertex state description
