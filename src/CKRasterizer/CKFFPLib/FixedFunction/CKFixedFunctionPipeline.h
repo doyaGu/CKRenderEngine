@@ -276,7 +276,7 @@ private:
     CKBOOL RecordDrawReject(CKFFDrawRejectReason reason);
     void RecordDrawApproximation(CKRST_DIAGNOSTIC code);
     void BeginDrawDiagnostics() { m_LastDrawApproximationMask = 0; }
-    CKBOOL ResolveStencilWrite(CKBOOL *forceKeepOps, CKDWORD *effectiveWriteMask) const;
+    void ResolveStencilWrite(CKDWORD *effectiveWriteMask) const;
     CKBOOL PrepareDraw(const CKFFDrawSubmission &submission);
     void LogAndResetFrameStats();
 

@@ -362,7 +362,7 @@ CKFFFragmentProgram CurrentDrawFragmentProgram(CKFixedFunctionPipeline &ffp,
     return CKFFFragmentProgram::Unpack24(it->second.data(), CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT * 4);
 }
 
-void DrawVertexBufferApproximatesStencilWriteMasks() {
+void DrawVertexBufferPreservesStencilWriteMasks() {
     FFPRecordingDriver driver;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
@@ -382,32 +382,30 @@ void DrawVertexBufferApproximatesStencilWriteMasks() {
 
     TestCheck(drawn && context.Log.DrawCount == 1,
               "A partial stencil write mask must still submit the draw");
-    TestCheck(context.Log.LastStencilWriteMask == 0xFF &&
+    TestCheck(context.Log.LastStencilWriteMask == 0x0F &&
                   context.Log.LastStencilReadMask == 0xF0,
-              "A partial stencil write mask approximates to writing every bit");
-    TestCheck((ffp.GetLastDrawApproximationMask() & (1ull << CKRST_DIAG_APPROX_STENCIL_WRITE_MASK)) != 0 &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 1,
-              "Partial stencil write mask approximation must be reported once per draw");
+              "A partial stencil write mask must reach the backend unchanged");
+    TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 0,
+              "A partial stencil write mask must not be approximated");
     TestCheck(ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_NONE,
-              "An approximated draw is not a rejected draw");
+              "An exact stencil-mask draw is not rejected");
 
     ffp.SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x00);
     drawn = ffp.DrawVertexBuffer(
         VX_TRIANGLELIST,
         1, 0, 0, 3, 0, 0,
         CKRST_DP_CL_V, CKRST_DP_CL_V, 1);
-    const CKDWORD stencilOps = context.Log.LastState.Mid &
-        (CKRST_STENCIL_FAIL(0xF) | CKRST_STENCIL_ZFAIL(0xF) | CKRST_STENCIL_PASS(0xF));
     TestCheck(drawn && context.Log.DrawCount == 2,
               "A zero stencil write mask must still submit the draw");
-    TestCheck(stencilOps == (CKRST_STENCIL_FAIL(VXSTENCILOP_KEEP) |
-                             CKRST_STENCIL_ZFAIL(VXSTENCILOP_KEEP) |
-                             CKRST_STENCIL_PASS(VXSTENCILOP_KEEP)) &&
+    TestCheck(context.Log.LastStencilWriteMask == 0 &&
+                  (context.Log.LastState.Mid & CKRST_STENCIL_PASS(0xF)) ==
+                      CKRST_STENCIL_PASS(VXSTENCILOP_REPLACE) &&
                   (context.Log.LastState.Mid & CKRST_STENCIL_ENABLE) != 0,
-              "A zero stencil write mask approximates to KEEP operations with the test still enabled");
+              "A zero stencil write mask preserves the requested operation and test");
     TestCheck(ffp.GetLastDrawApproximationMask() == 0 &&
-                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 1,
-              "Zero stencil write mask is exact with KEEP operations");
+                  ffp.GetApproximatedDrawCount(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK) == 0,
+              "A zero stencil write mask must not be approximated");
 
     ffp.Shutdown();
 }
@@ -4412,8 +4410,8 @@ int main() {
               &NullRasterizerSupportsHeadlessFFP);
     tests.Run("Missing shader payload family fails initialization",
               &MissingShaderPayloadFamilyFailsInitialization);
-    tests.Run("DrawVertexBuffer approximates stencil write masks",
-              &DrawVertexBufferApproximatesStencilWriteMasks);
+    tests.Run("DrawVertexBuffer preserves stencil write masks",
+              &DrawVertexBufferPreservesStencilWriteMasks);
     tests.Run("DrawVertexBuffer preserves supported stencil write masks",
               &DrawVertexBufferPreservesSupportedStencilWriteMasks);
     tests.Run("DrawVertexBuffer submits representable stencil masks",

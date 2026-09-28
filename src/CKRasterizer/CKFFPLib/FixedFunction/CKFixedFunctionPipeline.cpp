@@ -335,33 +335,10 @@ void CKFixedFunctionPipeline::RecordDrawApproximation(CKRST_DIAGNOSTIC code)
     }
 }
 
-// A backend without stencil write-mask support can preserve a zero mask with
-// KEEP operations. Only partial masks require an approximation on that path.
-CKBOOL CKFixedFunctionPipeline::ResolveStencilWrite(CKBOOL *forceKeepOps,
-                                                    CKDWORD *effectiveWriteMask) const
+void CKFixedFunctionPipeline::ResolveStencilWrite(CKDWORD *effectiveWriteMask) const
 {
-    const CKDWORD writeMask =
+    *effectiveWriteMask =
         m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
-    *forceKeepOps = FALSE;
-    if (m_Features & CKRST_DEVCAPS_STENCIL_WRITE_MASK) {
-        *effectiveWriteMask = writeMask;
-        return FALSE;
-    }
-    // The backend only knows "write nothing" or "write every bit".
-    *effectiveWriteMask = writeMask == 0x00u ? 0x00u : 0xffu;
-    if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILENABLE))
-        return FALSE;
-    const CKBOOL stencilWrites =
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILFAIL) != VXSTENCILOP_KEEP ||
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILZFAIL) != VXSTENCILOP_KEEP ||
-        m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILPASS) != VXSTENCILOP_KEEP;
-    if (!stencilWrites || writeMask == 0xffu)
-        return FALSE;
-    if (writeMask == 0x00u) {
-        *forceKeepOps = TRUE;
-        return FALSE;
-    }
-    return TRUE;
 }
 
 static float CKFFClampVertexBufferPointSize(float size)
@@ -423,11 +400,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
         RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING);
-    CKBOOL forceKeepStencilOps = FALSE;
-    CKDWORD effectiveStencilWriteMask = 0;
-    if (ResolveStencilWrite(&forceKeepStencilOps, &effectiveStencilWriteMask))
-        RecordDrawApproximation(CKRST_DIAG_APPROX_STENCIL_WRITE_MASK);
-
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
@@ -1267,16 +1239,9 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     // stencil buffer uses the low byte (D3D7 semantics).
     pipeline.StencilRef = m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILREF) & 0xffu;
     pipeline.StencilReadMask = m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILMASK) & 0xffu;
-    CKBOOL forceKeepStencilOps = FALSE;
     CKDWORD stencilWriteMask = 0xffu;
-    ResolveStencilWrite(&forceKeepStencilOps, &stencilWriteMask);
+    ResolveStencilWrite(&stencilWriteMask);
     pipeline.StencilWriteMask = stencilWriteMask;
-    if (forceKeepStencilOps) {
-        pipeline.State.Mid &= ~(CKRST_STENCIL_FAIL(0xF) | CKRST_STENCIL_ZFAIL(0xF) | CKRST_STENCIL_PASS(0xF));
-        pipeline.State.Mid |= CKRST_STENCIL_FAIL(VXSTENCILOP_KEEP) |
-                              CKRST_STENCIL_ZFAIL(VXSTENCILOP_KEEP) |
-                              CKRST_STENCIL_PASS(VXSTENCILOP_KEEP);
-    }
     pipeline.ScissorEnabled = m_State.ScissorEnabled;
     pipeline.Scissor = m_State.Scissor;
     pipeline.PointSize = submission.DrawStateType == VX_POINTLIST

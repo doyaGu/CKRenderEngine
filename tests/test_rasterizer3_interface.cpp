@@ -1012,12 +1012,6 @@ void SetupEdgeAntialias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState
 void SetupClippingOff(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE); }
 void SetupSoftwareVP(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_SOFTWAREVPROCESSING, TRUE); }
 void SetupFillPoint(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT); }
-void SetupStencilWriteMask(CKRasterizerContext *ctx, CKDWORD)
-{
-    ctx->SetRenderState(VXRENDERSTATE_STENCILENABLE, TRUE);
-    ctx->SetRenderState(VXRENDERSTATE_STENCILPASS, VXSTENCILOP_REPLACE);
-    ctx->SetRenderState(VXRENDERSTATE_STENCILWRITEMASK, 0x0F);
-}
 void SetupAffineTexcoords(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE); }
 void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
 {
@@ -1044,7 +1038,6 @@ void TestApproximationsKeepDrawing()
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
         {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
         {"software vertex processing", CKRST_DIAG_IGNORE_SOFTWAREVPROCESSING, &SetupSoftwareVP},
-        {"partial stencil write mask", CKRST_DIAG_APPROX_STENCIL_WRITE_MASK, &SetupStencilWriteMask},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
