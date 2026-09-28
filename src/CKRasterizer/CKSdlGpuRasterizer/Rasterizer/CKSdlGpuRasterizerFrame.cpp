@@ -428,66 +428,66 @@ void CKSdlGpuRasterizerContext::RecordDrawApproximations()
         m_Stats, m_FFP.GetLastDrawApproximationMask());
 }
 
-CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
-    const CKFFShaderKey &Key,
+CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
+    const CKFFProgramContext &ProgramContext,
     const CKFFTextureBindingSet &Textures,
     CKBOOL PositionTDepthPad)
 {
     const CKFFFragmentSamplingMode samplingMode =
         CKFFResolveFragmentSamplingMode(Textures);
-    const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(
-        Key, Textures.SamplerLayoutPlan, samplingMode);
-    const CKDWORD variant = (CKDWORD)selection.Variant;
-    const CKFFSamplerLayout layout = selection.SamplerLayoutPlan.Layout;
+    const CKFFProgramVariant programVariant =
+        CKFFShaderCache::ProgramVariantForKey(ProgramContext.ShaderKey);
+    const CKDWORD variant = (CKDWORD)programVariant;
+    const CKFFSamplerLayout layout = Textures.SamplerLayoutPlan.Layout;
     const CKDWORD samplerLayout = (CKDWORD)layout;
     const CKDWORD compareSamplerCount =
-        selection.SamplerLayoutPlan.CompareSamplerCount;
+        Textures.SamplerLayoutPlan.CompareSamplerCount;
     const CKSdlGpuFFComparisonProfile comparisonProfile =
         CKSdlGpuFFResolveComparisonProfile(
-            layout, compareSamplerCount, selection.SamplingMode);
+            layout, compareSamplerCount, samplingMode);
     const CKDWORD nativeCompareSamplerCount =
         comparisonProfile == CKSDL_GPU_FF_COMPARE_NATIVE_ONE ? 1u : 0u;
-    const CKDWORD sampling = (CKDWORD)selection.SamplingMode;
+    const CKDWORD sampling = (CKDWORD)samplingMode;
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT ||
         samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
         comparisonProfile >= CKSDL_GPU_FF_COMPARE_PROFILE_COUNT ||
         sampling >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT)
-        return CKFFProgramBinding();
+        return 0;
 
     if (!m_NativeFFPixelShaders[samplerLayout][comparisonProfile][sampling]) {
         CKShaderDesc pixelShader;
         if (!CKSdlGpuFFFragmentShader(ShaderFormat, layout,
                                      compareSamplerCount,
-                                     selection.SamplingMode,
+                                     samplingMode,
                                      pixelShader) ||
             CreateShader(&pixelShader,
                          &m_NativeFFPixelShaders[samplerLayout]
                                                 [comparisonProfile]
                                                 [sampling]) != CK_OK)
-            return CKFFProgramBinding();
+            return 0;
     }
     const CKBOOL positionT =
-        selection.Variant == CKFF_PROGRAM_POSITIONT ||
-        selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP;
+        programVariant == CKFF_PROGRAM_POSITIONT ||
+        programVariant == CKFF_PROGRAM_POSITIONT_CLIP;
     PositionTDepthPad = PositionTDepthPad && positionT &&
         nativeCompareSamplerCount != 0;
     CKDWORD vertexShader = 0;
     if (PositionTDepthPad) {
-        const CKDWORD clip = selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
+        const CKDWORD clip = programVariant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
         if (!m_NativeFFDepthPadVertexShaders[clip]) {
             CKShaderDesc vertexDesc;
             if (!CKSdlGpuFFDepthPadVertexShader(ShaderFormat, clip != 0,
                                                 vertexDesc) ||
                 CreateShader(&vertexDesc,
                              &m_NativeFFDepthPadVertexShaders[clip]) != CK_OK)
-                return CKFFProgramBinding();
+                return 0;
         }
         vertexShader = m_NativeFFDepthPadVertexShaders[clip];
     } else {
         if (!m_NativeFFVertexShaders[variant] &&
-            CreateShader(&m_ShaderCache.GetVertexShader(selection.Variant),
+            CreateShader(&m_ShaderCache.GetVertexShader(programVariant),
                          &m_NativeFFVertexShaders[variant]) != CK_OK)
-            return CKFFProgramBinding();
+            return 0;
         vertexShader = m_NativeFFVertexShaders[variant];
     }
 
@@ -503,18 +503,16 @@ CKFFProgramBinding CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
                           &m_NativeFFPrograms[variant][samplerLayout]
                                              [comparisonProfile]
                                              [sampling][pad]) != CK_OK)
-            return CKFFProgramBinding();
+            return 0;
         std::shared_ptr<CKSdlGpuProgram> program = Programs.Get(
             m_NativeFFPrograms[variant][samplerLayout]
                                [comparisonProfile][sampling][pad]);
         if (!program)
-            return CKFFProgramBinding();
+            return 0;
         program->CompareSamplerCount = nativeCompareSamplerCount;
     }
-    return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout]
-                                                [comparisonProfile]
-                                                [sampling][pad],
-                              selection.FragmentProgram);
+    return m_NativeFFPrograms[variant][samplerLayout]
+                             [comparisonProfile][sampling][pad];
 }
 
 void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()
@@ -591,11 +589,11 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
             }
         }
     }
-    const CKFFProgramBinding binding = ResolveNativeFFProgram(
-        programContext.ShaderKey, drawTextures,
+    const CKDWORD program = ResolveNativeFFProgram(
+        programContext, drawTextures,
         positionTDepthPad);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
-    if (!binding.Program || !vertexLayout)
+    if (!program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);
 
     CKFFTextureBindings textures;
@@ -613,7 +611,7 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
     nativeDraw.Textures = &textures;
     nativeDraw.Constants = draw.Constants;
     nativeDraw.Marker = draw.Marker;
-    nativeDraw.Program = binding.Program;
+    nativeDraw.Program = program;
     nativeDraw.Layout = vertexLayout;
     nativeDraw.VertexBuffer = draw.VertexBuffer;
     nativeDraw.StartVertex = draw.StartVertex;

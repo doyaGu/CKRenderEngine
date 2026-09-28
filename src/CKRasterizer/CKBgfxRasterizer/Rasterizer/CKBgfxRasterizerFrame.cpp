@@ -430,41 +430,41 @@ void CKBgfxRasterizerContext::RecordDrawApproximations()
         m_Stats, m_FFP.GetLastDrawApproximationMask());
 }
 
-CKFFProgramBinding CKBgfxRasterizerContext::ResolveNativeFFProgram(
-    const CKFFShaderKey &Key,
+CKDWORD CKBgfxRasterizerContext::ResolveNativeFFProgram(
+    const CKFFProgramContext &ProgramContext,
     const CKFFTextureBindingSet &Textures)
 {
     const CKFFFragmentSamplingMode samplingMode =
         CKFFResolveFragmentSamplingMode(Textures);
-    const CKFFProgramSelection selection = m_ShaderCache.ResolveProgram(
-        Key, Textures.SamplerLayoutPlan, samplingMode);
-    const CKDWORD variant = (CKDWORD)selection.Variant;
-    const CKFFSamplerLayout layout = selection.SamplerLayoutPlan.Layout;
+    const CKFFProgramVariant programVariant =
+        CKFFShaderCache::ProgramVariantForKey(ProgramContext.ShaderKey);
+    const CKDWORD variant = (CKDWORD)programVariant;
+    const CKFFSamplerLayout layout = Textures.SamplerLayoutPlan.Layout;
     const CKDWORD samplerLayout = (CKDWORD)layout;
-    const CKDWORD sampling = (CKDWORD)selection.SamplingMode;
+    const CKDWORD sampling = (CKDWORD)samplingMode;
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT ||
         samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
         sampling >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT)
-        return CKFFProgramBinding();
+        return 0;
 
     if (!m_NativeFFPixelShaders[samplerLayout][sampling]) {
         CKShaderDesc pixelShader;
         if (!CKBgfxRasterizerFFFragmentShader(m_Caps, layout,
-                                              selection.SamplingMode,
+                                              samplingMode,
                                               pixelShader) ||
             CreateShader(&pixelShader,
                          &m_NativeFFPixelShaders[samplerLayout][sampling]) != CK_OK)
-            return CKFFProgramBinding();
+            return 0;
     }
     if (!m_NativeFFVertexShaders[variant] &&
-        CreateShader(&m_ShaderCache.GetVertexShader(selection.Variant),
+        CreateShader(&m_ShaderCache.GetVertexShader(programVariant),
                      &m_NativeFFVertexShaders[variant]) != CK_OK)
-        return CKFFProgramBinding();
+        return 0;
 
     if (!m_NativeFFPrograms[variant][samplerLayout][sampling]) {
         const CKBOOL positionT =
-            selection.Variant == CKFF_PROGRAM_POSITIONT ||
-            selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP;
+            programVariant == CKFF_PROGRAM_POSITIONT ||
+            programVariant == CKFF_PROGRAM_POSITIONT_CLIP;
         const CKFFProgramDesc desc = CKFFBuildProgramInterface(
             m_NativeFFVertexShaders[variant],
             m_NativeFFPixelShaders[samplerLayout][sampling],
@@ -472,10 +472,9 @@ CKFFProgramBinding CKBgfxRasterizerContext::ResolveNativeFFProgram(
             layout);
         if (CreateProgram(&desc,
                           &m_NativeFFPrograms[variant][samplerLayout][sampling]) != CK_OK)
-            return CKFFProgramBinding();
+            return 0;
     }
-    return CKFFProgramBinding(m_NativeFFPrograms[variant][samplerLayout][sampling],
-                              selection.FragmentProgram);
+    return m_NativeFFPrograms[variant][samplerLayout][sampling];
 }
 
 void CKBgfxRasterizerContext::ClearNativeFFPrograms()
@@ -604,10 +603,10 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);
     const CKFFProgramContext &programContext = *draw.ProgramContext;
     const CKFFTextureBindingSet &drawTextures = *draw.Textures;
-    const CKFFProgramBinding binding = ResolveNativeFFProgram(
-        programContext.ShaderKey, drawTextures);
+    const CKDWORD program = ResolveNativeFFProgram(
+        programContext, drawTextures);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
-    if (!binding.Program || !vertexLayout)
+    if (!program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);
 
     CKFFTextureBindings textures;
@@ -624,7 +623,7 @@ CKBOOL CKBgfxRasterizerContext::SubmitPreparedDraw()
     nativeDraw.Textures = &textures;
     nativeDraw.Constants = draw.Constants;
     nativeDraw.Marker = draw.Marker;
-    nativeDraw.Program = binding.Program;
+    nativeDraw.Program = program;
     nativeDraw.Layout = vertexLayout;
     nativeDraw.VertexBuffer = draw.VertexBuffer;
     nativeDraw.StartVertex = draw.StartVertex;

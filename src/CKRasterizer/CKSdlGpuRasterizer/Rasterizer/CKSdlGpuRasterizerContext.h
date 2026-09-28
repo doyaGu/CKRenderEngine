@@ -318,8 +318,8 @@ private:
     CKBOOL SubmitPreparedDraw();
     CKDWORD GetNativeVertexLayout(CKDWORD FormatFlags);
     void ClearNativeVertexLayouts();
-    CKFFProgramBinding ResolveNativeFFProgram(
-        const CKFFShaderKey &Key,
+    CKDWORD ResolveNativeFFProgram(
+        const CKFFProgramContext &ProgramContext,
         const CKFFTextureBindingSet &Textures,
         CKBOOL PositionTDepthPad);
     void ClearNativeFFPrograms();

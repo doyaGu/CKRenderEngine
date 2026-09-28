@@ -71,32 +71,22 @@ public:
             return CKFFProgramBinding();
         const CKFFProgramSelection selection = ResolveProgram(
             key, samplerLayoutPlan);
-        const CKDWORD variant = (CKDWORD)selection.Variant;
-        const CKFFSamplerLayout selectedLayout =
-            selection.SamplerLayoutPlan.Layout;
-        const CKDWORD layout = (CKDWORD)selectedLayout;
-        if (variant >= CKFF_PROGRAM_VARIANT_COUNT)
-            return CKFFProgramBinding();
-        if (!m_PixelShaders[layout] &&
-            device->CreateShader(&GetPixelShader(), &m_PixelShaders[layout]) != CK_OK)
-            return CKFFProgramBinding();
-        if (!m_VertexShaders[variant] &&
-            device->CreateShader(&GetVertexShader(selection.Variant),
-                                 &m_VertexShaders[variant]) != CK_OK)
-            return CKFFProgramBinding();
-        if (!m_Programs[variant][layout]) {
-            const CKBOOL positionT =
-                selection.Variant == CKFF_PROGRAM_POSITIONT ||
-                selection.Variant == CKFF_PROGRAM_POSITIONT_CLIP;
-            const CKFFProgramDesc desc = CKFFBuildProgramInterface(
-                m_VertexShaders[variant], m_PixelShaders[layout],
-                GetShaderFormat(), FALSE, positionT,
-                selectedLayout);
-            if (device->CreateProgram(&desc, &m_Programs[variant][layout]) != CK_OK)
-                return CKFFProgramBinding();
-        }
-        return CKFFProgramBinding(m_Programs[variant][layout],
-                                  selection.FragmentProgram);
+        const CKDWORD program = GetNativeProgram(
+            device, selection.Variant,
+            selection.SamplerLayoutPlan.Layout);
+        return program
+            ? CKFFProgramBinding(program, selection.FragmentProgram)
+            : CKFFProgramBinding();
+    }
+
+    template <class DeviceT>
+    CKDWORD GetPreparedProgram(
+        DeviceT *device, const CKFFProgramContext &programContext)
+    {
+        return GetNativeProgram(
+            device,
+            ProgramVariantForKey(programContext.ShaderKey),
+            programContext.SamplerLayoutPlan.Layout);
     }
 
     size_t CachedProgramCount() const
@@ -112,6 +102,36 @@ public:
     }
 
 private:
+    template <class DeviceT>
+    CKDWORD GetNativeProgram(DeviceT *device,
+                             CKFFProgramVariant programVariant,
+                             CKFFSamplerLayout samplerLayout)
+    {
+        const CKDWORD variant = (CKDWORD)programVariant;
+        const CKDWORD layout = (CKDWORD)samplerLayout;
+        if (!device || variant >= CKFF_PROGRAM_VARIANT_COUNT ||
+            layout >= CKFF_SAMPLER_LAYOUT_COUNT)
+            return 0;
+        if (!m_PixelShaders[layout] &&
+            device->CreateShader(&GetPixelShader(), &m_PixelShaders[layout]) != CK_OK)
+            return 0;
+        if (!m_VertexShaders[variant] &&
+            device->CreateShader(&GetVertexShader(programVariant),
+                                 &m_VertexShaders[variant]) != CK_OK)
+            return 0;
+        if (!m_Programs[variant][layout]) {
+            const CKBOOL positionT =
+                programVariant == CKFF_PROGRAM_POSITIONT ||
+                programVariant == CKFF_PROGRAM_POSITIONT_CLIP;
+            const CKFFProgramDesc desc = CKFFBuildProgramInterface(
+                m_VertexShaders[variant], m_PixelShaders[layout],
+                GetShaderFormat(), FALSE, positionT, samplerLayout);
+            if (device->CreateProgram(&desc, &m_Programs[variant][layout]) != CK_OK)
+                return 0;
+        }
+        return m_Programs[variant][layout];
+    }
+
     CKDWORD m_Programs[CKFF_PROGRAM_VARIANT_COUNT][CKFF_SAMPLER_LAYOUT_COUNT];
     CKDWORD m_VertexShaders[CKFF_PROGRAM_VARIANT_COUNT];
     CKDWORD m_PixelShaders[CKFF_SAMPLER_LAYOUT_COUNT];
@@ -238,11 +258,10 @@ private:
             return FinishDraw(CKERR_INVALIDOPERATION, 0);
         const CKFFProgramContext &programContext = *draw.ProgramContext;
         const CKFFTextureBindingSet &drawTextures = *draw.Textures;
-        const CKFFProgramBinding binding = m_Shaders.GetProgram(
-            m_Device, programContext.ShaderKey,
-            drawTextures.SamplerLayoutPlan);
+        const CKDWORD program = m_Shaders.GetPreparedProgram(
+            m_Device, programContext);
         const CKDWORD layout = GetLayout(draw.VertexFormat);
-        if (!binding.Program || !layout)
+        if (!program || !layout)
             return FinishDraw(CKERR_INVALIDOPERATION, 0);
 
         CKFFTextureBindings textures;
@@ -259,7 +278,7 @@ private:
         nativeDraw.Textures = &textures;
         nativeDraw.Constants = draw.Constants;
         nativeDraw.Marker = draw.Marker;
-        nativeDraw.Program = binding.Program;
+        nativeDraw.Program = program;
         nativeDraw.Layout = layout;
         nativeDraw.VertexBuffer = draw.VertexBuffer;
         nativeDraw.StartVertex = draw.StartVertex;
