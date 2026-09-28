@@ -458,7 +458,7 @@ struct ComponentFixture {
         UniformTextureBinder = std::make_unique<CKFFTextureBinder>(
             UniformState, ShaderTargetFlags, Probes);
         UniformTextureBinder->BuildBindingSet(
-            &UniformTextureBindings, 1, 0x1u,
+            &UniformTextureBindings, 1,
             Contexts[0].SamplerLayoutPlan);
         UniformEmitter = std::make_unique<CKFFUniformEmitter>(
             UniformState, UniformState.DrawState, ShaderTargetFlags, Probes);
@@ -740,9 +740,8 @@ private:
         const CKFFSamplerLayoutPlan &layoutPlan = textureCount == 1
             ? m_Fixture->OneTextureLayoutPlan
             : m_Fixture->FourTextureLayoutPlan;
-        const CKDWORD mask = textureCount == 1 ? 0x1u : 0xFu;
         for (uint64_t i = 0; i < count; ++i) {
-            binder.BuildBindingSet(&set, textureCount, mask, layoutPlan);
+            binder.BuildBindingSet(&set, textureCount, layoutPlan);
             hash = Mix(hash, set.Hash);
             hash = Mix(hash, set.Bindings[textureCount - 1].Texture);
         }

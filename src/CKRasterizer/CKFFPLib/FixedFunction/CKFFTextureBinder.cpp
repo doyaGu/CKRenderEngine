@@ -42,7 +42,6 @@ CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
       m_SamplerOverrides(),
       m_BindingSetValid(FALSE),
       m_BindingSetActiveTextureCount(0),
-      m_BindingSetSampledTextureMask(0),
       m_BindingSetLayoutPlan(),
       m_BindingSet()
 {
@@ -124,29 +123,27 @@ void CKFFTextureBinder::ResolveSampler(
     shaderState = resolved.ShaderState;
 }
 
-void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
-                                        CKDWORD sampledTextureMask,
+void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out,
+                                        CKDWORD activeTextureCount,
                                         const CKFFSamplerLayoutPlan &layoutPlan) const
 {
     if (!out)
         return;
-    *out = ResolveBindingSet(activeTextureCount, sampledTextureMask,
-                             layoutPlan);
+    *out = ResolveBindingSet(activeTextureCount, layoutPlan);
 }
 
 const CKFFTextureBindingSet &CKFFTextureBinder::ResolveBindingSet(
     CKDWORD activeTextureCount,
-    CKDWORD sampledTextureMask,
     const CKFFSamplerLayoutPlan &layoutPlan) const
 {
     CKDWORD activeCount = activeTextureCount;
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
+    CKDWORD sampledTextureMask = layoutPlan.SampledStageMask;
     sampledTextureMask &= activeCount == CKFF_MAX_TEXTURE_STAGES
         ? 0xffu : ((1u << activeCount) - 1u);
     if (m_BindingSetValid &&
         m_BindingSetActiveTextureCount == activeCount &&
-        m_BindingSetSampledTextureMask == sampledTextureMask &&
         LayoutPlansEqual(m_BindingSetLayoutPlan, layoutPlan)) {
         return m_BindingSet;
     }
@@ -160,7 +157,6 @@ const CKFFTextureBindingSet &CKFFTextureBinder::ResolveBindingSet(
                                m_State.TextureHandles, m_State.TextureFlags,
                                samplers, shaderStates, layoutPlan);
     m_BindingSetActiveTextureCount = activeCount;
-    m_BindingSetSampledTextureMask = sampledTextureMask;
     m_BindingSetLayoutPlan = layoutPlan;
     m_BindingSetValid = TRUE;
     return m_BindingSet;

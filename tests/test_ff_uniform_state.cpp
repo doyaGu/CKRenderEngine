@@ -239,7 +239,7 @@ void NativeExactSamplingUsesFinalBindingState() {
     key.Stages[0].HasTexture = true;
     const CKFFSamplerLayoutPlan plan = CKFFBuildSamplerLayoutPlan(key);
     CKFFTextureBindingSet built;
-    binder.BuildBindingSet(&built, 1, 1u, plan);
+    binder.BuildBindingSet(&built, 1, plan);
     const CKDWORD transformFlags =
         state.StageStates[0][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
         CKFFResolveMirrorOnceAddressMask(state.StageStates[0]);
@@ -267,8 +267,8 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     CKFFSamplerLayoutPlan plan = CKFFBuildSamplerLayoutPlan(key);
     CKFFTextureBindingSet first;
     CKFFTextureBindingSet cached;
-    binder.BuildBindingSet(&first, 1, 1u, plan);
-    binder.BuildBindingSet(&cached, 1, 1u, plan);
+    binder.BuildBindingSet(&first, 1, plan);
+    binder.BuildBindingSet(&cached, 1, plan);
     TestCheck(cached.Hash == first.Hash &&
                   cached.Bindings[0].Texture == 17,
               "A stable texture binding request must preserve the resolved binding set");
@@ -276,7 +276,7 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     state.TextureHandles[0] = 23;
     binder.InvalidateStage(0);
     CKFFTextureBindingSet changedTexture;
-    binder.BuildBindingSet(&changedTexture, 1, 1u, plan);
+    binder.BuildBindingSet(&changedTexture, 1, plan);
     TestCheck(changedTexture.Bindings[0].Texture == 23 &&
                   changedTexture.Hash != first.Hash,
               "Invalidating a texture stage must rebuild the cached texture identity");
@@ -285,7 +285,7 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     state.StageStates[0][CKRST_TSS_BORDERCOLOR] = 0x80402010u;
     binder.InvalidateStage(0);
     CKFFTextureBindingSet changedSampler;
-    binder.BuildBindingSet(&changedSampler, 1, 1u, plan);
+    binder.BuildBindingSet(&changedSampler, 1, plan);
     TestCheck(changedSampler.Bindings[0].Sampler.AddressU == CKRST_ADDRESS_BORDER &&
                   changedSampler.Hash != changedTexture.Hash,
               "Invalidating a sampler stage must rebuild its native and shader state");
@@ -293,20 +293,22 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     CKFFSamplerLayoutPlan remappedPlan = plan;
     remappedPlan.Stages[0].NativeSlot = 7;
     CKFFTextureBindingSet remapped;
-    binder.BuildBindingSet(&remapped, 1, 1u, remappedPlan);
+    binder.BuildBindingSet(&remapped, 1, remappedPlan);
     TestCheck(remapped.Bindings[0].Stage == 7 &&
                   remapped.Hash != changedSampler.Hash,
               "A sampler layout change must miss the final binding-set cache");
 
     CKFFTextureBindingSet unsampled;
-    binder.BuildBindingSet(&unsampled, 1, 0u, plan);
+    CKFFSamplerLayoutPlan unsampledPlan = plan;
+    unsampledPlan.SampledStageMask = 0;
+    binder.BuildBindingSet(&unsampled, 1, unsampledPlan);
     TestCheck(unsampled.ActiveTextureCount == 0 &&
                   unsampled.Bindings[0].Texture == 0,
               "A sampled-stage mask change must rebuild the final binding set");
 
     binder.SetRenderOptions(TRUE, FALSE, FALSE);
     CKFFTextureBindingSet overridden;
-    binder.BuildBindingSet(&overridden, 1, 1u, plan);
+    binder.BuildBindingSet(&overridden, 1, plan);
     TestCheck(overridden.Bindings[0].Sampler.MinFilter == CKRST_FILTER_NEAREST &&
                   overridden.Bindings[0].Sampler.MagFilter == CKRST_FILTER_NEAREST,
               "Sampler render options must invalidate the final binding set");

@@ -673,7 +673,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(const CKFFTextureB
     if (!bindingSet)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     *bindingSet = &m_TextureBinder.ResolveBindingSet(
-        activeTextureCount, layoutPlan.SampledStageMask, layoutPlan);
+        activeTextureCount, layoutPlan);
     return TRUE;
 }
 

@@ -16,11 +16,9 @@ public:
     void InvalidateStage(int stage);
     void InvalidateAll();
     void BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD activeTextureCount,
-                         CKDWORD sampledTextureMask,
                          const CKFFSamplerLayoutPlan &layoutPlan) const;
     const CKFFTextureBindingSet &ResolveBindingSet(
         CKDWORD activeTextureCount,
-        CKDWORD sampledTextureMask,
         const CKFFSamplerLayoutPlan &layoutPlan) const;
     CKSamplerDesc BuildSamplerDesc(int stage) const;
 
@@ -47,7 +45,6 @@ private:
     mutable ResolvedSampler m_ResolvedSamplers[CKFF_MAX_TEXTURE_STAGES];
     mutable CKBOOL m_BindingSetValid;
     mutable CKDWORD m_BindingSetActiveTextureCount;
-    mutable CKDWORD m_BindingSetSampledTextureMask;
     mutable CKFFSamplerLayoutPlan m_BindingSetLayoutPlan;
     mutable CKFFTextureBindingSet m_BindingSet;
 };
