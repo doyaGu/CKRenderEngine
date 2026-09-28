@@ -226,9 +226,9 @@ CKDWORD CKFFStateResolver::BuildDrawParams(const CKFFStateStore &state,
                                            int packedLightCount,
                                            const CKFFUniformEmissionContext *context)
 {
-    if (!context)
+    if (!context || !context->ProgramContext)
         return 0;
-    const CKFFShaderKey &shaderKey = context->ShaderKey;
+    const CKFFShaderKey &shaderKey = context->ProgramContext->ShaderKey;
     memset(drawParams, 0, sizeof(float) * CKFF_DRAW_PARAM_VEC4_COUNT * 4);
     memcpy(drawParams[0], state.MaterialConstants.Diffuse, sizeof(drawParams[0]));
     memcpy(drawParams[1], state.MaterialConstants.Ambient, sizeof(drawParams[1]));

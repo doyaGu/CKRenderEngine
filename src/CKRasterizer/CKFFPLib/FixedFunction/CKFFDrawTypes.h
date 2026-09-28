@@ -105,8 +105,6 @@ struct CKFFUniformEmissionContext {
     CKFFUniformSink *Uniforms;
     const CKFFProgramContext *ProgramContext;
     const CKFFTextureBindingSet *Textures;
-    CKFFShaderKey ShaderKey;
-    CKFFFragmentProgram FragmentProgram;
     CKDWORD ActiveTextureCount;
     CKBOOL PositionT;
     CKBOOL LightingEnabled;

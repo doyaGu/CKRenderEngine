@@ -70,14 +70,12 @@ static void CKFFInitUniformEmissionContext(CKFFUniformEmissionContext *context,
     context->Uniforms = sink;
     context->ProgramContext = programContext;
     context->Textures = textures;
-    context->ShaderKey = programContext->ShaderKey;
-    context->FragmentProgram = programContext->FragmentProgram;
     context->ActiveTextureCount = activeTextureCount;
-    context->PositionT = context->ShaderKey.VS.GetHasPositionT() ? TRUE : FALSE;
+    context->PositionT = context->ProgramContext->ShaderKey.VS.GetHasPositionT() ? TRUE : FALSE;
     context->LightingEnabled = context->PositionT ? FALSE : TRUE;
-    context->FogEnabled = context->ShaderKey.FS.FogEnable ? TRUE : FALSE;
-    context->VertexFogMode = context->FogEnabled ? context->ShaderKey.FS.VertexFogMode : 0;
-    context->PixelFogMode = context->FogEnabled ? context->ShaderKey.FS.PixelFogMode : 0;
+    context->FogEnabled = context->ProgramContext->ShaderKey.FS.FogEnable ? TRUE : FALSE;
+    context->VertexFogMode = context->FogEnabled ? context->ProgramContext->ShaderKey.FS.VertexFogMode : 0;
+    context->PixelFogMode = context->FogEnabled ? context->ProgramContext->ShaderKey.FS.PixelFogMode : 0;
     context->PolygonDepthBias = polygonDepthBias;
     context->PatternedLines = patternedLines;
 }
@@ -140,7 +138,7 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
 
     CKFFUniformSink *sink = context->Uniforms;
     const bool viewSpaceUniforms = true;
-    const bool vertexBlend = CKFFShaderKeyVertexBlendMode(context->ShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
+    const bool vertexBlend = CKFFShaderKeyVertexBlendMode(context->ProgramContext->ShaderKey.VS) == CKFF_VERTEX_BLEND_NORMAL;
     VxMatrix modelView;
     VxMatrix normalMatrix;
     VxMatrix viewNormalMatrix;
@@ -271,7 +269,7 @@ void CKFFUniformEmitter::EmitStageAndFragmentProgramUniforms(const CKFFUniformEm
     CKFFPackStageParams(m_State.StageStates, m_State.TextureHandles, m_State.TextureFlags,
                         context->ActiveTextureCount, stageParams,
                         m_State.StageStateSetMasks);
-    if (context->ShaderKey.VS.GetPointSprite()) {
+    if (context->ProgramContext->ShaderKey.VS.GetPointSprite()) {
         // Expanded point sprites carry their own texcoords: bypass texgen,
         // texture matrices and projection, keep only the sampling flags.
         for (CKDWORD stage = 0;
@@ -292,7 +290,7 @@ void CKFFUniformEmitter::EmitStageAndFragmentProgramUniforms(const CKFFUniformEm
          CKFF_STAGE_PARAM_VEC4_COUNT, CKFF_STAGE_PARAM_VEC4_COUNT, FALSE);
 
     CKFFFragmentProgramUniform ffProgram;
-    CKFFPackFragmentProgram(context->FragmentProgram, ffProgram);
+    CKFFPackFragmentProgram(context->ProgramContext->FragmentProgram, ffProgram);
     Emit(sink, CKRST_BLOCK_FRAGMENT_PROGRAM, ffProgram.Values,
          CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT, CKFF_FRAGMENT_PROGRAM_UNIFORM_VEC4_COUNT, FALSE);
 }
@@ -344,7 +342,7 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
     CKFFLightData viewLights[CKFF_MAX_LIGHTS];
     if (context.LightingEnabled) {
         packed = CKFFPackViewLights(m_State.LightConstants, m_State.LightEnabled, m_State.ActiveLightCount,
-                                    CKFFShaderKeyLightingEnabled(context.ShaderKey.VS),
+                                    CKFFShaderKeyLightingEnabled(context.ProgramContext->ShaderKey.VS),
                                     m_State.View, viewLights);
 
         if (packed > 1)
