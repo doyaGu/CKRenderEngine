@@ -257,10 +257,10 @@ private:
                                             CKDWORD formatFlags = 0,
                                             const CKBYTE *texcoordComponentCounts = nullptr,
                                             CKBOOL pointSprite = FALSE);
-    CKFFProgramPrepareStatus PrepareVertexBufferProgram(CKFFProgramPreparation *preparation,
+    CKFFProgramPrepareStatus PrepareVertexBufferProgram(const CKFFProgramPreparation **preparation,
                                                         CKDWORD dpFlags,
                                                         CKDWORD formatFlags);
-    CKFFProgramPrepareStatus PrepareSoftwareProgram(CKFFProgramPreparation *preparation,
+    CKFFProgramPrepareStatus PrepareSoftwareProgram(const CKFFProgramPreparation **preparation,
                                                     CKDWORD dpFlags,
                                                     CKDWORD activeTextureCount,
                                                     CKDWORD formatFlags,

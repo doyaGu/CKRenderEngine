@@ -742,12 +742,13 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
 }
 
 CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareVertexBufferProgram(
-    CKFFProgramPreparation *preparation,
+    const CKFFProgramPreparation **preparation,
     CKDWORD dpFlags,
     CKDWORD formatFlags)
 {
     if (!preparation)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
+    *preparation = NULL;
 
     const CKDWORD activeTextureCount =
         (CKDWORD)CKFFResolveActiveTextureStageCount(
@@ -756,24 +757,25 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareVertexBufferProgram(
         m_VertexBufferProgramCacheDPFlags == dpFlags &&
         m_VertexBufferProgramCacheFormatFlags == formatFlags &&
         m_VertexBufferProgramCacheActiveTextureCount == activeTextureCount) {
-        *preparation = m_VertexBufferProgramCache;
+        *preparation = &m_VertexBufferProgramCache;
         return CKFF_PROGRAM_PREPARE_OK;
     }
 
+    m_VertexBufferProgramCacheValid = FALSE;
     const CKFFProgramPrepareStatus status = PrepareProgram(
-        preparation, dpFlags, activeTextureCount, formatFlags);
+        &m_VertexBufferProgramCache, dpFlags, activeTextureCount, formatFlags);
     if (status == CKFF_PROGRAM_PREPARE_OK) {
         m_VertexBufferProgramCacheDPFlags = dpFlags;
         m_VertexBufferProgramCacheFormatFlags = formatFlags;
         m_VertexBufferProgramCacheActiveTextureCount = activeTextureCount;
-        m_VertexBufferProgramCache = *preparation;
         m_VertexBufferProgramCacheValid = TRUE;
+        *preparation = &m_VertexBufferProgramCache;
     }
     return status;
 }
 
 CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareSoftwareProgram(
-    CKFFProgramPreparation *preparation,
+    const CKFFProgramPreparation **preparation,
     CKDWORD dpFlags,
     CKDWORD activeTextureCount,
     CKDWORD formatFlags,
@@ -782,6 +784,7 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareSoftwareProgram(
 {
     if (!preparation || !texcoordComponentCounts)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
+    *preparation = NULL;
 
     if (m_SoftwareProgramCacheValid &&
         m_SoftwareProgramCacheDPFlags == dpFlags &&
@@ -791,12 +794,13 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareSoftwareProgram(
         memcmp(m_SoftwareProgramCacheTexcoordComponentCounts,
                texcoordComponentCounts,
                sizeof(m_SoftwareProgramCacheTexcoordComponentCounts)) == 0) {
-        *preparation = m_SoftwareProgramCache;
+        *preparation = &m_SoftwareProgramCache;
         return CKFF_PROGRAM_PREPARE_OK;
     }
 
+    m_SoftwareProgramCacheValid = FALSE;
     const CKFFProgramPrepareStatus status = PrepareProgram(
-        preparation, dpFlags, activeTextureCount, formatFlags,
+        &m_SoftwareProgramCache, dpFlags, activeTextureCount, formatFlags,
         texcoordComponentCounts, pointSprite);
     if (status == CKFF_PROGRAM_PREPARE_OK) {
         m_SoftwareProgramCacheDPFlags = dpFlags;
@@ -806,8 +810,8 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareSoftwareProgram(
         memcpy(m_SoftwareProgramCacheTexcoordComponentCounts,
                texcoordComponentCounts,
                sizeof(m_SoftwareProgramCacheTexcoordComponentCounts));
-        m_SoftwareProgramCache = *preparation;
         m_SoftwareProgramCacheValid = TRUE;
+        *preparation = &m_SoftwareProgramCache;
     }
     return status;
 }
@@ -972,7 +976,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
         lineParams.TargetWidth = targetWidth ? (float)targetWidth : 1.0f;
         lineParams.TargetHeight = targetHeight ? (float)targetHeight : 1.0f;
     }
-    CKFFProgramPreparation programPreparation;
+    const CKFFProgramPreparation *programPreparation = NULL;
     const CKDWORD pointOffsetFlags = pointFillExpansion
         ? CKFF_VF_POINTOFFSET |
             (pointParams.BlendMode == CKFF_VERTEX_BLEND_TWEEN
@@ -999,8 +1003,8 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
             CKFF_PROBE(m_Probes, OnProgramMiss());
         return RecordDrawReject(CKFFProgramPrepareRejectReason(prepareStatus));
     }
-    const CKFFPreparedState &preparedState = programPreparation.PreparedState;
-    const CKFFProgramContext &programContext = programPreparation.ProgramContext;
+    const CKFFPreparedState &preparedState = programPreparation->PreparedState;
+    const CKFFProgramContext &programContext = programPreparation->ProgramContext;
     const CKFFShaderKey &shaderKey = programContext.ShaderKey;
     const CKDWORD program = 0;
     CKFF_PROBE(m_Probes, OnProgram(program));
@@ -1210,7 +1214,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         if (NeedsVertexBufferPointExpansion(dpFlags))
             return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     }
-    CKFFProgramPreparation preparation;
+    const CKFFProgramPreparation *preparation = NULL;
     const CKFFProgramPrepareStatus prepareStatus =
         PrepareVertexBufferProgram(
             &preparation, dpFlags, formatFlags);
@@ -1219,7 +1223,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
             CKFF_PROBE(m_Probes, OnProgramMiss());
         return RecordDrawReject(CKFFProgramPrepareRejectReason(prepareStatus));
     }
-    return PrepareVertexBufferImmediate(preparation, type, vb, ib,
+    return PrepareVertexBufferImmediate(*preparation, type, vb, ib,
                                         baseVertex, vertexCount, startIndex, indexCount,
                                         dpFlags, formatFlags, vertexLayout, indices);
 }
