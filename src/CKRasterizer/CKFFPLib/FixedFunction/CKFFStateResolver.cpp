@@ -74,7 +74,10 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     stateDesc.VS.SetHasNormal(hasFormat ? ((formatFlags & CKFF_VF_NORMAL) != 0) : ((dpFlags & CKRST_DP_LIGHT) != 0));
     stateDesc.VS.SetHasColor0(hasFormat ? ((formatFlags & CKFF_VF_COLOR0) != 0) : ((dpFlags & CKRST_DP_DIFFUSE) != 0));
     stateDesc.VS.SetHasColor1(hasFormat ? ((formatFlags & CKFF_VF_COLOR1) != 0) : ((dpFlags & CKRST_DP_SPECULAR) != 0));
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+    // Inactive stages retain CKFFVSStateDesc defaults. Their source
+    // declarations and texgen state cannot be observed until the stage is
+    // activated, which invalidates and rebuilds the prepared program.
+    for (CKDWORD stage = 0; stage < out->ActiveTextureCount; ++stage) {
         stateDesc.VS.SetHasTexCoord(
             stage,
             hasFormat ? ((formatFlags & CKFF_VF_TEXCOORD(stage)) != 0) : (out->ActiveTextureCount > (CKDWORD)stage));
@@ -160,12 +163,13 @@ void CKFFStateResolver::BuildPreparedState(const CKFFStateStore &state,
     }
 
     // Fragment state description mirrors the active fixed-function texture-stage state.
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+    for (CKDWORD stage = 0; stage < out->ActiveTextureCount; ++stage) {
         const uint64_t stateSetMask = state.StageStateSetMasks[stage];
-        const bool stageActive = (CKDWORD)stage < out->ActiveTextureCount;
-        const bool hasTexture = stageActive && state.TextureHandles[stage] != 0;
-        const CKDWORD colorOp = CKFFResolveStageColorOp(state.StageStates[stage], stageActive, hasTexture);
-        const CKDWORD alphaOp = CKFFResolveStageAlphaOp(state.StageStates[stage], stageActive, hasTexture);
+        const bool hasTexture = state.TextureHandles[stage] != 0;
+        const CKDWORD colorOp = CKFFResolveStageColorOp(
+            state.StageStates[stage], true, hasTexture);
+        const CKDWORD alphaOp = CKFFResolveStageAlphaOp(
+            state.StageStates[stage], true, hasTexture);
         stateDesc.FS.SetStageColorOp(stage, colorOp);
         stateDesc.FS.SetStageColorArg0(stage, CKFFResolveStageColorArg0(
             state.StageStates[stage], stateSetMask));
