@@ -248,6 +248,26 @@ void NativeExactSamplingUsesFinalBindingState() {
         transformFlags, targetFlags);
     TestCheck(built.Bindings[0].ShaderState.Bits == expected.Bits,
               "Texture bindings must retain the shader state resolved from the final sampler descriptor");
+    const CKDWORD nativeSlot = built.Bindings[0].Stage;
+    const CKSamplerDesc &nativeSampler =
+        built.NativeBindings[nativeSlot].Sampler;
+    const CKSamplerDesc &bindingSampler = built.Bindings[0].Sampler;
+    TestCheck(built.NativeBindings[nativeSlot].Texture == 17 &&
+                  built.NativeBindings[nativeSlot].FixedStage == 0 &&
+                  nativeSampler.MinFilter == bindingSampler.MinFilter &&
+                  nativeSampler.MagFilter == bindingSampler.MagFilter &&
+                  nativeSampler.MipFilter == bindingSampler.MipFilter &&
+                  nativeSampler.AddressU == bindingSampler.AddressU &&
+                  nativeSampler.AddressV == bindingSampler.AddressV &&
+                  nativeSampler.AddressW == bindingSampler.AddressW &&
+                  nativeSampler.BorderColor == bindingSampler.BorderColor &&
+                  nativeSampler.CompareFunc == bindingSampler.CompareFunc &&
+                  nativeSampler.MinMipLevel == bindingSampler.MinMipLevel &&
+                  nativeSampler.MaxAnisotropy == bindingSampler.MaxAnisotropy &&
+                  nativeSampler.ShaderAnisotropy ==
+                      bindingSampler.ShaderAnisotropy &&
+                  nativeSampler.MipLodBias == bindingSampler.MipLodBias,
+              "Texture bindings must cache the final native slot table");
     TestCheck(built.SamplingMode == CKFFResolveFragmentSamplingMode(built),
               "Texture bindings must cache the fragment sampling mode resolved from final sampler state");
 }

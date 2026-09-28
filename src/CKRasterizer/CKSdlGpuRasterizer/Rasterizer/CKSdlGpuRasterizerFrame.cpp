@@ -595,19 +595,9 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
     if (!program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);
 
-    CKFFTextureBindings textures;
-    for (CKDWORD i = 0; i < drawTextures.ActiveTextureCount; ++i) {
-        const CKFFTextureBinding &source = drawTextures.Bindings[i];
-        if (!source.Texture || source.Stage >= CKFF_TEXTURE_SLOT_COUNT)
-            continue;
-        textures[source.Stage].Texture = source.Texture;
-        textures[source.Stage].FixedStage = i;
-        textures[source.Stage].Sampler = source.Sampler;
-    }
-
     CKDrawCommand nativeDraw;
     nativeDraw.Pipeline = draw.Pipeline;
-    nativeDraw.Textures = &textures;
+    nativeDraw.Textures = &drawTextures.NativeBindings;
     nativeDraw.Constants = draw.Constants;
     nativeDraw.Marker = draw.Marker;
     nativeDraw.Program = program;

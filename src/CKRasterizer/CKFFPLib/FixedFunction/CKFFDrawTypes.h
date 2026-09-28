@@ -6,6 +6,7 @@
 #include "CKFFShaderKey.h"
 #include "CKFFProgram.h"
 #include "CKFFShaderABI.h"
+#include "CKFFTextureBindings.h"
 #include "CKRasterizerContextTypes.h"
 #include "CKFFPipelineState.h"
 
@@ -59,6 +60,7 @@ struct CKFFTextureBindingSet {
     CKFFFragmentSamplingMode SamplingMode;
     CKFFSamplerLayoutPlan SamplerLayoutPlan;
     CKFFTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
+    CKFFTextureBindings NativeBindings;
 };
 
 enum CKFFDrawSource {
@@ -160,6 +162,7 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
     set->Hash = 0;
     set->SamplingMode = CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
     set->SamplerLayoutPlan = CKFFSamplerLayoutPlan();
+    set->NativeBindings = CKFFTextureBindings();
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         set->Bindings[stage].Stage = stage;
         set->Bindings[stage].Texture = 0;

@@ -734,14 +734,14 @@ private:
     Observation RunTextureBinding(uint64_t count, CKDWORD textureCount)
     {
         uint64_t hash = 1469598103934665603ull;
-        CKFFTextureBindingSet set;
         CKFFTextureBinder &binder = textureCount == 1
             ? *m_Fixture->OneTextureBinder : *m_Fixture->FourTextureBinder;
         const CKFFSamplerLayoutPlan &layoutPlan = textureCount == 1
             ? m_Fixture->OneTextureLayoutPlan
             : m_Fixture->FourTextureLayoutPlan;
         for (uint64_t i = 0; i < count; ++i) {
-            binder.BuildBindingSet(&set, textureCount, layoutPlan);
+            const CKFFTextureBindingSet &set =
+                binder.ResolveBindingSet(textureCount, layoutPlan);
             hash = Mix(hash, set.Hash);
             hash = Mix(hash, set.Bindings[textureCount - 1].Texture);
         }

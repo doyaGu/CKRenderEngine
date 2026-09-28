@@ -29,6 +29,13 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
         set->Bindings[stage].TextureFlags = textureFlags[stage];
         set->Bindings[stage].Sampler = samplers[stage];
         set->Bindings[stage].ShaderState = shaderStates[stage];
+        const CKDWORD nativeSlot = set->Bindings[stage].Stage;
+        if (nativeSlot < CKFF_TEXTURE_SLOT_COUNT) {
+            CKFFTextureSlot &native = set->NativeBindings[nativeSlot];
+            native.Texture = textureHandles[stage];
+            native.FixedStage = stage;
+            native.Sampler = samplers[stage];
+        }
     }
     set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);
     set->SamplingMode = CKFFResolveFragmentSamplingMode(*set);
