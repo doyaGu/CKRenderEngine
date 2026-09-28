@@ -795,6 +795,8 @@ void SamplerOrdinalCountsOnlySamplingStagesOfTheSameType() {
     const CKFFFragmentProgram program = CKFFBuildFragmentProgram(key, plan);
     TestCheck(!key.Stages[1].HasTexture && key.Stages[1].SamplerType == CKFF_SAMPLER_2D,
               "A non-sampling stage must normalize to a 2D sampler type");
+    TestCheck(plan.SampledStageMask == 0x3du,
+              "The sampler layout plan must preserve the sampled logical stages");
     TestCheck(plan.Stages[0].Ordinal == 0 && plan.Stages[3].Ordinal == 1,
               "Cube ordinals must count only earlier sampling cube stages");
     TestCheck(plan.Stages[2].Ordinal == 0 && plan.Stages[5].Ordinal == 1,

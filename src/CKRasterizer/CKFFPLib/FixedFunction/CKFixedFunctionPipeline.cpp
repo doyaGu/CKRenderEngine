@@ -668,21 +668,12 @@ uint64_t CKFixedFunctionPipeline::GetConstantRevision(CKDWORD block) const
 
 CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(const CKFFTextureBindingSet **bindingSet,
                                                                CKDWORD activeTextureCount,
-                                                               const CKFFShaderKey &shaderKey,
                                                                const CKFFSamplerLayoutPlan &layoutPlan)
 {
     if (!bindingSet)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
-    CKDWORD sampledTextureMask = 0;
-    CKDWORD stageCount = activeTextureCount;
-    if (stageCount > CKFF_MAX_TEXTURE_STAGES)
-        stageCount = CKFF_MAX_TEXTURE_STAGES;
-    for (CKDWORD stage = 0; stage < stageCount; ++stage) {
-        if (shaderKey.FS.Stages[stage].HasTexture)
-            sampledTextureMask |= 1u << stage;
-    }
     *bindingSet = &m_TextureBinder.ResolveBindingSet(
-        activeTextureCount, sampledTextureMask, layoutPlan);
+        activeTextureCount, layoutPlan.SampledStageMask, layoutPlan);
     return TRUE;
 }
 
@@ -1001,7 +992,6 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     }
     const CKFFPreparedState &preparedState = programPreparation->PreparedState;
     const CKFFProgramContext &programContext = programPreparation->ProgramContext;
-    const CKFFShaderKey &shaderKey = programContext.ShaderKey;
     const CKDWORD program = 0;
     CKFF_PROBE(m_Probes, OnProgram(program));
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -1043,7 +1033,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
 
     const CKFFTextureBindingSet *textureBindingSet = NULL;
     if (!BuildCurrentTextureBindingSet(
-            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey,
+            &textureBindingSet, preparedState.ActiveTextureCount,
             programContext.SamplerLayoutPlan))
         return FALSE;
 
@@ -1425,7 +1415,6 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
 
     const CKFFPreparedState &preparedState = preparation.PreparedState;
     const CKFFProgramContext &programContext = preparation.ProgramContext;
-    const CKFFShaderKey &shaderKey = programContext.ShaderKey;
     const CKDWORD program = 0;
     CKFF_PROBE(m_Probes, OnProgram(program));
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -1474,7 +1463,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
 
     const CKFFTextureBindingSet *textureBindingSet = NULL;
     if (!BuildCurrentTextureBindingSet(
-            &textureBindingSet, preparedState.ActiveTextureCount, shaderKey,
+            &textureBindingSet, preparedState.ActiveTextureCount,
             programContext.SamplerLayoutPlan))
         return FALSE;
 

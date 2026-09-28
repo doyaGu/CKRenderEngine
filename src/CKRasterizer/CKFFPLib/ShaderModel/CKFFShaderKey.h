@@ -79,11 +79,12 @@ struct CKFFSamplerStageSlot {
 struct CKFFSamplerLayoutPlan {
     CKFFSamplerLayout Layout;
     CKBYTE CompareSamplerCount;
+    CKBYTE SampledStageMask;
     CKFFSamplerStageSlot Stages[CKFF_MAX_TEXTURE_STAGES];
 
     CKFFSamplerLayoutPlan()
         : Layout(CKFF_SAMPLER_LAYOUT_WIDE_2D),
-          CompareSamplerCount(0), Stages() {}
+          CompareSamplerCount(0), SampledStageMask(0), Stages() {}
 };
 
 struct CKFFShaderKey {

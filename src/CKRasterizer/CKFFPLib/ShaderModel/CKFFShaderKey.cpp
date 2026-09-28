@@ -237,6 +237,7 @@ CKFFSamplerLayoutPlan CKFFBuildSamplerLayoutPlan(const CKFFShaderKeyFS &key) {
     for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
         if (!key.Stages[stage].HasTexture)
             continue;
+        plan.SampledStageMask |= (CKBYTE)(1u << stage);
         if (key.Stages[stage].SamplerType == CKFF_SAMPLER_CUBE)
             ++cubeCount;
         else if (key.Stages[stage].SamplerType == CKFF_SAMPLER_VOLUME)

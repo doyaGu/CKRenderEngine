@@ -84,7 +84,8 @@ CKBOOL CKFFTextureBinder::LayoutPlansEqual(
     const CKFFSamplerLayoutPlan &b)
 {
     if (a.Layout != b.Layout ||
-        a.CompareSamplerCount != b.CompareSamplerCount)
+        a.CompareSamplerCount != b.CompareSamplerCount ||
+        a.SampledStageMask != b.SampledStageMask)
         return FALSE;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         if (a.Stages[stage].Ordinal != b.Stages[stage].Ordinal ||
