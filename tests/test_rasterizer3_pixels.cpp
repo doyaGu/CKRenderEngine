@@ -3120,6 +3120,63 @@ void CheckFilteredDepthComparison(Backend &b)
                  "bilinear depth comparison filters four comparison results");
 
     SetDiffuseState(ctx);
+    for (int stage = 0; stage < 2; ++stage) {
+        TestCheck(ctx->SetTexture(depthTexture, stage),
+                  "bind both filtered depth comparison stages");
+        ctx->SetTextureStageState(stage, CKRST_TSS_OP,
+                                  stage == 0 ? CKRST_TOP_SELECTARG1
+                                             : CKRST_TOP_MODULATE);
+        ctx->SetTextureStageState(stage, CKRST_TSS_ARG1,
+                                  stage == 0 ? CKRST_TA_TEXTURE
+                                             : CKRST_TA_CURRENT);
+        ctx->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(stage, CKRST_TSS_AOP,
+                                  stage == 0 ? CKRST_TOP_SELECTARG1
+                                             : CKRST_TOP_MODULATE);
+        ctx->SetTextureStageState(stage, CKRST_TSS_AARG1,
+                                  stage == 0 ? CKRST_TA_TEXTURE
+                                             : CKRST_TA_CURRENT);
+        ctx->SetTextureStageState(stage, CKRST_TSS_AARG2, CKRST_TA_TEXTURE);
+        ctx->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, 0);
+        ctx->SetTextureStageState(stage, CKRST_TSS_MINFILTER,
+                                  VXTEXTUREFILTER_LINEAR);
+        ctx->SetTextureStageState(stage, CKRST_TSS_MAGFILTER,
+                                  VXTEXTUREFILTER_LINEAR);
+        ctx->SetTextureStageState(stage, CKRST_TSS_ADDRESS,
+                                  VXTEXTURE_ADDRESSCLAMP);
+        ctx->SetTextureStageState(stage, CKRST_TSS_COMPAREFUNC,
+                                  CKRST_COMPARE_LEQUAL);
+        ctx->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS,
+                                  CKRST_TTF_COUNT3);
+        ctx->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage),
+                                compareTransform);
+    }
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.5f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw two bilinear depth comparison stages");
+    }, pixels);
+    ExpectCenter(pixels, 64, 64, 64,
+                 "two comparison stages each apply exact bilinear filtering");
+
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSU,
+                              VXTEXTURE_ADDRESSBORDER);
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESSV,
+                              VXTEXTURE_ADDRESSCLAMP);
+    ctx->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0xffff0000u);
+    ctx->SetTextureStageState(1, CKRST_TSS_COMPAREFUNC,
+                              CKRST_COMPARE_ALWAYS);
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = 0.0f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw two comparison stages across the depth border");
+    }, pixels);
+    ExpectCenter(pixels, 128, 128, 128,
+                 "manual comparison profile filters border depth per tap");
+
+    SetDiffuseState(ctx);
     TestCheck(ctx->SetTexture(colorTexture, 0),
               "bind an ordinary texture beside the comparison texture");
     TestCheck(ctx->SetTexture(depthTexture, 1),

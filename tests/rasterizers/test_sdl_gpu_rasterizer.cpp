@@ -354,6 +354,47 @@ int main()
                       rejectedNativeCompare),
                   "SDL rejects comparison samplers in the native-exact family");
         }
+        CKShaderDesc compareOne, compareTwo, compareEight;
+        check(CKSdlGpuFFResolveComparisonProfile(
+                  CKFF_SAMPLER_LAYOUT_WIDE_2D, 1,
+                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT) ==
+                  CKSDL_GPU_FF_COMPARE_NATIVE_ONE &&
+              CKSdlGpuFFFragmentShader(
+                  format, CKFF_SAMPLER_LAYOUT_WIDE_2D, 1,
+                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT, compareOne),
+              "one wide-2D depth sampler retains native comparison filtering");
+        check(CKSdlGpuFFResolveComparisonProfile(
+                  CKFF_SAMPLER_LAYOUT_WIDE_2D, 2,
+                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT) ==
+                  CKSDL_GPU_FF_COMPARE_MANUAL &&
+              CKSdlGpuFFFragmentShader(
+                  format, CKFF_SAMPLER_LAYOUT_WIDE_2D, 2,
+                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT, compareTwo) &&
+              CKSdlGpuFFFragmentShader(
+                  format, CKFF_SAMPLER_LAYOUT_WIDE_2D, 8,
+                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT, compareEight) &&
+              compareTwo.Code == compareEight.Code &&
+              compareTwo.Code != compareOne.Code,
+              "multiple wide-2D comparisons share one manual PCF shader");
+        for (CKFFSamplerLayout layout : {
+                 CKFF_SAMPLER_LAYOUT_WIDE_CUBE,
+                 CKFF_SAMPLER_LAYOUT_WIDE_VOLUME}) {
+            CKShaderDesc noCompare, multipleCompare;
+            const CKDWORD maximum =
+                CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, layout);
+            check(CKSdlGpuFFResolveComparisonProfile(
+                      layout, maximum,
+                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT) ==
+                      CKSDL_GPU_FF_COMPARE_BASE &&
+                  CKSdlGpuFFFragmentShader(
+                      format, layout, 0,
+                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT, noCompare) &&
+                  CKSdlGpuFFFragmentShader(
+                      format, layout, maximum,
+                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT, multipleCompare) &&
+                  noCompare.Code == multipleCompare.Code,
+                  "mixed layouts reuse their ordinal-dispatched manual comparison shader");
+        }
         CKShaderDesc vertex, fragment;
         check(CKSdlGpuNativeClearShaders(format, vertex, fragment) && vertex.UniformBufferCount == 1 &&
               fragment.UniformBufferCount == 1 && !vertex.SamplerCount && !fragment.SamplerCount,

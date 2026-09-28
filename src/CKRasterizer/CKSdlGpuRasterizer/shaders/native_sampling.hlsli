@@ -36,6 +36,7 @@ float4 ckLevel2D(Texture2D<float4> image, uint slot, float2 uv, uint mip, bool f
 
 float4 ckMips2D(Texture2D<float4> image, uint slot, float2 uv, float lod, uint levels, bool filtered, uint modes, uint mipFilter)
 {
+    mipFilter &= 15;
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
     if (mipFilter != 2 && mipFilter != 7) return ckLevel2D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
     uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
@@ -105,6 +106,108 @@ float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
     return ckMips2D(image, slot, uv, lod, levels, filter != 1, modes, uint(ck_samplerInfo[slot].w));
 }
 
+#if CKFF_MANUAL_COMPARE_PROFILE || CKFF_NATIVE_SAMPLER_LAYOUT != 0
+float ckManualCompareDepth(float depth, float reference, int function)
+{
+    if (function == 1) return reference < depth ? 1.0 : 0.0;
+    if (function == 2) return reference <= depth ? 1.0 : 0.0;
+    if (function == 3) return reference == depth ? 1.0 : 0.0;
+    if (function == 4) return reference >= depth ? 1.0 : 0.0;
+    if (function == 5) return reference > depth ? 1.0 : 0.0;
+    if (function == 6) return reference != depth ? 1.0 : 0.0;
+    if (function == 7) return 0.0;
+    if (function == 8) return 1.0;
+    return depth;
+}
+
+float ckCompareTap2D(Texture2D<float4> image, uint slot, int2 p,
+                     uint2 extent, uint mip, uint modes,
+                     float reference, int function)
+{
+    return ckManualCompareDepth(
+        ckTap2D(image, slot, p, extent, mip, modes).r,
+        reference, function);
+}
+
+float ckCompareLevel2D(Texture2D<float4> image, uint slot, float2 uv,
+                       uint mip, bool filtered, uint modes,
+                       float reference, int function)
+{
+    uint width, height, levels;
+    image.GetDimensions(mip, width, height, levels);
+    uint2 extent = uint2(width, height);
+    if (!filtered)
+        return ckCompareTap2D(image, slot, int2(floor(uv * extent)),
+                              extent, mip, modes, reference, function);
+    float2 coordinate = uv * extent - 0.5;
+    int2 base = int2(floor(coordinate));
+    float2 weight = frac(coordinate);
+    float c00 = ckCompareTap2D(image, slot, base, extent, mip, modes,
+                               reference, function);
+    float c10 = ckCompareTap2D(image, slot, base + int2(1, 0), extent,
+                               mip, modes, reference, function);
+    float c01 = ckCompareTap2D(image, slot, base + int2(0, 1), extent,
+                               mip, modes, reference, function);
+    float c11 = ckCompareTap2D(image, slot, base + int2(1, 1), extent,
+                               mip, modes, reference, function);
+    return lerp(lerp(c00, c10, weight.x),
+                lerp(c01, c11, weight.x), weight.y);
+}
+
+float ckCompareMips2D(Texture2D<float4> image, uint slot, float2 uv,
+                      float lod, uint levels, bool filtered, uint modes,
+                      uint mipFilter, float reference, int function)
+{
+    mipFilter &= 15;
+    lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
+    if (mipFilter != 2 && mipFilter != 7)
+        return ckCompareLevel2D(image, slot, uv,
+                                uint(floor(lod + 0.5)), filtered, modes,
+                                reference, function);
+    uint lower = uint(floor(lod));
+    uint upper = min(lower + 1, levels - 1);
+    return lerp(ckCompareLevel2D(image, slot, uv, lower, filtered,
+                                 modes, reference, function),
+                ckCompareLevel2D(image, slot, uv, upper, filtered,
+                                 modes, reference, function), frac(lod));
+}
+
+float ckCompareSample2D(Texture2D<float4> image, uint slot, float2 uv,
+                        float2 dx, float2 dy, float bias, float minMip,
+                        float reference, int function)
+{
+    uint modes = uint(ck_samplerInfo[slot].x);
+    uint packedMipFilter = uint(ck_samplerInfo[slot].w);
+    uint mipFilter = packedMipFilter & 15;
+    float maxAnisotropy = max(1.0, float(packedMipFilter >> 4));
+    uint width, height, levels;
+    image.GetDimensions(0, width, height, levels);
+    float2 extent = float2(width, height);
+    float lx = length(dx * extent), ly = length(dy * extent);
+    float lod = max(log2(max(max(lx, ly), 0.000001)) + bias, minMip);
+    uint filter = uint(lod > 0.0 ? ck_samplerInfo[slot].y :
+                                      ck_samplerInfo[slot].z);
+    if (filter == 7 && maxAnisotropy > 1.0 && lod > 0.0) {
+        float major = max(lx, ly);
+        float minor = max(min(lx, ly), major / maxAnisotropy);
+        uint taps = uint(clamp(ceil(major / max(minor, 1.0)),
+                               1.0, maxAnisotropy));
+        float2 step = (lx > ly ? dx : dy) / float(taps);
+        float tapLod = max(log2(max(minor, 1.0)) + bias, minMip);
+        float result = 0.0;
+        [loop] for (uint tap = 0; tap < taps; ++tap)
+            result += ckCompareMips2D(
+                image, slot,
+                uv + (float(tap) - float(taps - 1) * 0.5) * step,
+                tapLod, levels, true, modes, mipFilter,
+                reference, function);
+        return result / float(taps);
+    }
+    return ckCompareMips2D(image, slot, uv, lod, levels, filter != 1,
+                           modes, mipFilter, reference, function);
+}
+#endif
+
 float4 ckTap3D(Texture3D<float4> image, uint slot, int3 p, uint3 extent, uint mip, uint modes)
 {
     bool outside = false;
@@ -135,7 +238,7 @@ float4 ckSample3DAtLod(Texture3D<float4> image, uint slot, float3 uv, float lod,
     uint width, height, depth, levels;
     image.GetDimensions(0, width, height, depth, levels);
     bool filtered = (lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z) != 1.0;
-    uint mipFilter = uint(ck_samplerInfo[slot].w);
+    uint mipFilter = uint(ck_samplerInfo[slot].w) & 15;
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
     if (mipFilter != 2 && mipFilter != 7) return ckLevel3D(image, slot, uv, uint(floor(lod + 0.5)), filtered, modes);
     uint lower = uint(floor(lod)), upper = min(lower + 1, levels - 1);
@@ -264,7 +367,7 @@ float4 ckSample3DBorderLod(Texture3D<float4> image, SamplerState state,
 {
     uint width, height, depth, levels;
     image.GetDimensions(0, width, height, depth, levels);
-    uint mipFilter = uint(ck_samplerInfo[slot].w);
+    uint mipFilter = uint(ck_samplerInfo[slot].w) & 15;
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
     bool filtered = (lod > 0.0 ? ck_samplerInfo[slot].y : ck_samplerInfo[slot].z) != 1.0;
     if (mipFilter != 2 && mipFilter != 7)

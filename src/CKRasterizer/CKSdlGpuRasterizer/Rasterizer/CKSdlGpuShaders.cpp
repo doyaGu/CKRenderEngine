@@ -9,26 +9,12 @@
 #include "shaders/generated/dxil_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/dxil_fs_ff_stage.h"
 #include "shaders/generated/dxil_fs_ff_stage_native.h"
+#include "shaders/generated/dxil_fs_ff_stage_manual_compare.h"
 #include "shaders/generated/dxil_fs_ff_stage_cube_native.h"
 #include "shaders/generated/dxil_fs_ff_stage_volume_native.h"
 #include "shaders/generated/dxil_fs_ff_stage_compare1.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare2.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare3.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare4.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare5.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare6.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare7.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare8.h"
 #include "shaders/generated/dxil_fs_ff_stage_cube.h"
-#include "shaders/generated/dxil_fs_ff_stage_cube_compare1.h"
-#include "shaders/generated/dxil_fs_ff_stage_cube_compare2.h"
-#include "shaders/generated/dxil_fs_ff_stage_cube_compare3.h"
-#include "shaders/generated/dxil_fs_ff_stage_cube_compare4.h"
 #include "shaders/generated/dxil_fs_ff_stage_volume.h"
-#include "shaders/generated/dxil_fs_ff_stage_volume_compare1.h"
-#include "shaders/generated/dxil_fs_ff_stage_volume_compare2.h"
-#include "shaders/generated/dxil_fs_ff_stage_volume_compare3.h"
-#include "shaders/generated/dxil_fs_ff_stage_volume_compare4.h"
 #include "shaders/generated/dxil_vs_postprocess.h"
 #include "shaders/generated/dxil_fs_postprocess.h"
 #include "shaders/generated/spirv_vs_ff_3d.h"
@@ -39,26 +25,12 @@
 #include "shaders/generated/spirv_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/spirv_fs_ff_stage.h"
 #include "shaders/generated/spirv_fs_ff_stage_native.h"
+#include "shaders/generated/spirv_fs_ff_stage_manual_compare.h"
 #include "shaders/generated/spirv_fs_ff_stage_cube_native.h"
 #include "shaders/generated/spirv_fs_ff_stage_volume_native.h"
 #include "shaders/generated/spirv_fs_ff_stage_compare1.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare2.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare3.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare4.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare5.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare6.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare7.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare8.h"
 #include "shaders/generated/spirv_fs_ff_stage_cube.h"
-#include "shaders/generated/spirv_fs_ff_stage_cube_compare1.h"
-#include "shaders/generated/spirv_fs_ff_stage_cube_compare2.h"
-#include "shaders/generated/spirv_fs_ff_stage_cube_compare3.h"
-#include "shaders/generated/spirv_fs_ff_stage_cube_compare4.h"
 #include "shaders/generated/spirv_fs_ff_stage_volume.h"
-#include "shaders/generated/spirv_fs_ff_stage_volume_compare1.h"
-#include "shaders/generated/spirv_fs_ff_stage_volume_compare2.h"
-#include "shaders/generated/spirv_fs_ff_stage_volume_compare3.h"
-#include "shaders/generated/spirv_fs_ff_stage_volume_compare4.h"
 #include "shaders/generated/spirv_vs_postprocess.h"
 #include "shaders/generated/spirv_fs_postprocess.h"
 
@@ -103,11 +75,13 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
 {
     const CKDWORD twoDCount = CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D,
                                                        samplerLayout);
+    const CKSdlGpuFFComparisonProfile comparisonProfile =
+        CKSdlGpuFFResolveComparisonProfile(
+            samplerLayout, compareSamplerCount, samplingMode);
     if (samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
         compareSamplerCount > twoDCount ||
         samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT ||
-        (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT &&
-         compareSamplerCount != 0))
+        comparisonProfile >= CKSDL_GPU_FF_COMPARE_PROFILE_COUNT)
         return FALSE;
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_PIXEL;
@@ -120,27 +94,14 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
 #define CKFF_SET_SHADER(_format, _suffix) \
     out.Code = s_sdl_##_format##_fs_ff_stage##_suffix; \
     out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage##_suffix)
-#define CKFF_SELECT_COMPARE(_format, _layoutSuffix) \
-    switch (compareSamplerCount) { \
-    case 0: CKFF_SET_SHADER(_format, _layoutSuffix); break; \
-    case 1: CKFF_SET_SHADER(_format, _layoutSuffix##_compare1); break; \
-    case 2: CKFF_SET_SHADER(_format, _layoutSuffix##_compare2); break; \
-    case 3: CKFF_SET_SHADER(_format, _layoutSuffix##_compare3); break; \
-    case 4: CKFF_SET_SHADER(_format, _layoutSuffix##_compare4); break; \
-    default: return FALSE; \
-    }
 #define CKFF_SELECT_WIDE_2D(_format) \
-    switch (compareSamplerCount) { \
-    case 0: out.Code = s_sdl_##_format##_fs_ff_stage; \
-            out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage); break; \
-    case 1: CKFF_SET_SHADER(_format, _compare1); break; \
-    case 2: CKFF_SET_SHADER(_format, _compare2); break; \
-    case 3: CKFF_SET_SHADER(_format, _compare3); break; \
-    case 4: CKFF_SET_SHADER(_format, _compare4); break; \
-    case 5: CKFF_SET_SHADER(_format, _compare5); break; \
-    case 6: CKFF_SET_SHADER(_format, _compare6); break; \
-    case 7: CKFF_SET_SHADER(_format, _compare7); break; \
-    case 8: CKFF_SET_SHADER(_format, _compare8); break; \
+    if (comparisonProfile == CKSDL_GPU_FF_COMPARE_NATIVE_ONE) { \
+        CKFF_SET_SHADER(_format, _compare1); \
+    } else if (comparisonProfile == CKSDL_GPU_FF_COMPARE_MANUAL) { \
+        CKFF_SET_SHADER(_format, _manual_compare); \
+    } else { \
+        out.Code = s_sdl_##_format##_fs_ff_stage; \
+        out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage); \
     }
 #define CKFF_SELECT_NATIVE(_format) \
     if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
@@ -156,9 +117,9 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
             CKFF_SELECT_WIDE_2D(dxil);
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) {
-            CKFF_SELECT_COMPARE(dxil, _cube);
+            CKFF_SET_SHADER(dxil, _cube);
         } else {
-            CKFF_SELECT_COMPARE(dxil, _volume);
+            CKFF_SET_SHADER(dxil, _volume);
         }
     } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
         if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) {
@@ -166,18 +127,40 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
             CKFF_SELECT_WIDE_2D(spirv);
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) {
-            CKFF_SELECT_COMPARE(spirv, _cube);
+            CKFF_SET_SHADER(spirv, _cube);
         } else {
-            CKFF_SELECT_COMPARE(spirv, _volume);
+            CKFF_SET_SHADER(spirv, _volume);
         }
     } else {
         return FALSE;
     }
 #undef CKFF_SELECT_WIDE_2D
 #undef CKFF_SELECT_NATIVE
-#undef CKFF_SELECT_COMPARE
 #undef CKFF_SET_SHADER
     return out.Code && out.CodeSize;
+}
+
+CKSdlGpuFFComparisonProfile CKSdlGpuFFResolveComparisonProfile(
+    CKFFSamplerLayout samplerLayout,
+    CKDWORD compareSamplerCount,
+    CKFFFragmentSamplingMode samplingMode)
+{
+    if (samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT ||
+        compareSamplerCount >
+            CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, samplerLayout) ||
+        (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT &&
+         compareSamplerCount != 0)) {
+        return CKSDL_GPU_FF_COMPARE_PROFILE_COUNT;
+    }
+    if (compareSamplerCount == 0)
+        return CKSDL_GPU_FF_COMPARE_BASE;
+    if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D &&
+        compareSamplerCount == 1)
+        return CKSDL_GPU_FF_COMPARE_NATIVE_ONE;
+    if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D)
+        return CKSDL_GPU_FF_COMPARE_MANUAL;
+    return CKSDL_GPU_FF_COMPARE_BASE;
 }
 
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)

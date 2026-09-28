@@ -84,6 +84,7 @@
 #define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip, maxAnisotropy)
 #endif
 #define texture2DCompare(name, uv, dx, dy, bias, minMip, maxAnisotropy, reference, func) name.SampleCmp(name##Sampler, uv, reference)
+#define texture2DCompareManual(name, uv, dx, dy, bias, minMip, reference, func) ckCompareSample2D(name, name##Slot, uv, dx, dy, bias, minMip, reference, func)
 #else
 #define SAMPLER2D(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define texture2D(name, uv) name.Sample(name##Sampler, uv)

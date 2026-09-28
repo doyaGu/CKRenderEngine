@@ -498,6 +498,8 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     std::shared_ptr<CKSdlGpuTexture> paddedOwners[CKFF_TEXTURE_SLOT_COUNT];
     for (unsigned slot = 0; slot < (unsigned)draw.Program->Interface.Samplers.Size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
+        const bool nativeComparisonSampler =
+            slot < draw.Program->CompareSamplerCount;
         static const CKFFTextureSlot emptyBinding;
         const auto &binding = desc->Textures ? (*desc->Textures)[decl.Slot] : emptyBinding;
         auto &cached = SamplerBindings[decl.Slot];
@@ -513,7 +515,8 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
             (Target && (sourceTexture == Target->Color || sourceTexture == Target->Depth)))
             return CKERR_INVALIDPARAMETER;
-        if (texture->Depth && binding.Sampler.CompareFunc != CKRST_COMPARE_NONE &&
+        if (nativeComparisonSampler && texture->Depth &&
+            binding.Sampler.CompareFunc != CKRST_COMPARE_NONE &&
             (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
              binding.Sampler.AddressV == CKRST_ADDRESS_BORDER)) {
             float transform[4];
@@ -528,6 +531,8 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                 return CKERR_INVALIDPARAMETER;
         }
         CKSamplerDesc hardwareSampler = binding.Sampler;
+        if (!nativeComparisonSampler)
+            hardwareSampler.CompareFunc = CKRST_COMPARE_NONE;
         if (texture->Info.type == SDL_GPU_TEXTURETYPE_3D &&
             hardwareSampler.ShaderAnisotropy) {
             // The fixed-function 3D shader controls the anisotropic taps.
@@ -574,9 +579,8 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                                (unsigned(binding.Sampler.AddressV) << 4) |
                                (unsigned(binding.Sampler.AddressW) << 8));
         samplerInfo[1] = float(binding.Sampler.MinFilter); samplerInfo[2] = float(binding.Sampler.MagFilter);
-        CKDWORD packedMipFilter = unsigned(binding.Sampler.MipFilter);
-        if (draw.Program->CompareSamplerCount != 0)
-            packedMipFilter |= binding.Sampler.MaxAnisotropy << 4;
+        CKDWORD packedMipFilter = unsigned(binding.Sampler.MipFilter) & 0xfu;
+        packedMipFilter |= (binding.Sampler.MaxAnisotropy & 0xffu) << 4;
         samplerInfo[3] = float(packedMipFilter);
         std::memcpy(uniforms.Data.Begin() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
         std::memcpy(uniforms.Data.Begin() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));
