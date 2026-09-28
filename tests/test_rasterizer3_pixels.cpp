@@ -1699,6 +1699,8 @@ void CheckPointFilledTriangleSizes(Backend &b)
 void CheckClippingDisablesUserPlanes(Backend &b)
 {
     auto *ctx = b.Context;
+    const CKDWORD approximationsBefore =
+        ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_CLIPPING_OFF];
     SetDiffuseState(ctx);
     VxPlane plane;
     plane.m_Normal = VxVector(1.0f, 0.0f, 0.0f);
@@ -1763,7 +1765,60 @@ void CheckClippingDisablesUserPlanes(Backend &b)
               "POSITIONT user plane cuts the triangle at screen x=32");
 
     ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
-    printf("  CLIPPING and user planes cut 3D and POSITIONT triangles: passed\n");
+    const VxVector outsideNear[3] = {
+        VxVector(-0.9f, -0.9f, -0.5f), VxVector(0.9f, -0.9f, -0.5f),
+        VxVector(0.0f, 0.9f, -0.5f)};
+    const VxVector outsideFar[3] = {
+        VxVector(-0.9f, -0.9f, 1.5f), VxVector(0.9f, -0.9f, 1.5f),
+        VxVector(0.0f, 0.9f, 1.5f)};
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPING, TRUE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, outsideNear, kRed),
+                  "draw before the near plane with clipping enabled");
+        TestCheck(DrawColorTriangle(ctx, outsideFar, kBlue),
+                  "draw beyond the far plane with clipping enabled");
+    }, clipped);
+    TestCheck(!PixelNear(clipped, 32, 32, 255, 0, 0) &&
+                  !PixelNear(clipped, 32, 32, 0, 0, 255),
+              "canonical near and far planes reject outside triangles");
+
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE);
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawColorTriangle(ctx, outsideFar, kBlue),
+                  "draw beyond the far plane with clipping disabled");
+        TestCheck(DrawColorTriangle(ctx, outsideNear, kRed),
+                  "draw before the near plane with clipping disabled");
+    }, unclipped);
+    TestCheck(PixelNear(unclipped, 32, 32, 255, 0, 0),
+              "clipping off depth-clamps both canonical planes");
+
+    // Distinguish true post-interpolation depth clamp from clamping each
+    // vertex before rasterization. At the center the original depth is 0,
+    // while vertex clamping would interpolate to 0.5.
+    const VxVector crossingNear[3] = {
+        VxVector(-0.9f, -0.9f, -1.0f), VxVector(0.9f, -0.9f, -1.0f),
+        VxVector(0.0f, 0.9f, 1.0f)};
+    ctx->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESS);
+    TestCheck(ctx->Clear(CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH,
+                         0xFF000000u, 0.25f, 0, 0, NULL),
+              "clear depth for interpolation clamp test");
+    TestCheck(ctx->BeginScene(), "BeginScene (depth clamp interpolation)");
+    TestCheck(DrawColorTriangle(ctx, crossingNear, kGreen),
+              "draw triangle crossing the near plane with clipping disabled");
+    EndFrame(ctx);
+    ReadBackbuffer(ctx, unclipped);
+    TestCheck(PixelNear(unclipped, 32, 32, 0, 255, 0),
+              "depth clamp occurs after primitive depth interpolation");
+
+    ctx->SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_CLIPPING, TRUE);
+    TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_CLIPPING_OFF] ==
+                  approximationsBefore,
+              "exact clipping control emits no approximation diagnostic");
+    printf("  CLIPPING controls canonical depth and user planes exactly: passed\n");
 }
 
 void CheckVertexBufferWrapPixels(Backend &b)

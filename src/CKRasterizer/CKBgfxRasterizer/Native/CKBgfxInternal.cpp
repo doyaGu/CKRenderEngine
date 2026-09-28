@@ -167,7 +167,10 @@ static uint32_t CKBgfxMsaaResetFlags(CKDWORD samples)
 
 uint32_t CKBgfxBuildResetFlags(CKBOOL vsync, CKDWORD samples)
 {
-    uint32_t flags = CKBgfxMsaaResetFlags(samples);
+    // bgfx exposes depth clamp as a device reset flag. Keep it enabled and
+    // restore the legacy default near/far clipping with the two reserved
+    // fixed-function clip distances in the vertex shaders.
+    uint32_t flags = CKBgfxMsaaResetFlags(samples) | BGFX_RESET_DEPTH_CLAMP;
     if (vsync)
         flags |= BGFX_RESET_VSYNC;
     return flags;

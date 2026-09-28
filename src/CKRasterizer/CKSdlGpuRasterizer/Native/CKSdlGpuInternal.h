@@ -45,12 +45,12 @@ struct CKSdlGpuQwordHash {
     }
 };
 
-typedef CKSdlGpuFixedKey<10> CKSdlGpuPipelineKey;
+typedef CKSdlGpuFixedKey<11> CKSdlGpuPipelineKey;
 typedef CKSdlGpuFixedKey<10> CKSdlGpuSamplerKey;
 typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
 typedef XSHashTable<std::shared_ptr<SDL_GPUGraphicsPipeline>,
                     CKSdlGpuPipelineKey,
-                    CKSdlGpuFixedKeyHash<10>> CKSdlGpuPipelineTable;
+                    CKSdlGpuFixedKeyHash<11>> CKSdlGpuPipelineTable;
 typedef XSHashTable<std::weak_ptr<SDL_GPUBuffer>,
                     CKSdlGpuDefaultVertexKey,
                     CKSdlGpuFixedKeyHash<64>> CKSdlGpuDefaultVertexTable;

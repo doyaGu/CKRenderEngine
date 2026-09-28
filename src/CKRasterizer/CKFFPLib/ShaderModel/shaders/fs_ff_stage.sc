@@ -35,7 +35,8 @@ void main()
     // Fragment clipping also covers bgfx profiles without native clip-distance state.
     if (v_clipDistance0.x < 0.0 || v_clipDistance0.y < 0.0 ||
         v_clipDistance0.z < 0.0 || v_clipDistance0.w < 0.0 ||
-        v_clipDistance1.x < 0.0 || v_clipDistance1.y < 0.0)
+        v_clipDistance1.x < 0.0 || v_clipDistance1.y < 0.0 ||
+        v_clipDistance1.z < 0.0 || v_clipDistance1.w < 0.0)
         discard;
 // CKFF_BGFX_ONLY_END
 #if !CKFF_NATIVE_SDL_GPU

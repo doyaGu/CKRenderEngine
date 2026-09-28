@@ -1009,7 +1009,6 @@ void SetupLinePattern(CKRasterizerContext *ctx, CKDWORD)
     ctx->SetRenderState(VXRENDERSTATE_LINEPATTERN, 0x00FF0001u);
 }
 void SetupEdgeAntialias(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_EDGEANTIALIAS, TRUE); }
-void SetupClippingOff(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_CLIPPING, FALSE); }
 void SetupFillPoint(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_FILLMODE, VXFILL_POINT); }
 void SetupAffineTexcoords(CKRasterizerContext *ctx, CKDWORD) { ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, FALSE); }
 void SetupStageBlend(CKRasterizerContext *ctx, CKDWORD)
@@ -1035,7 +1034,6 @@ void TestApproximationsKeepDrawing()
 {
     const ApproximationCase cases[] = {
         {"edge antialias", CKRST_DIAG_IGNORE_ANTIALIAS, &SetupEdgeAntialias},
-        {"clipping off", CKRST_DIAG_IGNORE_CLIPPING_OFF, &SetupClippingOff},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {

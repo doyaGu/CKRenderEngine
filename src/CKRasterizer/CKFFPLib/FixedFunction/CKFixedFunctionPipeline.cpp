@@ -396,8 +396,6 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
     if ((triangles || lines) &&
         m_State.DrawState.GetRenderState(VXRENDERSTATE_EDGEANTIALIAS))
         RecordDrawApproximation(CKRST_DIAG_IGNORE_ANTIALIAS);
-    if (!m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING))
-        RecordDrawApproximation(CKRST_DIAG_IGNORE_CLIPPING_OFF);
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
@@ -1241,6 +1239,8 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     ResolveStencilWrite(&stencilWriteMask);
     pipeline.StencilWriteMask = stencilWriteMask;
     pipeline.ScissorEnabled = m_State.ScissorEnabled;
+    pipeline.DepthClipEnabled =
+        m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING) != 0;
     pipeline.Scissor = m_State.Scissor;
     pipeline.PointSize = submission.DrawStateType == VX_POINTLIST
         ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_State.DrawState))

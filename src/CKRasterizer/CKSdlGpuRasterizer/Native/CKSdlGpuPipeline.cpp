@@ -70,9 +70,10 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     const auto &state = draw.State.State;
-    const CKDWORD keyValues[10] = {draw.LayoutHandle, draw.Layout1Handle,
+    const CKDWORD keyValues[11] = {draw.LayoutHandle, draw.Layout1Handle,
         unsigned(color), unsigned(depth), unsigned(samples), state.Lo, state.Mid, state.Hi,
-        draw.State.StencilReadMask, draw.State.StencilWriteMask};
+        draw.State.StencilReadMask, draw.State.StencilWriteMask,
+        (CKDWORD)draw.State.DepthClipEnabled};
     CKSdlGpuPipelineKey key;
     std::memcpy(key.Values, keyValues, sizeof(keyValues));
     auto &pipelines = draw.Program->Pipelines;
@@ -116,7 +117,7 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     info.rasterizer_state.fill_mode = fill == 1 ? SDL_GPU_FILLMODE_LINE : SDL_GPU_FILLMODE_FILL;
     info.rasterizer_state.cull_mode = cull == 1 ? SDL_GPU_CULLMODE_FRONT : (cull == 2 ? SDL_GPU_CULLMODE_BACK : SDL_GPU_CULLMODE_NONE);
     info.rasterizer_state.front_face = state.Hi & CKRST_STATE_FRONT_CCW ? SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE : SDL_GPU_FRONTFACE_CLOCKWISE;
-    info.rasterizer_state.enable_depth_clip = true;
+    info.rasterizer_state.enable_depth_clip = draw.State.DepthClipEnabled != FALSE;
     info.multisample_state.sample_count = samples;
     info.multisample_state.enable_alpha_to_coverage = (state.Lo & CKRST_STATE_ALPHA_COVERAGE) != 0;
     auto &ds = info.depth_stencil_state;

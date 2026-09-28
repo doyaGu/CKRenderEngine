@@ -310,6 +310,8 @@ void CKFFUniformEmitter::EmitClipPlaneUniforms(const CKFFUniformEmissionContext 
     } else {
         memset(&clip, 0, sizeof(clip));
     }
+    clip.Params[1] = m_DrawState.GetRenderState(VXRENDERSTATE_CLIPPING)
+        ? 1.0f : 0.0f;
     Emit(sink, CKRST_BLOCK_CLIP_PARAMS, clip.Params, 1, 1, FALSE);
 }
 

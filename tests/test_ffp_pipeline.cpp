@@ -540,7 +540,6 @@ void IgnoredRenderStatesReportDiagnostics() {
     };
     const IgnoredStateCase cases[] = {
         {VXRENDERSTATE_EDGEANTIALIAS, TRUE, FALSE, CKRST_DIAG_IGNORE_ANTIALIAS},
-        {VXRENDERSTATE_CLIPPING, FALSE, TRUE, CKRST_DIAG_IGNORE_CLIPPING_OFF},
     };
 
     FFPRecordingDriver driver;
@@ -1564,8 +1563,9 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
               "Enabled clip planes must upload compacted plane uniform");
     TestCheck(params != context.Log.FloatUniforms.end(),
               "Enabled clip planes must upload clip params uniform");
-    TestCheck(params->second[0] == 2.0f,
-              "Clip params must contain enabled clip plane count");
+    TestCheck(params->second[0] == 2.0f && params->second[1] == 1.0f &&
+                  ffp.GetDraw().Pipeline.DepthClipEnabled,
+              "Clip params and pipeline must enable canonical depth clipping");
     TestCheck(planes->second[0] == 1.0f && planes->second[1] == 2.0f &&
                   planes->second[2] == 3.0f && planes->second[3] == 4.0f,
               "First uploaded clip plane must be the lowest enabled index");
@@ -1583,8 +1583,10 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
               "Clipping off must select the shader without user clip planes");
     params = context.Log.FloatUniforms.find(paramsUniform);
     TestCheck(params != context.Log.FloatUniforms.end() &&
-                  params->second[0] == 0.0f,
-              "Clipping off must clear the previous clip-plane count");
+                  params->second[0] == 0.0f && params->second[1] == 0.0f &&
+                  !ffp.GetDraw().Pipeline.DepthClipEnabled &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "Clipping off must disable user planes and canonical depth clipping exactly");
 
     context.Log.FloatUniforms.clear();
     ffp.SetRenderState(VXRENDERSTATE_CLIPPING, TRUE);
@@ -1595,7 +1597,8 @@ void DrawVertexBufferCompactsClipPlaneUniforms() {
     params = context.Log.FloatUniforms.find(paramsUniform);
     TestCheck(ffp.GetDraw().ProgramContext->ShaderKey.VS.GetVertexClipping() &&
                   params != context.Log.FloatUniforms.end() &&
-                  params->second[0] == 2.0f,
+                  params->second[0] == 2.0f && params->second[1] == 1.0f &&
+                  ffp.GetDraw().Pipeline.DepthClipEnabled,
               "Restoring clipping must reactivate the selected user planes");
 
     ffp.Shutdown();
@@ -1623,8 +1626,9 @@ void DrawVertexBufferSkipsClipUniformsWhenDisabled() {
         context.Log.FloatUniforms.find(paramsUniform);
     TestCheck(context.Log.FloatUniforms.find(planesUniform) == context.Log.FloatUniforms.end(),
               "Disabled clip planes must not upload clip plane uniform");
-    TestCheck(params == context.Log.FloatUniforms.end() || params->second[0] == 0.0f,
-              "Disabled clip planes must either skip clip params or upload count zero");
+    TestCheck(params != context.Log.FloatUniforms.end() &&
+                  params->second[0] == 0.0f && params->second[1] == 1.0f,
+              "Disabled user planes retain canonical depth clipping");
 
     ffp.Shutdown();
 }

@@ -10,12 +10,13 @@ struct CKFFPipelineState {
     CKDWORD StencilReadMask;
     CKDWORD StencilWriteMask;
     CKBOOL ScissorEnabled;
+    CKBOOL DepthClipEnabled;
     CKRECT Scissor;
     float PointSize;
 
     CKFFPipelineState()
         : StencilRef(0), StencilReadMask(0xFF), StencilWriteMask(0xFF),
-          ScissorEnabled(FALSE), PointSize(1.0f) {
+          ScissorEnabled(FALSE), DepthClipEnabled(TRUE), PointSize(1.0f) {
         State.Lo = CKRST_STATE_DEFAULT_LO;
         State.Mid = CKRST_STATE_DEFAULT_MID;
         State.Hi = 0;
