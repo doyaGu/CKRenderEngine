@@ -361,6 +361,17 @@ static float CKFFClampVertexBufferPointSize(float size)
     return rounded;
 }
 
+static CKDWORD CKFFFormatTexcoordCount(CKDWORD formatFlags)
+{
+    CKDWORD mask = (formatFlags >> 4) & 0xffu;
+    CKDWORD count = 0;
+    while (mask != 0) {
+        ++count;
+        mask >>= 1;
+    }
+    return count;
+}
+
 CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 {
     m_LastDrawRejectReason = reason;
@@ -1206,9 +1217,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     // Callers with WRAPn route through the transient primitive path, which
     // can adjust coordinates independently for each primitive.
-    CKRSTVertexLayout vertexLayoutDesc;
-    if (CKRSTGetVertexLayout(dpFlags, NULL, &vertexLayoutDesc) != 0 &&
-        NeedsVertexBufferWrap(vertexLayoutDesc.TexcoordCount))
+    if (NeedsVertexBufferWrap(CKFFFormatTexcoordCount(formatFlags)))
         return RecordDrawReject(CKFF_DRAW_REJECT_PREPARE_FAILED);
     if (type == VX_POINTLIST) {
         // Backend contexts expand these points through PreparePrimitive.
