@@ -87,10 +87,14 @@ CKBOOL CKFFTextureBinder::LayoutPlansEqual(
         a.CompareSamplerCount != b.CompareSamplerCount ||
         a.SampledStageMask != b.SampledStageMask)
         return FALSE;
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        if (a.Stages[stage].Ordinal != b.Stages[stage].Ordinal ||
-            a.Stages[stage].NativeSlot != b.Stages[stage].NativeSlot)
+    CKDWORD sampledStages = a.SampledStageMask;
+    for (CKDWORD stage = 0; sampledStages != 0;
+         ++stage, sampledStages >>= 1) {
+        if ((sampledStages & 1u) != 0 &&
+            (a.Stages[stage].Ordinal != b.Stages[stage].Ordinal ||
+             a.Stages[stage].NativeSlot != b.Stages[stage].NativeSlot)) {
             return FALSE;
+        }
     }
     return TRUE;
 }
