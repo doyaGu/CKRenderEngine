@@ -186,6 +186,51 @@ static uint64_t TextureCombineStateMask() {
            (1ull << CKRST_TSS_RESULTARG0);
 }
 
+static CKBOOL CKFFTextureStageStateAffectsProgram(
+    CKRST_TEXTURESTAGESTATETYPE type)
+{
+    switch (type) {
+    case CKRST_TSS_OP:
+    case CKRST_TSS_ARG1:
+    case CKRST_TSS_ARG2:
+    case CKRST_TSS_AOP:
+    case CKRST_TSS_AARG1:
+    case CKRST_TSS_AARG2:
+    case CKRST_TSS_TEXCOORDINDEX:
+    case CKRST_TSS_TEXTURETRANSFORMFLAGS:
+    case CKRST_TSS_COLORARG0:
+    case CKRST_TSS_ALPHAARG0:
+    case CKRST_TSS_RESULTARG0:
+    case CKRST_TSS_COMPAREFUNC:
+    case CKRST_TSS_TEXTUREMAPBLEND:
+    case CKRST_TSS_STAGEBLEND:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static CKBOOL CKFFTextureStageStateAffectsSampler(
+    CKRST_TEXTURESTAGESTATETYPE type)
+{
+    switch (type) {
+    case CKRST_TSS_ADDRESS:
+    case CKRST_TSS_ADDRESSU:
+    case CKRST_TSS_ADDRESSV:
+    case CKRST_TSS_ADDRESW:
+    case CKRST_TSS_BORDERCOLOR:
+    case CKRST_TSS_MAGFILTER:
+    case CKRST_TSS_MINFILTER:
+    case CKRST_TSS_MIPMAPLODBIAS:
+    case CKRST_TSS_MAXMIPMLEVEL:
+    case CKRST_TSS_MAXANISOTROPY:
+    case CKRST_TSS_COMPAREFUNC:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
 static void ClearExplicitTextureCombineState(CKDWORD *stageState,
                                              uint64_t *stateSetMask) {
     if (!stageState)
@@ -336,6 +381,8 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
         return;
     }
 
+    const CKDWORD oldMirrorOnceMask =
+        CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
     const uint64_t stateBit = 1ull << (CKDWORD)type;
     m_State.StageStateQueryMasks[stage] |= stateBit;
     m_State.StageQueryStates[stage][type] = value;
@@ -410,16 +457,25 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
         }
     }
     if (changed) {
-        m_TextureBinder.InvalidateStage(stage);
-        OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
-                                    CKFF_CHANGE_STATIC_UNIFORM |
-                                    CKFF_CHANGE_DRAW_VALIDATION);
+        if (CKFFTextureStageStateAffectsSampler(type))
+            m_TextureBinder.InvalidateStage(stage);
+        CKDWORD changeMask = CKFF_CHANGE_STATIC_UNIFORM |
+                             CKFF_CHANGE_DRAW_VALIDATION;
+        const CKDWORD newMirrorOnceMask =
+            CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
+        if (CKFFTextureStageStateAffectsProgram(type) ||
+            oldMirrorOnceMask != newMirrorOnceMask) {
+            changeMask |= CKFF_CHANGE_PROGRAM;
+        }
+        OnFixedFunctionStateChanged(changeMask);
     }
 }
 
 void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
+    const CKDWORD oldMirrorOnceMask =
+        CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
     const uint64_t stateBit = 1ull << (CKDWORD)type;
     m_State.StageStateQueryMasks[stage] |= stateBit;
     m_State.StageQueryStates[stage][type] = 0;
@@ -428,9 +484,17 @@ void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTA
         return;
     m_State.StageStates[stage][(int)type] = 0;
     m_State.StageStateSetMasks[stage] &= ~stateBit;
-    m_TextureBinder.InvalidateStage(stage);
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM |
-                                CKFF_CHANGE_DRAW_VALIDATION);
+    if (CKFFTextureStageStateAffectsSampler(type))
+        m_TextureBinder.InvalidateStage(stage);
+    CKDWORD changeMask = CKFF_CHANGE_STATIC_UNIFORM |
+                         CKFF_CHANGE_DRAW_VALIDATION;
+    const CKDWORD newMirrorOnceMask =
+        CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
+    if (CKFFTextureStageStateAffectsProgram(type) ||
+        oldMirrorOnceMask != newMirrorOnceMask) {
+        changeMask |= CKFF_CHANGE_PROGRAM;
+    }
+    OnFixedFunctionStateChanged(changeMask);
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {

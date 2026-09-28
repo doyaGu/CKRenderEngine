@@ -4295,6 +4295,50 @@ void RepeatedStateSettersKeepPreparedCaches() {
     ffp.Shutdown();
 }
 
+void SamplerStateKeepsPreparedProgramCache() {
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    TestCheck(ffp.Init(context.StartedBackend(), context.ShaderSet()),
+              "sampler-cache pipeline initialization");
+
+    ffp.SetTexture(0, 17, CKRST_TEXTURE_VALID);
+    TestCheck(ffp.DrawVertexBuffer(
+                  VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKFF_VF_POSITION, 1),
+              "initial sampler-cache draw");
+    TestCheck(ffp.IsVertexBufferProgramCacheValid(),
+              "initial draw primes the prepared program cache");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_MINFILTER,
+                             VXTEXTUREFILTER_LINEARMIPLINEAR);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAXMIPMLEVEL, 2);
+    ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 4);
+    ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, 0x80402010u);
+    TestCheck(ffp.IsVertexBufferProgramCacheValid(),
+              "sampler-only state keeps the prepared program cache");
+    TestCheck(ffp.DrawVertexBuffer(
+                  VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+                  CKRST_DP_CL_V, CKFF_VF_POSITION, 1) &&
+                  context.Log.LastTextureSampler.MinFilter == CKRST_FILTER_LINEAR &&
+                  context.Log.LastTextureSampler.MipFilter == CKRST_FILTER_LINEAR &&
+                  context.Log.LastTextureSampler.MinMipLevel == 2 &&
+                  context.Log.LastTextureSampler.MaxAnisotropy == 4 &&
+                  context.Log.LastTextureSampler.BorderColor == 0x80402010u,
+              "sampler-only state rebuilds the final texture binding");
+
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                             VXTEXTURE_ADDRESSCLAMP);
+    TestCheck(ffp.IsVertexBufferProgramCacheValid(),
+              "non-mirror address state keeps the prepared program cache");
+    ffp.SetTextureStageState(0, CKRST_TSS_ADDRESSU,
+                             VXTEXTURE_ADDRESSMIRRORONCE);
+    TestCheck(!ffp.IsVertexBufferProgramCacheValid(),
+              "mirror-once address state invalidates the prepared program cache");
+
+    ffp.Shutdown();
+}
+
 void SharedPresentPreparationBuildsTheCompleteDraw() {
     TestCheck(CKFFScaledDimension(0, 1.0f, 4096) == 1 &&
                   CKFFScaledDimension(100, 0.5f, 4096) == 50 &&
@@ -4550,5 +4594,7 @@ int main() {
               &MaterialSourceUsesDeclaredDPColorStreams);
     tests.Run("Repeated state setters keep prepared caches",
               &RepeatedStateSettersKeepPreparedCaches);
+    tests.Run("Sampler state keeps the prepared program cache",
+              &SamplerStateKeepsPreparedProgramCache);
     return tests.ExitCode();
 }
