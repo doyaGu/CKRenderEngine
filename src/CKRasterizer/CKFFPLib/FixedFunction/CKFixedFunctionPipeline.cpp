@@ -1287,7 +1287,6 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     m_Draw.Constants = &m_Constants;
     m_Draw.Marker = m_DrawMarker;
     m_Draw.ShaderKey = programContext->ShaderKey;
-    m_Draw.FragmentProgram = programContext->FragmentProgram;
     m_Draw.Source = submission.Source;
     if (submission.VertexLayout)
         CKFF_PROBE(m_Probes, OnVertexLayoutSet());

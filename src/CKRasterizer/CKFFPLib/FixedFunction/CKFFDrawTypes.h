@@ -74,7 +74,6 @@ struct CKFFDraw {
     const CKFFConstantSet *Constants;
     const char *Marker;
     CKFFShaderKey ShaderKey;
-    CKFFFragmentProgram FragmentProgram;
     CKDWORD VertexFormat;
     CKDWORD VertexBuffer;
     const CKBYTE *Vertices;
