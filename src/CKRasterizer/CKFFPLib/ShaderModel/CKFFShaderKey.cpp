@@ -303,7 +303,11 @@ CKFFFragmentProgram CKFFBuildFragmentProgram(
     program.Set(CKFF_FRAGMENT_PROGRAM_PIXEL_FOG_MODE, key.PixelFogMode);
     program.Set(CKFF_FRAGMENT_PROGRAM_RANGE_FOG, key.RangeFog ? 1u : 0u);
     program.Set(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE, key.FlatShade ? 1u : 0u);
-    for (CKDWORD stage = 0; stage < CKFF_STATE_DESC_TEXTURE_STAGES; ++stage) {
+    const CKDWORD stageCount =
+        key.LastActiveTextureStage < CKFF_STATE_DESC_TEXTURE_STAGES
+            ? key.LastActiveTextureStage + 1
+            : CKFF_STATE_DESC_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < stageCount; ++stage) {
         const CKFFShaderKeyFSStage &src = key.Stages[stage];
         program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP, src.ColorOp);
         program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0, CKFFFragmentProgram::RepackArg(src.ColorArg0));
