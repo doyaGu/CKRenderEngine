@@ -38,8 +38,14 @@ CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,
     : m_State(state),
       m_ShaderTargetFlags(shaderTargetFlags),
       m_Probes(probes),
-      m_SamplerOverrides()
+      m_SamplerOverrides(),
+      m_BindingSetValid(FALSE),
+      m_BindingSetActiveTextureCount(0),
+      m_BindingSetSampledTextureMask(0),
+      m_BindingSetLayoutPlan(),
+      m_BindingSet()
 {
+    CKFFInitTextureBindingSet(&m_BindingSet);
 }
 
 CKBOOL CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableMipmaps, CKBOOL forceAniso)
@@ -54,14 +60,37 @@ CKBOOL CKFFTextureBinder::SetRenderOptions(CKBOOL disableFilter, CKBOOL disableM
 
 void CKFFTextureBinder::InvalidateStage(int stage)
 {
-    if (stage >= 0 && stage < CKFF_MAX_TEXTURE_STAGES)
+    if (stage >= 0 && stage < CKFF_MAX_TEXTURE_STAGES) {
         m_ResolvedSamplers[stage].Valid = FALSE;
+        InvalidateBindingSet();
+    }
 }
 
 void CKFFTextureBinder::InvalidateAll()
 {
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage)
         m_ResolvedSamplers[stage].Valid = FALSE;
+    InvalidateBindingSet();
+}
+
+void CKFFTextureBinder::InvalidateBindingSet()
+{
+    m_BindingSetValid = FALSE;
+}
+
+CKBOOL CKFFTextureBinder::LayoutPlansEqual(
+    const CKFFSamplerLayoutPlan &a,
+    const CKFFSamplerLayoutPlan &b)
+{
+    if (a.Layout != b.Layout ||
+        a.CompareSamplerCount != b.CompareSamplerCount)
+        return FALSE;
+    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+        if (a.Stages[stage].Ordinal != b.Stages[stage].Ordinal ||
+            a.Stages[stage].NativeSlot != b.Stages[stage].NativeSlot)
+            return FALSE;
+    }
+    return TRUE;
 }
 
 void CKFFTextureBinder::ResolveSampler(
@@ -98,15 +127,29 @@ void CKFFTextureBinder::BuildBindingSet(CKFFTextureBindingSet *out, CKDWORD acti
     CKDWORD activeCount = activeTextureCount;
     if (activeCount > CKFF_MAX_TEXTURE_STAGES)
         activeCount = CKFF_MAX_TEXTURE_STAGES;
+    sampledTextureMask &= activeCount == CKFF_MAX_TEXTURE_STAGES
+        ? 0xffu : ((1u << activeCount) - 1u);
+    if (m_BindingSetValid &&
+        m_BindingSetActiveTextureCount == activeCount &&
+        m_BindingSetSampledTextureMask == sampledTextureMask &&
+        LayoutPlansEqual(m_BindingSetLayoutPlan, layoutPlan)) {
+        *out = m_BindingSet;
+        return;
+    }
     CKSamplerDesc samplers[CKFF_MAX_TEXTURE_STAGES];
     CKFFSamplerShaderState shaderStates[CKFF_MAX_TEXTURE_STAGES];
     for (CKDWORD i = 0; i < activeCount; ++i) {
         if ((sampledTextureMask & (1u << i)) != 0)
             ResolveSampler((int)i, samplers[i], shaderStates[i]);
     }
-    CKFFBuildTextureBindingSet(out, activeCount, sampledTextureMask,
+    CKFFBuildTextureBindingSet(&m_BindingSet, activeCount, sampledTextureMask,
                                m_State.TextureHandles, m_State.TextureFlags,
                                samplers, shaderStates, layoutPlan);
+    m_BindingSetActiveTextureCount = activeCount;
+    m_BindingSetSampledTextureMask = sampledTextureMask;
+    m_BindingSetLayoutPlan = layoutPlan;
+    m_BindingSetValid = TRUE;
+    *out = m_BindingSet;
 }
 
 CKSamplerDesc CKFFTextureBinder::BuildSamplerDesc(int stage) const

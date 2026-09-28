@@ -32,12 +32,20 @@ private:
 
     void ResolveSampler(int stage, CKSamplerDesc &sampler,
                         CKFFSamplerShaderState &shaderState) const;
+    void InvalidateBindingSet();
+    static CKBOOL LayoutPlansEqual(const CKFFSamplerLayoutPlan &a,
+                                   const CKFFSamplerLayoutPlan &b);
 
     const CKFFStateStore &m_State;
     const CKDWORD &m_ShaderTargetFlags;
     CKFFDrawProbes &m_Probes;
     CKFFSamplerOverrides m_SamplerOverrides;
     mutable ResolvedSampler m_ResolvedSamplers[CKFF_MAX_TEXTURE_STAGES];
+    mutable CKBOOL m_BindingSetValid;
+    mutable CKDWORD m_BindingSetActiveTextureCount;
+    mutable CKDWORD m_BindingSetSampledTextureMask;
+    mutable CKFFSamplerLayoutPlan m_BindingSetLayoutPlan;
+    mutable CKFFTextureBindingSet m_BindingSet;
 };
 
 #endif // CKFFTEXTUREBINDER_H
