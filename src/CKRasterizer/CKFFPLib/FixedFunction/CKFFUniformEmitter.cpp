@@ -19,6 +19,12 @@ static CKDWORD CKFFShaderKeyVertexBlendMode(const CKFFShaderKeyVS &vs)
     return (CKDWORD)((vs.Bits >> 35) & 3u);
 }
 
+static CKDWORD CKFFObjectUniformProgramKey(const CKFFShaderKeyVS &vs)
+{
+    return (vs.GetHasPositionT() ? 1u : 0u) |
+           (CKFFShaderKeyVertexBlendMode(vs) << 1);
+}
+
 static CKBOOL CKFFShaderKeyLightingEnabled(const CKFFShaderKeyVS &vs)
 {
     return (vs.Bits & (1ull << 13)) != 0 ? TRUE : FALSE;
@@ -88,6 +94,10 @@ CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
       m_DrawState(drawState),
       m_ShaderTargetFlags(shaderTargetFlags),
       m_Probes(probes),
+      m_ObjectUniformCacheValid(FALSE),
+      m_LastObjectConstantsIdentity(0),
+      m_LastObjectUniformRevision(0),
+      m_LastObjectProgramKey(0),
       m_StaticUniformCacheValid(FALSE),
       m_LastStaticConstantsIdentity(0),
       m_LastStaticUniformRevision(0),
@@ -100,6 +110,10 @@ CKFFUniformEmitter::CKFFUniformEmitter(CKFFStateStore &state,
 
 void CKFFUniformEmitter::ResetCache()
 {
+    m_ObjectUniformCacheValid = FALSE;
+    m_LastObjectConstantsIdentity = 0;
+    m_LastObjectUniformRevision = 0;
+    m_LastObjectProgramKey = 0;
     m_StaticUniformCacheValid = FALSE;
     m_LastStaticConstantsIdentity = 0;
     m_LastStaticUniformRevision = 0;
@@ -365,15 +379,27 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 CKBOOL CKFFUniformEmitter::UploadUniforms(CKFFConstantSet *constants,
                                           const CKFFProgramContext *programContext,
                                           const CKFFTextureBindingSet &textures,
+                                          uint64_t objectUniformRevision,
                                           uint64_t staticUniformRevision,
                                           CKBOOL polygonDepthBias,
                                           CKBOOL patternedLines)
 {
     if (!constants || !programContext)
         return FALSE;
-    if (!UploadObjectUniforms(constants, programContext,
-                              textures.ActiveStageCount))
-        return FALSE;
+    const CKDWORD objectProgramKey =
+        CKFFObjectUniformProgramKey(programContext->ShaderKey.VS);
+    if (!m_ObjectUniformCacheValid ||
+        m_LastObjectConstantsIdentity != constants->Identity() ||
+        m_LastObjectUniformRevision != objectUniformRevision ||
+        m_LastObjectProgramKey != objectProgramKey) {
+        if (!UploadObjectUniforms(constants, programContext,
+                                  textures.ActiveStageCount))
+            return FALSE;
+        m_ObjectUniformCacheValid = TRUE;
+        m_LastObjectConstantsIdentity = constants->Identity();
+        m_LastObjectUniformRevision = objectUniformRevision;
+        m_LastObjectProgramKey = objectProgramKey;
+    }
     if (m_StaticUniformCacheValid &&
         m_LastStaticConstantsIdentity == constants->Identity() &&
         m_LastStaticUniformRevision == staticUniformRevision &&

@@ -226,6 +226,7 @@ private:
     CKFFDrawProbes m_Probes;
     CKFFTextureBinder m_TextureBinder;
     CKFFUniformEmitter m_UniformEmitter;
+    uint64_t m_ObjectUniformRevision;
     uint64_t m_StaticUniformRevision;
     CKBOOL m_DrawValidationCacheValid;
     VXPRIMITIVETYPE m_DrawValidationCacheTopology;

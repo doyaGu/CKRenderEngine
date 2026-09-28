@@ -18,6 +18,7 @@ public:
     CKBOOL UploadUniforms(CKFFConstantSet *constants,
                           const CKFFProgramContext *programContext,
                           const CKFFTextureBindingSet &textures,
+                          uint64_t objectUniformRevision,
                           uint64_t staticUniformRevision,
                           CKBOOL polygonDepthBias = TRUE,
                           CKBOOL patternedLines = FALSE);
@@ -48,6 +49,10 @@ private:
     const CKDrawStateCache &m_DrawState;
     const CKDWORD &m_ShaderTargetFlags;
     CKFFDrawProbes &m_Probes;
+    CKBOOL m_ObjectUniformCacheValid;
+    uint64_t m_LastObjectConstantsIdentity;
+    uint64_t m_LastObjectUniformRevision;
+    CKDWORD m_LastObjectProgramKey;
     CKBOOL m_StaticUniformCacheValid;
     uint64_t m_LastStaticConstantsIdentity;
     uint64_t m_LastStaticUniformRevision;

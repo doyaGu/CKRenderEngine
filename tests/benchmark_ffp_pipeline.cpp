@@ -725,7 +725,7 @@ private:
                 static_cast<size_t>(i % CKFFBenchmark::DrawsPerFrame)];
             ok = m_Fixture->UniformEmitter->UploadUniforms(
                      &m_Fixture->FullConstants, &m_Fixture->Contexts[profile],
-                     m_Fixture->UniformTextureBindings, i + 1) != FALSE;
+                     m_Fixture->UniformTextureBindings, i + 1, i + 1) != FALSE;
             hash = Mix(hash, ConstantsChecksum(m_Fixture->FullConstants));
         }
         return {ok, count, 0, hash};

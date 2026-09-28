@@ -22,6 +22,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_TextureBinder(m_State, m_ShaderTargetFlags, m_Probes),
       m_UniformEmitter(m_State, m_State.DrawState,
                        m_ShaderTargetFlags, m_Probes),
+      m_ObjectUniformRevision(1),
       m_StaticUniformRevision(1),
       m_DrawValidationCacheValid(FALSE),
       m_DrawValidationCacheTopology(VX_TRIANGLELIST),
@@ -80,6 +81,7 @@ bool CKFixedFunctionPipeline::Init(uint64_t features,
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
     m_FrameDrawRejected = FALSE;
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
+    m_ObjectUniformRevision = 1;
     m_StaticUniformRevision = 1;
     m_UniformEmitter.ResetCache();
     m_DrawValidationCacheValid = FALSE;
@@ -643,6 +645,13 @@ void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 {
     if (changeMask & CKFF_CHANGE_DRAW_VALIDATION)
         m_DrawValidationCacheValid = FALSE;
+    if (changeMask & CKFF_CHANGE_OBJECT_UNIFORM) {
+        ++m_ObjectUniformRevision;
+        if (m_ObjectUniformRevision == 0) {
+            m_ObjectUniformRevision = 1;
+            m_UniformEmitter.ResetCache();
+        }
+    }
     if (changeMask & CKFF_CHANGE_STATIC_UNIFORM) {
         ++m_StaticUniformRevision;
         if (m_StaticUniformRevision == 0) {
@@ -658,7 +667,9 @@ void CKFixedFunctionPipeline::RestoreState(const CKFFStateStore &state)
 {
     m_State = state;
     m_TextureBinder.InvalidateAll();
-    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM | CKFF_CHANGE_STATIC_UNIFORM);
+    OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
+                                CKFF_CHANGE_OBJECT_UNIFORM |
+                                CKFF_CHANGE_STATIC_UNIFORM);
 }
 
 uint64_t CKFixedFunctionPipeline::GetConstantRevision(CKDWORD block) const
@@ -1246,6 +1257,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
         CKFF_SCOPE_TIME(m_Probes, UniformUs);
         if (!m_UniformEmitter.UploadUniforms(
                 &m_Constants, programContext, *textures,
+                m_ObjectUniformRevision,
                 m_StaticUniformRevision, submission.PolygonDepthBias,
                 submission.PatternedLines))
             return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
