@@ -50,20 +50,6 @@ void CKFFPackColorARGB(CKDWORD color, float outColor[4]) {
     outColor[3] = (float)ColorGetAlpha(color) / 255.0f;
 }
 
-static void CKFFPackStageConstantUniforms(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF_MAX_TEXTURE_STAGE_STATES],
-                                          float outConstants[CKFF_MAX_TEXTURE_STAGES][4]) {
-    if (!outConstants)
-        return;
-
-    memset(outConstants, 0, sizeof(float) * CKFF_MAX_TEXTURE_STAGES * 4);
-    if (!stageStates)
-        return;
-
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        CKFFPackColorARGB(stageStates[stage][CKRST_TSS_CONSTANT], outConstants[stage]);
-    }
-}
-
 CKDWORD CKFFResolveMaterialSource(CKBOOL lighting,
                                   CKBOOL colorVertex,
                                   CKBOOL fromVertex,
@@ -95,16 +81,15 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
     if (!stageStates)
         return;
 
-    float stageConstants[CKFF_MAX_TEXTURE_STAGES][4] = {};
-    CKFFPackStageConstantUniforms(stageStates, stageConstants);
-
-    for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
-        const bool stageActive = stage < activeTextureCount;
-        const bool hasTexture = stageActive && textureHandles && textureHandles[stage] != 0;
-        CKDWORD textureTransformFlags = stageActive
-            ? (stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
-               CKFFResolveMirrorOnceAddressMask(stageStates[stage]))
-            : 0;
+    if (activeTextureCount < 0)
+        activeTextureCount = 0;
+    if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
+    for (int stage = 0; stage < activeTextureCount; ++stage) {
+        const bool hasTexture = textureHandles && textureHandles[stage] != 0;
+        CKDWORD textureTransformFlags =
+            stageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS] |
+            CKFFResolveMirrorOnceAddressMask(stageStates[stage]);
         if (hasTexture && textureFlags &&
             (textureFlags[stage] & CKRST_TEXTURE_BUMPLUMINANCE) != 0) {
             textureTransformFlags |= CKFF_TTF_BUMP_UNORM;
@@ -115,16 +100,15 @@ void CKFFPackStageParams(const CKDWORD stageStates[CKFF_MAX_TEXTURE_STAGES][CKFF
         coord[0] = (float)stageStates[stage][CKRST_TSS_TEXCOORDINDEX];
         coord[1] = (float)textureTransformFlags;
         coord[2] = hasTexture ? 1.0f : 0.0f;
-        coord[3] = stageActive && stageStateSetMasks &&
+        coord[3] = stageStateSetMasks &&
                            (stageStateSetMasks[stage] & (1ull << CKRST_TSS_STAGEBLEND)) != 0
                        ? (float)stageStates[stage][CKRST_TSS_STAGEBLEND] : 0.0f;
-        memcpy(constant, stageConstants[stage], sizeof(float) * 4);
+        CKFFPackColorARGB(stageStates[stage][CKRST_TSS_CONSTANT], constant);
     }
 }
 
 void CKFFPackFragmentProgram(const CKFFFragmentProgram &program,
                              CKFFFragmentProgramUniform &outProgram) {
-    memset(&outProgram, 0, sizeof(outProgram));
     program.Pack24(outProgram.Values);
 }
 

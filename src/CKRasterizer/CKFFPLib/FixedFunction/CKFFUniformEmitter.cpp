@@ -231,8 +231,12 @@ void CKFFUniformEmitter::EmitStageAndFragmentProgramUniforms(const CKFFUniformEm
     // when a bias is reset so cached uniforms cannot retain the previous draw.
     float bumpEnv[CKFF_MAX_TEXTURE_STAGES * 2][4] = {};
     float borderColors[CKFF_MAX_TEXTURE_STAGES][4] = {};
-    CKFFPackBumpEnvUniforms(m_State.StageStates, bumpEnv);
-    for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+    CKDWORD activeTextureCount = context->ActiveTextureCount;
+    if (activeTextureCount > CKFF_MAX_TEXTURE_STAGES)
+        activeTextureCount = CKFF_MAX_TEXTURE_STAGES;
+    for (CKDWORD stage = 0; stage < activeTextureCount; ++stage) {
+        CKFFPackBumpEnvUniform(m_State.StageStates[stage],
+                              &bumpEnv[stage * 2]);
         const CKFFTextureBinding &binding = context->Textures->Bindings[stage];
         const CKSamplerDesc &sampler = binding.Sampler;
         if (binding.Texture != 0)
