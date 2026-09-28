@@ -590,6 +590,7 @@ CKBOOL CKFixedFunctionPipeline::GetViewportScissor(CKRECT *rect) const {
 // viewport covers the whole logical target or the extents are unknown.
 void CKFixedFunctionPipeline::UpdateViewportMapping() {
     CKFFStateStore &st = m_State;
+    st.MarkObjectViewProjectionDirty();
     st.ViewportRemap[0] = st.ViewportRemap[1] = 1.0f;
     st.ViewportRemap[2] = st.ViewportRemap[3] = 0.0f;
     st.ViewportRemapIdentity = TRUE;

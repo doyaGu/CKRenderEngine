@@ -61,7 +61,17 @@ struct CKFFStateStore {
     CKBOOL EnsureViewProjection();
     const VxMatrix &ViewProjection() const { return m_ViewProjection; }
     CKDWORD ViewProjectionHash() const { return m_ViewProjectionHash; }
-    void MarkViewProjectionDirty() { m_ViewProjectionDirty = TRUE; }
+    CKBOOL EnsureObjectViewProjection(CKBOOL originFlip);
+    const VxMatrix &ObjectViewProjection() const {
+        return m_ObjectViewProjection;
+    }
+    void MarkViewProjectionDirty() {
+        m_ViewProjectionDirty = TRUE;
+        m_ObjectViewProjectionDirty = TRUE;
+    }
+    void MarkObjectViewProjectionDirty() {
+        m_ObjectViewProjectionDirty = TRUE;
+    }
 
     void Reset();
 
@@ -69,6 +79,9 @@ private:
     VxMatrix m_ViewProjection;
     CKDWORD m_ViewProjectionHash;
     CKBOOL m_ViewProjectionDirty;
+    VxMatrix m_ObjectViewProjection;
+    CKBOOL m_ObjectViewProjectionDirty;
+    CKBOOL m_ObjectViewProjectionOriginFlip;
 };
 
 #endif // CKFFSTATESTORE_H

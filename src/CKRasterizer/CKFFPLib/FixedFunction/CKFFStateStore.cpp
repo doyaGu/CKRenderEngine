@@ -15,6 +15,37 @@ CKBOOL CKFFStateStore::EnsureViewProjection()
     return TRUE;
 }
 
+CKBOOL CKFFStateStore::EnsureObjectViewProjection(CKBOOL originFlip)
+{
+    EnsureViewProjection();
+    originFlip = originFlip ? TRUE : FALSE;
+    if (!m_ObjectViewProjectionDirty &&
+        m_ObjectViewProjectionOriginFlip == originFlip) {
+        return FALSE;
+    }
+
+    VxMatrix remap;
+    Vx3DMatrixIdentity(remap);
+    remap[0][0] = ViewportRemap[0];
+    remap[1][1] = ViewportRemap[1];
+    remap[3][0] = ViewportRemap[2] +
+        0.5f * Viewport[0] * ViewportRemap[0];
+    remap[3][1] = ViewportRemap[3] +
+        0.5f * Viewport[1] * ViewportRemap[1];
+    Vx3DMultiplyMatrix4(m_ObjectViewProjection, remap, m_ViewProjection);
+    if (originFlip) {
+        VxMatrix flip;
+        Vx3DMatrixIdentity(flip);
+        flip[1][1] = -1.0f;
+        VxMatrix flipped;
+        Vx3DMultiplyMatrix4(flipped, flip, m_ObjectViewProjection);
+        m_ObjectViewProjection = flipped;
+    }
+    m_ObjectViewProjectionDirty = FALSE;
+    m_ObjectViewProjectionOriginFlip = originFlip;
+    return TRUE;
+}
+
 void CKFFStateStore::Reset()
 {
     DrawState.Reset();
@@ -26,8 +57,11 @@ void CKFFStateStore::Reset()
     Vx3DMatrixIdentity(View);
     Vx3DMatrixIdentity(Projection);
     Vx3DMatrixIdentity(m_ViewProjection);
+    Vx3DMatrixIdentity(m_ObjectViewProjection);
     m_ViewProjectionHash = 0;
     m_ViewProjectionDirty = TRUE;
+    m_ObjectViewProjectionDirty = TRUE;
+    m_ObjectViewProjectionOriginFlip = FALSE;
     for (int i = 0; i < CKFF_MAX_TEXTURE_STAGES; i++)
         Vx3DMatrixIdentity(TexMatrix[i]);
     for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++i) {

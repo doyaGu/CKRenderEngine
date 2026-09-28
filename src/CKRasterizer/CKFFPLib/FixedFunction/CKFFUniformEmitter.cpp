@@ -167,35 +167,10 @@ void CKFFUniformEmitter::EmitObjectMatrixUniforms(const CKFFUniformEmissionConte
             Vx3DTransposeMatrix(viewNormalMatrix, viewNormalMatrix);
         }
     }
-    m_State.EnsureViewProjection();
-    viewProj = m_State.ViewProjection();
-    {
-        // D3D8 samples at integer pixel centers. Match the half-pixel shift
-        // already applied to POSITIONT vertices, then map the viewport into
-        // the target. Applying it in clip space preserves perspective w and
-        // keeps transformed meshes aligned with screen-space geometry.
-        VxMatrix remap;
-        Vx3DMatrixIdentity(remap);
-        remap[0][0] = m_State.ViewportRemap[0];
-        remap[1][1] = m_State.ViewportRemap[1];
-        remap[3][0] = m_State.ViewportRemap[2] +
-            0.5f * m_State.Viewport[0] * m_State.ViewportRemap[0];
-        remap[3][1] = m_State.ViewportRemap[3] +
-            0.5f * m_State.Viewport[1] * m_State.ViewportRemap[1];
-        VxMatrix remapped;
-        Vx3DMultiplyMatrix4(remapped, remap, viewProj);
-        viewProj = remapped;
-    }
-    if (RenderTargetOriginFlip()) {
-        // Render upside down into the target so its memory matches the D3D
-        // layout on bottom-left-origin rasterizers.
-        VxMatrix flip;
-        Vx3DMatrixIdentity(flip);
-        flip[1][1] = -1.0f;
-        VxMatrix flipped;
-        Vx3DMultiplyMatrix4(flipped, flip, viewProj);
-        viewProj = flipped;
-    }
+    // D3D8 pixel-center correction, viewport remap and render-target origin
+    // depend only on view/projection and target state, not on the object.
+    m_State.EnsureObjectViewProjection(RenderTargetOriginFlip());
+    viewProj = m_State.ObjectViewProjection();
     Vx3DMultiplyMatrix4(modelViewProj, viewProj, m_State.World);
     VxMatrix matrices[4];
     matrices[0] = vertexBlend ? viewProj : modelViewProj;
