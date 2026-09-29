@@ -20,6 +20,7 @@
 #include <memory>
 
 #include "../Native/CKSdlGpuInternal.h"
+#include "../Native/CKSdlGpuWorker.h"
 
 class CKSdlGpuRasterizerContext;
 struct CKSdlGpuReadback;
@@ -256,6 +257,10 @@ private:
     std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc);
     void PruneProgramCaches();
     void Collect();
+    // Takes ownership; the worker starts with its first job.
+    bool SubmitJob(CKSdlGpuJob *Job);
+    // Completes finished jobs. Call only at a frame boundary.
+    void CollectJobs();
 
     // Snapshot of the current target at RequestReadback, completed by an
     // owned backend ticket and delivered at a frame boundary.
@@ -463,6 +468,8 @@ private:
     CKSdlGpuTable<CKSdlGpuShader> ShaderObjects;
     CKSdlGpuTable<CKSdlGpuProgram> Programs;
     CKSdlGpuTable<CKSdlGpuTarget> Targets;
+    // Last, so it stops before anything its jobs reference is destroyed.
+    CKSdlGpuWorker Worker;
 };
 
 #endif // CKSDLGPURASTERIZERCONTEXT_H

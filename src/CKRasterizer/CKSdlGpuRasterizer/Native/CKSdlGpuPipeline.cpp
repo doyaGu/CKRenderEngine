@@ -1,3 +1,4 @@
+#include "CKRenderProfile.h"
 #include "CKSdlGpuRasterizerContext.h"
 
 SDL_GPUVertexElementFormat CKSdlGpuVertexFormat(const CKVertexElementDesc &e)
@@ -90,6 +91,41 @@ struct CKSdlGpuPipelineDesc {
         return info;
     }
 };
+
+// Creates a specialized program's pipeline on the worker. The program may be
+// destroyed meanwhile; an unused result is released with the job.
+class CKSdlGpuPipelineJob : public CKSdlGpuJob {
+public:
+    CKSdlGpuPipelineJob(SDL_GPUDevice *device, std::weak_ptr<CKSdlGpuProgram> program,
+                        const CKSdlGpuPipelineKey &key)
+        : Device(device), Program(std::move(program)), Key(key) {}
+    ~CKSdlGpuPipelineJob() override {
+        if (Result) SDL_ReleaseGPUGraphicsPipeline(Device, Result);
+    }
+
+    void Run() override {
+        const SDL_GPUGraphicsPipelineCreateInfo info = Desc.CreateInfo();
+        Result = SDL_CreateGPUGraphicsPipeline(Device, &info);
+        // The program keeps drawing with its fallback, so this is not fatal.
+        if (!Result)
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "FF background pipeline failed: %s", SDL_GetError());
+    }
+    void Complete() override {
+        const std::shared_ptr<CKSdlGpuProgram> program = Program.lock();
+        if (!program || !Result) return;
+        program->Pipelines.Insert(Key, CKSdlGpuOwn(Device, Result, SDL_ReleaseGPUGraphicsPipeline), TRUE);
+        Result = nullptr;
+    }
+
+    CKSdlGpuPipelineDesc Desc;
+
+private:
+    SDL_GPUDevice *Device;
+    std::weak_ptr<CKSdlGpuProgram> Program;
+    CKSdlGpuPipelineKey Key;
+    SDL_GPUGraphicsPipeline *Result = nullptr;
+};
 }
 
 static CKSdlGpuPipelineKey PipelineKey(const CKSdlGpuDraw &draw,
@@ -177,21 +213,36 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     const CKSdlGpuPipelineKey key = PipelineKey(draw, color, depth, samples);
-    auto &pipelines = draw.Program->Pipelines;
+    CKSdlGpuProgram *program = draw.Program;
+    if (program->Fallback) {
+        // Never create a specialized pipeline while drawing: queue it once and
+        // use the fallback's pipeline until the worker's result is collected.
+        std::shared_ptr<SDL_GPUGraphicsPipeline> *found = program->Pipelines.FindPtr(key);
+        if (found && *found) return found->get();
+        if (!found) {
+            program->Pipelines.Insert(key, std::shared_ptr<SDL_GPUGraphicsPipeline>(), FALSE);
+            auto *job = new CKSdlGpuPipelineJob(Device, program->weak_from_this(), key);
+            DescribePipeline(*program, draw, color, depth, samples, job->Desc);
+            SubmitJob(job);
+            CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
+        }
+        program = program->Fallback.get();
+    }
+    auto &pipelines = program->Pipelines;
     std::shared_ptr<SDL_GPUGraphicsPipeline> *found = pipelines.FindPtr(key);
     if (found) return found->get();
     CKSdlGpuPipelineDesc desc;
-    DescribePipeline(*draw.Program, draw, color, depth, samples, desc);
+    DescribePipeline(*program, draw, color, depth, samples, desc);
     const SDL_GPUGraphicsPipelineCreateInfo info = desc.CreateInfo();
     auto pipeline = CKSdlGpuOwn(Device, SDL_CreateGPUGraphicsPipeline(Device, &info), SDL_ReleaseGPUGraphicsPipeline);
     if (!pipeline) {
         unsigned dimensions[3] = {};
-        for (const CKFFSamplerBinding &sampler : draw.Program->Interface.Samplers)
+        for (const CKFFSamplerBinding &sampler : program->Interface.Samplers)
             ++dimensions[sampler.Dimension];
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "FF pipeline details: fragment_bytes=%u compare_samplers=%u dimensions=%u/%u/%u",
-                     draw.Program->Fragment->Desc.CodeSize,
-                     draw.Program->CompareSamplerCount,
+                     program->Fragment->Desc.CodeSize,
+                     program->CompareSamplerCount,
                      dimensions[CKFF_TEXTURE_2D], dimensions[CKFF_TEXTURE_CUBE],
                      dimensions[CKFF_TEXTURE_3D]);
         Fail("CreateGPUGraphicsPipeline");

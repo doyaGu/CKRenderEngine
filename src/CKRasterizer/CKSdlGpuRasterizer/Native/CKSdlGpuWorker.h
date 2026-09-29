@@ -11,6 +11,9 @@ class CKSdlGpuJob {
 public:
     virtual ~CKSdlGpuJob() {}
     virtual void Run() = 0;
+    // Called by the owner on its own thread after collecting the job. Jobs
+    // that Stop deletes are never completed.
+    virtual void Complete() {}
 };
 
 // One low-priority thread that runs jobs in submission order. The owner

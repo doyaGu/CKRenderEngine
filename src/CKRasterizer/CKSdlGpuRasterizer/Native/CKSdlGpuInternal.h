@@ -149,7 +149,7 @@ struct CKSdlGpuShader {
     std::shared_ptr<SDL_GPUShader> Shader;
     CKShaderDesc Desc;
 };
-struct CKSdlGpuProgram {
+struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     std::shared_ptr<CKSdlGpuShader> Vertex, Fragment;
     CKFFProgramDesc Interface;
     CKFFProgramLayout UniformLayout;
@@ -165,6 +165,10 @@ struct CKSdlGpuProgram {
     // A queued draw retains its program; private image helpers do too after
     // their public handle is removed. Pipelines follow those exact lifetimes.
     CKSdlGpuPipelineTable Pipelines;
+    // A specialized program shares Fallback's interface. It draws with
+    // Fallback's pipelines until the worker has created its own; a null
+    // entry in Pipelines marks one that is pending or failed.
+    std::shared_ptr<CKSdlGpuProgram> Fallback;
 };
 struct CKSdlGpuTarget {
     CKRenderTargetDesc Desc;

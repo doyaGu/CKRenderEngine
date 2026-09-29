@@ -1274,6 +1274,8 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     FrameStats = CKSdlGpuSubmissionStats();
     if (number) *number = Submission;
     Collect();
+    // No pass is open, so completed jobs may change what later draws use.
+    CollectJobs();
     CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", Submissions.Size());
     if (Submissions.Size() > 3) {
         CKRE_PROFILE_SCOPE("CKRE.SDL.WaitInflight");

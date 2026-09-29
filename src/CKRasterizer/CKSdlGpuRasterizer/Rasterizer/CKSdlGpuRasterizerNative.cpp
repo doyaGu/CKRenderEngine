@@ -237,6 +237,25 @@ void CKSdlGpuRasterizerContext::Collect()
     }
 }
 
+bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job)
+{
+    if (!Worker.Running() && !Worker.Start("CKSdlGpuWorker")) {
+        delete job;
+        return false;
+    }
+    return Worker.Submit(job);
+}
+
+void CKSdlGpuRasterizerContext::CollectJobs()
+{
+    XArray<CKSdlGpuJob *> finished;
+    Worker.Collect(finished);
+    for (int i = 0; i < finished.Size(); ++i) {
+        finished[i]->Complete();
+        delete finished[i];
+    }
+}
+
 CKERROR CKSdlGpuRasterizerContext::FlushPendingCommandsForTests()
 {
     return Flush(false);
@@ -270,6 +289,8 @@ CKBOOL CKSdlGpuRasterizerContext::CompleteEmptySubmissionsForTests()
 void CKSdlGpuRasterizerContext::Shutdown()
 {
     if (!Device) return;
+    // Jobs hold device objects; release them while the device is alive.
+    Worker.Stop();
     Draws.Clear();
     DrawResources.Clear();
     Bindings.Clear();
