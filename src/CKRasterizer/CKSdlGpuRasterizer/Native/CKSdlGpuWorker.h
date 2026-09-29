@@ -16,8 +16,16 @@ public:
     virtual void Complete() {}
 };
 
-// One low-priority thread that runs jobs in submission order. The owner
-// submits and collects without waiting for a running job; only Stop waits.
+// Idle jobs are speculative. They run only while no normal job is queued,
+// so they never delay work that a draw is waiting for.
+enum CKSdlGpuJobPriority {
+    CKSDLGPU_JOB_NORMAL,
+    CKSDLGPU_JOB_IDLE,
+};
+
+// One low-priority thread that runs jobs of each priority in submission
+// order. The owner submits and collects without waiting for a running job;
+// only Stop waits.
 class CKSdlGpuWorker {
 public:
     CKSdlGpuWorker() = default;
@@ -32,12 +40,13 @@ public:
     bool Running() const { return Thread != nullptr; }
 
     // Takes ownership. A stopped worker deletes the job and returns false.
-    bool Submit(CKSdlGpuJob *job);
+    bool Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority = CKSDLGPU_JOB_NORMAL);
     // Moves the jobs that have run to the caller, who then owns them.
     void Collect(XArray<CKSdlGpuJob *> &finished);
-    // Jobs queued or running.
+    // Jobs of either priority queued or running.
     int Pending() const;
-    // Blocks until no job is queued or running, or the timeout elapses.
+    // Blocks until no job of either priority is queued or running, or the
+    // timeout elapses.
     bool WaitIdle(Sint32 timeoutMs);
 
 private:
@@ -48,6 +57,7 @@ private:
     SDL_Condition *Work = nullptr;
     SDL_Condition *Idle = nullptr;
     XArray<CKSdlGpuJob *> Queued;
+    XArray<CKSdlGpuJob *> IdleQueued;
     XArray<CKSdlGpuJob *> Finished;
     bool Active = false;
     bool Stopping = false;

@@ -25,8 +25,9 @@ void CKSdlGpuWorker::Stop()
         Thread = nullptr;
     }
     for (int i = 0; i < Queued.Size(); ++i) delete Queued[i];
+    for (int i = 0; i < IdleQueued.Size(); ++i) delete IdleQueued[i];
     for (int i = 0; i < Finished.Size(); ++i) delete Finished[i];
-    Queued.Clear(); Finished.Clear();
+    Queued.Clear(); IdleQueued.Clear(); Finished.Clear();
     Active = false;
     if (Idle) SDL_DestroyCondition(Idle);
     if (Work) SDL_DestroyCondition(Work);
@@ -34,7 +35,7 @@ void CKSdlGpuWorker::Stop()
     Idle = Work = nullptr; Lock = nullptr;
 }
 
-bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job)
+bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority)
 {
     if (!job) return false;
     if (!Thread) {
@@ -42,7 +43,7 @@ bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job)
         return false;
     }
     SDL_LockMutex(Lock);
-    Queued.PushBack(job);
+    (priority == CKSDLGPU_JOB_IDLE ? IdleQueued : Queued).PushBack(job);
     SDL_SignalCondition(Work);
     SDL_UnlockMutex(Lock);
     return true;
@@ -61,7 +62,7 @@ int CKSdlGpuWorker::Pending() const
 {
     if (!Thread) return 0;
     SDL_LockMutex(Lock);
-    const int pending = Queued.Size() + (Active ? 1 : 0);
+    const int pending = Queued.Size() + IdleQueued.Size() + (Active ? 1 : 0);
     SDL_UnlockMutex(Lock);
     return pending;
 }
@@ -71,12 +72,12 @@ bool CKSdlGpuWorker::WaitIdle(Sint32 timeoutMs)
     if (!Thread) return true;
     const Uint64 deadline = SDL_GetTicks() + Uint64(timeoutMs < 0 ? 0 : timeoutMs);
     SDL_LockMutex(Lock);
-    while (Active || Queued.Size() != 0) {
+    while (Active || Queued.Size() != 0 || IdleQueued.Size() != 0) {
         const Uint64 now = SDL_GetTicks();
         if (now >= deadline) break;
         SDL_WaitConditionTimeout(Idle, Lock, Sint32(deadline - now));
     }
-    const bool idle = !Active && Queued.Size() == 0;
+    const bool idle = !Active && Queued.Size() == 0 && IdleQueued.Size() == 0;
     SDL_UnlockMutex(Lock);
     return idle;
 }
@@ -88,18 +89,22 @@ int SDLCALL CKSdlGpuWorker::Main(void *data)
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
     SDL_LockMutex(worker.Lock);
     for (;;) {
-        while (!worker.Stopping && worker.Queued.Size() == 0)
+        while (!worker.Stopping && worker.Queued.Size() == 0 &&
+               worker.IdleQueued.Size() == 0)
             SDL_WaitCondition(worker.Work, worker.Lock);
         if (worker.Stopping) break;
-        CKSdlGpuJob *job = worker.Queued.Front();
-        worker.Queued.PopFront();
+        XArray<CKSdlGpuJob *> &queue =
+            worker.Queued.Size() != 0 ? worker.Queued : worker.IdleQueued;
+        CKSdlGpuJob *job = queue.Front();
+        queue.PopFront();
         worker.Active = true;
         SDL_UnlockMutex(worker.Lock);
         job->Run();
         SDL_LockMutex(worker.Lock);
         worker.Active = false;
         worker.Finished.PushBack(job);
-        if (worker.Queued.Size() == 0) SDL_BroadcastCondition(worker.Idle);
+        if (worker.Queued.Size() == 0 && worker.IdleQueued.Size() == 0)
+            SDL_BroadcastCondition(worker.Idle);
     }
     SDL_UnlockMutex(worker.Lock);
     return 0;
