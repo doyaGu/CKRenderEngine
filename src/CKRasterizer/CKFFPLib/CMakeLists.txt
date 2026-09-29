@@ -19,6 +19,7 @@ set(CKFFP_LIB_SOURCES
     ShaderModel/CKFFShaderInterface.cpp
     ShaderModel/CKFFShaderKey.cpp
     ShaderModel/CKFFFragmentProgram.cpp
+    ShaderModel/CKFFNativeFragmentJit.cpp
     FixedFunction/CKFFStageState.cpp
     FixedFunction/CKFFStateResolver.cpp
     FixedFunction/CKFFStateStore.cpp
@@ -73,6 +74,7 @@ set(CKFFP_LIB_HEADERS
     ShaderModel/CKFFFragmentProgram.h
     ShaderModel/CKFFFragmentProgramLayout.def
     ShaderModel/CKFFFragmentProgramLayout.h
+    ShaderModel/CKFFNativeFragmentJit.h
 )
 
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
@@ -86,7 +88,7 @@ target_include_directories(CKFFPLib
         ${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel
 )
 target_link_libraries(CKFFPLib
-    PUBLIC CKRasterizerLib
+    PUBLIC CKRasterizerLib CKShaderJit
 )
 set_target_properties(CKFFPLib PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

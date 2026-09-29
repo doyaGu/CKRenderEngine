@@ -340,6 +340,11 @@ ckre_add_ckff_test(ffp_state_matrix_tests
     test_ffp_state_matrix.cpp
 )
 
+# The native fragment JIT against the uber shaders it specializes.
+ckre_add_ckff_test(ff_native_fragment_jit_tests
+    test_ff_native_fragment_jit.cpp
+)
+
 # Real-backend pixel gate: fixed-function semantics driven through the public
 # rasterizer interface on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
 if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
