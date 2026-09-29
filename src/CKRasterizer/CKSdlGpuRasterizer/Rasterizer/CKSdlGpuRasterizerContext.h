@@ -261,11 +261,17 @@ private:
     SDL_GPUGraphicsPipeline *Pipeline(
         const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
         SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples);
+    // Queues the worker's creation of the pipeline of a specialized program
+    // for a draw, unless the program has or awaits it already.
+    void QueuePipeline(const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
+                       SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples,
+                       CKSdlGpuJobPriority Priority);
     std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc);
     void PruneProgramCaches();
     void Collect();
     // Takes ownership; the worker starts with its first job.
-    bool SubmitJob(CKSdlGpuJob *Job);
+    bool SubmitJob(CKSdlGpuJob *Job,
+                   CKSdlGpuJobPriority Priority = CKSDLGPU_JOB_NORMAL);
     // Completes finished jobs. Call only at a frame boundary.
     void CollectJobs();
 
@@ -338,6 +344,10 @@ private:
         const CKFFProgramContext &ProgramContext,
         const CKFFTextureBindingSet &Textures,
         CKBOOL PositionTDepthPad);
+    // The precompiled program of an artifact, created on first use.
+    CKDWORD NativeFFProgram(CKFFProgramVariant Variant,
+                            const CKSdlGpuFFFragmentArtifactKey &Artifact,
+                            CKBOOL PositionTDepthPad);
     void ClearNativeFFPrograms();
 
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).

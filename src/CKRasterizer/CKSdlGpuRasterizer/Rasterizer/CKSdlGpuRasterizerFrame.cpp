@@ -433,41 +433,53 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     const CKFFTextureBindingSet &Textures,
     CKBOOL PositionTDepthPad)
 {
-    const CKFFProgramVariant programVariant =
+    const CKFFProgramVariant variant =
         CKFFShaderCache::ProgramVariantForKey(ProgramContext.ShaderKey);
-    const CKDWORD variant = (CKDWORD)programVariant;
-    const CKFFSamplerLayout layout = Textures.SamplerLayoutPlan.Layout;
-    const CKDWORD samplerLayout = (CKDWORD)layout;
-    CKSdlGpuFFFragmentArtifactKey fragmentArtifactKey;
+    CKSdlGpuFFFragmentArtifactKey artifact;
     if (!CKSdlGpuBuildFFFragmentArtifactKey(
             Textures.SamplerLayoutPlan, Textures.RequiresShaderSampling,
-            fragmentArtifactKey))
+            artifact))
         return 0;
-    const CKDWORD fragmentArtifact =
-        CKSdlGpuFFFragmentArtifactIndex(fragmentArtifactKey);
-    const CKDWORD comparisonResourceCount =
-        fragmentArtifactKey.ComparisonResourceCount;
+    const CKDWORD precompiled =
+        NativeFFProgram(variant, artifact, PositionTDepthPad);
+    // Only the native artifacts have a compiler.
+    if (!precompiled || artifact.UsesShaderSampling ||
+        artifact.ComparisonResourceCount != 0)
+        return precompiled;
+    return ResolveFFJitProgram(ProgramContext.FragmentProgram,
+                               artifact.SamplerLayout, variant, precompiled);
+}
+
+CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(
+    CKFFProgramVariant Variant,
+    const CKSdlGpuFFFragmentArtifactKey &Artifact,
+    CKBOOL PositionTDepthPad)
+{
+    const CKDWORD variant = (CKDWORD)Variant;
+    const CKFFSamplerLayout layout = Artifact.SamplerLayout;
+    const CKDWORD fragmentArtifact = CKSdlGpuFFFragmentArtifactIndex(Artifact);
+    const CKDWORD comparisonResourceCount = Artifact.ComparisonResourceCount;
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT ||
-        samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        (CKDWORD)layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
         fragmentArtifact >= CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT)
         return 0;
 
     if (!m_NativeFFPixelShaders[fragmentArtifact]) {
         CKShaderDesc pixelShader;
-        if (!CKSdlGpuFFFragmentShader(ShaderFormat, fragmentArtifactKey,
+        if (!CKSdlGpuFFFragmentShader(ShaderFormat, Artifact,
                                      pixelShader) ||
             CreateShader(&pixelShader,
                          &m_NativeFFPixelShaders[fragmentArtifact]) != CK_OK)
             return 0;
     }
     const CKBOOL positionT =
-        programVariant == CKFF_PROGRAM_POSITIONT ||
-        programVariant == CKFF_PROGRAM_POSITIONT_CLIP;
+        Variant == CKFF_PROGRAM_POSITIONT ||
+        Variant == CKFF_PROGRAM_POSITIONT_CLIP;
     PositionTDepthPad = PositionTDepthPad && positionT &&
         comparisonResourceCount != 0;
     CKDWORD vertexShader = 0;
     if (PositionTDepthPad) {
-        const CKDWORD clip = programVariant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
+        const CKDWORD clip = Variant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
         if (!m_NativeFFDepthPadVertexShaders[clip]) {
             CKShaderDesc vertexDesc;
             if (!CKSdlGpuFFDepthPadVertexShader(ShaderFormat, clip != 0,
@@ -479,7 +491,7 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
         vertexShader = m_NativeFFDepthPadVertexShaders[clip];
     } else {
         if (!m_NativeFFVertexShaders[variant] &&
-            CreateShader(&m_ShaderCache.GetVertexShader(programVariant),
+            CreateShader(&m_ShaderCache.GetVertexShader(Variant),
                          &m_NativeFFVertexShaders[variant]) != CK_OK)
             return 0;
         vertexShader = m_NativeFFVertexShaders[variant];
@@ -502,12 +514,7 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
             return 0;
         program->CompareSamplerCount = comparisonResourceCount;
     }
-    const CKDWORD precompiled = m_NativeFFPrograms[variant][fragmentArtifact][pad];
-    // Only the native artifacts have a compiler.
-    if (fragmentArtifactKey.UsesShaderSampling || comparisonResourceCount != 0)
-        return precompiled;
-    return ResolveFFJitProgram(ProgramContext.FragmentProgram, layout,
-                               programVariant, precompiled);
+    return m_NativeFFPrograms[variant][fragmentArtifact][pad];
 }
 
 void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()

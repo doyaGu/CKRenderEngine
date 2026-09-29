@@ -219,13 +219,8 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         // use the fallback's pipeline until the worker's result is collected.
         std::shared_ptr<SDL_GPUGraphicsPipeline> *found = program->Pipelines.FindPtr(key);
         if (found && *found) return found->get();
-        if (!found) {
-            program->Pipelines.Insert(key, std::shared_ptr<SDL_GPUGraphicsPipeline>(), FALSE);
-            auto *job = new CKSdlGpuPipelineJob(Device, program->weak_from_this(), key);
-            DescribePipeline(*program, draw, color, depth, samples, job->Desc);
-            SubmitJob(job);
-            CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
-        }
+        if (!found)
+            QueuePipeline(draw, color, depth, samples, CKSDLGPU_JOB_NORMAL);
         program = program->Fallback.get();
     }
     auto &pipelines = program->Pipelines;
@@ -250,6 +245,22 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     }
     pipelines.Insert(key, pipeline, FALSE);
     return pipeline.get();
+}
+
+void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
+    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples,
+    CKSdlGpuJobPriority priority)
+{
+    const CKSdlGpuPipelineKey key = PipelineKey(draw, color, depth, samples);
+    CKSdlGpuProgram &program = *draw.Program;
+    if (program.Pipelines.FindPtr(key))
+        return;
+    // A null entry marks the pipeline as pending.
+    program.Pipelines.Insert(key, std::shared_ptr<SDL_GPUGraphicsPipeline>(), FALSE);
+    auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key);
+    DescribePipeline(program, draw, color, depth, samples, job->Desc);
+    SubmitJob(job, priority);
+    CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
 }
 
 static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
