@@ -2,6 +2,7 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuTextureData.h"
+#include "CKSdlGpuWorker.h"
 #include "CKFFShaderInterface.h"
 #include <cstdio>
 
@@ -218,6 +219,66 @@ int main()
         batch.Clear();
         check(program.use_count() == 1 && layout.use_count() == 1 && buffer.use_count() == 1,
               "draw resource ownership ends with the encoded batch");
+    }
+    {
+        struct Job : CKSdlGpuJob {
+            SDL_AtomicInt *Sequence = nullptr;
+            SDL_Semaphore *Started = nullptr, *Gate = nullptr;
+            int *Deleted = nullptr;
+            int Order = -1;
+            ~Job() override { ++*Deleted; }
+            void Run() override {
+                if (Started) SDL_SignalSemaphore(Started);
+                if (Gate) SDL_WaitSemaphore(Gate);
+                Order = SDL_AddAtomicInt(Sequence, 1);
+            }
+        };
+        SDL_AtomicInt sequence;
+        SDL_SetAtomicInt(&sequence, 0);
+        int deleted = 0;
+        auto job = [&](SDL_Semaphore *started = nullptr, SDL_Semaphore *gate = nullptr) {
+            Job *result = new Job;
+            result->Sequence = &sequence; result->Deleted = &deleted;
+            result->Started = started; result->Gate = gate;
+            return result;
+        };
+        CKSdlGpuWorker worker;
+        check(!worker.Submit(job()) && deleted == 1 && worker.Pending() == 0,
+              "a stopped worker deletes submitted jobs");
+        check(worker.Start("CKSdlGpuWorkerTest") && worker.Running(), "worker starts");
+        Job *jobs[3];
+        for (Job *&each : jobs) {
+            each = job();
+            check(worker.Submit(each), "running worker accepts jobs");
+        }
+        check(worker.WaitIdle(5000) && worker.Pending() == 0, "worker drains its queue");
+        XArray<CKSdlGpuJob *> finished;
+        worker.Collect(finished);
+        check(finished.Size() == 3 && finished[0] == jobs[0] && finished[1] == jobs[1] &&
+              finished[2] == jobs[2] && jobs[0]->Order == 0 && jobs[1]->Order == 1 &&
+              jobs[2]->Order == 2 && deleted == 1,
+              "jobs run and are collected in submission order");
+        for (int i = 0; i < finished.Size(); ++i) delete finished[i];
+        finished.Clear();
+        SDL_Semaphore *started = SDL_CreateSemaphore(0), *gate = SDL_CreateSemaphore(0);
+        worker.Submit(job(started, gate));
+        worker.Submit(job());
+        worker.Submit(job());
+        check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
+        worker.Collect(finished);
+        check(finished.Size() == 0 && worker.Pending() == 3 && !worker.WaitIdle(10),
+              "collection does not wait for a running job");
+        SDL_SignalSemaphore(gate);
+        worker.Stop();
+        check(!worker.Running() && deleted == 7 && worker.Pending() == 0,
+              "stopping deletes running, queued and uncollected jobs");
+        check(!worker.Submit(job()) && deleted == 8, "a stopped worker rejects jobs");
+        check(worker.Start("CKSdlGpuWorkerTest") && worker.Submit(job()) &&
+              worker.WaitIdle(5000), "a stopped worker restarts");
+        worker.Stop();
+        check(deleted == 9, "stopping deletes finished jobs");
+        SDL_DestroySemaphore(started);
+        SDL_DestroySemaphore(gate);
     }
     {
         CKSdlGpuRasterizerContext context;

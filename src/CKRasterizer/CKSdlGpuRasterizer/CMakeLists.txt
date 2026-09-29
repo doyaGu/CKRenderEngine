@@ -8,6 +8,7 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Native/CKSdlGpuPipeline.cpp
     Native/CKSdlGpuResources.cpp
     Native/CKSdlGpuTextureData.cpp
+    Native/CKSdlGpuWorker.cpp
     Rasterizer/CKSdlGpuPresentStage.cpp
     Rasterizer/CKSdlGpuRasterizer.cpp
     Rasterizer/CKSdlGpuRasterizerContext.cpp
@@ -24,6 +25,7 @@ set(CKSDL_GPU_RASTERIZER_HEADERS
     Native/CKSdlGpuNativeShaders.h
     Native/CKSdlGpuTextureData.h
     Native/CKSdlGpuUniformBatch.h
+    Native/CKSdlGpuWorker.h
     Rasterizer/CKSdlGpuPresentStage.h
     Rasterizer/CKSdlGpuRasterizerContext.h
     Rasterizer/CKSdlGpuShaders.h
