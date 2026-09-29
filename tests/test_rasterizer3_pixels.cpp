@@ -945,6 +945,22 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
 }
 
 #ifdef CKRE_PIXEL_SDL_GPU
+void CheckMatchingSamples(const char *mode, const Samples &samples, const Samples &precompiled)
+{
+    for (int id = 0; id < SAMPLE_COUNT; ++id) {
+        const CKBYTE *expected = precompiled.Center[id];
+        const CKBYTE *actual = samples.Center[id];
+        bool matches = true;
+        for (int channel = 0; channel < 4; ++channel)
+            matches = matches && abs((int)actual[channel] - (int)expected[channel]) <= 1;
+        TestCheckf(matches,
+                   "%s sample %d: BGRA=(%u,%u,%u,%u), precompiled (%u,%u,%u,%u)", mode, id,
+                   (unsigned)actual[0], (unsigned)actual[1], (unsigned)actual[2],
+                   (unsigned)actual[3], (unsigned)expected[0], (unsigned)expected[1],
+                   (unsigned)expected[2], (unsigned)expected[3]);
+    }
+}
+
 // The fragment programs of the native artifacts are compiled in the
 // background while their draws use the precompiled shaders. The first run of
 // the cases queued them; each further run completes the work the one before
@@ -972,18 +988,7 @@ void CheckCompiledFragmentPrograms(Backend &b, const Samples &precompiled)
                "compiled fragment programs: queued=%u ready=%u rejected=%u programs=%u pipelines=%u",
                (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
                (unsigned)counts.Programs, (unsigned)counts.Pipelines);
-    for (int id = 0; id < SAMPLE_COUNT; ++id) {
-        const CKBYTE *expected = precompiled.Center[id];
-        const CKBYTE *actual = samples.Center[id];
-        bool matches = true;
-        for (int channel = 0; channel < 4; ++channel)
-            matches = matches && abs((int)actual[channel] - (int)expected[channel]) <= 1;
-        TestCheckf(matches,
-                   "compiled sample %d: BGRA=(%u,%u,%u,%u), precompiled (%u,%u,%u,%u)", id,
-                   (unsigned)actual[0], (unsigned)actual[1], (unsigned)actual[2],
-                   (unsigned)actual[3], (unsigned)expected[0], (unsigned)expected[1],
-                   (unsigned)expected[2], (unsigned)expected[3]);
-    }
+    CheckMatchingSamples("compiled", samples, precompiled);
     printf("  compiled fragment programs: %u shaders, %u programs and %u pipelines match the precompiled pixels\n",
            (unsigned)counts.Ready, (unsigned)counts.Programs, (unsigned)counts.Pipelines);
 }
@@ -1096,6 +1101,100 @@ void CheckCompiledProgramDepthInvariance(Backend &b)
     SetDiffuseState(ctx);
     printf("  compiled and precompiled programs produce the same depth: passed %d pixels\n",
            covered);
+}
+
+void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCounts &counts,
+                      const CKSdlGpuRasterizerContext::FFJitCounts &expected)
+{
+    TestCheckf(counts.Queued == expected.Queued && counts.Ready == expected.Ready &&
+                   counts.Rejected == expected.Rejected && counts.Programs == expected.Programs &&
+                   counts.Pipelines == expected.Pipelines,
+               "%s: queued=%u ready=%u rejected=%u programs=%u pipelines=%u, "
+               "expected %u %u %u %u %u", what,
+               (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
+               (unsigned)counts.Programs, (unsigned)counts.Pipelines,
+               (unsigned)expected.Queued, (unsigned)expected.Ready, (unsigned)expected.Rejected,
+               (unsigned)expected.Programs, (unsigned)expected.Pipelines);
+}
+
+void RemoveManifestDirectory(const char *directory)
+{
+    int count = 0;
+    char **entries = SDL_GlobDirectory(directory, NULL, 0, &count);
+    for (int i = 0; entries && i < count; ++i) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", directory, entries[i]);
+        SDL_RemovePath(path);
+    }
+    SDL_free(entries);
+    SDL_RemovePath(directory);
+}
+
+// A run saves its compiled programs and their pipelines at shutdown. The
+// next run on the device compiles them all before any draw asks for them,
+// so its draws create nothing and match the precompiled pixels.
+void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
+{
+    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
+    if (setting && strcmp(setting, "0") == 0)
+        return;
+    const char *base = SDL_GetBasePath();
+    TestCheckf(base != NULL, "SDL base path: %s", SDL_GetError());
+    if (!base)
+        return;
+    char directory[1024];
+    snprintf(directory, sizeof(directory), "%sffjit-prewarm-test", base);
+    RemoveManifestDirectory(directory);
+    const char *cache = SDL_getenv("CKRE_SDL_GPU_FF_JIT_CACHE");
+    char previous[1024] = {};
+    const bool restore = cache != NULL;
+    if (cache)
+        SDL_strlcpy(previous, cache, sizeof(previous));
+    SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", directory, 1);
+
+    CKSdlGpuRasterizerContext::FFJitCounts saved;
+    Backend backend;
+    if (OpenBackend(backend, kWidth, kHeight)) {
+        CKSdlGpuRasterizerContext *context =
+            static_cast<CKSdlGpuRasterizerContext *>(backend.Context);
+        Samples samples;
+        for (int run = 0; run < 2; ++run) {
+            RunPixelCases(backend.Context, "saved", samples);
+            TestCheck(context->FinishBackgroundWorkForTests(30000),
+                      "background compilation finishes");
+        }
+        saved = context->CountFFJitProgramsForTests();
+        TestCheck(saved.Ready != 0 && saved.Programs != 0 && saved.Pipelines != 0,
+                  "the saving run compiles programs and pipelines");
+    }
+    CloseBackend(backend);
+    int files = 0;
+    SDL_free(SDL_GlobDirectory(directory, "ffjit-*.bin", 0, &files));
+    TestCheckf(files == 1, "shutdown saves one manifest, found %d", files);
+
+    if (OpenBackend(backend, kWidth, kHeight)) {
+        CKSdlGpuRasterizerContext *context =
+            static_cast<CKSdlGpuRasterizerContext *>(backend.Context);
+        TestCheck(context->FinishBackgroundWorkForTests(30000), "prewarming finishes");
+        CheckFFJitCounts("prewarmed before drawing", context->CountFFJitProgramsForTests(),
+                         saved);
+        Samples samples;
+        RunPixelCases(backend.Context, "prewarmed", samples);
+        TestCheck(context->FinishBackgroundWorkForTests(30000),
+                  "background compilation finishes");
+        CheckFFJitCounts("prewarmed after drawing", context->CountFFJitProgramsForTests(),
+                         saved);
+        CheckMatchingSamples("prewarmed", samples, precompiled);
+    }
+    CloseBackend(backend);
+
+    RemoveManifestDirectory(directory);
+    if (restore)
+        SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", previous, 1);
+    else
+        SDL_unsetenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE");
+    printf("  prewarmed fragment programs: %u shaders, %u programs and %u pipelines before any draw\n",
+           (unsigned)saved.Ready, (unsigned)saved.Programs, (unsigned)saved.Pipelines);
 }
 #endif
 
@@ -4229,7 +4328,8 @@ void BackendRendersFixedFunctionSemantics()
 
     Samples samples;
     Backend backend;
-    if (OpenBackend(backend, kWidth, kHeight)) {
+    const CKBOOL opened = OpenBackend(backend, kWidth, kHeight);
+    if (opened) {
         if (EnvFlagEnabled("CKRE_GPU_TEST_INTERACTIVE_START")) {
             SDL_SetWindowTitle(backend.Window, "rasterizer3-pixels - press Enter to start");
             std::puts("  waiting for foreground Enter before GPU cases");
@@ -4303,6 +4403,10 @@ void BackendRendersFixedFunctionSemantics()
         CheckReadbackShutdown(backend);
     }
     CloseBackend(backend);
+#ifdef CKRE_PIXEL_SDL_GPU
+    if (opened)
+        CheckPrewarmedFragmentPrograms(samples);
+#endif
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     printf("  coverage: pixelCases=%d tolerance=%d\n", (int)SAMPLE_COUNT, kTolerance);

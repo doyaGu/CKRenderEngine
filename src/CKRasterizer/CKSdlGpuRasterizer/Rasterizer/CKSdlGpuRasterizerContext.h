@@ -185,7 +185,8 @@ public:
     void CollectForTests();
     CKBOOL CompleteEmptySubmissionsForTests();
     // Waits for background compilation, then completes it as a frame
-    // boundary would. Call between frames.
+    // boundary would, until completing it queues no more. Call between
+    // frames.
     CKBOOL FinishBackgroundWorkForTests(Sint32 TimeoutMs);
     struct FFJitCounts {
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;

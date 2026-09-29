@@ -278,10 +278,16 @@ void CKSdlGpuRasterizerContext::CollectForTests()
 
 CKBOOL CKSdlGpuRasterizerContext::FinishBackgroundWorkForTests(Sint32 timeoutMs)
 {
-    if (!Worker.WaitIdle(timeoutMs))
-        return FALSE;
-    CollectJobs();
-    return TRUE;
+    const Uint64 deadline = SDL_GetTicks() + Uint64(timeoutMs < 0 ? 0 : timeoutMs);
+    for (;;) {
+        const Uint64 now = SDL_GetTicks();
+        if (!Worker.WaitIdle(Sint32(now < deadline ? deadline - now : 0)))
+            return FALSE;
+        CollectJobs();
+        // A compiled program queues the pipelines it prewarms.
+        if (Worker.Pending() == 0)
+            return TRUE;
+    }
 }
 
 CKBOOL CKSdlGpuRasterizerContext::CompleteEmptySubmissionsForTests()
