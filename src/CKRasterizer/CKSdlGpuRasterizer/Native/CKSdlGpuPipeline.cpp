@@ -41,11 +41,12 @@ static void AddVertexStream(
     const CKSdlGpuLayout *layout,
     unsigned slot,
     SDL_GPUVertexAttribute (&locations)[16],
-    XArray<SDL_GPUVertexBufferDescription> &streams)
+    SDL_GPUVertexInputState &input,
+    SDL_GPUVertexBufferDescription *streams)
 {
     if (!layout)
         return;
-    streams.PushBack({slot, layout->Stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0});
+    streams[input.num_vertex_buffers++] = {slot, layout->Stride, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
     for (const CKVertexElementDesc &element : layout->Elements) {
         const int location = program.AttributeLocations[element.Attrib];
         if (location < 0)
@@ -66,7 +67,32 @@ static SDL_GPUStencilOpState StencilState(unsigned function, unsigned fail,
     return state;
 }
 
-SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw &draw,
+namespace {
+// Everything SDL needs to create a pipeline. It owns its shaders and arrays,
+// so it stays valid after the draw that described it.
+struct CKSdlGpuPipelineDesc {
+    std::shared_ptr<CKSdlGpuShader> Vertex, Fragment;
+    SDL_GPUVertexAttribute Attributes[16] = {};
+    SDL_GPUVertexBufferDescription Streams[3] = {};
+    SDL_GPUColorTargetDescription Target = {};
+    // Pointer members stay null; CreateInfo() points them into this value.
+    SDL_GPUGraphicsPipelineCreateInfo Info = {};
+
+    SDL_GPUGraphicsPipelineCreateInfo CreateInfo() const {
+        SDL_GPUGraphicsPipelineCreateInfo info = Info;
+        info.vertex_shader = Vertex->Shader.get();
+        info.fragment_shader = Fragment->Shader.get();
+        if (info.vertex_input_state.num_vertex_attributes)
+            info.vertex_input_state.vertex_attributes = Attributes;
+        if (info.vertex_input_state.num_vertex_buffers)
+            info.vertex_input_state.vertex_buffer_descriptions = Streams;
+        info.target_info.color_target_descriptions = &Target;
+        return info;
+    }
+};
+}
+
+static CKSdlGpuPipelineKey PipelineKey(const CKSdlGpuDraw &draw,
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     const auto &state = draw.State.State;
@@ -76,15 +102,18 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         (CKDWORD)draw.State.DepthClipEnabled};
     CKSdlGpuPipelineKey key;
     std::memcpy(key.Values, keyValues, sizeof(keyValues));
-    auto &pipelines = draw.Program->Pipelines;
-    std::shared_ptr<SDL_GPUGraphicsPipeline> *found = pipelines.FindPtr(key);
-    if (found) return found->get();
-    SDL_GPUGraphicsPipelineCreateInfo info = {};
-    info.vertex_shader = draw.Program->Vertex->Shader.get();
-    info.fragment_shader = draw.Program->Fragment->Shader.get();
-    XArray<SDL_GPUVertexAttribute> attributes;
-    XArray<SDL_GPUVertexBufferDescription> streams;
-    const auto &inputs = draw.Program->Interface.VertexInputs;
+    return key;
+}
+
+static void DescribePipeline(const CKSdlGpuProgram &program, const CKSdlGpuDraw &draw,
+    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples,
+    CKSdlGpuPipelineDesc &desc)
+{
+    const auto &state = draw.State.State;
+    SDL_GPUGraphicsPipelineCreateInfo &info = desc.Info;
+    desc.Vertex = program.Vertex;
+    desc.Fragment = program.Fragment;
+    const auto &inputs = program.Interface.VertexInputs;
     if (inputs.Size() != 0) {
         const unsigned defaultSlot = draw.Layout1 ? 2 : 1;
         SDL_GPUVertexAttribute locations[16] = {};
@@ -94,16 +123,14 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
                 input.Integer ? SDL_GPU_VERTEXELEMENTFORMAT_UINT4 : SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
                 input.Location * 16};
         }
-        AddVertexStream(*draw.Program, draw.Layout, 0, locations, streams);
-        AddVertexStream(*draw.Program, draw.Layout1, 1, locations, streams);
-        streams.PushBack({defaultSlot, 256, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0});
-        attributes.Reserve(inputs.Size());
+        auto &vertexInput = info.vertex_input_state;
+        AddVertexStream(program, draw.Layout, 0, locations, vertexInput, desc.Streams);
+        AddVertexStream(program, draw.Layout1, 1, locations, vertexInput, desc.Streams);
+        desc.Streams[vertexInput.num_vertex_buffers++] =
+            {defaultSlot, 256, SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0};
+        // Program validation keeps input locations distinct and below 16.
         for (int i = 0; i < inputs.Size(); ++i)
-            attributes.PushBack(locations[inputs[i].Location]);
-        info.vertex_input_state.vertex_attributes = attributes.Begin();
-        info.vertex_input_state.num_vertex_attributes = unsigned(attributes.Size());
-        info.vertex_input_state.vertex_buffer_descriptions = streams.Begin();
-        info.vertex_input_state.num_vertex_buffers = unsigned(streams.Size());
+            desc.Attributes[vertexInput.num_vertex_attributes++] = locations[inputs[i].Location];
     }
     switch ((state.Mid >> 6) & 7) {
     case VX_POINTLIST: info.primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST; break;
@@ -129,7 +156,7 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     ds.front_stencil_state = StencilState((state.Mid >> 10) & 15, (state.Mid >> 14) & 15, (state.Mid >> 18) & 15, (state.Mid >> 22) & 15);
     ds.back_stencil_state = state.Hi & 0xffff ? StencilState(state.Hi & 15, (state.Hi >> 4) & 15, (state.Hi >> 8) & 15, (state.Hi >> 12) & 15)
                                            : ds.front_stencil_state;
-    SDL_GPUColorTargetDescription target = {};
+    SDL_GPUColorTargetDescription &target = desc.Target;
     target.format = color;
     auto &blend = target.blend_state;
     blend.enable_color_write_mask = true; blend.color_write_mask = state.Lo & 15;
@@ -141,9 +168,21 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     const unsigned eq = state.Mid & 7, eqA = (state.Mid >> 3) & 7;
     blend.color_blend_op = SDL_GPUBlendOp(eq ? eq : 1);
     blend.alpha_blend_op = SDL_GPUBlendOp(eqA ? eqA : (eq ? eq : 1));
-    info.target_info.color_target_descriptions = &target; info.target_info.num_color_targets = 1;
+    info.target_info.num_color_targets = 1;
     info.target_info.has_depth_stencil_target = depth != SDL_GPU_TEXTUREFORMAT_INVALID;
     info.target_info.depth_stencil_format = depth;
+}
+
+SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw &draw,
+    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
+{
+    const CKSdlGpuPipelineKey key = PipelineKey(draw, color, depth, samples);
+    auto &pipelines = draw.Program->Pipelines;
+    std::shared_ptr<SDL_GPUGraphicsPipeline> *found = pipelines.FindPtr(key);
+    if (found) return found->get();
+    CKSdlGpuPipelineDesc desc;
+    DescribePipeline(*draw.Program, draw, color, depth, samples, desc);
+    const SDL_GPUGraphicsPipelineCreateInfo info = desc.CreateInfo();
     auto pipeline = CKSdlGpuOwn(Device, SDL_CreateGPUGraphicsPipeline(Device, &info), SDL_ReleaseGPUGraphicsPipeline);
     if (!pipeline) {
         unsigned dimensions[3] = {};
