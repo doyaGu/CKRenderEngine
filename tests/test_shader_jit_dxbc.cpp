@@ -1,0 +1,917 @@
+#include "CKJitBuilder.h"
+#include "CKJitDxbc.h"
+#include "TestTriangleMultiset.h"
+
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+
+// Structural checks of the DXBC backend. Every compiled container is decoded
+// and checked for a valid digest, declared registers and temporaries that are
+// written before they are read. With a directory argument every container is
+// also written there as <name>.dxbc for the D3D12 validator.
+
+namespace {
+
+// The shader model 5.1 numbers the checks look for.
+enum {
+    kOpAdd = 0,
+    kOpAnd = 1,
+    kOpDiscard = 13,
+    kOpDiv = 14,
+    kOpDp3 = 16,
+    kOpEq = 24,
+    kOpExp = 25,
+    kOpFtoi = 27,
+    kOpGe = 29,
+    kOpIeq = 32,
+    kOpIshr = 42,
+    kOpLt = 49,
+    kOpMin = 51,
+    kOpMax = 52,
+    kOpMov = 54,
+    kOpMovc = 55,
+    kOpMul = 56,
+    kOpNe = 57,
+    kOpNot = 59,
+    kOpOr = 60,
+    kOpRet = 62,
+    kOpRoundNe = 64,
+    kOpRoundNi = 65,
+    kOpSample = 69,
+    kOpSampleB = 74,
+    kOpSqrt = 75,
+    kOpDclResource = 88,
+    kOpDclConstantBuffer = 89,
+    kOpDclSampler = 90,
+    kOpDclInputPs = 98,
+    kOpDclInputPsSiv = 100,
+    kOpDclOutput = 101,
+    kOpDclTemps = 104,
+    kOpDclGlobalFlags = 106,
+
+    kOperandTemp = 0,
+    kOperandInput = 1,
+    kOperandOutput = 2,
+    kOperandImmediate32 = 4,
+    kOperandSampler = 6,
+    kOperandResource = 7,
+    kOperandConstantBuffer = 8,
+
+    kSelectMask = 0,
+    kSelectSwizzle = 1,
+    kSelectOne = 2,
+    kModifierNeg = 1,
+    kModifierAbs = 2,
+
+    kInterpolationConstant = 1,
+    kInterpolationLinear = 2,
+    kInterpolationLinearNoPerspective = 4,
+    kResourceTexture2D = 3,
+    kResourceTexture3D = 5,
+    kResourceTextureCube = 6,
+    kSaturate = 1 << 13,
+    kTestNonZero = 1 << 18,
+};
+
+// The SDL_gpu fragment ABI: uniforms in space 3, samplers in space 2.
+const CKJitResourceLayout kLayout = {3, 0, 2};
+
+const CKJitInput kColor0 = {"TEXCOORD", 0, 1, 0, 4, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFlatColor0 = {"TEXCOORD", 2, 3, 2, 4, CKJIT_INPUT_FLAT};
+const CKJitInput kTexCoord0 = {"TEXCOORD", 4, 5, 4, 2, CKJIT_INPUT_SMOOTH};
+const CKJitInput kTexCoord1 = {"TEXCOORD", 5, 6, 5, 3, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFragCoord = {"SV_Position", 0, 0, 0, 4, CKJIT_INPUT_FRAG_COORD};
+
+// FXC 10.1 output (fxc /T ps_5_1 /Qstrip_reflect) for
+//   float4 main(float4 p : SV_Position) : SV_Target { return p; }
+const uint32_t kFxcPassThrough[] = {
+    0x43425844, 0xb809cf08, 0x8a1b4bff, 0xad1ac64e, 0xe85d2f30, 0x00000001, 0x000000dc, 0x00000003, 0x0000002c,
+    0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001,
+    0x00000003, 0x00000000, 0x00000f0f, 0x505f5653, 0x7469736f, 0x006e6f69, 0x4e47534f, 0x0000002c, 0x00000001,
+    0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x0000000f, 0x545f5653, 0x65677261,
+    0xabab0074, 0x58454853, 0x00000040, 0x00000051, 0x00000010, 0x0100086a, 0x04002064, 0x001010f2, 0x00000000,
+    0x00000001, 0x03000065, 0x001020f2, 0x00000000, 0x05000036, 0x001020f2, 0x00000000, 0x00101e46, 0x00000000,
+    0x0100003e,
+};
+
+// FXC output for
+//   float4 main(float4 p : SV_Position) : SV_Target { return float4(p.xy * 2, 0, 1); }
+// whose digest input ends 15 dwords into a block.
+const uint32_t kFxcLongTail[] = {
+    0x43425844, 0x6c75e843, 0x9d1c625a, 0x1c1c8196, 0x0417a0c8, 0x00000001, 0x00000110, 0x00000003, 0x0000002c,
+    0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000001,
+    0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x7469736f, 0x006e6f69, 0x4e47534f, 0x0000002c, 0x00000001,
+    0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003, 0x00000000, 0x0000000f, 0x545f5653, 0x65677261,
+    0xabab0074, 0x58454853, 0x00000074, 0x00000051, 0x0000001d, 0x0100086a, 0x04002064, 0x00101032, 0x00000000,
+    0x00000001, 0x03000065, 0x001020f2, 0x00000000, 0x0a000038, 0x00102032, 0x00000000, 0x00101046, 0x00000000,
+    0x00004002, 0x40000000, 0x40000000, 0x00000000, 0x00000000, 0x08000036, 0x001020c2, 0x00000000, 0x00004002,
+    0x00000000, 0x00000000, 0x00000000, 0x3f800000, 0x0100003e,
+};
+
+const char *g_ContainerDirectory = nullptr;
+
+uint32_t FourCC(const char *code) {
+    uint32_t value;
+    std::memcpy(&value, code, sizeof(value));
+    return value;
+}
+
+struct Chunk {
+    uint32_t Tag;
+    const uint32_t *Body;
+    uint32_t Size; // dwords
+};
+
+// Chunk view of a container; the words must outlive it.
+class Container {
+public:
+    explicit Container(const XArray<uint32_t> &words) : m_WellFormed(false) {
+        const uint32_t count = (uint32_t)words.Size();
+        if (count < 8 || words[0] != FourCC("DXBC") || words[5] != 1 || words[6] != count * 4)
+            return;
+        uint32_t expected = 8 + words[7];
+        for (uint32_t i = 0; i < words[7]; ++i) {
+            const uint32_t offset = words[8 + (int)i];
+            if (offset != expected * 4 || expected + 2 > count || expected + 2 + words[(int)expected + 1] / 4 > count)
+                return;
+            m_Chunks.PushBack(Chunk{words[(int)expected], words.Begin() + expected + 2, words[(int)expected + 1] / 4});
+            expected += 2 + words[(int)expected + 1] / 4;
+        }
+        m_WellFormed = expected == count;
+    }
+
+    bool WellFormed() const { return m_WellFormed; }
+    int Size() const { return m_Chunks.Size(); }
+    const Chunk &operator[](int i) const { return m_Chunks[i]; }
+
+    const Chunk *Find(const char *tag) const {
+        for (int i = 0; i < m_Chunks.Size(); ++i) {
+            if (m_Chunks[i].Tag == FourCC(tag))
+                return &m_Chunks[i];
+        }
+        return nullptr;
+    }
+
+private:
+    XArray<Chunk> m_Chunks;
+    bool m_WellFormed;
+};
+
+struct Element {
+    const char *Name;
+    uint32_t NameOffset;
+    uint32_t SemanticIndex;
+    uint32_t SystemValue;
+    uint32_t ComponentType;
+    uint32_t Register;
+    uint32_t Mask;
+    uint32_t ReadWriteMask;
+};
+
+// Elements of a signature chunk; the chunk must outlive them.
+bool ReadSignature(const Chunk *chunk, XArray<Element> &elements) {
+    elements.Clear();
+    if (!chunk || chunk->Size < 2 || chunk->Body[1] != 8 || 2 + chunk->Body[0] * 6 > chunk->Size)
+        return false;
+    const char *bytes = (const char *)chunk->Body;
+    for (uint32_t i = 0; i < chunk->Body[0]; ++i) {
+        const uint32_t *e = chunk->Body + 2 + i * 6;
+        if (e[0] >= chunk->Size * 4 || !std::memchr(bytes + e[0], 0, chunk->Size * 4 - e[0]))
+            return false;
+        elements.PushBack(Element{bytes + e[0], e[0], e[1], e[2], e[3], e[4], e[5] & 0xff, e[5] >> 8 & 0xff});
+    }
+    return true;
+}
+
+struct Operand {
+    uint32_t Type;
+    uint32_t Components; // 0, 1 or 4
+    uint32_t Selection;  // for four components
+    uint32_t Selector;   // mask, swizzle or component
+    uint32_t Modifier;
+    uint32_t Indices[3];
+    uint32_t IndexCount;
+    uint32_t Values[4]; // immediates
+    uint32_t ValueCount;
+
+    // The register components an instruction source reads: unread positions
+    // repeat a read component, so every swizzle component is read.
+    uint32_t Lanes() const {
+        if (Components == 1)
+            return 1;
+        if (Selection == kSelectMask)
+            return Selector;
+        if (Selection == kSelectOne)
+            return 1u << Selector;
+        uint32_t lanes = 0;
+        for (uint32_t p = 0; p < 4; ++p)
+            lanes |= 1u << (Selector >> (2 * p) & 3);
+        return lanes;
+    }
+
+    bool Is(uint32_t type, uint32_t index) const { return Type == type && IndexCount >= 1 && Indices[0] == index; }
+};
+
+bool DecodeOperand(const uint32_t *&cursor, const uint32_t *end, Operand &operand) {
+    std::memset(&operand, 0, sizeof(operand));
+    if (cursor == end)
+        return false;
+    const uint32_t token = *cursor++;
+    operand.Type = token >> 12 & 0xff;
+    operand.Components = (token & 3) == 2 ? 4 : token & 3;
+    operand.Selection = token >> 2 & 3;
+    operand.Selector = operand.Selection == kSelectOne ? token >> 4 & 3 : token >> 4 & 0xff;
+    operand.IndexCount = token >> 20 & 3;
+    if ((token >> 22 & 0x1ff) != 0) // only immediate indices
+        return false;
+    if (token >> 31) {
+        if (cursor == end || (*cursor & 0x3f) != 1 || (*cursor >> 31) != 0)
+            return false;
+        operand.Modifier = *cursor++ >> 6 & 0xff;
+    }
+    if (operand.Type == kOperandImmediate32) {
+        operand.ValueCount = operand.Components;
+        for (uint32_t k = 0; k < operand.ValueCount; ++k) {
+            if (cursor == end)
+                return false;
+            operand.Values[k] = *cursor++;
+        }
+        return operand.IndexCount == 0;
+    }
+    for (uint32_t k = 0; k < operand.IndexCount; ++k) {
+        if (cursor == end)
+            return false;
+        operand.Indices[k] = *cursor++;
+    }
+    return true;
+}
+
+// XArray relocates its elements bytewise, so instructions hold their
+// operands inline.
+const uint32_t kMaxOperands = 6;
+
+struct Instruction {
+    uint32_t Opcode;
+    uint32_t Controls; // the opcode token without opcode and length
+    const uint32_t *Tokens;
+    uint32_t Length;
+    Operand Operands[kMaxOperands]; // code only
+    uint32_t OperandCount;
+};
+
+// Instruction view of the SHEX chunk; the chunk must outlive it.
+class Program {
+public:
+    explicit Program(const Chunk *chunk) : m_WellFormed(false), m_FirstCode(-1) {
+        if (!chunk || chunk->Size < 2 || chunk->Body[0] != 0x51 || chunk->Body[1] != chunk->Size)
+            return;
+        const uint32_t *end = chunk->Body + chunk->Size;
+        for (const uint32_t *at = chunk->Body + 2; at < end;) {
+            const uint32_t length = at[0] >> 24 & 0x7f;
+            if (length == 0 || at + length > end || (at[0] >> 31) != 0)
+                return;
+            Instruction instruction;
+            std::memset(&instruction, 0, sizeof(instruction));
+            instruction.Opcode = at[0] & 0x7ff;
+            instruction.Controls = at[0] & 0x00fff800u;
+            instruction.Tokens = at + 1;
+            instruction.Length = length;
+            if (instruction.Opcode < kOpDclResource) {
+                for (const uint32_t *cursor = at + 1; cursor < at + length;) {
+                    if (instruction.OperandCount == kMaxOperands ||
+                        !DecodeOperand(cursor, at + length, instruction.Operands[instruction.OperandCount++]))
+                        return;
+                }
+            } else if (m_FirstCode >= 0) {
+                return; // declarations precede the code
+            }
+            if (instruction.Opcode < kOpDclResource && m_FirstCode < 0)
+                m_FirstCode = m_Instructions.Size();
+            m_Instructions.PushBack(instruction);
+            at += length;
+        }
+        m_WellFormed = m_FirstCode >= 0 && m_Instructions[m_Instructions.Size() - 1].Opcode == kOpRet;
+    }
+
+    bool WellFormed() const { return m_WellFormed; }
+    int Size() const { return m_Instructions.Size(); }
+    int FirstCode() const { return m_FirstCode; }
+    const Instruction &operator[](int i) const { return m_Instructions[i]; }
+
+    int Count(uint32_t opcode, uint32_t controls = 0) const {
+        int count = 0;
+        for (int i = 0; i < m_Instructions.Size(); ++i)
+            count += m_Instructions[i].Opcode == opcode && (m_Instructions[i].Controls & controls) == controls ? 1 : 0;
+        return count;
+    }
+
+    int Find(uint32_t opcode, int from = 0) const {
+        for (int i = from; i < m_Instructions.Size(); ++i) {
+            if (m_Instructions[i].Opcode == opcode)
+                return i;
+        }
+        return -1;
+    }
+
+    int FindLast(uint32_t opcode) const {
+        for (int i = m_Instructions.Size() - 1; i >= 0; --i) {
+            if (m_Instructions[i].Opcode == opcode)
+                return i;
+        }
+        return -1;
+    }
+
+    // Declarations of an input register, or -1.
+    int FindInputDeclaration(uint32_t reg) const {
+        for (int i = 0; i < m_FirstCode; ++i) {
+            const Instruction &dcl = m_Instructions[i];
+            if ((dcl.Opcode == kOpDclInputPs || dcl.Opcode == kOpDclInputPsSiv) && dcl.Tokens[1] == reg)
+                return i;
+        }
+        return -1;
+    }
+
+    // Instructions with a source operand carrying the modifier.
+    int CountModified(uint32_t opcode, uint32_t modifier) const {
+        int count = 0;
+        for (int i = m_FirstCode; i < m_Instructions.Size(); ++i) {
+            const Instruction &instruction = m_Instructions[i];
+            bool modified = false;
+            for (uint32_t k = 1; k < instruction.OperandCount; ++k)
+                modified = modified || instruction.Operands[k].Modifier == modifier;
+            count += instruction.Opcode == opcode && modified ? 1 : 0;
+        }
+        return count;
+    }
+
+private:
+    XArray<Instruction> m_Instructions;
+    bool m_WellFormed;
+    int m_FirstCode;
+};
+
+// Whether an instruction's first operand is its destination.
+bool HasDestination(uint32_t opcode) { return opcode != kOpDiscard && opcode != kOpRet; }
+
+// What the runtime and the driver rely on: the digest, the chunks, declared
+// inputs, resources and temporaries, and temporaries written before they are
+// read.
+void CheckProgram(const XArray<uint32_t> &words) {
+    uint32_t digest[4];
+    CKJitDxbcDigest(words.Begin(), (uint32_t)words.Size(), digest);
+    TestCheck(std::memcmp(digest, words.Begin() + 1, sizeof(digest)) == 0, "the container is signed");
+
+    const Container container(words);
+    TestCheck(container.WellFormed() && container.Size() == 3, "the chunks cover the container");
+    if (!container.WellFormed() || container.Size() != 3)
+        return;
+    TestCheck(container[0].Tag == FourCC("ISGN") && container[1].Tag == FourCC("OSGN") &&
+                  container[2].Tag == FourCC("SHEX"),
+              "input and output signatures precede the program");
+    XArray<Element> inputs, outputs;
+    TestCheck(ReadSignature(container.Find("ISGN"), inputs) && ReadSignature(container.Find("OSGN"), outputs),
+              "the signatures are well formed");
+    TestCheck(outputs.Size() == 1 && std::strcmp(outputs[0].Name, "SV_Target") == 0 && outputs[0].Register == 0 &&
+                  outputs[0].Mask == 0xf && outputs[0].ReadWriteMask == 0,
+              "the output is SV_Target 0");
+    for (int i = 1; i < inputs.Size(); ++i)
+        TestCheck(inputs[i - 1].Register < inputs[i].Register, "inputs are in register order");
+
+    const Program program(container.Find("SHEX"));
+    TestCheck(program.WellFormed(), "the program decodes and returns");
+    if (!program.WellFormed())
+        return;
+
+    uint32_t temps = 0, uniformRows = 0, inputMasks[32] = {}, samplers = 0, resources = 0;
+    bool uniforms = false;
+    for (int i = 0; i < program.FirstCode(); ++i) {
+        const Instruction &dcl = program[i];
+        switch (dcl.Opcode) {
+        case kOpDclTemps: temps = dcl.Tokens[0]; break;
+        case kOpDclConstantBuffer:
+            uniforms = true;
+            uniformRows = dcl.Tokens[4];
+            break;
+        case kOpDclSampler: samplers |= 1u << dcl.Tokens[2]; break;
+        case kOpDclResource: resources |= 1u << dcl.Tokens[2]; break;
+        case kOpDclInputPs:
+        case kOpDclInputPsSiv:
+            if (dcl.Tokens[1] < 32)
+                inputMasks[dcl.Tokens[1]] = dcl.Tokens[0] >> 4 & 0xf;
+            break;
+        default: break;
+        }
+    }
+    TestCheck(program.Find(kOpDclGlobalFlags) == 0, "the global flags come first");
+    TestCheck(program.Count(kOpDclOutput) == 1, "the output is declared");
+    for (int i = 0; i < inputs.Size(); ++i) {
+        TestCheck(inputs[i].Register < 32 && inputs[i].ReadWriteMask == inputMasks[inputs[i].Register],
+                  "an input declares the components its signature reads");
+    }
+
+    uint8_t written[64] = {};
+    uint32_t output = 0;
+    for (int i = program.FirstCode(); i < program.Size(); ++i) {
+        const Instruction &instruction = program[i];
+        const uint32_t first = HasDestination(instruction.Opcode) ? 1 : 0;
+        for (uint32_t k = first; k < instruction.OperandCount; ++k) {
+            const Operand &source = instruction.Operands[k];
+            switch (source.Type) {
+            case kOperandTemp:
+                TestCheck(source.Indices[0] < temps && source.Indices[0] < 64 &&
+                              (source.Lanes() & ~written[source.Indices[0] & 63]) == 0,
+                          "temporaries are written before they are read");
+                break;
+            case kOperandInput: {
+                bool declared = false;
+                for (int e = 0; e < inputs.Size(); ++e)
+                    declared = declared || inputs[e].Register == source.Indices[0];
+                TestCheck(declared && source.Indices[0] < 32 &&
+                              (source.Lanes() & ~inputMasks[source.Indices[0] & 31]) == 0,
+                          "inputs are read within their declarations");
+                break;
+            }
+            case kOperandConstantBuffer:
+                TestCheck(uniforms && source.IndexCount == 3 && source.Indices[0] == 0 &&
+                              source.Indices[2] < uniformRows,
+                          "uniform rows are within the declared block");
+                break;
+            case kOperandResource:
+                TestCheck(source.IndexCount == 2 && (resources >> (source.Indices[1] & 31) & 1) != 0,
+                          "sampled textures are declared");
+                break;
+            case kOperandSampler:
+                TestCheck(source.IndexCount == 2 && (samplers >> (source.Indices[1] & 31) & 1) != 0,
+                          "samplers are declared");
+                break;
+            case kOperandImmediate32: break;
+            default: TestCheck(false, "sources are registers, uniforms, resources or immediates"); break;
+            }
+        }
+        if (first == 1 && instruction.OperandCount > 0) {
+            const Operand &dest = instruction.Operands[0];
+            TestCheck(dest.Components == 4 && dest.Selection == kSelectMask && dest.Selector != 0 &&
+                          dest.Modifier == 0,
+                      "destinations are written through a mask");
+            if (dest.Type == kOperandTemp) {
+                TestCheck(dest.Indices[0] < temps, "temporaries are declared");
+                written[dest.Indices[0] & 63] |= (uint8_t)dest.Selector;
+            } else {
+                TestCheck(dest.Is(kOperandOutput, 0), "only temporaries and o0 are written");
+                output |= dest.Selector;
+            }
+        }
+    }
+    TestCheck(output == 0xf, "every colour component is written");
+}
+
+void Save(const char *name, const XArray<uint32_t> &words) {
+    if (!g_ContainerDirectory)
+        return;
+    char path[512];
+    std::snprintf(path, sizeof(path), "%s/%s.dxbc", g_ContainerDirectory, name);
+    FILE *file = std::fopen(path, "wb");
+    TestCheck(file != nullptr, "the container file opens");
+    if (file) {
+        TestCheck(std::fwrite(words.Begin(), sizeof(uint32_t), (size_t)words.Size(), file) == (size_t)words.Size(),
+                  "the container is written");
+        std::fclose(file);
+    }
+}
+
+bool Compile(const CKJitBuilder &b, CKJitValue color, CKJitValue discard, XArray<uint32_t> &words,
+             const CKJitResourceLayout &layout = kLayout) {
+    CKJitFragmentShader shader;
+    if (!b.Finish(color, discard, shader) || !CKJitEmitDxbc(shader, layout, words))
+        return false;
+    CheckProgram(words);
+    return true;
+}
+
+// Every IR operation, all reachable from the outputs.
+void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
+    const CKJitValue diffuse = b.Input(kColor0);
+    const CKJitValue flat = b.Input(kFlatColor0);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue direction = b.Input(kTexCoord1);
+    const CKJitValue position = b.Input(kFragCoord);
+    const CKJitValue tint = b.Uniform(36);
+    const CKJitValue params = b.Uniform(37);
+    const CKJitValue bias = b.Component(params, 0);
+
+    const CKJitValue base = b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue cube = b.Sample(9, CKJIT_SAMPLER_CUBE, direction, bias);
+    const CKJitValue volume = b.Sample(13, CKJIT_SAMPLER_3D, b.Saturate(direction), bias);
+
+    CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
+    value = b.Div(value, b.Max(b.Abs(flat), b.Float(0.001f)));
+    value = b.Min(value, b.Neg(diffuse));
+    const CKJitValue rounded = b.RoundEven(b.Floor(value));
+    const CKJitValue shade = b.Dot(b.Swizzle(diffuse, "xyz"), direction);
+    const CKJitValue spot = b.Sqrt(b.Exp2(b.Component(params, 1)));
+    const CKJitValue assembled = b.Construct({b.Swizzle(value, "xy"), shade, spot});
+
+    const CKJitValue lanes = b.FloatToInt(b.Component(params, 2));
+    const CKJitValue shifted = b.IntShiftRight(lanes, b.FloatToInt(b.Component(params, 3)));
+    const CKJitValue bit = b.IntEqual(b.IntAnd(b.IntShiftRight(lanes, b.Int(33)), b.Int(1)), b.Int(1));
+    const CKJitValue less = b.Less(shade, spot);
+    const CKJitValue lessEqual = b.LessEqual(b.Component(position, 0), b.Component(position, 1));
+    const CKJitValue equal = b.Equal(shade, b.Component(tint, 3));
+    const CKJitValue notEqual = b.NotEqual(spot, b.Component(tint, 2));
+    const CKJitValue picked = b.Select(less, equal, notEqual);
+    const CKJitValue mask = b.Select(lessEqual, shifted, b.Int(7));
+    const CKJitValue condition = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
+    const CKJitValue alpha = b.Select(condition, shade, spot);
+    color = b.Mul(b.Select(condition, assembled, rounded), alpha);
+    discard = b.Less(b.Component(color, 3), b.Component(position, 2));
+}
+
+void TestContainerLayout() {
+    CKJitBuilder b(4);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Input(kColor0), CKJitValue(), words), "a pass-through shader compiles");
+    Save("pass_through", words);
+
+    const Container container(words);
+    TestCheck(container.WellFormed(), "the container is well formed");
+    TestCheck(words[5] == 1 && words[7] == 3 && words[8] == 44, "version 1, three chunks after the header");
+    const Program program(container.Find("SHEX"));
+    TestCheck(program.WellFormed() && program.Size() - program.FirstCode() == 2 && program.Count(kOpMov) == 1,
+              "the program moves the input to the output and returns");
+    TestCheck(program.Count(kOpDclTemps) == 0 && program.Count(kOpDclConstantBuffer) == 0 &&
+                  program.Count(kOpDclSampler) == 0 && program.Count(kOpDclResource) == 0,
+              "unused resources are not declared");
+}
+
+void TestDigest() {
+    const struct {
+        const uint32_t *Words;
+        uint32_t Count;
+    } references[] = {
+        {kFxcPassThrough, sizeof(kFxcPassThrough) / sizeof(uint32_t)},
+        {kFxcLongTail, sizeof(kFxcLongTail) / sizeof(uint32_t)},
+    };
+    for (const auto &reference : references) {
+        uint32_t digest[4];
+        CKJitDxbcDigest(reference.Words, reference.Count, digest);
+        TestCheck(std::memcmp(digest, reference.Words + 1, sizeof(digest)) == 0, "the digest matches FXC's");
+    }
+    TestCheck((sizeof(kFxcPassThrough) / 4 - 5) % 16 < 14 && (sizeof(kFxcLongTail) / 4 - 5) % 16 >= 14,
+              "the references cover both final block layouts");
+
+    uint32_t tampered[sizeof(kFxcPassThrough) / sizeof(uint32_t)];
+    std::memcpy(tampered, kFxcPassThrough, sizeof(tampered));
+    tampered[sizeof(tampered) / 4 - 1] ^= 1;
+    uint32_t digest[4];
+    CKJitDxbcDigest(tampered, sizeof(tampered) / 4, digest);
+    TestCheck(std::memcmp(digest, kFxcPassThrough + 1, sizeof(digest)) != 0, "the digest covers the program");
+}
+
+void TestMatchesFxc() {
+    CKJitBuilder b(4);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Input(kFragCoord), CKJitValue(), words), "the position shader compiles");
+    Save("position", words);
+    TestCheck(words.Size() == (int)(sizeof(kFxcPassThrough) / sizeof(uint32_t)) &&
+                  std::memcmp(words.Begin(), kFxcPassThrough, sizeof(kFxcPassThrough)) == 0,
+              "the container is FXC's, byte for byte");
+}
+
+void TestInterface() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Input(kColor0);
+    const CKJitValue flat = b.Input(kFlatColor0);
+    b.Input(kTexCoord0); // declared, never read
+    const CKJitValue position = b.Input(kFragCoord);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Add(b.Mul(color, flat), b.Swizzle(position, "xyww")), CKJitValue(), words),
+              "the shader compiles");
+    Save("interface", words);
+
+    const Container container(words);
+    XArray<Element> inputs;
+    TestCheck(ReadSignature(container.Find("ISGN"), inputs) && inputs.Size() == 4, "every input is in the signature");
+    if (inputs.Size() != 4)
+        return;
+    TestCheck(inputs[0].Register == 0 && inputs[1].Register == 1 && inputs[2].Register == 3 &&
+                  inputs[3].Register == 5,
+              "inputs keep their registers");
+    TestCheck(std::strcmp(inputs[0].Name, "SV_Position") == 0 && inputs[0].SystemValue == 1 &&
+                  inputs[1].SystemValue == 0,
+              "the position is the POSITION system value");
+    TestCheck(std::strcmp(inputs[1].Name, "TEXCOORD") == 0 && inputs[1].NameOffset == inputs[2].NameOffset &&
+                  inputs[2].NameOffset == inputs[3].NameOffset,
+              "a shared semantic name is stored once");
+    TestCheck(inputs[1].SemanticIndex == 0 && inputs[2].SemanticIndex == 2 && inputs[3].SemanticIndex == 4,
+              "semantic indices are kept");
+    TestCheck(inputs[3].Mask == 0x3 && inputs[3].ReadWriteMask == 0, "an unread input is in the signature, unread");
+    TestCheck(inputs[0].ReadWriteMask == 0xb && inputs[1].ReadWriteMask == 0xf,
+              "the signature records the components read");
+
+    const Program program(container.Find("SHEX"));
+    const int position0 = program.FindInputDeclaration(0);
+    const int color1 = program.FindInputDeclaration(1);
+    const int flat3 = program.FindInputDeclaration(3);
+    TestCheck(position0 >= 0 && program[position0].Opcode == kOpDclInputPsSiv &&
+                  program[position0].Controls >> 11 == kInterpolationLinearNoPerspective &&
+                  program[position0].Tokens[2] == 1,
+              "the position is a noperspective POSITION input");
+    TestCheck(color1 >= 0 && program[color1].Opcode == kOpDclInputPs &&
+                  program[color1].Controls >> 11 == kInterpolationLinear,
+              "smooth inputs are linear");
+    TestCheck(flat3 >= 0 && program[flat3].Controls >> 11 == kInterpolationConstant, "flat inputs are constant");
+    TestCheck(program.FindInputDeclaration(5) < 0, "unread inputs are not declared");
+}
+
+void TestResources() {
+    CKJitBuilder b(89);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue direction = b.Input(kTexCoord1);
+    const CKJitValue first = b.Uniform(0);
+    const CKJitValue last = b.Uniform(88);
+    CKJitValue color = b.Mul(b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f)), first);
+    color = b.Add(color, b.Sample(0, CKJIT_SAMPLER_2D, b.Swizzle(uv, "yx"), b.Float(0.0f)));
+    color = b.Add(color, b.Sample(9, CKJIT_SAMPLER_CUBE, direction, b.Float(0.0f)));
+    color = b.Mul(color, b.Sample(13, CKJIT_SAMPLER_3D, direction, b.Component(last, 0)));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, CKJitValue(), words), "the shader compiles");
+    Save("resources", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const int block = program.Find(kOpDclConstantBuffer);
+    TestCheck(block >= 0 && program.Count(kOpDclConstantBuffer) == 1, "one uniform block");
+    TestCheck(block >= 0 && program[block].Tokens[1] == 0 && program[block].Tokens[2] == 0 &&
+                  program[block].Tokens[3] == 0 && program[block].Tokens[4] == 89 && program[block].Tokens[5] == 3,
+              "the block is b0 in space 3 with every row");
+
+    const uint32_t slots[] = {0, 9, 13};
+    const uint32_t dimensions[] = {kResourceTexture2D, kResourceTextureCube, kResourceTexture3D};
+    TestCheck(program.Count(kOpDclSampler) == 3 && program.Count(kOpDclResource) == 3,
+              "one sampler and texture per used slot");
+    for (uint32_t i = 0; i < 3; ++i) {
+        const int sampler = program.Find(kOpDclSampler) + (int)i;
+        const int texture = program.Find(kOpDclResource) + (int)i;
+        TestCheck(program[sampler].Opcode == kOpDclSampler && program[sampler].Tokens[1] == i &&
+                      program[sampler].Tokens[2] == slots[i] && program[sampler].Tokens[3] == slots[i] &&
+                      program[sampler].Tokens[4] == 2,
+                  "a sampler is its slot in space 2, with a dense range id");
+        TestCheck(program[texture].Opcode == kOpDclResource && program[texture].Controls >> 11 == dimensions[i] &&
+                      program[texture].Tokens[1] == i && program[texture].Tokens[2] == slots[i] &&
+                      program[texture].Tokens[4] == 0x5555 && program[texture].Tokens[5] == 2,
+                  "a float texture of the slot's dimension shares the slot");
+    }
+    for (int i = program.FirstCode(); i < program.Size(); ++i) {
+        const Instruction &instruction = program[i];
+        if (instruction.Opcode != kOpSample && instruction.Opcode != kOpSampleB)
+            continue;
+        const Operand &texture = instruction.Operands[2];
+        const Operand &sampler = instruction.Operands[3];
+        TestCheck(texture.Type == kOperandResource && sampler.Type == kOperandSampler &&
+                      texture.Indices[0] == sampler.Indices[0] && texture.Indices[1] == sampler.Indices[1] &&
+                      texture.Indices[0] < 3 && slots[texture.Indices[0]] == texture.Indices[1],
+                  "a sample reads the texture and sampler of one slot");
+    }
+
+    CKJitBuilder moved(89);
+    XArray<uint32_t> relocated;
+    const CKJitValue sampled = moved.Sample(1, CKJIT_SAMPLER_2D, moved.Input(kTexCoord0), moved.Float(0.0f));
+    TestCheck(Compile(moved, moved.Mul(sampled, moved.Uniform(5)), CKJitValue(), relocated, {7, 4, 1}),
+              "another layout compiles");
+    const Container otherContainer(relocated);
+    const Program other(otherContainer.Find("SHEX"));
+    const int otherBlock = other.Find(kOpDclConstantBuffer);
+    const int otherSampler = other.Find(kOpDclSampler);
+    const int multiply = other.Find(kOpMul);
+    TestCheck(otherBlock >= 0 && other[otherBlock].Tokens[2] == 4 && other[otherBlock].Tokens[5] == 7 &&
+                  otherSampler >= 0 && other[otherSampler].Tokens[2] == 1 && other[otherSampler].Tokens[4] == 1,
+              "the resource layout places the block and the samplers");
+    TestCheck(multiply >= 0 && other[multiply].Operands[2].Type == kOperandConstantBuffer &&
+                  other[multiply].Operands[2].Indices[1] == 4 && other[multiply].Operands[2].Indices[2] == 5,
+              "uniform reads address the block's register");
+}
+
+void TestLowering() {
+    CKJitBuilder b(89);
+    CKJitValue color, discard;
+    BuildEveryOperation(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "every operation compiles");
+    Save("every_operation", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    TestCheck(program.Count(kOpMin) == 1 && program.Count(kOpMax) == 1 && program.Count(kOpDiv) == 1,
+              "arithmetic maps to single instructions");
+    TestCheck(program.Count(kOpMov, kSaturate) == 1, "saturate is a saturated move");
+    TestCheck(program.Count(kOpRoundNi) == 1 && program.Count(kOpRoundNe) == 1 && program.Count(kOpExp) == 1 &&
+                  program.Count(kOpSqrt) == 1 && program.Count(kOpDp3) == 1,
+              "unary functions and the dot product are single instructions");
+    TestCheck(program.CountModified(kOpMax, kModifierAbs) == 1, "abs is a source modifier");
+    TestCheck(program.CountModified(kOpMin, kModifierNeg) == 1 && program.CountModified(kOpAdd, kModifierNeg) == 1,
+              "negation and subtraction use the negate modifier");
+    TestCheck(program.Count(kOpSample) == 1 && program.Count(kOpSampleB) == 2,
+              "a zero bias is omitted, others are sample_b");
+    TestCheck(program.Count(kOpMovc) == 4, "every select is one movc");
+    TestCheck(program.Count(kOpLt) == 2 && program.Count(kOpEq) == 1 && program.Count(kOpNe) == 1 &&
+                  program.Count(kOpGe) == 1,
+              "comparisons map to single instructions");
+    const int greaterEqual = program.Find(kOpGe);
+    TestCheck(greaterEqual >= 0 && program[greaterEqual].Operands[1].Is(kOperandInput, 0) &&
+                  program[greaterEqual].Operands[1].Lanes() == 0x2 &&
+                  program[greaterEqual].Operands[2].Lanes() == 0x1,
+              "a <= b is b >= a");
+    TestCheck(program.Count(kOpFtoi) == 2 && program.Count(kOpIeq) == 2 && program.Count(kOpAnd) == 2 &&
+                  program.Count(kOpOr) == 1 && program.Count(kOpNot) == 1,
+              "integer and boolean operations map to single instructions");
+
+    int shifts = 0;
+    for (int i = program.FirstCode(); i < program.Size(); ++i) {
+        if (program[i].Opcode != kOpIshr)
+            continue;
+        const Operand &count = program[i].Operands[2];
+        shifts += count.Type != kOperandImmediate32 || (count.ValueCount == 1 && count.Values[0] == 1) ? 1 : 0;
+    }
+    TestCheck(shifts == 2, "constant shift counts keep their low five bits");
+
+    const int kill = program.Find(kOpDiscard);
+    TestCheck(program.Count(kOpDiscard, kTestNonZero) == 1 && kill > program.FindLast(kOpSampleB) &&
+                  kill > program.FindLast(kOpSample),
+              "the discard follows every sample");
+    TestCheck(kill >= 0 && program[kill].Operands[0].Type == kOperandTemp && program[kill - 1].Opcode == kOpLt,
+              "the discard tests the discard condition");
+    TestCheck(kill >= 0 && kill + 3 == program.Size() && program[kill + 1].Opcode == kOpMov &&
+                  program[kill + 1].Operands[0].Is(kOperandOutput, 0),
+              "the colour is written after the discard");
+}
+
+void TestRegisterAllocation() {
+    CKJitBuilder b(4);
+    const CKJitValue flat = b.Input(kFlatColor0);
+    CKJitValue value = b.Input(kColor0);
+    for (uint32_t i = 0; i < 64; ++i)
+        value = b.Add(b.Mul(value, b.Uniform(i % 4)), b.Swizzle(flat, i % 2 ? "wzyx" : "yxwz"));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, value, CKJitValue(), words), "a long chain compiles");
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const int temps = program.Find(kOpDclTemps);
+    TestCheck(temps >= 0 && program[temps].Tokens[0] <= 2, "dead values free their temporaries");
+
+    CKJitBuilder scalars(4);
+    const CKJitValue params = scalars.Uniform(0);
+    CKJitValue x = scalars.Component(params, 0), y = scalars.Component(params, 1);
+    for (uint32_t i = 0; i < 8; ++i) {
+        x = scalars.Add(scalars.Mul(x, y), scalars.Component(params, 2));
+        y = scalars.Sub(y, x);
+    }
+    CKJitValue packed[3];
+    for (uint32_t i = 0; i < 3; ++i)
+        packed[i] = scalars.Mul(x, scalars.Component(params, i));
+    TestCheck(Compile(scalars, scalars.Construct({packed[0], packed[1], packed[2], x}), CKJitValue(), words),
+              "scalar work compiles");
+    const Container scalarContainer(words);
+    const Program scalarProgram(scalarContainer.Find("SHEX"));
+    const int scalarTemps = scalarProgram.Find(kOpDclTemps);
+    TestCheck(scalarTemps >= 0 && scalarProgram[scalarTemps].Tokens[0] == 1,
+              "scalars share the components of one register");
+}
+
+void TestColorInOutput() {
+    CKJitBuilder direct(4);
+    XArray<uint32_t> words;
+    TestCheck(Compile(direct, direct.Mul(direct.Input(kColor0), direct.Uniform(0)), CKJitValue(), words),
+              "a computed colour compiles");
+    Save("direct_output", words);
+    const Container directContainer(words);
+    const Program directProgram(directContainer.Find("SHEX"));
+    const int multiply = directProgram.Find(kOpMul);
+    TestCheck(multiply >= 0 && directProgram[multiply].Operands[0].Is(kOperandOutput, 0) &&
+                  directProgram.Count(kOpMov) == 0 && directProgram.Count(kOpDclTemps) == 0,
+              "a colour nothing else reads is computed into the output");
+
+    CKJitBuilder read(4);
+    const CKJitValue color = read.Mul(read.Input(kColor0), read.Uniform(0));
+    TestCheck(Compile(read, color, read.Less(read.Component(color, 3), read.Float(0.5f)), words),
+              "a colour the discard reads compiles");
+    Save("discarded_output", words);
+    const Container readContainer(words);
+    const Program readProgram(readContainer.Find("SHEX"));
+    const int readMultiply = readProgram.Find(kOpMul);
+    TestCheck(readMultiply >= 0 && readProgram[readMultiply].Operands[0].Type == kOperandTemp &&
+                  readProgram.Count(kOpMov) == 1 && readProgram.Find(kOpDiscard) < readProgram.Find(kOpMov),
+              "a colour the discard reads is moved to the output after the discard");
+
+    CKJitBuilder mirrored(4);
+    const CKJitValue sampled =
+        mirrored.Sample(0, CKJIT_SAMPLER_2D, mirrored.Neg(mirrored.Input(kTexCoord0)), mirrored.Float(0.0f));
+    TestCheck(Compile(mirrored, sampled, CKJitValue(), words), "a mirrored sample compiles");
+    Save("mirrored_sample", words);
+    const Container mirroredContainer(words);
+    const Program mirroredProgram(mirroredContainer.Find("SHEX"));
+    const int mirroredSample = mirroredProgram.Find(kOpSample);
+    TestCheck(mirroredSample > 0 && mirroredProgram[mirroredSample].Operands[0].Is(kOperandOutput, 0) &&
+                  mirroredProgram[mirroredSample].Operands[1].Is(kOperandTemp, 0) &&
+                  mirroredProgram[mirroredSample].Operands[1].Modifier == 0 &&
+                  mirroredProgram[mirroredSample - 1].Opcode == kOpMov &&
+                  mirroredProgram[mirroredSample - 1].Operands[1].Modifier == kModifierNeg,
+              "a modified coordinate moves to a scratch register first");
+
+    CKJitBuilder biased(4);
+    const CKJitValue params = biased.Uniform(0);
+    const CKJitValue texel = biased.Sample(0, CKJIT_SAMPLER_2D, biased.Neg(biased.Input(kTexCoord0)),
+                                           biased.Abs(biased.Component(params, 0)));
+    TestCheck(Compile(biased, biased.Mul(texel, biased.Input(kColor0)), CKJitValue(), words),
+              "a modified bias compiles");
+    Save("modified_bias", words);
+    const Container biasedContainer(words);
+    const Program biasedProgram(biasedContainer.Find("SHEX"));
+    const int biasedSample = biasedProgram.Find(kOpSampleB);
+    TestCheck(biasedSample >= 2 && biasedProgram[biasedSample].Operands[4].Is(kOperandTemp, 0) &&
+                  biasedProgram[biasedSample].Operands[4].Modifier == 0 &&
+                  biasedProgram[biasedSample].Operands[0].Is(kOperandTemp, 0) &&
+                  biasedProgram[biasedSample - 1].Operands[1].Modifier == kModifierAbs,
+              "a modified bias moves into the destination first");
+    const int biasedTemps = biasedProgram.Find(kOpDclTemps);
+    TestCheck(biasedTemps >= 0 && biasedProgram[biasedTemps].Tokens[0] == 1,
+              "the destination is the scratch register");
+}
+
+void TestDeterminism() {
+    CKJitBuilder b(89);
+    CKJitValue color, discard;
+    BuildEveryOperation(b, color, discard);
+    XArray<uint32_t> words, again;
+    TestCheck(Compile(b, color, discard, words) && Compile(b, color, discard, again), "the shader compiles twice");
+    TestCheck(again.Size() == words.Size() &&
+                  std::memcmp(again.Begin(), words.Begin(), (size_t)words.Size() * sizeof(uint32_t)) == 0,
+              "emission is deterministic");
+}
+
+void TestConstantOutputs() {
+    CKJitBuilder b(4);
+    b.Input(kColor0);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Float4(0.25f, 0.5f, 0.75f, 1.0f), b.Bool(true), words), "constant outputs compile");
+    Save("constant_outputs", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const int kill = program.Find(kOpDiscard);
+    TestCheck(kill >= 0 && program[kill].Operands[0].Type == kOperandImmediate32 &&
+                  program[kill].Operands[0].ValueCount == 1 && program[kill].Operands[0].Values[0] == 0xffffffffu,
+              "an unconditional discard tests an all-ones immediate");
+    const int move = program.Find(kOpMov);
+    TestCheck(move >= 0 && program[move].Operands[1].ValueCount == 4 &&
+                  program[move].Operands[1].Values[0] == 0x3e800000u &&
+                  program[move].Operands[1].Values[3] == 0x3f800000u,
+              "the colour is an immediate");
+    TestCheck(program.Count(kOpDclInputPs) == 0 && program.Count(kOpDclTemps) == 0, "nothing is read");
+}
+
+void TestRejects() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Mul(b.Add(b.Input(kColor0), b.Input(kFlatColor0)), b.Uniform(1));
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(color, CKJitValue(), shader), "the shader finishes");
+    XArray<uint32_t> words;
+    TestCheck(CKJitEmitDxbc(shader, kLayout, words), "the shader compiles");
+
+    CKJitFragmentShader corrupted = shader;
+    corrupted.Nodes[corrupted.Nodes.Size() - 1].Operands[0] = (uint32_t)corrupted.Nodes.Size() - 1;
+    TestCheck(!CKJitEmitDxbc(corrupted, kLayout, words), "shaders that fail verification are refused");
+
+    CKJitFragmentShader unnamed = shader;
+    unnamed.Inputs[0].Semantic = nullptr;
+    TestCheck(!CKJitEmitDxbc(unnamed, kLayout, words), "inputs need a semantic");
+
+    CKJitFragmentShader high = shader;
+    high.Inputs[1].Register = 32;
+    TestCheck(!CKJitEmitDxbc(high, kLayout, words), "input registers are below 32");
+
+    CKJitFragmentShader shared = shader;
+    shared.Inputs[1].Register = shared.Inputs[0].Register;
+    TestCheck(!CKJitEmitDxbc(shared, kLayout, words), "input registers are unique");
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+    if (argc > 1)
+        g_ContainerDirectory = argv[1];
+    TestFramework framework;
+    framework.Run("container layout", TestContainerLayout);
+    framework.Run("digest", TestDigest);
+    framework.Run("matches fxc", TestMatchesFxc);
+    framework.Run("interface", TestInterface);
+    framework.Run("resources", TestResources);
+    framework.Run("lowering", TestLowering);
+    framework.Run("register allocation", TestRegisterAllocation);
+    framework.Run("color in output", TestColorInOutput);
+    framework.Run("determinism", TestDeterminism);
+    framework.Run("constant outputs", TestConstantOutputs);
+    framework.Run("rejects", TestRejects);
+    return framework.ExitCode();
+}

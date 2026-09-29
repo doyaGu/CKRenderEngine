@@ -1,0 +1,854 @@
+#include "CKJitDxbc.h"
+
+#include <cstring>
+#include <initializer_list>
+
+namespace {
+
+// The subset of the shader model 5.1 token format and of the container the
+// emitter uses.
+enum : uint32_t {
+    DxbcOpAdd = 0,
+    DxbcOpAnd = 1,
+    DxbcOpDiscard = 13,
+    DxbcOpDiv = 14,
+    DxbcOpDp2 = 15,
+    DxbcOpDp3 = 16,
+    DxbcOpDp4 = 17,
+    DxbcOpEq = 24,
+    DxbcOpExp = 25,
+    DxbcOpFtoi = 27,
+    DxbcOpGe = 29,
+    DxbcOpIeq = 32,
+    DxbcOpIshr = 42,
+    DxbcOpLt = 49,
+    DxbcOpMin = 51,
+    DxbcOpMax = 52,
+    DxbcOpMov = 54,
+    DxbcOpMovc = 55,
+    DxbcOpMul = 56,
+    DxbcOpNe = 57,
+    DxbcOpNot = 59,
+    DxbcOpOr = 60,
+    DxbcOpRet = 62,
+    DxbcOpRoundNe = 64,
+    DxbcOpRoundNi = 65,
+    DxbcOpSample = 69,
+    DxbcOpSampleB = 74,
+    DxbcOpSqrt = 75,
+    DxbcOpDclResource = 88,
+    DxbcOpDclConstantBuffer = 89,
+    DxbcOpDclSampler = 90,
+    DxbcOpDclInputPs = 98,
+    DxbcOpDclInputPsSiv = 100,
+    DxbcOpDclOutput = 101,
+    DxbcOpDclTemps = 104,
+    DxbcOpDclGlobalFlags = 106,
+
+    // Opcode token controls; the instruction length is in bits 24..30.
+    DxbcRefactoringAllowed = 1u << 11,
+    DxbcSaturate = 1u << 13,
+    DxbcTestNonZero = 1u << 18,
+    DxbcInterpolationConstant = 1u << 11,
+    DxbcInterpolationLinear = 2u << 11,
+    DxbcInterpolationLinearNoPerspective = 4u << 11,
+    DxbcResourceTexture2D = 3u << 11,
+    DxbcResourceTexture3D = 5u << 11,
+    DxbcResourceTextureCube = 6u << 11,
+    DxbcLengthShift = 24,
+    DxbcReturnTypeFloat = 0x5555, // float in every component
+
+    // Operand token fields.
+    DxbcComponents1 = 1,
+    DxbcComponents4 = 2,
+    DxbcSelectMask = 0u << 2,
+    DxbcSelectSwizzle = 1u << 2,
+    DxbcSelectOne = 2u << 2,
+    DxbcSelectorShift = 4,
+    DxbcSwizzleIdentity = 0xe4,
+    DxbcOperandTemp = 0u << 12,
+    DxbcOperandInput = 1u << 12,
+    DxbcOperandOutput = 2u << 12,
+    DxbcOperandImmediate32 = 4u << 12,
+    DxbcOperandSampler = 6u << 12,
+    DxbcOperandResource = 7u << 12,
+    DxbcOperandConstantBuffer = 8u << 12,
+    DxbcIndex1D = 1u << 20,
+    DxbcIndex2D = 2u << 20,
+    DxbcIndex3D = 3u << 20,
+    DxbcOperandExtended = 1u << 31,
+    DxbcExtendedModifier = 1,
+    DxbcModifierShift = 6,
+    DxbcModifierNeg = 1, // with DxbcModifierAbs: -|x|
+    DxbcModifierAbs = 2,
+
+    DxbcNamePosition = 1,
+    DxbcComponentFloat32 = 3,
+    DxbcPixelShader51 = 0x51,
+    DxbcContainerVersion = 1,
+    DxbcMaxInputRegisters = 32,
+};
+
+uint32_t FourCC(const char *code) {
+    return (uint32_t)(uint8_t)code[0] | (uint32_t)(uint8_t)code[1] << 8 | (uint32_t)(uint8_t)code[2] << 16 |
+           (uint32_t)(uint8_t)code[3] << 24;
+}
+
+// A token stream. An instruction is opened, given its operand tokens and
+// closed, which stores its length in the opcode token.
+class DxbcStream {
+public:
+    void Open(uint32_t opcode) {
+        m_Start = m_Tokens.Size();
+        m_Tokens.PushBack(opcode);
+    }
+    void Token(uint32_t token) { m_Tokens.PushBack(token); }
+    void Close() { m_Tokens[m_Start] |= (uint32_t)(m_Tokens.Size() - m_Start) << DxbcLengthShift; }
+    void Instruction(uint32_t opcode, std::initializer_list<uint32_t> operands) {
+        Open(opcode);
+        for (uint32_t operand : operands)
+            Token(operand);
+        Close();
+    }
+    const XArray<uint32_t> &Tokens() const { return m_Tokens; }
+
+private:
+    XArray<uint32_t> m_Tokens;
+    int m_Start = 0;
+};
+
+// Where the components of a value are: a register read through a swizzle and
+// a source modifier, or immediate bits with any modifier applied.
+struct DxbcValue {
+    uint32_t File;     // DxbcOperandTemp, Input, Output, ConstantBuffer or Immediate32
+    uint32_t Index;    // register, or constant buffer row
+    uint32_t Count;    // components
+    uint32_t Modifier; // DxbcModifierNeg and DxbcModifierAbs bits
+    uint32_t Lanes[4]; // register component of every value component
+    uint32_t Bits[4];  // immediate components
+};
+
+uint32_t LaneMask(const DxbcValue &value) {
+    uint32_t mask = 0;
+    for (uint32_t k = 0; k < value.Count; ++k)
+        mask |= 1u << value.Lanes[k];
+    return mask;
+}
+
+DxbcValue Negated(DxbcValue value) {
+    if (value.File == DxbcOperandImmediate32) {
+        for (uint32_t k = 0; k < value.Count; ++k)
+            value.Bits[k] ^= 0x80000000u;
+    } else {
+        value.Modifier ^= DxbcModifierNeg;
+    }
+    return value;
+}
+
+DxbcValue Absolute(DxbcValue value) {
+    if (value.File == DxbcOperandImmediate32) {
+        for (uint32_t k = 0; k < value.Count; ++k)
+            value.Bits[k] &= 0x7fffffffu;
+    } else {
+        value.Modifier = DxbcModifierAbs;
+    }
+    return value;
+}
+
+// The value component each of the four positions of a source operand reads;
+// -1 leaves a position unread.
+struct DxbcReads {
+    int Components[4];
+};
+
+// Position dest.Lanes[k] reads component k: component-wise instructions.
+DxbcReads ComponentWise(const DxbcValue &dest) {
+    DxbcReads reads = {{-1, -1, -1, -1}};
+    for (uint32_t k = 0; k < dest.Count; ++k)
+        reads.Components[dest.Lanes[k]] = (int)k;
+    return reads;
+}
+
+// Every written position reads component 0: a scalar applied to a vector.
+DxbcReads Broadcast(const DxbcValue &dest) {
+    DxbcReads reads = {{-1, -1, -1, -1}};
+    for (uint32_t k = 0; k < dest.Count; ++k)
+        reads.Components[dest.Lanes[k]] = 0;
+    return reads;
+}
+
+// Position k reads component k: dot products, coordinates and scalars.
+DxbcReads Leading(uint32_t count) {
+    DxbcReads reads = {{-1, -1, -1, -1}};
+    for (uint32_t k = 0; k < count; ++k)
+        reads.Components[k] = (int)k;
+    return reads;
+}
+
+// The components of the temporary registers, allocated per value.
+class DxbcTemps {
+public:
+    // The lowest count free components of the first register that has them.
+    uint32_t Allocate(uint32_t count, uint32_t lanes[4]);
+    void Release(uint32_t reg, uint32_t mask) { m_Used[(int)reg] &= (uint8_t)~mask; }
+    uint32_t Count() const { return (uint32_t)m_Used.Size(); }
+
+private:
+    XArray<uint8_t> m_Used; // component mask of every register
+};
+
+uint32_t DxbcTemps::Allocate(uint32_t count, uint32_t lanes[4]) {
+    int reg = 0;
+    for (; reg < m_Used.Size(); ++reg) {
+        uint32_t free = 0;
+        for (uint32_t lane = 0; lane < 4; ++lane)
+            free += (m_Used[reg] >> lane & 1u) == 0 ? 1u : 0u;
+        if (free >= count)
+            break;
+    }
+    if (reg == m_Used.Size())
+        m_Used.PushBack(0);
+    uint32_t taken = 0;
+    for (uint32_t lane = 0; taken < count; ++lane) {
+        if ((m_Used[reg] >> lane & 1u) == 0) {
+            m_Used[reg] |= (uint8_t)(1u << lane);
+            lanes[taken++] = lane;
+        }
+    }
+    return (uint32_t)reg;
+}
+
+struct DxbcSignatureElement {
+    const char *Name;
+    uint32_t SemanticIndex;
+    uint32_t SystemValue;
+    uint32_t Register;
+    uint32_t Mask;
+    uint32_t ReadWriteMask; // components an input reads, or an output never writes
+};
+
+// A signature chunk: the elements, then their names, each stored once and
+// padded with 0xab to whole dwords as FXC does.
+void AppendSignature(XArray<uint32_t> &chunk, const XArray<DxbcSignatureElement> &elements) {
+    const uint32_t namesOffset = 8 + 24 * (uint32_t)elements.Size();
+    XArray<uint8_t> names;
+    XArray<uint32_t> offsets;
+    chunk.PushBack((uint32_t)elements.Size());
+    chunk.PushBack(8); // offset of the first element
+    for (int i = 0; i < elements.Size(); ++i) {
+        const DxbcSignatureElement &element = elements[i];
+        int same = 0;
+        while (same < i && std::strcmp(elements[same].Name, element.Name) != 0)
+            ++same;
+        // PushBack may reallocate before it copies, so never pass it an
+        // element of the same array.
+        const uint32_t offset = same < i ? offsets[same] : namesOffset + (uint32_t)names.Size();
+        offsets.PushBack(offset);
+        if (same == i) {
+            for (const char *c = element.Name;; ++c) {
+                names.PushBack((uint8_t)*c);
+                if (*c == '\0')
+                    break;
+            }
+        }
+        chunk.PushBack(offset);
+        chunk.PushBack(element.SemanticIndex);
+        chunk.PushBack(element.SystemValue);
+        chunk.PushBack(DxbcComponentFloat32);
+        chunk.PushBack(element.Register);
+        chunk.PushBack(element.Mask | element.ReadWriteMask << 8);
+    }
+    while (names.Size() % 4 != 0)
+        names.PushBack(0xab);
+    for (int i = 0; i < names.Size(); i += 4)
+        chunk.PushBack((uint32_t)names[i] | (uint32_t)names[i + 1] << 8 | (uint32_t)names[i + 2] << 16 |
+                       (uint32_t)names[i + 3] << 24);
+}
+
+void Md5Block(uint32_t state[4], const uint32_t block[16]) {
+    static const uint32_t kSines[64] = {
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
+    };
+    static const uint32_t kShifts[16] = {7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21};
+
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+    for (uint32_t i = 0; i < 64; ++i) {
+        const uint32_t round = i >> 4;
+        uint32_t f, g;
+        switch (round) {
+        case 0: f = (b & c) | (~b & d); g = i; break;
+        case 1: f = (d & b) | (~d & c); g = 5 * i + 1; break;
+        case 2: f = b ^ c ^ d; g = 3 * i + 5; break;
+        default: f = c ^ (b | ~d); g = 7 * i; break;
+        }
+        const uint32_t sum = a + f + kSines[i] + block[g & 15];
+        const uint32_t shift = kShifts[round * 4 + (i & 3)];
+        a = d;
+        d = c;
+        c = b;
+        b += sum << shift | sum >> (32 - shift);
+    }
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+}
+
+class DxbcEmitter {
+public:
+    DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout);
+
+    bool Emit(XArray<uint32_t> &words);
+
+private:
+    static const uint32_t NoRoot = 0xffffffffu;
+
+    bool MapInputs();
+    void Analyze();
+    DxbcValue View(const CKJitNode &node) const;
+    DxbcValue Destination(uint32_t node);
+    void Release(uint32_t node);
+    void Translate(uint32_t node);
+
+    void Dest(const DxbcValue &dest);
+    void Source(const DxbcValue &value, const DxbcReads &reads);
+    void Unary(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a);
+    void Binary(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b);
+    void Dot(const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b);
+    void Construct(const CKJitNode &node, const DxbcValue &dest);
+    void Select(const CKJitNode &node, const DxbcValue &dest);
+    void Sample(const CKJitNode &node, const DxbcValue &dest);
+
+    void Declare(DxbcStream &out) const;
+    void Signatures(XArray<uint32_t> &input, XArray<uint32_t> &output) const;
+
+    const CKJitFragmentShader &m_Shader;
+    const CKJitResourceLayout &m_Layout;
+    DxbcStream m_Code;
+    DxbcTemps m_Temps;
+    XArray<DxbcValue> m_Values; // where the value of every node is
+    XArray<uint32_t> m_Roots;   // the node whose temporary holds a value, or NoRoot
+    XArray<uint32_t> m_LastUse; // the last node reading a computed value; the node count for outputs
+    int m_InputByRegister[DxbcMaxInputRegisters]; // input index, or -1
+    uint8_t m_InputReads[DxbcMaxInputRegisters];  // components read of every input register
+    uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS];    // 0xff for an unused slot
+    uint32_t m_SamplerIds[CKJIT_MAX_SAMPLERS];    // range ids, dense over the used slots
+    bool m_ColorInOutput;
+    bool m_ReadsUniforms;
+};
+
+DxbcEmitter::DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
+    : m_Shader(shader), m_Layout(layout), m_ColorInOutput(false), m_ReadsUniforms(false) {
+    std::memset(m_InputByRegister, 0xff, sizeof(m_InputByRegister));
+    std::memset(m_InputReads, 0, sizeof(m_InputReads));
+    std::memset(m_SamplerDims, 0xff, sizeof(m_SamplerDims));
+    std::memset(m_SamplerIds, 0, sizeof(m_SamplerIds));
+}
+
+bool DxbcEmitter::MapInputs() {
+    for (int i = 0; i < m_Shader.Inputs.Size(); ++i) {
+        const CKJitInput &input = m_Shader.Inputs[i];
+        if (!input.Semantic || input.Register >= DxbcMaxInputRegisters || m_InputByRegister[input.Register] >= 0)
+            return false;
+        m_InputByRegister[input.Register] = i;
+    }
+    return true;
+}
+
+// A computed value keeps its temporary components from its node to its last
+// reader; views (swizzles and modifiers) of it extend that span.
+void DxbcEmitter::Analyze() {
+    const uint32_t count = (uint32_t)m_Shader.Nodes.Size();
+    m_Roots.Resize((int)count);
+    m_LastUse.Resize((int)count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const CKJitNode &node = m_Shader.Nodes[(int)i];
+        m_LastUse[(int)i] = i;
+        switch (node.Op) {
+        case CKJIT_OP_CONSTANT:
+        case CKJIT_OP_INPUT:
+        case CKJIT_OP_UNIFORM:
+            m_Roots[(int)i] = NoRoot;
+            continue;
+        case CKJIT_OP_SWIZZLE:
+        case CKJIT_OP_NEG:
+        case CKJIT_OP_ABS:
+            m_Roots[(int)i] = m_Roots[(int)node.Operands[0]];
+            continue;
+        case CKJIT_OP_SAMPLE:
+            m_SamplerDims[node.Imm[0]] = (uint8_t)node.Imm[1];
+            break;
+        default:
+            break;
+        }
+        m_Roots[(int)i] = i;
+        for (uint32_t operand = 0; operand < node.OperandCount; ++operand) {
+            const uint32_t root = m_Roots[(int)node.Operands[operand]];
+            if (root != NoRoot)
+                m_LastUse[(int)root] = i;
+        }
+    }
+
+    // A computed colour nothing else reads is computed into the output.
+    const uint32_t color = m_Shader.Color.Id;
+    m_ColorInOutput = m_Roots[(int)color] == color && m_LastUse[(int)color] == color;
+    if (m_Roots[(int)color] != NoRoot)
+        m_LastUse[(int)m_Roots[(int)color]] = count;
+    if (m_Shader.Discard.IsValid() && m_Roots[(int)m_Shader.Discard.Id] != NoRoot)
+        m_LastUse[(int)m_Roots[(int)m_Shader.Discard.Id]] = count;
+
+    uint32_t id = 0;
+    for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
+        if (m_SamplerDims[slot] != 0xff)
+            m_SamplerIds[slot] = id++;
+    }
+}
+
+// Leaves name their register or bits and views adjust their operand's; none
+// of them emits code.
+DxbcValue DxbcEmitter::View(const CKJitNode &node) const {
+    DxbcValue value;
+    std::memset(&value, 0, sizeof(value));
+    value.Count = CKJitComponentCount(node.Type);
+    for (uint32_t k = 0; k < 4; ++k)
+        value.Lanes[k] = k;
+    switch (node.Op) {
+    case CKJIT_OP_CONSTANT:
+        value.File = DxbcOperandImmediate32;
+        for (uint32_t k = 0; k < value.Count; ++k)
+            value.Bits[k] = node.Type == CKJIT_TYPE_BOOL ? (node.Imm[0] != 0 ? 0xffffffffu : 0u) : node.Imm[k];
+        return value;
+    case CKJIT_OP_INPUT:
+        value.File = DxbcOperandInput;
+        value.Index = m_Shader.Inputs[(int)node.Imm[0]].Register;
+        return value;
+    case CKJIT_OP_UNIFORM:
+        value.File = DxbcOperandConstantBuffer;
+        value.Index = node.Imm[0];
+        return value;
+    case CKJIT_OP_SWIZZLE: {
+        const DxbcValue &source = m_Values[(int)node.Operands[0]];
+        value.File = source.File;
+        value.Index = source.Index;
+        value.Modifier = source.Modifier;
+        for (uint32_t k = 0; k < value.Count; ++k) {
+            value.Lanes[k] = source.Lanes[node.Imm[k]];
+            value.Bits[k] = source.Bits[node.Imm[k]];
+        }
+        return value;
+    }
+    case CKJIT_OP_NEG:
+        return Negated(m_Values[(int)node.Operands[0]]);
+    default:
+        return Absolute(m_Values[(int)node.Operands[0]]);
+    }
+}
+
+DxbcValue DxbcEmitter::Destination(uint32_t node) {
+    DxbcValue dest;
+    std::memset(&dest, 0, sizeof(dest));
+    dest.Count = CKJitComponentCount(m_Shader.Nodes[(int)node].Type);
+    if (node == m_Shader.Color.Id && m_ColorInOutput) {
+        dest.File = DxbcOperandOutput;
+        for (uint32_t k = 0; k < 4; ++k)
+            dest.Lanes[k] = k;
+    } else {
+        dest.File = DxbcOperandTemp;
+        dest.Index = m_Temps.Allocate(dest.Count, dest.Lanes);
+    }
+    return dest;
+}
+
+void DxbcEmitter::Release(uint32_t node) {
+    const DxbcValue &value = m_Values[(int)node];
+    if (value.File == DxbcOperandTemp)
+        m_Temps.Release(value.Index, LaneMask(value));
+}
+
+void DxbcEmitter::Dest(const DxbcValue &dest) {
+    m_Code.Token(dest.File | DxbcComponents4 | DxbcSelectMask | LaneMask(dest) << DxbcSelectorShift | DxbcIndex1D);
+    m_Code.Token(dest.Index);
+}
+
+// One read position selects a single component (a scalar immediate); unread
+// positions repeat the first read one or are zero immediates, as with FXC.
+void DxbcEmitter::Source(const DxbcValue &value, const DxbcReads &reads) {
+    int first = -1;
+    uint32_t used = 0;
+    for (int p = 0; p < 4; ++p) {
+        if (reads.Components[p] >= 0) {
+            first = first < 0 ? p : first;
+            ++used;
+        }
+    }
+    if (value.File == DxbcOperandImmediate32) {
+        if (used == 1) {
+            m_Code.Token(DxbcOperandImmediate32 | DxbcComponents1);
+            m_Code.Token(value.Bits[reads.Components[first]]);
+        } else {
+            m_Code.Token(DxbcOperandImmediate32 | DxbcComponents4);
+            for (int p = 0; p < 4; ++p)
+                m_Code.Token(reads.Components[p] >= 0 ? value.Bits[reads.Components[p]] : 0u);
+        }
+        return;
+    }
+
+    uint32_t token = value.File | DxbcComponents4;
+    uint32_t lanes = 0;
+    if (used == 1) {
+        const uint32_t lane = value.Lanes[reads.Components[first]];
+        token |= DxbcSelectOne | lane << DxbcSelectorShift;
+        lanes = 1u << lane;
+    } else {
+        uint32_t swizzle = 0;
+        for (int p = 0; p < 4; ++p) {
+            const uint32_t lane = value.Lanes[reads.Components[reads.Components[p] >= 0 ? p : first]];
+            swizzle |= lane << (2 * p);
+            lanes |= 1u << lane;
+        }
+        token |= DxbcSelectSwizzle | swizzle << DxbcSelectorShift;
+    }
+    token |= value.File == DxbcOperandConstantBuffer ? DxbcIndex3D : DxbcIndex1D;
+    token |= value.Modifier != 0 ? DxbcOperandExtended : 0u;
+    m_Code.Token(token);
+    if (value.Modifier != 0)
+        m_Code.Token(DxbcExtendedModifier | value.Modifier << DxbcModifierShift);
+    if (value.File == DxbcOperandConstantBuffer) {
+        m_Code.Token(0); // range id
+        m_Code.Token(m_Layout.UniformBinding);
+        m_ReadsUniforms = true;
+    } else if (value.File == DxbcOperandInput) {
+        m_InputReads[value.Index] |= (uint8_t)lanes;
+    }
+    m_Code.Token(value.Index);
+}
+
+void DxbcEmitter::Unary(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a) {
+    m_Code.Open(opcode);
+    Dest(dest);
+    Source(a, ComponentWise(dest));
+    m_Code.Close();
+}
+
+void DxbcEmitter::Binary(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b) {
+    m_Code.Open(opcode);
+    Dest(dest);
+    Source(a, ComponentWise(dest));
+    Source(b, ComponentWise(dest));
+    m_Code.Close();
+}
+
+void DxbcEmitter::Dot(const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b) {
+    static const uint32_t kDots[] = {DxbcOpMul, DxbcOpDp2, DxbcOpDp3, DxbcOpDp4};
+    m_Code.Open(kDots[a.Count - 1]);
+    Dest(dest);
+    Source(a, Leading(a.Count));
+    Source(b, Leading(a.Count));
+    m_Code.Close();
+}
+
+// One move per part, into its components of the destination.
+void DxbcEmitter::Construct(const CKJitNode &node, const DxbcValue &dest) {
+    uint32_t offset = 0;
+    for (uint32_t i = 0; i < node.OperandCount; ++i) {
+        const DxbcValue &part = m_Values[(int)node.Operands[i]];
+        DxbcValue lanes = dest;
+        lanes.Count = part.Count;
+        for (uint32_t k = 0; k < part.Count; ++k)
+            lanes.Lanes[k] = dest.Lanes[offset + k];
+        Unary(DxbcOpMov, lanes, part);
+        offset += part.Count;
+    }
+}
+
+void DxbcEmitter::Select(const CKJitNode &node, const DxbcValue &dest) {
+    m_Code.Open(DxbcOpMovc);
+    Dest(dest);
+    Source(m_Values[(int)node.Operands[0]], Broadcast(dest));
+    Source(m_Values[(int)node.Operands[1]], ComponentWise(dest));
+    Source(m_Values[(int)node.Operands[2]], ComponentWise(dest));
+    m_Code.Close();
+}
+
+// Sample operands take no modifiers: a modified coordinate or bias first
+// moves to a scratch register, the destination unless that is the output.
+void DxbcEmitter::Sample(const CKJitNode &node, const DxbcValue &dest) {
+    const uint32_t slot = node.Imm[0];
+    DxbcValue coordinate = m_Values[(int)node.Operands[0]];
+    DxbcValue bias = m_Values[(int)node.Operands[1]];
+    const CKJitNode &biasNode = m_Shader.Nodes[(int)node.Operands[1]];
+    const bool biased = biasNode.Op != CKJIT_OP_CONSTANT || (biasNode.Imm[0] & 0x7fffffffu) != 0;
+
+    DxbcValue scratch = dest;
+    const bool spill = coordinate.Modifier != 0 || (biased && bias.Modifier != 0);
+    const bool borrowed = spill && dest.File != DxbcOperandTemp;
+    if (borrowed)
+        scratch.Index = m_Temps.Allocate(4, scratch.Lanes);
+    scratch.File = DxbcOperandTemp;
+    if (coordinate.Modifier != 0) {
+        DxbcValue moved = scratch;
+        moved.Count = coordinate.Count;
+        Unary(DxbcOpMov, moved, coordinate);
+        coordinate = moved;
+    }
+    if (biased && bias.Modifier != 0) {
+        DxbcValue moved = scratch;
+        moved.Count = 1;
+        moved.Lanes[0] = scratch.Lanes[3]; // coordinates have at most three components
+        Unary(DxbcOpMov, moved, bias);
+        bias = moved;
+    }
+
+    m_Code.Open(biased ? DxbcOpSampleB : DxbcOpSample);
+    Dest(dest);
+    Source(coordinate, Leading(coordinate.Count));
+    m_Code.Token(DxbcOperandResource | DxbcComponents4 | DxbcSelectSwizzle | DxbcSwizzleIdentity << DxbcSelectorShift |
+                 DxbcIndex2D);
+    m_Code.Token(m_SamplerIds[slot]);
+    m_Code.Token(slot);
+    m_Code.Token(DxbcOperandSampler | DxbcIndex2D);
+    m_Code.Token(m_SamplerIds[slot]);
+    m_Code.Token(slot);
+    if (biased)
+        Source(bias, Leading(1));
+    m_Code.Close();
+    if (borrowed)
+        m_Temps.Release(scratch.Index, 0xf);
+}
+
+void DxbcEmitter::Translate(uint32_t index) {
+    const CKJitNode &node = m_Shader.Nodes[(int)index];
+    if (m_Roots[(int)index] != index) {
+        m_Values[(int)index] = View(node);
+        return;
+    }
+
+    // The destination is allocated while the operands are live, so it never
+    // overlaps them.
+    const DxbcValue dest = Destination(index);
+    m_Values[(int)index] = dest;
+    const DxbcValue &a = m_Values[(int)node.Operands[0]];
+    const DxbcValue &b = m_Values[(int)node.Operands[node.OperandCount > 1 ? 1 : 0]];
+    switch (node.Op) {
+    case CKJIT_OP_CONSTRUCT: Construct(node, dest); break;
+    case CKJIT_OP_ADD: Binary(DxbcOpAdd, dest, a, b); break;
+    case CKJIT_OP_SUB: Binary(DxbcOpAdd, dest, a, Negated(b)); break;
+    case CKJIT_OP_MUL: Binary(DxbcOpMul, dest, a, b); break;
+    case CKJIT_OP_DIV: Binary(DxbcOpDiv, dest, a, b); break;
+    case CKJIT_OP_MIN: Binary(DxbcOpMin, dest, a, b); break;
+    case CKJIT_OP_MAX: Binary(DxbcOpMax, dest, a, b); break;
+    case CKJIT_OP_SATURATE: Unary(DxbcOpMov | DxbcSaturate, dest, a); break;
+    case CKJIT_OP_FLOOR: Unary(DxbcOpRoundNi, dest, a); break;
+    case CKJIT_OP_ROUND_EVEN: Unary(DxbcOpRoundNe, dest, a); break;
+    case CKJIT_OP_EXP2: Unary(DxbcOpExp, dest, a); break;
+    case CKJIT_OP_SQRT: Unary(DxbcOpSqrt, dest, a); break;
+    case CKJIT_OP_DOT: Dot(dest, a, b); break;
+    case CKJIT_OP_LT: Binary(DxbcOpLt, dest, a, b); break;
+    case CKJIT_OP_LE: Binary(DxbcOpGe, dest, b, a); break;
+    case CKJIT_OP_EQ: Binary(DxbcOpEq, dest, a, b); break;
+    case CKJIT_OP_NE: Binary(DxbcOpNe, dest, a, b); break;
+    case CKJIT_OP_FTOI: Unary(DxbcOpFtoi, dest, a); break;
+    case CKJIT_OP_IEQ: Binary(DxbcOpIeq, dest, a, b); break;
+    case CKJIT_OP_IAND: Binary(DxbcOpAnd, dest, a, b); break;
+    case CKJIT_OP_ISHR: {
+        // The hardware shifts by the low five bits; constant counts are
+        // stored that way, as FXC folds them.
+        DxbcValue count = b;
+        if (count.File == DxbcOperandImmediate32)
+            count.Bits[0] &= 31u;
+        Binary(DxbcOpIshr, dest, a, count);
+        break;
+    }
+    case CKJIT_OP_AND: Binary(DxbcOpAnd, dest, a, b); break;
+    case CKJIT_OP_OR: Binary(DxbcOpOr, dest, a, b); break;
+    case CKJIT_OP_NOT: Unary(DxbcOpNot, dest, a); break;
+    case CKJIT_OP_SELECT: Select(node, dest); break;
+    case CKJIT_OP_SAMPLE: Sample(node, dest); break;
+    default: break; // leaves and views are handled above
+    }
+
+    for (uint32_t operand = 0; operand < node.OperandCount; ++operand) {
+        const uint32_t root = m_Roots[(int)node.Operands[operand]];
+        if (root != NoRoot && m_LastUse[(int)root] == index)
+            Release(root);
+    }
+    if (m_LastUse[(int)index] == index)
+        Release(index);
+}
+
+void DxbcEmitter::Declare(DxbcStream &out) const {
+    const uint32_t range = DxbcComponents4 | DxbcSelectSwizzle | DxbcSwizzleIdentity << DxbcSelectorShift | DxbcIndex3D;
+    out.Instruction(DxbcOpDclGlobalFlags | DxbcRefactoringAllowed, {});
+    if (m_ReadsUniforms) {
+        out.Instruction(DxbcOpDclConstantBuffer, {DxbcOperandConstantBuffer | range, 0, m_Layout.UniformBinding,
+                                                  m_Layout.UniformBinding, m_Shader.UniformVec4Count,
+                                                  m_Layout.UniformSpace});
+    }
+    for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
+        if (m_SamplerDims[slot] != 0xff) {
+            out.Instruction(DxbcOpDclSampler,
+                            {DxbcOperandSampler | range, m_SamplerIds[slot], slot, slot, m_Layout.SamplerSpace});
+        }
+    }
+    static const uint32_t kDimensions[] = {DxbcResourceTexture2D, DxbcResourceTextureCube, DxbcResourceTexture3D};
+    for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
+        if (m_SamplerDims[slot] != 0xff) {
+            out.Instruction(DxbcOpDclResource | kDimensions[m_SamplerDims[slot]],
+                            {DxbcOperandResource | range, m_SamplerIds[slot], slot, slot, DxbcReturnTypeFloat,
+                             m_Layout.SamplerSpace});
+        }
+    }
+
+    // Only read components are declared; the signature keeps every input.
+    for (uint32_t reg = 0; reg < DxbcMaxInputRegisters; ++reg) {
+        if (m_InputByRegister[reg] < 0 || m_InputReads[reg] == 0)
+            continue;
+        const uint32_t operand = DxbcOperandInput | DxbcComponents4 | DxbcSelectMask |
+                                 (uint32_t)m_InputReads[reg] << DxbcSelectorShift | DxbcIndex1D;
+        switch (m_Shader.Inputs[m_InputByRegister[reg]].Kind) {
+        case CKJIT_INPUT_FRAG_COORD:
+            out.Instruction(DxbcOpDclInputPsSiv | DxbcInterpolationLinearNoPerspective,
+                            {operand, reg, DxbcNamePosition});
+            break;
+        case CKJIT_INPUT_FLAT:
+            out.Instruction(DxbcOpDclInputPs | DxbcInterpolationConstant, {operand, reg});
+            break;
+        default:
+            out.Instruction(DxbcOpDclInputPs | DxbcInterpolationLinear, {operand, reg});
+            break;
+        }
+    }
+    out.Instruction(DxbcOpDclOutput,
+                    {DxbcOperandOutput | DxbcComponents4 | DxbcSelectMask | 0xfu << DxbcSelectorShift | DxbcIndex1D, 0});
+    if (m_Temps.Count() > 0)
+        out.Instruction(DxbcOpDclTemps, {m_Temps.Count()});
+}
+
+void DxbcEmitter::Signatures(XArray<uint32_t> &input, XArray<uint32_t> &output) const {
+    XArray<DxbcSignatureElement> elements;
+    for (uint32_t reg = 0; reg < DxbcMaxInputRegisters; ++reg) {
+        if (m_InputByRegister[reg] < 0)
+            continue;
+        const CKJitInput &source = m_Shader.Inputs[m_InputByRegister[reg]];
+        const DxbcSignatureElement element = {
+            source.Semantic,
+            source.SemanticIndex,
+            source.Kind == CKJIT_INPUT_FRAG_COORD ? (uint32_t)DxbcNamePosition : 0u,
+            reg,
+            (1u << source.Components) - 1u,
+            m_InputReads[reg],
+        };
+        elements.PushBack(element);
+    }
+    AppendSignature(input, elements);
+
+    elements.Clear();
+    const DxbcSignatureElement target = {"SV_Target", 0, 0, 0, 0xf, 0};
+    elements.PushBack(target);
+    AppendSignature(output, elements);
+}
+
+bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
+    if (!MapInputs())
+        return false;
+    Analyze();
+    m_Values.Resize(m_Shader.Nodes.Size());
+    for (uint32_t i = 0; i < (uint32_t)m_Shader.Nodes.Size(); ++i)
+        Translate(i);
+
+    // Every value is computed before the discard, so no implicit-LOD sample
+    // runs after a quad neighbour was discarded.
+    if (m_Shader.Discard.IsValid()) {
+        m_Code.Open(DxbcOpDiscard | DxbcTestNonZero);
+        Source(m_Values[(int)m_Shader.Discard.Id], Leading(1));
+        m_Code.Close();
+    }
+    if (!m_ColorInOutput) {
+        DxbcValue output;
+        std::memset(&output, 0, sizeof(output));
+        output.File = DxbcOperandOutput;
+        output.Count = 4;
+        for (uint32_t k = 0; k < 4; ++k)
+            output.Lanes[k] = k;
+        Unary(DxbcOpMov, output, m_Values[(int)m_Shader.Color.Id]);
+    }
+    m_Code.Instruction(DxbcOpRet, {});
+
+    // The declarations follow from the code: what it reads, and its temps.
+    DxbcStream declarations;
+    Declare(declarations);
+    XArray<uint32_t> program;
+    program.PushBack(DxbcPixelShader51);
+    program.PushBack(2u + (uint32_t)declarations.Tokens().Size() + (uint32_t)m_Code.Tokens().Size());
+    program += declarations.Tokens();
+    program += m_Code.Tokens();
+
+    XArray<uint32_t> inputSignature, outputSignature;
+    Signatures(inputSignature, outputSignature);
+
+    const XArray<uint32_t> *chunks[] = {&inputSignature, &outputSignature, &program};
+    static const char *const kChunkNames[] = {"ISGN", "OSGN", "SHEX"};
+    const uint32_t chunkCount = sizeof(chunks) / sizeof(chunks[0]);
+    words.Clear();
+    words.PushBack(FourCC("DXBC"));
+    for (uint32_t i = 0; i < 4; ++i)
+        words.PushBack(0); // digest, once the rest is known
+    words.PushBack(DxbcContainerVersion);
+    words.PushBack(0); // total size
+    words.PushBack(chunkCount);
+    for (uint32_t i = 0; i < chunkCount; ++i)
+        words.PushBack(0); // chunk offset
+    for (uint32_t i = 0; i < chunkCount; ++i) {
+        words[8 + (int)i] = (uint32_t)words.Size() * 4u;
+        words.PushBack(FourCC(kChunkNames[i]));
+        words.PushBack((uint32_t)chunks[i]->Size() * 4u);
+        words += *chunks[i];
+    }
+    words[6] = (uint32_t)words.Size() * 4u;
+    CKJitDxbcDigest(words.Begin(), (uint32_t)words.Size(), &words[1]);
+    return true;
+}
+
+} // namespace
+
+bool CKJitEmitDxbc(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout, XArray<uint32_t> &words) {
+    if (!CKJitVerify(shader))
+        return false;
+    DxbcEmitter emitter(shader, layout);
+    return emitter.Emit(words);
+}
+
+void CKJitDxbcDigest(const uint32_t *words, uint32_t count, uint32_t digest[4]) {
+    uint32_t state[4] = {0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u};
+    const uint32_t *data = count > 5 ? words + 5 : words;
+    const uint32_t length = count > 5 ? count - 5 : 0;
+    const uint32_t full = length & ~15u;
+    for (uint32_t i = 0; i < full; i += 16)
+        Md5Block(state, data + i);
+
+    // Unlike MD5 the bit count leads the final block, which ends with
+    // (bytes * 2) | 1; a remainder too long for both gets a block of its own.
+    const uint32_t rest = length - full;
+    uint32_t block[16];
+    std::memset(block, 0, sizeof(block));
+    if (rest >= 14) {
+        std::memcpy(block, data + full, rest * sizeof(uint32_t));
+        block[rest] = 0x80;
+        Md5Block(state, block);
+        std::memset(block, 0, sizeof(block));
+    } else {
+        std::memcpy(block + 1, data + full, rest * sizeof(uint32_t));
+        block[1 + rest] = 0x80;
+    }
+    block[0] = length * 32u;
+    block[15] = length * 8u | 1u;
+    Md5Block(state, block);
+    std::memcpy(digest, state, sizeof(state));
+}

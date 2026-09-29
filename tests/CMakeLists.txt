@@ -132,6 +132,7 @@ endfunction()
 
 ckre_add_shader_jit_test(test_shader_jit_ir ShaderJitIRTests test_shader_jit_ir.cpp)
 ckre_add_shader_jit_test(test_shader_jit_spirv ShaderJitSpirvTests test_shader_jit_spirv.cpp)
+ckre_add_shader_jit_test(test_shader_jit_dxbc ShaderJitDxbcTests test_shader_jit_dxbc.cpp)
 
 # The Vulkan SDK validator checks every module the SPIR-V tests emit.
 find_program(CKRE_SPIRV_VAL spirv-val HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")

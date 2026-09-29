@@ -1,12 +1,14 @@
 # Runtime shader compiler for fixed-function fragment programs.
 set(CKSHADERJIT_SOURCES
     CKJitBuilder.cpp
+    CKJitDxbc.cpp
     CKJitIR.cpp
     CKJitSpirv.cpp
 )
 
 set(CKSHADERJIT_HEADERS
     CKJitBuilder.h
+    CKJitDxbc.h
     CKJitIR.h
     CKJitOps.def
     CKJitSpirv.h
