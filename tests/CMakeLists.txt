@@ -147,6 +147,23 @@ if (CKRE_SPIRV_VAL)
     set_tests_properties(ShaderJitSpirvValidation PROPERTIES TIMEOUT 60)
 endif ()
 
+# D3D12 checks every container the DXBC tests emit, on WARP.
+if (WIN32)
+    add_executable(shader_jit_dxbc_validator shader_jit_dxbc_validator.cpp)
+    target_link_libraries(shader_jit_dxbc_validator PRIVATE CKShaderJit d3d12 dxgi d3dcompiler)
+    set_target_properties(shader_jit_dxbc_validator PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
+    ckre_copy_runtime_dependencies(shader_jit_dxbc_validator)
+    add_test(NAME ShaderJitDxbcValidation
+        COMMAND "${CMAKE_COMMAND}"
+            -DTEST=$<TARGET_FILE:test_shader_jit_dxbc>
+            -DVALIDATOR=$<TARGET_FILE:shader_jit_dxbc_validator>
+            -DOUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader_jit_dxbc
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/shader_jit_dxbc_validation.cmake
+    )
+    set_tests_properties(ShaderJitDxbcValidation PROPERTIES TIMEOUT 60)
+endif ()
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 add_test(NAME BgfxDependencyDisabled
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/check_bgfx_disabled.cmake)
