@@ -12,9 +12,9 @@
 // transcendentals, and no NaN or denormal operands or results, so it never
 // moves a result outside what the GPU computes for the unfolded form.
 //
-// A scalar float operand is splatted against a vector operand. Ill-typed
-// operands never reach a backend: the operation returns an invalid value, the
-// builder reports Failed() and Finish() refuses to produce a shader.
+// A scalar operand is splatted against a vector operand of its kind.
+// Ill-typed operands never reach a backend: the operation returns an invalid
+// value, the builder reports Failed() and Finish() refuses to produce a shader.
 class CKJitBuilder {
 public:
     explicit CKJitBuilder(uint32_t uniformVec4Count);
@@ -61,7 +61,7 @@ public:
     CKJitValue Length(CKJitValue v);                          // sqrt(dot(v, v))
     CKJitValue Exp(CKJitValue x);                             // exp2(x * log2(e))
 
-    // Scalar float comparisons.
+    // Float comparisons, producing BOOLs of the operands' width.
     CKJitValue Less(CKJitValue a, CKJitValue b);
     CKJitValue LessEqual(CKJitValue a, CKJitValue b);
     CKJitValue Greater(CKJitValue a, CKJitValue b);
@@ -69,23 +69,44 @@ public:
     CKJitValue Equal(CKJitValue a, CKJitValue b);
     CKJitValue NotEqual(CKJitValue a, CKJitValue b);
 
-    // Scalar integers.
+    // Integers, with the IR semantics: IntMod is the floored remainder of a
+    // positive divisor, IntShiftRight shifts by the low five bits.
     CKJitValue FloatToInt(CKJitValue x);
-    CKJitValue IntEqual(CKJitValue a, CKJitValue b);
+    CKJitValue IntToFloat(CKJitValue x);
+    CKJitValue IntAdd(CKJitValue a, CKJitValue b);
+    CKJitValue IntSub(CKJitValue a, CKJitValue b);
+    CKJitValue IntMul(CKJitValue a, CKJitValue b);
+    CKJitValue IntMin(CKJitValue a, CKJitValue b);
+    CKJitValue IntMax(CKJitValue a, CKJitValue b);
+    CKJitValue IntMod(CKJitValue a, CKJitValue b);
     CKJitValue IntAnd(CKJitValue a, CKJitValue b);
     CKJitValue IntShiftRight(CKJitValue a, CKJitValue b);
 
-    // Booleans.
+    // Integer comparisons.
+    CKJitValue IntLess(CKJitValue a, CKJitValue b);
+    CKJitValue IntLessEqual(CKJitValue a, CKJitValue b);
+    CKJitValue IntGreater(CKJitValue a, CKJitValue b);
+    CKJitValue IntGreaterEqual(CKJitValue a, CKJitValue b);
+    CKJitValue IntEqual(CKJitValue a, CKJitValue b);
+    CKJitValue IntNotEqual(CKJitValue a, CKJitValue b);
+
+    // Booleans. Any and All reduce a vector to a BOOL.
     CKJitValue And(CKJitValue a, CKJitValue b);
     CKJitValue Or(CKJitValue a, CKJitValue b);
     CKJitValue Not(CKJitValue x);
+    CKJitValue Any(CKJitValue x);
+    CKJitValue All(CKJitValue x);
 
+    // A BOOL condition picks whole arms; a vector one picks per component
+    // (scalar arms splat to its width).
     CKJitValue Select(CKJitValue condition, CKJitValue whenTrue, CKJitValue whenFalse);
     CKJitValue Sample(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lodBias);
 
-    // Constant inspection; false for non-constant values.
+    // Constant inspection: every component of a constant of the kind is x;
+    // false for non-constant values.
     bool IsConstant(CKJitValue value) const;
     bool IsConstantSplat(CKJitValue value, float x) const;
+    bool IsConstantInt(CKJitValue value, int32_t x) const;
     bool IsConstantBool(CKJitValue value, bool x) const;
 
     // Keeps the nodes reachable from the outputs. discard may be invalid
@@ -109,13 +130,18 @@ private:
     CKJitValue Emit(CKJitOp op, CKJitType type, std::initializer_list<CKJitValue> operands,
                     std::initializer_list<uint32_t> imm = {});
     CKJitValue Constant(CKJitType type, const uint32_t *bits);
+    CKJitValue ConstantSplat(CKJitType type, uint32_t bits);
+    CKJitValue Fold(CKJitOp op, CKJitType type, CKJitValue a, CKJitValue b = CKJitValue());
     CKJitValue SwizzleComponents(CKJitValue value, const uint32_t *selectors, uint32_t count);
     CKJitValue ConstructComponents(const ComponentRef *refs, uint32_t count);
     CKJitValue FloatBinary(CKJitOp op, CKJitValue a, CKJitValue b);
     CKJitValue FloatUnary(CKJitOp op, CKJitValue x);
-    CKJitValue Compare(CKJitOp op, CKJitValue a, CKJitValue b);
+    CKJitValue Compare(CKJitOp op, CKJitType kind, CKJitValue a, CKJitValue b);
+    CKJitValue Convert(CKJitOp op, CKJitType from, CKJitType to, CKJitValue x);
     CKJitValue IntBinary(CKJitOp op, CKJitValue a, CKJitValue b);
     CKJitValue BoolBinary(CKJitOp op, CKJitValue a, CKJitValue b);
+    CKJitValue Reduce(CKJitOp op, CKJitValue x);
+    bool Operands(CKJitType kind, CKJitValue &a, CKJitValue &b);
     bool Unify(CKJitValue &a, CKJitValue &b);
     bool Valid(CKJitValue value) const { return value.Id < (uint32_t)m_Nodes.Size(); }
     bool IsOp(CKJitValue value, CKJitOp op) const { return m_Nodes[value.Id].Op == op; }

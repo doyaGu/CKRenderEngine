@@ -12,22 +12,35 @@
 // (hash-consed and folded); the SPIR-V and DXBC backends translate a finished
 // CKJitFragmentShader.
 
+// A scalar kind and 1..4 components: the scalar type plus components - 1.
+// Integers are signed 32-bit.
 enum CKJitType : uint8_t {
     CKJIT_TYPE_BOOL,
+    CKJIT_TYPE_BOOL2,
+    CKJIT_TYPE_BOOL3,
+    CKJIT_TYPE_BOOL4,
     CKJIT_TYPE_INT,
+    CKJIT_TYPE_INT2,
+    CKJIT_TYPE_INT3,
+    CKJIT_TYPE_INT4,
     CKJIT_TYPE_FLOAT,
     CKJIT_TYPE_FLOAT2,
     CKJIT_TYPE_FLOAT3,
     CKJIT_TYPE_FLOAT4,
+    CKJIT_TYPE_COUNT
 };
 
-inline bool CKJitIsFloat(CKJitType type) { return type >= CKJIT_TYPE_FLOAT; }
-inline uint32_t CKJitComponentCount(CKJitType type) {
-    return CKJitIsFloat(type) ? (uint32_t)(type - CKJIT_TYPE_FLOAT) + 1u : 1u;
+inline CKJitType CKJitScalarOf(CKJitType type) { return (CKJitType)(type & ~3u); }
+inline uint32_t CKJitComponentCount(CKJitType type) { return (type & 3u) + 1u; }
+inline CKJitType CKJitMakeType(CKJitType scalar, uint32_t components) {
+    return (CKJitType)(CKJitScalarOf(scalar) + components - 1u);
 }
-inline CKJitType CKJitFloatType(uint32_t components) {
-    return (CKJitType)(CKJIT_TYPE_FLOAT + components - 1u);
-}
+inline bool CKJitIsBool(CKJitType type) { return CKJitScalarOf(type) == CKJIT_TYPE_BOOL; }
+inline bool CKJitIsInt(CKJitType type) { return CKJitScalarOf(type) == CKJIT_TYPE_INT; }
+inline bool CKJitIsFloat(CKJitType type) { return CKJitScalarOf(type) == CKJIT_TYPE_FLOAT; }
+inline CKJitType CKJitBoolType(uint32_t components) { return CKJitMakeType(CKJIT_TYPE_BOOL, components); }
+inline CKJitType CKJitIntType(uint32_t components) { return CKJitMakeType(CKJIT_TYPE_INT, components); }
+inline CKJitType CKJitFloatType(uint32_t components) { return CKJitMakeType(CKJIT_TYPE_FLOAT, components); }
 
 enum CKJitOpFlag {
     CKJIT_OPFLAG_COMMUTATIVE = 0x1,
@@ -99,7 +112,7 @@ struct CKJitFragmentShader {
     XArray<CKJitNode> Nodes;
     uint32_t UniformVec4Count = 0; // float4 rows of the fragment uniform block
     CKJitValue Color;              // FLOAT4 written to render target 0
-    CKJitValue Discard;            // optional BOOL; true discards the fragment
+    CKJitValue Discard;            // optional scalar BOOL; true discards the fragment
 
     const CKJitNode &Node(CKJitValue value) const { return Nodes[(int)value.Id]; }
 };

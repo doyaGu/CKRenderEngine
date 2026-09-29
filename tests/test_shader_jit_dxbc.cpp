@@ -24,8 +24,16 @@ enum {
     kOpExp = 25,
     kOpFtoi = 27,
     kOpGe = 29,
+    kOpIadd = 30,
     kOpIeq = 32,
+    kOpIge = 33,
+    kOpIlt = 34,
+    kOpImax = 36,
+    kOpImin = 37,
+    kOpImul = 38,
+    kOpIne = 39,
     kOpIshr = 42,
+    kOpItof = 43,
     kOpLt = 49,
     kOpMin = 51,
     kOpMax = 52,
@@ -41,6 +49,8 @@ enum {
     kOpSample = 69,
     kOpSampleB = 74,
     kOpSqrt = 75,
+    kOpUdiv = 78,
+    kOpXor = 87,
     kOpDclResource = 88,
     kOpDclConstantBuffer = 89,
     kOpDclSampler = 90,
@@ -57,6 +67,7 @@ enum {
     kOperandSampler = 6,
     kOperandResource = 7,
     kOperandConstantBuffer = 8,
+    kOperandNull = 13,
 
     kSelectMask = 0,
     kSelectSwizzle = 1,
@@ -351,8 +362,13 @@ private:
     int m_FirstCode;
 };
 
-// Whether an instruction's first operand is its destination.
-bool HasDestination(uint32_t opcode) { return opcode != kOpDiscard && opcode != kOpRet; }
+// How many leading operands are destinations: imul and udiv write two
+// results, the first of which the backend discards.
+uint32_t DestinationCount(uint32_t opcode) {
+    if (opcode == kOpDiscard || opcode == kOpRet)
+        return 0;
+    return opcode == kOpImul || opcode == kOpUdiv ? 2 : 1;
+}
 
 // What the runtime and the driver rely on: the digest, the chunks, declared
 // inputs, resources and temporaries, and temporaries written before they are
@@ -414,7 +430,7 @@ void CheckProgram(const XArray<uint32_t> &words) {
     uint32_t output = 0;
     for (int i = program.FirstCode(); i < program.Size(); ++i) {
         const Instruction &instruction = program[i];
-        const uint32_t first = HasDestination(instruction.Opcode) ? 1 : 0;
+        const uint32_t first = DestinationCount(instruction.Opcode);
         for (uint32_t k = first; k < instruction.OperandCount; ++k) {
             const Operand &source = instruction.Operands[k];
             switch (source.Type) {
@@ -449,8 +465,13 @@ void CheckProgram(const XArray<uint32_t> &words) {
             default: TestCheck(false, "sources are registers, uniforms, resources or immediates"); break;
             }
         }
-        if (first == 1 && instruction.OperandCount > 0) {
-            const Operand &dest = instruction.Operands[0];
+        if (first == 2) {
+            TestCheck(instruction.Operands[0].Type == kOperandNull && instruction.Operands[0].Components == 0 &&
+                          instruction.Operands[0].IndexCount == 0,
+                      "the discarded result is null");
+        }
+        if (first > 0 && instruction.OperandCount >= first) {
+            const Operand &dest = instruction.Operands[first - 1];
             TestCheck(dest.Components == 4 && dest.Selection == kSelectMask && dest.Selector != 0 &&
                           dest.Modifier == 0,
                       "destinations are written through a mask");
@@ -521,9 +542,21 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue notEqual = b.NotEqual(spot, b.Component(tint, 2));
     const CKJitValue picked = b.Select(less, equal, notEqual);
     const CKJitValue mask = b.Select(lessEqual, shifted, b.Int(7));
-    const CKJitValue condition = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
+
+    const CKJitValue texel = b.FloatToInt(b.Swizzle(position, "xy"));
+    const CKJitValue extent = b.IntMax(b.FloatToInt(b.Swizzle(tint, "xy")), b.Int(1));
+    const CKJitValue wrapped = b.IntMod(b.IntAdd(b.IntMul(texel, extent), b.Int(3)), extent);
+    const CKJitValue offset = b.IntMin(b.IntSub(wrapped, texel), b.Int(255));
+    const CKJitValue inside = b.All(b.IntLessEqual(offset, extent));
+    const CKJitValue moved = b.Any(b.IntNotEqual(offset, texel));
+    const CKJitValue low = b.IntLess(b.Component(wrapped, 0), b.Int(16));
+
+    const CKJitValue flags = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
+    const CKJitValue condition = b.Or(flags, b.And(b.And(inside, moved), low));
     const CKJitValue alpha = b.Select(condition, shade, spot);
-    color = b.Mul(b.Select(condition, assembled, rounded), alpha);
+    const CKJitValue ramp = b.Construct({b.IntToFloat(offset), b.Swizzle(rounded, "zw")});
+    const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
+    color = b.Mul(b.Select(condition, graded, rounded), alpha);
     discard = b.Less(b.Component(color, 3), b.Component(position, 2));
 }
 
@@ -713,8 +746,8 @@ void TestLowering() {
               "negation and subtraction use the negate modifier");
     TestCheck(program.Count(kOpSample) == 1 && program.Count(kOpSampleB) == 2,
               "a zero bias is omitted, others are sample_b");
-    TestCheck(program.Count(kOpMovc) == 4, "every select is one movc");
-    TestCheck(program.Count(kOpLt) == 2 && program.Count(kOpEq) == 1 && program.Count(kOpNe) == 1 &&
+    TestCheck(program.Count(kOpMovc) == 5, "every select is one movc");
+    TestCheck(program.Count(kOpLt) == 3 && program.Count(kOpEq) == 1 && program.Count(kOpNe) == 1 &&
                   program.Count(kOpGe) == 1,
               "comparisons map to single instructions");
     const int greaterEqual = program.Find(kOpGe);
@@ -722,18 +755,32 @@ void TestLowering() {
                   program[greaterEqual].Operands[1].Lanes() == 0x2 &&
                   program[greaterEqual].Operands[2].Lanes() == 0x1,
               "a <= b is b >= a");
-    TestCheck(program.Count(kOpFtoi) == 2 && program.Count(kOpIeq) == 2 && program.Count(kOpAnd) == 2 &&
-                  program.Count(kOpOr) == 1 && program.Count(kOpNot) == 1,
-              "integer and boolean operations map to single instructions");
+    TestCheck(program.Count(kOpIadd) == 3 && program.Count(kOpImul) == 1 && program.Count(kOpImin) == 1 &&
+                  program.Count(kOpImax) == 1 && program.Count(kOpItof) == 1 && program.Count(kOpFtoi) == 4,
+              "integer arithmetic maps to single instructions");
+    TestCheck(program.CountModified(kOpIadd, kModifierNeg) == 1, "integer subtraction negates in two's complement");
+    TestCheck(program.Count(kOpIlt) == 1 && program.Count(kOpIge) == 1 && program.Count(kOpIeq) == 2 &&
+                  program.Count(kOpIne) == 1,
+              "integer comparisons map to single instructions");
+    TestCheck(program.Count(kOpUdiv) == 1 && program.Count(kOpXor) == 2, "the remainder divides non-negative values");
+    // and: the mask, the boolean ands, the remainder's offset and the reduction
+    // of all; or: the boolean ors and the reduction of any.
+    TestCheck(program.Count(kOpAnd) == 6 && program.Count(kOpOr) == 3 && program.Count(kOpNot) == 1,
+              "boolean operations and reductions map to single instructions");
 
-    int shifts = 0;
+    int shifts = 0, masked = 0, once = 0;
     for (int i = program.FirstCode(); i < program.Size(); ++i) {
         if (program[i].Opcode != kOpIshr)
             continue;
+        ++shifts;
         const Operand &count = program[i].Operands[2];
-        shifts += count.Type != kOperandImmediate32 || (count.ValueCount == 1 && count.Values[0] == 1) ? 1 : 0;
+        bool low = true;
+        for (uint32_t k = 0; k < count.ValueCount; ++k)
+            low = low && count.Values[k] < 32;
+        masked += low ? 1 : 0;
+        once += count.Type == kOperandImmediate32 && count.ValueCount == 1 && count.Values[0] == 1 ? 1 : 0;
     }
-    TestCheck(shifts == 2, "constant shift counts keep their low five bits");
+    TestCheck(shifts == 3 && masked == 3 && once == 1, "constant shift counts keep their low five bits");
 
     const int kill = program.Find(kOpDiscard);
     TestCheck(program.Count(kOpDiscard, kTestNonZero) == 1 && kill > program.FindLast(kOpSampleB) &&
@@ -744,6 +791,82 @@ void TestLowering() {
     TestCheck(kill >= 0 && kill + 3 == program.Size() && program[kill + 1].Opcode == kOpMov &&
                   program[kill + 1].Operands[0].Is(kOperandOutput, 0),
               "the colour is written after the discard");
+}
+
+void TestIntegerLowering() {
+    CKJitBuilder b(4);
+    const CKJitValue position = b.Input(kFragCoord);
+    const CKJitValue params = b.Uniform(0);
+    const CKJitValue texel = b.FloatToInt(b.Swizzle(position, "xyz"));
+    const CKJitValue extent = b.FloatToInt(b.Swizzle(params, "xyz"));
+    const CKJitValue wrapped = b.IntMod(texel, extent);
+    const CKJitValue bound = b.IntSub(texel, b.Int(5));
+    const CKJitValue inside = b.All(b.IntLess(wrapped, bound));
+    const CKJitValue scaled = b.IntMul(texel, b.Int(3));
+    const CKJitValue ramp = b.IntToFloat(b.IntSub(wrapped, scaled));
+    const CKJitValue color = b.Select(inside, b.Construct({ramp, b.Float(1.0f)}), b.Uniform(1));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, CKJitValue(), words), "integer work compiles");
+    Save("integer_lowering", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+
+    // sign = a >> 31; ((a ^ sign) udiv b ^ sign) + (b & sign)
+    const int divide = program.Find(kOpUdiv);
+    TestCheck(divide >= 2 && divide + 3 < program.Size() && program[divide - 2].Opcode == kOpIshr &&
+                  program[divide - 1].Opcode == kOpXor && program[divide + 1].Opcode == kOpXor &&
+                  program[divide + 2].Opcode == kOpAnd && program[divide + 3].Opcode == kOpIadd,
+              "the remainder takes the sign apart and back");
+    if (divide < 2 || divide + 3 >= program.Size())
+        return;
+    const Instruction &udiv = program[divide];
+    TestCheck(udiv.OperandCount == 4 && udiv.Operands[0].Type == kOperandNull, "the quotient is discarded");
+    const Operand &sign = program[divide - 2].Operands[0];
+    const Operand &count = program[divide - 2].Operands[2];
+    TestCheck(count.Type == kOperandImmediate32 && count.Values[0] == 31, "the sign is the top bit");
+    TestCheck(program[divide - 1].Operands[2].Is(kOperandTemp, sign.Indices[0]) &&
+                  program[divide + 1].Operands[2].Is(kOperandTemp, sign.Indices[0]) &&
+                  program[divide + 2].Operands[0].Is(kOperandTemp, sign.Indices[0]) &&
+                  program[divide + 3].Operands[2].Is(kOperandTemp, sign.Indices[0]),
+              "one register holds the sign and the offset");
+    TestCheck(udiv.Operands[1].Is(kOperandTemp, udiv.Operands[2].Indices[0]) &&
+                  !udiv.Operands[1].Is(kOperandTemp, sign.Indices[0]),
+              "the remainder is taken in place, apart from the sign");
+
+    const int multiply = program.Find(kOpImul);
+    TestCheck(multiply >= 0 && program[multiply].OperandCount == 4 &&
+                  program[multiply].Operands[0].Type == kOperandNull,
+              "the high product is discarded");
+
+    int negated = 0, immediate = 0;
+    for (int i = program.FirstCode(); i < program.Size(); ++i) {
+        if (program[i].Opcode != kOpIadd)
+            continue;
+        const Operand &dest = program[i].Operands[0];
+        const Operand &subtrahend = program[i].Operands[2];
+        negated += subtrahend.Type == kOperandTemp && subtrahend.Modifier == kModifierNeg ? 1 : 0;
+        bool five = subtrahend.Type == kOperandImmediate32 && subtrahend.ValueCount == 4;
+        for (uint32_t p = 0; p < 4 && five; ++p)
+            five = (dest.Selector >> p & 1) == 0 || subtrahend.Values[p] == 0xfffffffbu;
+        immediate += five ? 1 : 0;
+    }
+    TestCheck(negated == 1, "a register is subtracted through the negate modifier");
+    TestCheck(immediate == 1, "a constant is subtracted as its negation");
+
+    const int less = program.Find(kOpIlt);
+    TestCheck(less >= 0 && less + 2 < program.Size() && program[less + 1].Opcode == kOpAnd &&
+                  program[less + 2].Opcode == kOpAnd && program.Count(kOpAnd) == 3,
+              "all of three components is two ands");
+    if (less >= 0 && less + 2 < program.Size()) {
+        const Operand &first = program[less + 1].Operands[0];
+        const Operand &folded = program[less + 2].Operands[1];
+        TestCheck(program[less + 1].Operands[1].Is(kOperandTemp, program[less].Operands[0].Indices[0]) &&
+                      folded.Is(kOperandTemp, first.Indices[0]) && folded.Lanes() == first.Selector &&
+                      program[less + 2].Operands[0].Selector == first.Selector,
+                  "the second and folds the first into the same component");
+    }
+    TestCheck(program.Count(kOpItof) == 1 && program.Count(kOpFtoi) == 2, "conversions are single instructions");
 }
 
 void TestRegisterAllocation() {
@@ -908,6 +1031,7 @@ int main(int argc, char **argv) {
     framework.Run("interface", TestInterface);
     framework.Run("resources", TestResources);
     framework.Run("lowering", TestLowering);
+    framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("register allocation", TestRegisterAllocation);
     framework.Run("color in output", TestColorInOutput);
     framework.Run("determinism", TestDeterminism);

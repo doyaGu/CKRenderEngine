@@ -46,22 +46,33 @@ enum {
     SpvOpCompositeExtract = 81,
     SpvOpImageSampleImplicitLod = 87,
     SpvOpConvertFToS = 110,
+    SpvOpConvertSToF = 111,
     SpvOpFNegate = 127,
+    SpvOpIAdd = 128,
     SpvOpFAdd = 129,
+    SpvOpISub = 130,
     SpvOpFSub = 131,
+    SpvOpIMul = 132,
     SpvOpFMul = 133,
     SpvOpFDiv = 136,
+    SpvOpSRem = 138,
     SpvOpDot = 148,
+    SpvOpAny = 154,
+    SpvOpAll = 155,
     SpvOpLogicalOr = 166,
     SpvOpLogicalAnd = 167,
     SpvOpLogicalNot = 168,
     SpvOpSelect = 169,
     SpvOpIEqual = 170,
+    SpvOpINotEqual = 171,
+    SpvOpSLessThan = 177,
+    SpvOpSLessThanEqual = 179,
     SpvOpFOrdEqual = 180,
     SpvOpFUnordNotEqual = 183,
     SpvOpFOrdLessThan = 184,
     SpvOpFOrdLessThanEqual = 188,
     SpvOpShiftRightArithmetic = 195,
+    SpvOpBitwiseXor = 198,
     SpvOpBitwiseAnd = 199,
     SpvOpSelectionMerge = 247,
     SpvOpLabel = 248,
@@ -103,6 +114,8 @@ enum {
     GLSLstd450Floor = 8,
     GLSLstd450Exp2 = 29,
     GLSLstd450Sqrt = 31,
+    GLSLstd450SMin = 39,
+    GLSLstd450SMax = 42,
     GLSLstd450FClamp = 43,
     GLSLstd450NMin = 79,
     GLSLstd450NMax = 80,
@@ -170,13 +183,14 @@ private:
         m_Annotations.Emit(SpvOpDecorate, {target, decoration, value});
     }
 
-    uint32_t FloatType(uint32_t components);
-    uint32_t BoolType(uint32_t components);
-    uint32_t IntType() { return DeclareType(SpvOpTypeInt, {32, 1}); }
     uint32_t TypeOf(CKJitType type);
+    uint32_t FloatType(uint32_t components) { return TypeOf(CKJitFloatType(components)); }
+    uint32_t BoolType(uint32_t components) { return TypeOf(CKJitBoolType(components)); }
+    uint32_t IntType() { return TypeOf(CKJIT_TYPE_INT); }
     uint32_t PointerType(uint32_t storage, uint32_t type) { return DeclareType(SpvOpTypePointer, {storage, type}); }
-    uint32_t IntConstant(int32_t value) { return DeclareConstant(SpvOpConstant, IntType(), {(uint32_t)value}); }
-    uint32_t FloatConstant(CKJitType type, const uint32_t *bits);
+    uint32_t Constant(CKJitType type, const uint32_t *bits);
+    uint32_t ConstantSplat(CKJitType type, uint32_t bits);
+    uint32_t IntConstant(int32_t value) { return ConstantSplat(CKJIT_TYPE_INT, (uint32_t)value); }
     uint32_t FloatSplat(float value, CKJitType type);
 
     // Function body instructions; each returns its result id.
@@ -191,10 +205,10 @@ private:
     uint32_t SampledImage(uint32_t slot, uint32_t dim);
     uint32_t Value(uint32_t node) const { return m_Values[(int)node]; }
     uint32_t Translate(const CKJitNode &node);
-    uint32_t Constant(const CKJitNode &node);
     uint32_t Swizzle(const CKJitNode &node);
     uint32_t Select(const CKJitNode &node);
     uint32_t Sample(const CKJitNode &node);
+    uint32_t Modulo(const CKJitNode &node, uint32_t a, uint32_t b);
     uint32_t ShiftCount(uint32_t node);
 
     const CKJitFragmentShader &m_Shader;
@@ -262,37 +276,39 @@ uint32_t SpirvEmitter::Variable(uint32_t storage, uint32_t type) {
     return id;
 }
 
-uint32_t SpirvEmitter::FloatType(uint32_t components) {
-    const uint32_t scalar = DeclareType(SpvOpTypeFloat, {32});
-    return components == 1 ? scalar : DeclareType(SpvOpTypeVector, {scalar, components});
-}
-
-uint32_t SpirvEmitter::BoolType(uint32_t components) {
-    const uint32_t scalar = DeclareType(SpvOpTypeBool, {});
-    return components == 1 ? scalar : DeclareType(SpvOpTypeVector, {scalar, components});
-}
-
 uint32_t SpirvEmitter::TypeOf(CKJitType type) {
-    switch (type) {
-    case CKJIT_TYPE_BOOL: return BoolType(1);
-    case CKJIT_TYPE_INT: return IntType();
-    default: return FloatType(CKJitComponentCount(type));
+    uint32_t scalar;
+    switch (CKJitScalarOf(type)) {
+    case CKJIT_TYPE_BOOL: scalar = DeclareType(SpvOpTypeBool, {}); break;
+    case CKJIT_TYPE_INT: scalar = DeclareType(SpvOpTypeInt, {32, 1}); break;
+    default: scalar = DeclareType(SpvOpTypeFloat, {32}); break;
     }
+    const uint32_t components = CKJitComponentCount(type);
+    return components == 1 ? scalar : DeclareType(SpvOpTypeVector, {scalar, components});
 }
 
-uint32_t SpirvEmitter::FloatConstant(CKJitType type, const uint32_t *bits) {
+uint32_t SpirvEmitter::Constant(CKJitType type, const uint32_t *bits) {
+    const uint32_t scalar = TypeOf(CKJitScalarOf(type));
     const uint32_t count = CKJitComponentCount(type);
     uint32_t components[4];
-    for (uint32_t i = 0; i < count; ++i)
-        components[i] = DeclareConstant(SpvOpConstant, FloatType(1), {bits[i]});
-    return count == 1 ? components[0] : Declare(SpvOpConstantComposite, FloatType(count), components, count);
+    for (uint32_t i = 0; i < count; ++i) {
+        if (CKJitIsBool(type))
+            components[i] = DeclareConstant(bits[i] != 0 ? SpvOpConstantTrue : SpvOpConstantFalse, scalar, {});
+        else
+            components[i] = DeclareConstant(SpvOpConstant, scalar, {bits[i]});
+    }
+    return count == 1 ? components[0] : Declare(SpvOpConstantComposite, TypeOf(type), components, count);
+}
+
+uint32_t SpirvEmitter::ConstantSplat(CKJitType type, uint32_t bits) {
+    const uint32_t components[4] = {bits, bits, bits, bits};
+    return Constant(type, components);
 }
 
 uint32_t SpirvEmitter::FloatSplat(float value, CKJitType type) {
-    uint32_t bits[4];
-    std::memcpy(&bits[0], &value, sizeof(value));
-    bits[1] = bits[2] = bits[3] = bits[0];
-    return FloatConstant(type, bits);
+    uint32_t bits;
+    std::memcpy(&bits, &value, sizeof(value));
+    return ConstantSplat(type, bits);
 }
 
 uint32_t SpirvEmitter::Op(uint32_t opcode, uint32_t type, const uint32_t *operands, uint32_t count) {
@@ -365,21 +381,13 @@ uint32_t SpirvEmitter::SampledImage(uint32_t slot, uint32_t dim) {
     return m_SampledImages[slot];
 }
 
-uint32_t SpirvEmitter::Constant(const CKJitNode &node) {
-    switch (node.Type) {
-    case CKJIT_TYPE_BOOL: return DeclareConstant(node.Imm[0] != 0 ? SpvOpConstantTrue : SpvOpConstantFalse, BoolType(1), {});
-    case CKJIT_TYPE_INT: return IntConstant((int32_t)node.Imm[0]);
-    default: return FloatConstant(node.Type, node.Imm);
-    }
-}
-
 uint32_t SpirvEmitter::Swizzle(const CKJitNode &node) {
     const uint32_t source = Value(node.Operands[0]);
     const uint32_t count = CKJitComponentCount(node.Type);
     const uint32_t type = TypeOf(node.Type);
     // A scalar source is a splat (a scalar-to-scalar swizzle is the identity
     // the builder never emits).
-    if (m_Shader.Nodes[(int)node.Operands[0]].Type == CKJIT_TYPE_FLOAT) {
+    if (CKJitComponentCount(m_Shader.Nodes[(int)node.Operands[0]].Type) == 1) {
         const uint32_t parts[4] = {source, source, source, source};
         return Op(SpvOpCompositeConstruct, type, parts, count);
     }
@@ -392,11 +400,11 @@ uint32_t SpirvEmitter::Swizzle(const CKJitNode &node) {
 }
 
 // SPIR-V 1.0 selects component-wise: a vector select needs a condition of
-// the arms' width.
+// the arms' width, so a scalar one is splatted.
 uint32_t SpirvEmitter::Select(const CKJitNode &node) {
     uint32_t condition = Value(node.Operands[0]);
     const uint32_t count = CKJitComponentCount(node.Type);
-    if (count > 1) {
+    if (count > 1 && CKJitComponentCount(m_Shader.Nodes[(int)node.Operands[0]].Type) == 1) {
         const uint32_t parts[4] = {condition, condition, condition, condition};
         condition = Op(SpvOpCompositeConstruct, BoolType(count), parts, count);
     }
@@ -413,13 +421,30 @@ uint32_t SpirvEmitter::Sample(const CKJitNode &node) {
               {image, coordinate, SpvImageOperandsBiasMask, Value(node.Operands[1])});
 }
 
+// Vulkan leaves OpSRem and OpSMod undefined for negative operands, so the
+// remainder is taken of non-negative values. With m = a >> 31, 0 or all
+// ones, the floored a mod b is ((a ^ m) rem b ^ m) + (b & m).
+uint32_t SpirvEmitter::Modulo(const CKJitNode &node, uint32_t a, uint32_t b) {
+    const uint32_t type = TypeOf(node.Type);
+    const uint32_t sign = Op(SpvOpShiftRightArithmetic, type, {a, ConstantSplat(node.Type, 31)});
+    const uint32_t magnitude = Op(SpvOpBitwiseXor, type, {a, sign});
+    const uint32_t remainder = Op(SpvOpSRem, type, {magnitude, b});
+    const uint32_t restored = Op(SpvOpBitwiseXor, type, {remainder, sign});
+    const uint32_t offset = Op(SpvOpBitwiseAnd, type, {b, sign});
+    return Op(SpvOpIAdd, type, {restored, offset});
+}
+
 // HLSL uses the low five bits of a shift count; SPIR-V leaves larger counts
 // undefined.
 uint32_t SpirvEmitter::ShiftCount(uint32_t node) {
     const CKJitNode &count = m_Shader.Nodes[(int)node];
-    if (count.Op == CKJIT_OP_CONSTANT)
-        return IntConstant((int32_t)(count.Imm[0] & 31u));
-    return Op(SpvOpBitwiseAnd, IntType(), {Value(node), IntConstant(31)});
+    if (count.Op == CKJIT_OP_CONSTANT) {
+        uint32_t bits[4];
+        for (uint32_t i = 0; i < CKJitComponentCount(count.Type); ++i)
+            bits[i] = count.Imm[i] & 31u;
+        return Constant(count.Type, bits);
+    }
+    return Op(SpvOpBitwiseAnd, TypeOf(count.Type), {Value(node), ConstantSplat(count.Type, 31)});
 }
 
 uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
@@ -427,7 +452,7 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
     const uint32_t a = node.OperandCount > 0 ? Value(node.Operands[0]) : 0;
     const uint32_t b = node.OperandCount > 1 ? Value(node.Operands[1]) : 0;
     switch (node.Op) {
-    case CKJIT_OP_CONSTANT: return Constant(node);
+    case CKJIT_OP_CONSTANT: return Constant(node.Type, node.Imm);
     case CKJIT_OP_INPUT: return Op(SpvOpLoad, type, {m_Inputs[(int)node.Imm[0]]});
     case CKJIT_OP_UNIFORM: {
         const uint32_t row = Op(SpvOpAccessChain, PointerType(SpvStorageClassUniform, type),
@@ -461,12 +486,24 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
     case CKJIT_OP_EQ: return Op(SpvOpFOrdEqual, type, {a, b});
     case CKJIT_OP_NE: return Op(SpvOpFUnordNotEqual, type, {a, b});
     case CKJIT_OP_FTOI: return Op(SpvOpConvertFToS, type, {a});
-    case CKJIT_OP_IEQ: return Op(SpvOpIEqual, type, {a, b});
+    case CKJIT_OP_ITOF: return Op(SpvOpConvertSToF, type, {a});
+    case CKJIT_OP_IADD: return Op(SpvOpIAdd, type, {a, b});
+    case CKJIT_OP_ISUB: return Op(SpvOpISub, type, {a, b});
+    case CKJIT_OP_IMUL: return Op(SpvOpIMul, type, {a, b});
+    case CKJIT_OP_IMIN: return Glsl(GLSLstd450SMin, type, {a, b});
+    case CKJIT_OP_IMAX: return Glsl(GLSLstd450SMax, type, {a, b});
+    case CKJIT_OP_IMOD: return Modulo(node, a, b);
     case CKJIT_OP_IAND: return Op(SpvOpBitwiseAnd, type, {a, b});
     case CKJIT_OP_ISHR: return Op(SpvOpShiftRightArithmetic, type, {a, ShiftCount(node.Operands[1])});
+    case CKJIT_OP_ILT: return Op(SpvOpSLessThan, type, {a, b});
+    case CKJIT_OP_ILE: return Op(SpvOpSLessThanEqual, type, {a, b});
+    case CKJIT_OP_IEQ: return Op(SpvOpIEqual, type, {a, b});
+    case CKJIT_OP_INE: return Op(SpvOpINotEqual, type, {a, b});
     case CKJIT_OP_AND: return Op(SpvOpLogicalAnd, type, {a, b});
     case CKJIT_OP_OR: return Op(SpvOpLogicalOr, type, {a, b});
     case CKJIT_OP_NOT: return Op(SpvOpLogicalNot, type, {a});
+    case CKJIT_OP_ANY: return Op(SpvOpAny, type, {a});
+    case CKJIT_OP_ALL: return Op(SpvOpAll, type, {a});
     case CKJIT_OP_SELECT: return Select(node);
     case CKJIT_OP_SAMPLE: return Sample(node);
     case CKJIT_OP_COUNT: break;

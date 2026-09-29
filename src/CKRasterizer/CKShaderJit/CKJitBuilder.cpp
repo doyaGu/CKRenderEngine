@@ -62,6 +62,68 @@ bool FoldCompare(CKJitOp op, float a, float b, bool &out) {
     }
 }
 
+// One component of an operation on constant bits; false leaves it to the
+// GPU. Booleans are 0 or 1.
+bool FoldComponent(CKJitOp op, uint32_t a, uint32_t b, uint32_t &out) {
+    const int32_t x = (int32_t)a;
+    const int32_t y = (int32_t)b;
+    switch (op) {
+    case CKJIT_OP_LT:
+    case CKJIT_OP_LE:
+    case CKJIT_OP_EQ:
+    case CKJIT_OP_NE: {
+        bool result;
+        if (!FoldCompare(op, BitsFloat(a), BitsFloat(b), result))
+            return false;
+        out = result ? 1u : 0u;
+        return true;
+    }
+    case CKJIT_OP_FTOI: {
+        // Out-of-range conversions saturate on GPUs and are undefined in C++.
+        const float value = BitsFloat(a);
+        if (!Foldable(value) || value <= -2147483648.0f || value >= 2147483648.0f)
+            return false;
+        out = (uint32_t)(int32_t)value;
+        return true;
+    }
+    case CKJIT_OP_ITOF:
+        // Only exact conversions: GPUs need not round the others to nearest.
+        if (x < -16777216 || x > 16777216)
+            return false;
+        out = FloatBits((float)x);
+        return true;
+    case CKJIT_OP_IADD: out = a + b; return true;
+    case CKJIT_OP_ISUB: out = a - b; return true;
+    case CKJIT_OP_IMUL: out = a * b; return true;
+    case CKJIT_OP_IMIN: out = (uint32_t)(y < x ? y : x); return true;
+    case CKJIT_OP_IMAX: out = (uint32_t)(x < y ? y : x); return true;
+    case CKJIT_OP_IMOD: {
+        if (y <= 0)
+            return false;
+        const int32_t remainder = x % y;
+        out = (uint32_t)(remainder < 0 ? remainder + y : remainder);
+        return true;
+    }
+    case CKJIT_OP_IAND: out = a & b; return true;
+    // Shader shifts use the low five bits of the shift count.
+    case CKJIT_OP_ISHR: out = (uint32_t)(x >> (b & 31u)); return true;
+    case CKJIT_OP_ILT: out = x < y ? 1u : 0u; return true;
+    case CKJIT_OP_ILE: out = x <= y ? 1u : 0u; return true;
+    case CKJIT_OP_IEQ: out = a == b ? 1u : 0u; return true;
+    case CKJIT_OP_INE: out = a != b ? 1u : 0u; return true;
+    case CKJIT_OP_AND: out = a != 0 && b != 0 ? 1u : 0u; return true;
+    case CKJIT_OP_OR: out = a != 0 || b != 0 ? 1u : 0u; return true;
+    case CKJIT_OP_NOT: out = a == 0 ? 1u : 0u; return true;
+    default: {
+        float result;
+        if (!FoldFloat(op, BitsFloat(a), BitsFloat(b), result))
+            return false;
+        out = FloatBits(result);
+        return true;
+    }
+    }
+}
+
 int SwizzleIndex(char c) {
     switch (c) {
     case 'x': case 'r': return 0;
@@ -138,6 +200,24 @@ CKJitValue CKJitBuilder::Constant(CKJitType type, const uint32_t *bits) {
     for (uint32_t i = 0; i < CKJitComponentCount(type); ++i)
         node.Imm[i] = bits[i];
     return Emit(node);
+}
+
+CKJitValue CKJitBuilder::ConstantSplat(CKJitType type, uint32_t bits) {
+    const uint32_t components[4] = {bits, bits, bits, bits};
+    return Constant(type, components);
+}
+
+// The constant of an operation on constants, folded per component; invalid
+// when a component is left to the GPU. b is invalid for unary operations.
+CKJitValue CKJitBuilder::Fold(CKJitOp op, CKJitType type, CKJitValue a, CKJitValue b) {
+    if (!IsConstant(a) || (b.IsValid() && !IsConstant(b)))
+        return CKJitValue();
+    uint32_t bits[4] = {};
+    for (uint32_t i = 0; i < CKJitComponentCount(type); ++i) {
+        if (!FoldComponent(op, m_Nodes[a.Id].Imm[i], b.IsValid() ? m_Nodes[b.Id].Imm[i] : 0u, bits[i]))
+            return CKJitValue();
+    }
+    return Constant(type, bits);
 }
 
 CKJitValue CKJitBuilder::Float(float x) {
@@ -225,8 +305,6 @@ CKJitValue CKJitBuilder::SwizzleComponents(CKJitValue value, const uint32_t *sel
     }
     if (identity)
         return value;
-    if (!CKJitIsFloat(type))
-        return Fail();
 
     const CKJitNode node = m_Nodes[value.Id];
     uint32_t composed[4] = {};
@@ -234,7 +312,7 @@ CKJitValue CKJitBuilder::SwizzleComponents(CKJitValue value, const uint32_t *sel
     case CKJIT_OP_CONSTANT:
         for (uint32_t i = 0; i < count; ++i)
             composed[i] = node.Imm[selectors[i]];
-        return Constant(CKJitFloatType(count), composed);
+        return Constant(CKJitMakeType(type, count), composed);
     case CKJIT_OP_SWIZZLE:
         for (uint32_t i = 0; i < count; ++i)
             composed[i] = node.Imm[selectors[i]];
@@ -260,7 +338,7 @@ CKJitValue CKJitBuilder::SwizzleComponents(CKJitValue value, const uint32_t *sel
     CKJitNode swizzle;
     std::memset(&swizzle, 0, sizeof(swizzle));
     swizzle.Op = CKJIT_OP_SWIZZLE;
-    swizzle.Type = CKJitFloatType(count);
+    swizzle.Type = CKJitMakeType(type, count);
     swizzle.OperandCount = 1;
     swizzle.Operands[0] = value.Id;
     for (uint32_t i = 0; i < count; ++i)
@@ -285,7 +363,7 @@ CKJitValue CKJitBuilder::Component(CKJitValue value, uint32_t index) {
 }
 
 CKJitValue CKJitBuilder::Splat(CKJitValue scalar, uint32_t components) {
-    if (!Valid(scalar) || TypeOf(scalar) != CKJIT_TYPE_FLOAT)
+    if (!Valid(scalar) || CKJitComponentCount(TypeOf(scalar)) != 1)
         return Fail();
     static const uint32_t kZero[4] = {};
     return SwizzleComponents(scalar, kZero, components);
@@ -294,11 +372,14 @@ CKJitValue CKJitBuilder::Splat(CKJitValue scalar, uint32_t components) {
 CKJitValue CKJitBuilder::Construct(std::initializer_list<CKJitValue> parts) {
     ComponentRef refs[4];
     uint32_t count = 0;
+    CKJitType kind = CKJIT_TYPE_COUNT; // of the first part, which every part has
     for (CKJitValue part : parts) {
-        if (!Valid(part) || !CKJitIsFloat(TypeOf(part)))
+        if (!Valid(part))
             return Fail();
+        if (kind == CKJIT_TYPE_COUNT)
+            kind = CKJitScalarOf(TypeOf(part));
         const uint32_t width = CKJitComponentCount(TypeOf(part));
-        if (count + width > 4)
+        if (CKJitScalarOf(TypeOf(part)) != kind || count + width > 4)
             return Fail();
         for (uint32_t c = 0; c < width; ++c)
             refs[count++] = Source(part, c);
@@ -309,12 +390,14 @@ CKJitValue CKJitBuilder::Construct(std::initializer_list<CKJitValue> parts) {
 }
 
 // Canonical construction: one part per run of components taken in order from
-// the same value, with adjacent constant components merged.
+// the same value, with adjacent constant components merged. Every component
+// has one kind.
 CKJitValue CKJitBuilder::ConstructComponents(const ComponentRef *refs, uint32_t count) {
+    const CKJitType kind = CKJitScalarOf(m_Nodes[refs[0].Value].Type);
     CKJitNode node;
     std::memset(&node, 0, sizeof(node));
     node.Op = CKJIT_OP_CONSTRUCT;
-    node.Type = CKJitFloatType(count);
+    node.Type = CKJitMakeType(kind, count);
     for (uint32_t begin = 0; begin < count;) {
         const bool constant = m_Nodes[refs[begin].Value].Op == CKJIT_OP_CONSTANT;
         uint32_t selected[4];
@@ -325,7 +408,7 @@ CKJitValue CKJitBuilder::ConstructComponents(const ComponentRef *refs, uint32_t 
                 break;
             selected[end - begin] = constant ? m_Nodes[ref.Value].Imm[ref.Component] : ref.Component;
         }
-        const CKJitValue part = constant ? Constant(CKJitFloatType(end - begin), selected)
+        const CKJitValue part = constant ? Constant(CKJitMakeType(kind, end - begin), selected)
                                          : SwizzleComponents(CKJitValue{refs[begin].Value}, selected, end - begin);
         if (!part.IsValid())
             return part;
@@ -351,6 +434,12 @@ bool CKJitBuilder::Unify(CKJitValue &a, CKJitValue &b) {
     return a.IsValid() && b.IsValid();
 }
 
+// Both operands of the scalar kind, at one width.
+bool CKJitBuilder::Operands(CKJitType kind, CKJitValue &a, CKJitValue &b) {
+    return Valid(a) && Valid(b) && CKJitScalarOf(TypeOf(a)) == kind && CKJitScalarOf(TypeOf(b)) == kind &&
+           Unify(a, b);
+}
+
 bool CKJitBuilder::IsConstant(CKJitValue value) const {
     return Valid(value) && m_Nodes[value.Id].Op == CKJIT_OP_CONSTANT;
 }
@@ -366,25 +455,35 @@ bool CKJitBuilder::IsConstantSplat(CKJitValue value, float x) const {
     return true;
 }
 
+bool CKJitBuilder::IsConstantInt(CKJitValue value, int32_t x) const {
+    if (!IsConstant(value) || !CKJitIsInt(TypeOf(value)))
+        return false;
+    const CKJitNode &node = m_Nodes[value.Id];
+    for (uint32_t i = 0; i < CKJitComponentCount(node.Type); ++i) {
+        if ((int32_t)node.Imm[i] != x)
+            return false;
+    }
+    return true;
+}
+
 bool CKJitBuilder::IsConstantBool(CKJitValue value, bool x) const {
-    return IsConstant(value) && TypeOf(value) == CKJIT_TYPE_BOOL && (m_Nodes[value.Id].Imm[0] != 0) == x;
+    if (!IsConstant(value) || !CKJitIsBool(TypeOf(value)))
+        return false;
+    const CKJitNode &node = m_Nodes[value.Id];
+    for (uint32_t i = 0; i < CKJitComponentCount(node.Type); ++i) {
+        if ((node.Imm[i] != 0) != x)
+            return false;
+    }
+    return true;
 }
 
 CKJitValue CKJitBuilder::FloatBinary(CKJitOp op, CKJitValue a, CKJitValue b) {
-    if (!Valid(a) || !Valid(b) || !CKJitIsFloat(TypeOf(a)) || !CKJitIsFloat(TypeOf(b)) || !Unify(a, b))
+    if (!Operands(CKJIT_TYPE_FLOAT, a, b))
         return Fail();
     const CKJitType type = TypeOf(a);
-    if (IsConstant(a) && IsConstant(b)) {
-        uint32_t bits[4] = {};
-        bool folded = true;
-        for (uint32_t i = 0; i < CKJitComponentCount(type) && folded; ++i) {
-            float result;
-            folded = FoldFloat(op, BitsFloat(m_Nodes[a.Id].Imm[i]), BitsFloat(m_Nodes[b.Id].Imm[i]), result);
-            bits[i] = FloatBits(result);
-        }
-        if (folded)
-            return Constant(type, bits);
-    }
+    const CKJitValue folded = Fold(op, type, a, b);
+    if (folded.IsValid())
+        return folded;
     switch (op) {
     case CKJIT_OP_ADD:
         if (IsConstantSplat(b, 0.0f))
@@ -421,18 +520,10 @@ CKJitValue CKJitBuilder::FloatUnary(CKJitOp op, CKJitValue x) {
     if (!Valid(x) || !CKJitIsFloat(TypeOf(x)))
         return Fail();
     const CKJitType type = TypeOf(x);
+    const CKJitValue folded = Fold(op, type, x);
+    if (folded.IsValid())
+        return folded;
     const CKJitNode node = m_Nodes[x.Id];
-    if (node.Op == CKJIT_OP_CONSTANT) {
-        uint32_t bits[4] = {};
-        bool folded = true;
-        for (uint32_t i = 0; i < CKJitComponentCount(type) && folded; ++i) {
-            float result;
-            folded = FoldFloat(op, BitsFloat(node.Imm[i]), 0.0f, result);
-            bits[i] = FloatBits(result);
-        }
-        if (folded)
-            return Constant(type, bits);
-    }
     switch (op) {
     case CKJIT_OP_NEG:
         if (node.Op == CKJIT_OP_NEG)
@@ -471,8 +562,10 @@ CKJitValue CKJitBuilder::Exp2(CKJitValue x) { return FloatUnary(CKJIT_OP_EXP2, x
 CKJitValue CKJitBuilder::Sqrt(CKJitValue x) { return FloatUnary(CKJIT_OP_SQRT, x); }
 
 CKJitValue CKJitBuilder::Dot(CKJitValue a, CKJitValue b) {
-    if (!Valid(a) || !Valid(b) || TypeOf(a) != TypeOf(b) || TypeOf(a) < CKJIT_TYPE_FLOAT2)
+    if (!Valid(a) || !Valid(b) || TypeOf(a) != TypeOf(b) || !CKJitIsFloat(TypeOf(a)) ||
+        CKJitComponentCount(TypeOf(a)) < 2) {
         return Fail();
+    }
     return Emit(CKJIT_OP_DOT, CKJIT_TYPE_FLOAT, {a, b});
 }
 
@@ -490,94 +583,225 @@ CKJitValue CKJitBuilder::Exp(CKJitValue x) {
     return Exp2(Mul(x, Float(1.4426950408889634f)));
 }
 
-CKJitValue CKJitBuilder::Compare(CKJitOp op, CKJitValue a, CKJitValue b) {
-    if (!Valid(a) || !Valid(b) || TypeOf(a) != CKJIT_TYPE_FLOAT || TypeOf(b) != CKJIT_TYPE_FLOAT)
+CKJitValue CKJitBuilder::Compare(CKJitOp op, CKJitType kind, CKJitValue a, CKJitValue b) {
+    if (!Operands(kind, a, b))
         return Fail();
-    bool result;
-    if (IsConstant(a) && IsConstant(b) &&
-        FoldCompare(op, BitsFloat(m_Nodes[a.Id].Imm[0]), BitsFloat(m_Nodes[b.Id].Imm[0]), result)) {
-        return Bool(result);
-    }
-    if (op == CKJIT_OP_LT && a == b)
-        return Bool(false);
-    return Emit(op, CKJIT_TYPE_BOOL, {a, b});
-}
-
-CKJitValue CKJitBuilder::Less(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LT, a, b); }
-CKJitValue CKJitBuilder::LessEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LE, a, b); }
-CKJitValue CKJitBuilder::Greater(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LT, b, a); }
-CKJitValue CKJitBuilder::GreaterEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LE, b, a); }
-CKJitValue CKJitBuilder::Equal(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_EQ, a, b); }
-CKJitValue CKJitBuilder::NotEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_NE, a, b); }
-
-CKJitValue CKJitBuilder::FloatToInt(CKJitValue x) {
-    if (!Valid(x) || TypeOf(x) != CKJIT_TYPE_FLOAT)
-        return Fail();
-    if (IsConstant(x)) {
-        const float value = BitsFloat(m_Nodes[x.Id].Imm[0]);
-        // Out-of-range conversions saturate on GPUs and are undefined in C++.
-        if (Foldable(value) && value > -2147483648.0f && value < 2147483648.0f)
-            return Int((int32_t)value);
-    }
-    return Emit(CKJIT_OP_FTOI, CKJIT_TYPE_INT, {x});
-}
-
-CKJitValue CKJitBuilder::IntBinary(CKJitOp op, CKJitValue a, CKJitValue b) {
-    if (!Valid(a) || !Valid(b) || TypeOf(a) != CKJIT_TYPE_INT || TypeOf(b) != CKJIT_TYPE_INT)
-        return Fail();
-    if (IsConstant(a) && IsConstant(b)) {
-        const int32_t x = (int32_t)m_Nodes[a.Id].Imm[0];
-        const int32_t y = (int32_t)m_Nodes[b.Id].Imm[0];
+    const CKJitType type = CKJitBoolType(CKJitComponentCount(TypeOf(a)));
+    const CKJitValue folded = Fold(op, type, a, b);
+    if (folded.IsValid())
+        return folded;
+    // A value against itself: x < x is false even for NaN, and integers
+    // have no NaN.
+    if (a == b) {
         switch (op) {
-        case CKJIT_OP_IEQ: return Bool(x == y);
-        case CKJIT_OP_IAND: return Int(x & y);
-        // Shader shifts use the low five bits of the shift count.
-        case CKJIT_OP_ISHR: return Int(x >> (y & 31));
-        default: break;
+        case CKJIT_OP_LT:
+        case CKJIT_OP_ILT:
+        case CKJIT_OP_INE:
+            return ConstantSplat(type, 0u);
+        case CKJIT_OP_ILE:
+        case CKJIT_OP_IEQ:
+            return ConstantSplat(type, 1u);
+        default:
+            break;
         }
     }
-    if (op == CKJIT_OP_IEQ && a == b)
-        return Bool(true);
-    if (op == CKJIT_OP_IAND && a == b)
-        return a;
-    return Emit(op, op == CKJIT_OP_IEQ ? CKJIT_TYPE_BOOL : CKJIT_TYPE_INT, {a, b});
+    return Emit(op, type, {a, b});
 }
 
-CKJitValue CKJitBuilder::IntEqual(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IEQ, a, b); }
+CKJitValue CKJitBuilder::Less(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LT, CKJIT_TYPE_FLOAT, a, b); }
+CKJitValue CKJitBuilder::LessEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LE, CKJIT_TYPE_FLOAT, a, b); }
+CKJitValue CKJitBuilder::Greater(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LT, CKJIT_TYPE_FLOAT, b, a); }
+CKJitValue CKJitBuilder::GreaterEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_LE, CKJIT_TYPE_FLOAT, b, a); }
+CKJitValue CKJitBuilder::Equal(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_EQ, CKJIT_TYPE_FLOAT, a, b); }
+CKJitValue CKJitBuilder::NotEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_NE, CKJIT_TYPE_FLOAT, a, b); }
+CKJitValue CKJitBuilder::IntLess(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_ILT, CKJIT_TYPE_INT, a, b); }
+CKJitValue CKJitBuilder::IntLessEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_ILE, CKJIT_TYPE_INT, a, b); }
+CKJitValue CKJitBuilder::IntGreater(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_ILT, CKJIT_TYPE_INT, b, a); }
+CKJitValue CKJitBuilder::IntGreaterEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_ILE, CKJIT_TYPE_INT, b, a); }
+CKJitValue CKJitBuilder::IntEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_IEQ, CKJIT_TYPE_INT, a, b); }
+CKJitValue CKJitBuilder::IntNotEqual(CKJitValue a, CKJitValue b) { return Compare(CKJIT_OP_INE, CKJIT_TYPE_INT, a, b); }
+
+CKJitValue CKJitBuilder::Convert(CKJitOp op, CKJitType from, CKJitType to, CKJitValue x) {
+    if (!Valid(x) || CKJitScalarOf(TypeOf(x)) != from)
+        return Fail();
+    const CKJitType type = CKJitMakeType(to, CKJitComponentCount(TypeOf(x)));
+    const CKJitValue folded = Fold(op, type, x);
+    if (folded.IsValid())
+        return folded;
+    return Emit(op, type, {x});
+}
+
+CKJitValue CKJitBuilder::FloatToInt(CKJitValue x) { return Convert(CKJIT_OP_FTOI, CKJIT_TYPE_FLOAT, CKJIT_TYPE_INT, x); }
+CKJitValue CKJitBuilder::IntToFloat(CKJitValue x) { return Convert(CKJIT_OP_ITOF, CKJIT_TYPE_INT, CKJIT_TYPE_FLOAT, x); }
+
+CKJitValue CKJitBuilder::IntBinary(CKJitOp op, CKJitValue a, CKJitValue b) {
+    if (!Operands(CKJIT_TYPE_INT, a, b))
+        return Fail();
+    const CKJitType type = TypeOf(a);
+    const CKJitValue folded = Fold(op, type, a, b);
+    if (folded.IsValid())
+        return folded;
+    switch (op) {
+    case CKJIT_OP_IADD:
+        if (IsConstantInt(b, 0))
+            return a;
+        if (IsConstantInt(a, 0))
+            return b;
+        break;
+    case CKJIT_OP_ISUB:
+        if (IsConstantInt(b, 0))
+            return a;
+        if (a == b)
+            return ConstantSplat(type, 0u);
+        break;
+    case CKJIT_OP_IMUL:
+        if (IsConstantInt(b, 1) || IsConstantInt(a, 0))
+            return a;
+        if (IsConstantInt(a, 1) || IsConstantInt(b, 0))
+            return b;
+        break;
+    case CKJIT_OP_IMIN:
+    case CKJIT_OP_IMAX:
+        if (a == b)
+            return a;
+        break;
+    case CKJIT_OP_IMOD:
+        // The floored remainder of a power of two keeps the low bits, of
+        // negative dividends too.
+        if (IsConstant(b)) {
+            uint32_t masks[4];
+            bool powers = true;
+            for (uint32_t i = 0; i < CKJitComponentCount(type) && powers; ++i) {
+                const int32_t divisor = (int32_t)m_Nodes[b.Id].Imm[i];
+                powers = divisor > 0 && (divisor & (divisor - 1)) == 0;
+                masks[i] = (uint32_t)divisor - 1u;
+            }
+            if (powers)
+                return IntAnd(a, Constant(type, masks));
+        }
+        break;
+    case CKJIT_OP_IAND:
+        if (a == b || IsConstantInt(b, -1) || IsConstantInt(a, 0))
+            return a;
+        if (IsConstantInt(a, -1) || IsConstantInt(b, 0))
+            return b;
+        break;
+    case CKJIT_OP_ISHR:
+        if (IsConstant(b)) {
+            bool none = true;
+            for (uint32_t i = 0; i < CKJitComponentCount(type); ++i)
+                none = none && (m_Nodes[b.Id].Imm[i] & 31u) == 0;
+            if (none)
+                return a;
+        }
+        break;
+    default:
+        break;
+    }
+    return Emit(op, type, {a, b});
+}
+
+CKJitValue CKJitBuilder::IntAdd(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IADD, a, b); }
+CKJitValue CKJitBuilder::IntSub(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_ISUB, a, b); }
+CKJitValue CKJitBuilder::IntMul(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IMUL, a, b); }
+CKJitValue CKJitBuilder::IntMin(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IMIN, a, b); }
+CKJitValue CKJitBuilder::IntMax(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IMAX, a, b); }
+CKJitValue CKJitBuilder::IntMod(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IMOD, a, b); }
 CKJitValue CKJitBuilder::IntAnd(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_IAND, a, b); }
 CKJitValue CKJitBuilder::IntShiftRight(CKJitValue a, CKJitValue b) { return IntBinary(CKJIT_OP_ISHR, a, b); }
 
 CKJitValue CKJitBuilder::BoolBinary(CKJitOp op, CKJitValue a, CKJitValue b) {
-    if (!Valid(a) || !Valid(b) || TypeOf(a) != CKJIT_TYPE_BOOL || TypeOf(b) != CKJIT_TYPE_BOOL)
+    if (!Operands(CKJIT_TYPE_BOOL, a, b))
         return Fail();
+    const CKJitType type = TypeOf(a);
+    const CKJitValue folded = Fold(op, type, a, b);
+    if (folded.IsValid())
+        return folded;
     // AND absorbs false and ignores true; OR the other way around.
     const bool absorbing = op == CKJIT_OP_OR;
     if (IsConstantBool(a, absorbing) || IsConstantBool(b, !absorbing))
         return a;
     if (IsConstantBool(b, absorbing) || IsConstantBool(a, !absorbing) || a == b)
         return b;
-    return Emit(op, CKJIT_TYPE_BOOL, {a, b});
+    return Emit(op, type, {a, b});
 }
 
 CKJitValue CKJitBuilder::And(CKJitValue a, CKJitValue b) { return BoolBinary(CKJIT_OP_AND, a, b); }
 CKJitValue CKJitBuilder::Or(CKJitValue a, CKJitValue b) { return BoolBinary(CKJIT_OP_OR, a, b); }
 
 CKJitValue CKJitBuilder::Not(CKJitValue x) {
-    if (!Valid(x) || TypeOf(x) != CKJIT_TYPE_BOOL)
+    if (!Valid(x) || !CKJitIsBool(TypeOf(x)))
         return Fail();
-    if (IsConstant(x))
-        return Bool(m_Nodes[x.Id].Imm[0] == 0);
+    const CKJitValue folded = Fold(CKJIT_OP_NOT, TypeOf(x), x);
+    if (folded.IsValid())
+        return folded;
     if (IsOp(x, CKJIT_OP_NOT))
         return CKJitValue{m_Nodes[x.Id].Operands[0]};
-    return Emit(CKJIT_OP_NOT, CKJIT_TYPE_BOOL, {x});
+    return Emit(CKJIT_OP_NOT, TypeOf(x), {x});
 }
 
+// ANY is decided by a true component and ALL by a false one; the other
+// constant components and repeated ones drop out.
+CKJitValue CKJitBuilder::Reduce(CKJitOp op, CKJitValue x) {
+    if (!Valid(x) || !CKJitIsBool(TypeOf(x)))
+        return Fail();
+    const bool decisive = op == CKJIT_OP_ANY;
+    ComponentRef refs[4];
+    uint32_t count = 0;
+    for (uint32_t c = 0; c < CKJitComponentCount(TypeOf(x)); ++c) {
+        const ComponentRef ref = Source(x, c);
+        const CKJitNode &node = m_Nodes[ref.Value];
+        if (node.Op == CKJIT_OP_CONSTANT) {
+            if ((node.Imm[ref.Component] != 0) == decisive)
+                return Bool(decisive);
+            continue;
+        }
+        bool repeated = false;
+        for (uint32_t i = 0; i < count && !repeated; ++i)
+            repeated = refs[i].Value == ref.Value && refs[i].Component == ref.Component;
+        if (!repeated)
+            refs[count++] = ref;
+    }
+    if (count == 0)
+        return Bool(!decisive);
+    const CKJitValue remaining = ConstructComponents(refs, count);
+    if (!remaining.IsValid() || count == 1)
+        return remaining;
+    return Emit(op, CKJIT_TYPE_BOOL, {remaining});
+}
+
+CKJitValue CKJitBuilder::Any(CKJitValue x) { return Reduce(CKJIT_OP_ANY, x); }
+CKJitValue CKJitBuilder::All(CKJitValue x) { return Reduce(CKJIT_OP_ALL, x); }
+
 CKJitValue CKJitBuilder::Select(CKJitValue condition, CKJitValue whenTrue, CKJitValue whenFalse) {
-    if (!Valid(condition) || TypeOf(condition) != CKJIT_TYPE_BOOL || !Valid(whenTrue) || !Valid(whenFalse))
+    if (!Valid(condition) || !CKJitIsBool(TypeOf(condition)) || !Valid(whenTrue) || !Valid(whenFalse) ||
+        CKJitScalarOf(TypeOf(whenTrue)) != CKJitScalarOf(TypeOf(whenFalse)) || !Unify(whenTrue, whenFalse)) {
         return Fail();
-    if (TypeOf(whenTrue) != TypeOf(whenFalse) &&
-        (!CKJitIsFloat(TypeOf(whenTrue)) || !CKJitIsFloat(TypeOf(whenFalse)) || !Unify(whenTrue, whenFalse))) {
-        return Fail();
+    }
+    const uint32_t width = CKJitComponentCount(TypeOf(condition));
+    if (width > 1) {
+        if (CKJitComponentCount(TypeOf(whenTrue)) == 1) {
+            whenTrue = Splat(whenTrue, width);
+            whenFalse = Splat(whenFalse, width);
+        }
+        if (CKJitComponentCount(TypeOf(whenTrue)) != width)
+            return Fail();
+        // A constant condition takes every component from its side.
+        if (IsConstant(condition)) {
+            ComponentRef refs[4];
+            for (uint32_t c = 0; c < width; ++c)
+                refs[c] = Source(m_Nodes[condition.Id].Imm[c] != 0 ? whenTrue : whenFalse, c);
+            return ConstructComponents(refs, width);
+        }
+        // A splatted condition picks whole arms.
+        const ComponentRef first = Source(condition, 0);
+        bool splat = true;
+        for (uint32_t c = 1; c < width && splat; ++c) {
+            const ComponentRef ref = Source(condition, c);
+            splat = ref.Value == first.Value && ref.Component == first.Component;
+        }
+        if (splat)
+            condition = Component(CKJitValue{first.Value}, first.Component);
     }
     if (IsConstant(condition))
         return m_Nodes[condition.Id].Imm[0] != 0 ? whenTrue : whenFalse;
@@ -590,7 +814,7 @@ CKJitValue CKJitBuilder::Select(CKJitValue condition, CKJitValue whenTrue, CKJit
         return Select(condition, CKJitValue{m_Nodes[whenTrue.Id].Operands[1]}, whenFalse);
     if (IsOp(whenFalse, CKJIT_OP_SELECT) && m_Nodes[whenFalse.Id].Operands[0] == condition.Id)
         return Select(condition, whenTrue, CKJitValue{m_Nodes[whenFalse.Id].Operands[2]});
-    if (TypeOf(whenTrue) == CKJIT_TYPE_BOOL) {
+    if (CKJitIsBool(TypeOf(whenTrue))) {
         if (IsConstantBool(whenFalse, false))
             return And(condition, whenTrue);
         if (IsConstantBool(whenTrue, true))

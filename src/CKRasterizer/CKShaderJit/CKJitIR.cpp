@@ -20,15 +20,11 @@ const OpInfo kOps[] = {
 static_assert(sizeof(kOps) / sizeof(kOps[0]) == CKJIT_OP_COUNT, "op table out of sync");
 
 const char *TypeName(CKJitType type) {
-    switch (type) {
-    case CKJIT_TYPE_BOOL: return "bool";
-    case CKJIT_TYPE_INT: return "int";
-    case CKJIT_TYPE_FLOAT: return "float";
-    case CKJIT_TYPE_FLOAT2: return "float2";
-    case CKJIT_TYPE_FLOAT3: return "float3";
-    case CKJIT_TYPE_FLOAT4: return "float4";
-    }
-    return "?";
+    static const char *const kNames[] = {
+        "bool", "bool2", "bool3", "bool4", "int", "int2", "int3", "int4", "float", "float2", "float3", "float4",
+    };
+    static_assert(sizeof(kNames) / sizeof(kNames[0]) == CKJIT_TYPE_COUNT, "type names out of sync");
+    return type < CKJIT_TYPE_COUNT ? kNames[type] : "?";
 }
 
 void Append(XString &out, const char *format, ...) {
@@ -46,9 +42,9 @@ void AppendConstant(XString &out, const CKJitNode &node) {
     for (uint32_t i = 0; i < count; ++i) {
         if (i != 0)
             out << ", ";
-        if (node.Type == CKJIT_TYPE_BOOL) {
+        if (CKJitIsBool(node.Type)) {
             out << (node.Imm[i] != 0 ? "true" : "false");
-        } else if (node.Type == CKJIT_TYPE_INT) {
+        } else if (CKJitIsInt(node.Type)) {
             Append(out, "%d", (int32_t)node.Imm[i]);
         } else {
             float value;
@@ -87,7 +83,7 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
     const uint32_t count = (uint32_t)shader.Nodes.Size();
     for (uint32_t i = 0; i < count; ++i) {
         const CKJitNode &node = shader.Nodes[(int)i];
-        if (node.Op >= CKJIT_OP_COUNT || node.Type > CKJIT_TYPE_FLOAT4)
+        if (node.Op >= CKJIT_OP_COUNT || node.Type >= CKJIT_TYPE_COUNT)
             return false;
         const uint32_t operands = kOps[node.Op].Operands;
         if ((kOps[node.Op].Flags & CKJIT_OPFLAG_VARIADIC) != 0
@@ -112,7 +108,7 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
             break;
         case CKJIT_OP_SWIZZLE: {
             const CKJitType source = shader.Nodes[(int)node.Operands[0]].Type;
-            if (!CKJitIsFloat(node.Type) || !CKJitIsFloat(source))
+            if (CKJitScalarOf(node.Type) != CKJitScalarOf(source))
                 return false;
             for (uint32_t c = 0; c < CKJitComponentCount(node.Type); ++c) {
                 if (node.Imm[c] >= CKJitComponentCount(source))

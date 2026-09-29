@@ -2,9 +2,9 @@
 // takes from two up to that many operands.
 //
 // Every value is a pure function of its operands; the IR has no control flow.
-// Float operations are component-wise unless noted. Comparisons, integer and
-// boolean operations are scalar. Keep this list in sync with the operand and
-// type rules in CKJitBuilder and with every backend.
+// Operations are component-wise over operands of one type unless noted, and
+// comparisons produce BOOLs of their operands' width. Keep this list in sync
+// with the operand and type rules in CKJitBuilder and with every backend.
 
 // Leaves. CONSTANT holds the component bit patterns in Imm[0..3], INPUT the
 // shader input index in Imm[0], UNIFORM the float4 row in Imm[0].
@@ -14,7 +14,7 @@ CKJIT_OP(UNIFORM,    0, 0)
 
 // Component routing. SWIZZLE selects Imm[i] of its operand for component i
 // (a scalar operand only has component 0, so it also expresses splats).
-// CONSTRUCT concatenates the components of its operands.
+// CONSTRUCT concatenates the components of its operands, all of one kind.
 CKJIT_OP(SWIZZLE,    1, 0)
 CKJIT_OP(CONSTRUCT,  4, CKJIT_OPFLAG_VARIADIC)
 
@@ -34,25 +34,43 @@ CKJIT_OP(EXP2,       1, 0)
 CKJIT_OP(SQRT,       1, 0)
 CKJIT_OP(DOT,        2, CKJIT_OPFLAG_COMMUTATIVE)
 
-// Scalar float comparisons producing BOOL. LT, LE and EQ are ordered (false
-// when either operand is NaN); NE is unordered, like HLSL and GLSL "!=".
+// Float comparisons. LT, LE and EQ are ordered (false when either operand is
+// NaN); NE is unordered, like HLSL and GLSL "!=".
 CKJIT_OP(LT,         2, 0)
 CKJIT_OP(LE,         2, 0)
 CKJIT_OP(EQ,         2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(NE,         2, CKJIT_OPFLAG_COMMUTATIVE)
 
-// Scalar integers. FTOI truncates toward zero; ISHR is arithmetic.
+// Integers. FTOI converts floats truncating toward zero and ITOF converts
+// back. IADD, ISUB and IMUL wrap around. IMOD is the floored remainder (it has
+// the sign of the divisor), defined for positive divisors only. ISHR is
+// arithmetic and shifts by the low five bits of its count.
 CKJIT_OP(FTOI,       1, 0)
-CKJIT_OP(IEQ,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(ITOF,       1, 0)
+CKJIT_OP(IADD,       2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(ISUB,       2, 0)
+CKJIT_OP(IMUL,       2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(IMIN,       2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(IMAX,       2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(IMOD,       2, 0)
 CKJIT_OP(IAND,       2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(ISHR,       2, 0)
 
-// Booleans.
+// Integer comparisons.
+CKJIT_OP(ILT,        2, 0)
+CKJIT_OP(ILE,        2, 0)
+CKJIT_OP(IEQ,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(INE,        2, CKJIT_OPFLAG_COMMUTATIVE)
+
+// Booleans. ANY and ALL reduce a BOOL2..BOOL4 to a BOOL.
 CKJIT_OP(AND,        2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(OR,         2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(NOT,        1, 0)
+CKJIT_OP(ANY,        1, 0)
+CKJIT_OP(ALL,        1, 0)
 
-// SELECT(condition, whenTrue, whenFalse) with a scalar BOOL condition.
+// SELECT(condition, whenTrue, whenFalse): a BOOL condition picks whole arms,
+// one of the arms' width picks per component.
 CKJIT_OP(SELECT,     3, 0)
 
 // SAMPLE(coordinate, lodBias): implicit-LOD sample of sampler slot Imm[0]

@@ -145,7 +145,7 @@ void TestConstructs() {
     CKJitBuilder bad(4);
     const CKJitValue color = bad.Input(kColor);
     TestCheck(!bad.Construct({color, bad.Float(1.0f)}).IsValid(), "at most four components");
-    TestCheck(!bad.Construct({bad.Bool(true)}).IsValid(), "only floats construct");
+    TestCheck(!bad.Construct({bad.Bool(true), bad.Float(1.0f)}).IsValid(), "parts share a kind");
     TestCheck(bad.Failed(), "bad constructions fail the builder");
 }
 
@@ -176,9 +176,116 @@ void TestComparisonsAndIntegers() {
 
     CKJitBuilder bad(4);
     const CKJitValue color = bad.Input(kColor);
-    TestCheck(!bad.Less(color, color).IsValid(), "comparisons are scalar");
+    TestCheck(!bad.Less(bad.Input(kTexCoord), bad.Swizzle(color, "xyz")).IsValid(), "comparisons take one width");
     TestCheck(!bad.IntAnd(bad.Float(1.0f), bad.Int(1)).IsValid(), "integer operations take integers");
     TestCheck(bad.Failed(), "ill-typed comparisons fail the builder");
+}
+
+void TestIntegers() {
+    CKJitBuilder b(4);
+    TestCheck(Same(b.IntAdd(b.Int(0x7fffffff), b.Int(1)), b.Int((int32_t)0x80000000u)), "addition wraps");
+    TestCheck(Same(b.IntSub(b.Int(3), b.Int(5)), b.Int(-2)), "subtraction folds");
+    TestCheck(Same(b.IntMul(b.Int(0x10000), b.Int(0x10001)), b.Int(0x10000)), "multiplication keeps the low bits");
+    TestCheck(Same(b.IntMin(b.Int(-1), b.Int(1)), b.Int(-1)) && Same(b.IntMax(b.Int(-1), b.Int(1)), b.Int(1)),
+              "min and max are signed");
+    TestCheck(Same(b.IntMod(b.Int(7), b.Int(3)), b.Int(1)) && Same(b.IntMod(b.Int(-7), b.Int(3)), b.Int(2)),
+              "the remainder is floored");
+    TestCheck(IsOp(b, b.IntMod(b.Int(7), b.Int(-3)), CKJIT_OP_IMOD) && IsOp(b, b.IntMod(b.Int(7), b.Int(0)), CKJIT_OP_IMOD),
+              "remainders of other divisors are not folded");
+    TestCheck(b.IsConstantBool(b.IntLess(b.Int(-1), b.Int(0)), true), "integer comparisons are signed");
+    TestCheck(Same(b.IntToFloat(b.Int(-3)), b.Float(-3.0f)), "exact conversions fold");
+    TestCheck(IsOp(b, b.IntToFloat(b.Int(16777217)), CKJIT_OP_ITOF), "inexact conversions stay");
+
+    const CKJitValue pair = b.Construct({b.Int(1), b.Int(-2)});
+    TestCheck(IsOp(b, pair, CKJIT_OP_CONSTANT) && b.TypeOf(pair) == CKJIT_TYPE_INT2, "integer constants construct");
+    TestCheck(Same(b.FloatToInt(b.Float2(1.5f, -2.5f)), pair), "vector conversions fold per component");
+    TestCheck(Same(b.IntAdd(pair, b.Int(1)), b.Construct({b.Int(2), b.Int(-1)})), "a scalar integer splats");
+    TestCheck(Same(b.Swizzle(pair, "yx"), b.Construct({b.Int(-2), b.Int(1)})), "integer swizzles fold");
+
+    const CKJitValue lanes = b.FloatToInt(b.Swizzle(b.Input(kColor), "xy"));
+    TestCheck(b.TypeOf(lanes) == CKJIT_TYPE_INT2 && b.TypeOf(b.IntToFloat(lanes)) == CKJIT_TYPE_FLOAT2,
+              "conversions keep the width");
+    TestCheck(Same(b.IntAdd(lanes, b.Int(0)), lanes) && Same(b.IntSub(lanes, b.Int(0)), lanes), "x + 0 and x - 0");
+    TestCheck(b.IsConstantInt(b.IntSub(lanes, lanes), 0), "x - x");
+    TestCheck(Same(b.IntMul(lanes, b.Int(1)), lanes) && b.IsConstantInt(b.IntMul(b.Int(0), lanes), 0),
+              "x * 1 and x * 0");
+    TestCheck(Same(b.IntMin(lanes, lanes), lanes) && Same(b.IntMax(lanes, lanes), lanes), "min and max of one value");
+    TestCheck(Same(b.IntAnd(lanes, b.Int(-1)), lanes) && b.IsConstantInt(b.IntAnd(lanes, b.Int(0)), 0),
+              "and with all bits and none");
+    TestCheck(Same(b.IntShiftRight(lanes, b.Int(32)), lanes), "a shift by 32 is none");
+    TestCheck(Same(b.IntAdd(lanes, b.Int(2)), b.IntAdd(b.Int(2), lanes)), "integer addition is commutative");
+    TestCheck(Same(b.IntMod(lanes, b.Int(8)), b.IntAnd(lanes, b.Int(7))), "a power-of-two remainder is a mask");
+    TestCheck(IsOp(b, b.IntMod(lanes, b.Construct({b.Int(4), b.Int(6)})), CKJIT_OP_IMOD),
+              "a mask needs a power of two in every component");
+
+    const CKJitValue less = b.IntLess(lanes, b.Int(3));
+    TestCheck(IsOp(b, less, CKJIT_OP_ILT) && b.TypeOf(less) == CKJIT_TYPE_BOOL2, "integer comparisons keep the width");
+    TestCheck(Same(b.IntGreater(lanes, b.Int(3)), b.IntLess(b.Int(3), lanes)) &&
+                  Same(b.IntGreaterEqual(lanes, b.Int(3)), b.IntLessEqual(b.Int(3), lanes)),
+              "greater comparisons swap their operands");
+    TestCheck(b.IsConstantBool(b.IntLessEqual(lanes, lanes), true) && b.IsConstantBool(b.IntLess(lanes, lanes), false) &&
+                  b.IsConstantBool(b.IntNotEqual(lanes, lanes), false),
+              "integers against themselves fold");
+    TestCheck(!b.Failed(), "integer vectors are well typed");
+
+    CKJitBuilder bad(4);
+    const CKJitValue ints = bad.FloatToInt(bad.Input(kColor));
+    TestCheck(!bad.IntAdd(ints, bad.FloatToInt(bad.Input(kTexCoord))).IsValid(), "integer vectors share a width");
+    TestCheck(!bad.IntToFloat(bad.Float(1.0f)).IsValid(), "only integers convert to floats");
+    TestCheck(!bad.Add(ints, ints).IsValid(), "float arithmetic takes floats");
+    TestCheck(bad.Failed(), "ill-typed integers fail the builder");
+}
+
+void TestVectorBooleans() {
+    CKJitBuilder b(4);
+    const CKJitValue v = b.Input(kColor);
+    const CKJitValue other = b.Uniform(0);
+    const CKJitValue less = b.Less(v, other);
+    TestCheck(IsOp(b, less, CKJIT_OP_LT) && b.TypeOf(less) == CKJIT_TYPE_BOOL4, "vector comparisons are component-wise");
+    TestCheck(b.TypeOf(b.Less(v, b.Float(0.5f))) == CKJIT_TYPE_BOOL4, "a scalar splats against a vector");
+    TestCheck(Same(b.Less(b.Float2(1.0f, 3.0f), b.Float2(2.0f, 2.0f)), b.Construct({b.Bool(true), b.Bool(false)})),
+              "vector comparisons fold per component");
+    TestCheck(b.IsConstantBool(b.Less(v, v), false), "x < x is false in every component");
+    TestCheck(b.TypeOf(b.Not(less)) == CKJIT_TYPE_BOOL4 && Same(b.Not(b.Not(less)), less), "not is component-wise");
+    TestCheck(Same(b.And(less, b.Bool(true)), less), "a scalar boolean splats against a vector");
+
+    const CKJitValue x = b.Component(less, 0);
+    const CKJitValue y = b.Component(less, 1);
+    TestCheck(IsOp(b, b.Any(less), CKJIT_OP_ANY) && b.TypeOf(b.Any(less)) == CKJIT_TYPE_BOOL &&
+                  IsOp(b, b.All(less), CKJIT_OP_ALL),
+              "any and all reduce to a bool");
+    TestCheck(Same(b.Any(x), x) && Same(b.All(x), x), "a scalar reduces to itself");
+    TestCheck(b.IsConstantBool(b.Any(b.Construct({x, b.Bool(true)})), true), "a true component decides any");
+    TestCheck(b.IsConstantBool(b.All(b.Construct({x, b.Bool(false)})), false), "a false component decides all");
+    TestCheck(Same(b.Any(b.Construct({x, b.Bool(false)})), x), "false components drop out of any");
+    TestCheck(Same(b.All(b.Construct({b.Bool(true), y, y})), y), "repeated components drop out");
+    TestCheck(Same(b.Any(b.Construct({x, y, x})), b.Any(b.Swizzle(less, "xy"))), "any is over the distinct components");
+    TestCheck(b.IsConstantBool(b.All(b.Construct({b.Bool(true), b.Bool(true)})), true), "all of true is true");
+
+    const CKJitValue picked = b.Select(less, v, other);
+    TestCheck(IsOp(b, picked, CKJIT_OP_SELECT) && b.TypeOf(picked) == CKJIT_TYPE_FLOAT4,
+              "a vector condition selects per component");
+    TestCheck(b.TypeOf(b.Select(less, b.Float(1.0f), b.Float(0.0f))) == CKJIT_TYPE_FLOAT4,
+              "scalar arms splat to the condition");
+    const CKJitValue mask = b.Construct({b.Bool(true), b.Bool(false), b.Bool(false), b.Bool(true)});
+    TestCheck(Same(b.Select(mask, v, other),
+                   b.Construct({b.Component(v, 0), b.Swizzle(other, "yz"), b.Component(v, 3)})),
+              "a constant condition picks each component");
+    const CKJitValue c = b.Less(b.Component(v, 3), b.Float(0.5f));
+    TestCheck(Same(b.Select(b.Splat(c, 4), v, other), b.Select(c, v, other)), "a splatted condition picks whole arms");
+    TestCheck(Same(b.Select(b.Not(less), other, v), picked), "negated vector conditions swap the arms");
+    const CKJitValue greater = b.Less(other, v);
+    TestCheck(Same(b.Select(less, b.Bool(true), greater), b.Or(less, greater)), "boolean arms fold per component");
+    TestCheck(!b.Failed(), "vector booleans are well typed");
+
+    CKJitBuilder bad(4);
+    const CKJitValue color = bad.Input(kColor);
+    const CKJitValue wide = bad.Less(color, bad.Uniform(0));
+    const CKJitValue uv = bad.Input(kTexCoord);
+    TestCheck(!bad.Select(wide, uv, uv).IsValid(), "arms have the condition's width");
+    TestCheck(!bad.And(wide, bad.Less(uv, bad.Float(0.0f))).IsValid(), "boolean vectors share a width");
+    TestCheck(!bad.Any(color).IsValid(), "any takes booleans");
+    TestCheck(bad.Failed(), "ill-typed booleans fail the builder");
 }
 
 void TestBooleansAndSelects() {
@@ -346,7 +453,7 @@ void TestVerify() {
               "constructs have at least two parts");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].Op = CKJIT_OP_COUNT; }),
               "operations are known");
-    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].Type = (CKJitType)6; }),
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].Type = CKJIT_TYPE_COUNT; }),
               "types are known");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[input].Imm[0] = 2; }),
               "inputs are declared");
@@ -358,6 +465,8 @@ void TestVerify() {
               "uniform rows are in the block");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[swizzle].Imm[0] = 4; }),
               "swizzles select existing components");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[swizzle].Type = CKJIT_TYPE_INT3; }),
+              "swizzles keep their operand's kind");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[0] = CKJIT_MAX_SAMPLERS; }),
               "sampler slots are bounded");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[1] = 3; }),
@@ -412,6 +521,8 @@ int main() {
     framework.Run("swizzles", TestSwizzles);
     framework.Run("constructs", TestConstructs);
     framework.Run("comparisons and integers", TestComparisonsAndIntegers);
+    framework.Run("integers", TestIntegers);
+    framework.Run("vector booleans", TestVectorBooleans);
     framework.Run("booleans and selects", TestBooleansAndSelects);
     framework.Run("samples and inputs", TestSamplesAndInputs);
     framework.Run("finish", TestFinish);

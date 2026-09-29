@@ -19,8 +19,16 @@ enum : uint32_t {
     DxbcOpExp = 25,
     DxbcOpFtoi = 27,
     DxbcOpGe = 29,
+    DxbcOpIadd = 30,
     DxbcOpIeq = 32,
+    DxbcOpIge = 33,
+    DxbcOpIlt = 34,
+    DxbcOpImax = 36,
+    DxbcOpImin = 37,
+    DxbcOpImul = 38,
+    DxbcOpIne = 39,
     DxbcOpIshr = 42,
+    DxbcOpItof = 43,
     DxbcOpLt = 49,
     DxbcOpMin = 51,
     DxbcOpMax = 52,
@@ -36,6 +44,8 @@ enum : uint32_t {
     DxbcOpSample = 69,
     DxbcOpSampleB = 74,
     DxbcOpSqrt = 75,
+    DxbcOpUdiv = 78,
+    DxbcOpXor = 87,
     DxbcOpDclResource = 88,
     DxbcOpDclConstantBuffer = 89,
     DxbcOpDclSampler = 90,
@@ -73,6 +83,7 @@ enum : uint32_t {
     DxbcOperandSampler = 6u << 12,
     DxbcOperandResource = 7u << 12,
     DxbcOperandConstantBuffer = 8u << 12,
+    DxbcOperandNull = 13u << 12, // a discarded result: no components, no index
     DxbcIndex1D = 1u << 20,
     DxbcIndex2D = 2u << 20,
     DxbcIndex3D = 3u << 20,
@@ -145,6 +156,29 @@ DxbcValue Negated(DxbcValue value) {
     return value;
 }
 
+// Integer instructions negate a register operand in two's complement.
+DxbcValue IntNegated(DxbcValue value) {
+    if (value.File == DxbcOperandImmediate32) {
+        for (uint32_t k = 0; k < value.Count; ++k)
+            value.Bits[k] = 0u - value.Bits[k];
+    } else {
+        value.Modifier ^= DxbcModifierNeg;
+    }
+    return value;
+}
+
+DxbcValue Immediate(uint32_t count, uint32_t bits) {
+    DxbcValue value;
+    std::memset(&value, 0, sizeof(value));
+    value.File = DxbcOperandImmediate32;
+    value.Count = count;
+    for (uint32_t k = 0; k < 4; ++k) {
+        value.Lanes[k] = k;
+        value.Bits[k] = bits;
+    }
+    return value;
+}
+
 DxbcValue Absolute(DxbcValue value) {
     if (value.File == DxbcOperandImmediate32) {
         for (uint32_t k = 0; k < value.Count; ++k)
@@ -174,6 +208,13 @@ DxbcReads Broadcast(const DxbcValue &dest) {
     DxbcReads reads = {{-1, -1, -1, -1}};
     for (uint32_t k = 0; k < dest.Count; ++k)
         reads.Components[dest.Lanes[k]] = 0;
+    return reads;
+}
+
+// Position dest.Lanes[0] reads component k: one component of a vector.
+DxbcReads Single(const DxbcValue &dest, uint32_t k) {
+    DxbcReads reads = {{-1, -1, -1, -1}};
+    reads.Components[dest.Lanes[0]] = (int)k;
     return reads;
 }
 
@@ -321,7 +362,10 @@ private:
     void Source(const DxbcValue &value, const DxbcReads &reads);
     void Unary(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a);
     void Binary(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b);
+    void Paired(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b);
     void Dot(const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b);
+    void Modulo(const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b);
+    void Reduce(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a);
     void Construct(const CKJitNode &node, const DxbcValue &dest);
     void Select(const CKJitNode &node, const DxbcValue &dest);
     void Sample(const CKJitNode &node, const DxbcValue &dest);
@@ -423,7 +467,7 @@ DxbcValue DxbcEmitter::View(const CKJitNode &node) const {
     case CKJIT_OP_CONSTANT:
         value.File = DxbcOperandImmediate32;
         for (uint32_t k = 0; k < value.Count; ++k)
-            value.Bits[k] = node.Type == CKJIT_TYPE_BOOL ? (node.Imm[0] != 0 ? 0xffffffffu : 0u) : node.Imm[k];
+            value.Bits[k] = CKJitIsBool(node.Type) ? (node.Imm[k] != 0 ? 0xffffffffu : 0u) : node.Imm[k];
         return value;
     case CKJIT_OP_INPUT:
         value.File = DxbcOperandInput;
@@ -545,6 +589,17 @@ void DxbcEmitter::Binary(uint32_t opcode, const DxbcValue &dest, const DxbcValue
     m_Code.Close();
 }
 
+// imul and udiv write two results; the first, the high product or the
+// quotient, is discarded.
+void DxbcEmitter::Paired(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b) {
+    m_Code.Open(opcode);
+    m_Code.Token(DxbcOperandNull);
+    Dest(dest);
+    Source(a, ComponentWise(dest));
+    Source(b, ComponentWise(dest));
+    m_Code.Close();
+}
+
 void DxbcEmitter::Dot(const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b) {
     static const uint32_t kDots[] = {DxbcOpMul, DxbcOpDp2, DxbcOpDp3, DxbcOpDp4};
     m_Code.Open(kDots[a.Count - 1]);
@@ -552,6 +607,35 @@ void DxbcEmitter::Dot(const DxbcValue &dest, const DxbcValue &a, const DxbcValue
     Source(a, Leading(a.Count));
     Source(b, Leading(a.Count));
     m_Code.Close();
+}
+
+// Shader model 5 only divides unsigned values, so the remainder is taken of
+// non-negative ones. With m = a >> 31, 0 or all ones, the floored a mod b is
+// ((a ^ m) urem b ^ m) + (b & m). The integer result is never the output, so
+// the destination holds the intermediate values.
+void DxbcEmitter::Modulo(const DxbcValue &dest, const DxbcValue &a, const DxbcValue &b) {
+    DxbcValue sign = dest;
+    sign.Index = m_Temps.Allocate(dest.Count, sign.Lanes);
+    Binary(DxbcOpIshr, sign, a, Immediate(dest.Count, 31));
+    Binary(DxbcOpXor, dest, a, sign);
+    Paired(DxbcOpUdiv, dest, dest, b);
+    Binary(DxbcOpXor, dest, dest, sign);
+    Binary(DxbcOpAnd, sign, b, sign);
+    Binary(DxbcOpIadd, dest, dest, sign);
+    m_Temps.Release(sign.Index, LaneMask(sign));
+}
+
+// A chain of ors or ands folds every component into the scalar destination.
+void DxbcEmitter::Reduce(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a) {
+    const DxbcValue *folded = &a;
+    for (uint32_t k = 1; k < a.Count; ++k) {
+        m_Code.Open(opcode);
+        Dest(dest);
+        Source(*folded, Single(dest, 0));
+        Source(a, Single(dest, k));
+        m_Code.Close();
+        folded = &dest;
+    }
 }
 
 // One move per part, into its components of the destination.
@@ -569,9 +653,10 @@ void DxbcEmitter::Construct(const CKJitNode &node, const DxbcValue &dest) {
 }
 
 void DxbcEmitter::Select(const CKJitNode &node, const DxbcValue &dest) {
+    const DxbcValue &condition = m_Values[(int)node.Operands[0]];
     m_Code.Open(DxbcOpMovc);
     Dest(dest);
-    Source(m_Values[(int)node.Operands[0]], Broadcast(dest));
+    Source(condition, condition.Count == 1 ? Broadcast(dest) : ComponentWise(dest));
     Source(m_Values[(int)node.Operands[1]], ComponentWise(dest));
     Source(m_Values[(int)node.Operands[2]], ComponentWise(dest));
     m_Code.Close();
@@ -655,20 +740,34 @@ void DxbcEmitter::Translate(uint32_t index) {
     case CKJIT_OP_EQ: Binary(DxbcOpEq, dest, a, b); break;
     case CKJIT_OP_NE: Binary(DxbcOpNe, dest, a, b); break;
     case CKJIT_OP_FTOI: Unary(DxbcOpFtoi, dest, a); break;
-    case CKJIT_OP_IEQ: Binary(DxbcOpIeq, dest, a, b); break;
+    case CKJIT_OP_ITOF: Unary(DxbcOpItof, dest, a); break;
+    case CKJIT_OP_IADD: Binary(DxbcOpIadd, dest, a, b); break;
+    case CKJIT_OP_ISUB: Binary(DxbcOpIadd, dest, a, IntNegated(b)); break;
+    case CKJIT_OP_IMUL: Paired(DxbcOpImul, dest, a, b); break;
+    case CKJIT_OP_IMIN: Binary(DxbcOpImin, dest, a, b); break;
+    case CKJIT_OP_IMAX: Binary(DxbcOpImax, dest, a, b); break;
+    case CKJIT_OP_IMOD: Modulo(dest, a, b); break;
     case CKJIT_OP_IAND: Binary(DxbcOpAnd, dest, a, b); break;
     case CKJIT_OP_ISHR: {
         // The hardware shifts by the low five bits; constant counts are
         // stored that way, as FXC folds them.
         DxbcValue count = b;
-        if (count.File == DxbcOperandImmediate32)
-            count.Bits[0] &= 31u;
+        if (count.File == DxbcOperandImmediate32) {
+            for (uint32_t k = 0; k < count.Count; ++k)
+                count.Bits[k] &= 31u;
+        }
         Binary(DxbcOpIshr, dest, a, count);
         break;
     }
+    case CKJIT_OP_ILT: Binary(DxbcOpIlt, dest, a, b); break;
+    case CKJIT_OP_ILE: Binary(DxbcOpIge, dest, b, a); break;
+    case CKJIT_OP_IEQ: Binary(DxbcOpIeq, dest, a, b); break;
+    case CKJIT_OP_INE: Binary(DxbcOpIne, dest, a, b); break;
     case CKJIT_OP_AND: Binary(DxbcOpAnd, dest, a, b); break;
     case CKJIT_OP_OR: Binary(DxbcOpOr, dest, a, b); break;
     case CKJIT_OP_NOT: Unary(DxbcOpNot, dest, a); break;
+    case CKJIT_OP_ANY: Reduce(DxbcOpOr, dest, a); break;
+    case CKJIT_OP_ALL: Reduce(DxbcOpAnd, dest, a); break;
     case CKJIT_OP_SELECT: Select(node, dest); break;
     case CKJIT_OP_SAMPLE: Sample(node, dest); break;
     default: break; // leaves and views are handled above

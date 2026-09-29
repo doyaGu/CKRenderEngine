@@ -23,6 +23,7 @@ enum {
     kOpTypeVoid = 19,
     kOpTypeBool = 20,
     kOpTypeInt = 21,
+    kOpTypeFloat = 22,
     kOpTypeFunction = 33,
     kOpTypeVector = 23,
     kOpTypeImage = 25,
@@ -36,10 +37,24 @@ enum {
     kOpAccessChain = 65,
     kOpDecorate = 71,
     kOpMemberDecorate = 72,
+    kOpCompositeConstruct = 80,
     kOpImageSampleImplicitLod = 87,
-    kOpFOrdLessThan = 184,
+    kOpConvertFToS = 110,
+    kOpConvertSToF = 111,
+    kOpIAdd = 128,
+    kOpISub = 130,
+    kOpIMul = 132,
+    kOpSRem = 138,
+    kOpSMod = 139,
+    kOpAny = 154,
+    kOpAll = 155,
     kOpSelect = 169,
+    kOpINotEqual = 171,
+    kOpSLessThan = 177,
+    kOpSLessThanEqual = 179,
+    kOpFOrdLessThan = 184,
     kOpShiftRightArithmetic = 195,
+    kOpBitwiseXor = 198,
     kOpBitwiseAnd = 199,
     kOpSelectionMerge = 247,
     kOpLabel = 248,
@@ -70,6 +85,8 @@ enum {
     kGlslFloor = 8,
     kGlslExp2 = 29,
     kGlslSqrt = 31,
+    kGlslSMin = 39,
+    kGlslSMax = 42,
     kGlslFClamp = 43,
     kGlslNMin = 79,
     kGlslNMax = 80,
@@ -154,6 +171,22 @@ public:
         return Count(kOpConstant, {TypeId(kOpTypeInt, {kAny, 32, 1}), id, value}) == 1;
     }
 
+    // Whether id is an integer constant, or a composite of them, with every
+    // component within [low, high].
+    bool IsIntConstantWithin(uint32_t id, uint32_t low, uint32_t high) const {
+        const int scalar = Find(kOpConstant, {TypeId(kOpTypeInt, {kAny, 32, 1}), id});
+        if (scalar >= 0)
+            return m_Instructions[scalar].Operands[2] >= low && m_Instructions[scalar].Operands[2] <= high;
+        const int composite = Find(kOpConstantComposite, {kAny, id});
+        if (composite < 0)
+            return false;
+        for (uint32_t i = 2; i < m_Instructions[composite].Count; ++i) {
+            if (!IsIntConstantWithin(m_Instructions[composite].Operands[i], low, high))
+                return false;
+        }
+        return true;
+    }
+
     uint32_t GlslImport() const { return TypeId(kOpExtInstImport, {}); }
 
     int CountGlsl(uint32_t instruction) const {
@@ -217,9 +250,21 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue notEqual = b.NotEqual(spot, b.Component(tint, 2));
     const CKJitValue picked = b.Select(less, equal, notEqual);
     const CKJitValue mask = b.Select(lessEqual, shifted, b.Int(7));
-    const CKJitValue condition = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
+
+    const CKJitValue texel = b.FloatToInt(b.Swizzle(position, "xy"));
+    const CKJitValue extent = b.IntMax(b.FloatToInt(b.Swizzle(tint, "xy")), b.Int(1));
+    const CKJitValue wrapped = b.IntMod(b.IntAdd(b.IntMul(texel, extent), b.Int(3)), extent);
+    const CKJitValue offset = b.IntMin(b.IntSub(wrapped, texel), b.Int(255));
+    const CKJitValue inside = b.All(b.IntLessEqual(offset, extent));
+    const CKJitValue moved = b.Any(b.IntNotEqual(offset, texel));
+    const CKJitValue low = b.IntLess(b.Component(wrapped, 0), b.Int(16));
+
+    const CKJitValue flags = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
+    const CKJitValue condition = b.Or(flags, b.And(b.And(inside, moved), low));
     const CKJitValue alpha = b.Select(condition, shade, spot);
-    color = b.Mul(b.Select(condition, assembled, rounded), alpha);
+    const CKJitValue ramp = b.Construct({b.IntToFloat(offset), b.Swizzle(rounded, "zw")});
+    const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
+    color = b.Mul(b.Select(condition, graded, rounded), alpha);
     discard = b.Less(b.Component(color, 3), b.Component(position, 2));
 }
 
@@ -364,21 +409,35 @@ void TestLowering() {
     TestCheck(unbiased == 1 && biased == 2, "a zero bias is omitted, others are Bias operands");
 
     const uint32_t boolType = module.TypeId(kOpTypeBool, {});
-    TestCheck(module.Count(kOpSelect) == 4, "every select is one instruction");
-    TestCheck(module.Count(kOpTypeVector, {kAny, boolType, 4}) == 1, "a vector select splats its condition");
+    const uint32_t bool4Type = module.TypeId(kOpTypeVector, {kAny, boolType, 4});
+    TestCheck(module.Count(kOpSelect) == 5, "every select is one instruction");
+    TestCheck(module.Count(kOpCompositeConstruct, {bool4Type}) == 1, "a scalar condition splats against vector arms");
+    const int wide = module.Find(kOpFOrdLessThan, {bool4Type});
+    TestCheck(wide >= 0 && module.Count(kOpSelect, {kAny, kAny, module[wide].Operands[1]}) == 1,
+              "a vector condition selects per component");
 
-    int masked = 0;
+    TestCheck(module.Count(kOpIAdd) == 2 && module.Count(kOpISub) == 1 && module.Count(kOpIMul) == 1 &&
+                  module.CountGlsl(kGlslSMin) == 1 && module.CountGlsl(kGlslSMax) == 1 &&
+                  module.Count(kOpConvertSToF) == 1,
+              "integer arithmetic maps to single instructions");
+    TestCheck(module.Count(kOpSLessThan) == 1 && module.Count(kOpSLessThanEqual) == 1 &&
+                  module.Count(kOpINotEqual) == 1 && module.Count(kOpAny) == 1 && module.Count(kOpAll) == 1,
+              "integer comparisons and reductions map to single instructions");
+    TestCheck(module.Count(kOpSRem) == 1 && module.Count(kOpSMod) == 0 && module.Count(kOpBitwiseXor) == 2,
+              "the remainder divides non-negative values");
+
+    int shifts = 0, masked = 0;
     for (int i = 0; i < module.Size(); ++i) {
         if (module[i].Opcode != kOpShiftRightArithmetic)
             continue;
+        ++shifts;
         const uint32_t count = module[i].Operands[3];
-        if (module.IsIntConstant(count, 1))
-            ++masked;
-        else if (module.Count(kOpBitwiseAnd, {kAny, count}) == 1 &&
-                 module.IsIntConstant(module[module.Find(kOpBitwiseAnd, {kAny, count})].Operands[3], 31))
+        const int mask = module.Find(kOpBitwiseAnd, {kAny, count});
+        if (module.IsIntConstantWithin(count, 0, 31) ||
+            (mask >= 0 && module.IsIntConstantWithin(module[mask].Operands[3], 31, 31)))
             ++masked;
     }
-    TestCheck(masked == 2, "shift counts use their low five bits");
+    TestCheck(shifts == 3 && masked == 3, "shift counts use their low five bits");
 
     // The discard branches around a kill after every sample.
     const int branch = module.Find(kOpBranchConditional);
@@ -396,6 +455,58 @@ void TestLowering() {
             lastSample = i;
     }
     TestCheck(lastSample < branch, "every sample runs before the discard");
+}
+
+void TestIntegerLowering() {
+    CKJitBuilder b(4);
+    const CKJitValue position = b.Input(kFragCoord);
+    const CKJitValue params = b.Uniform(0);
+    const CKJitValue texel = b.FloatToInt(b.Swizzle(position, "xyz"));
+    const CKJitValue extent = b.FloatToInt(b.Swizzle(params, "xyz"));
+    const CKJitValue wrapped = b.IntMod(texel, extent);
+    const CKJitValue bound = b.IntSub(texel, b.Int(5));
+    const CKJitValue inside = b.All(b.IntLess(wrapped, bound));
+    const CKJitValue scaled = b.IntMul(texel, b.Int(3));
+    const CKJitValue ramp = b.IntToFloat(b.IntSub(wrapped, scaled));
+    const CKJitValue color = b.Select(inside, b.Construct({ramp, b.Float(1.0f)}), b.Uniform(1));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, CKJitValue(), words), "integer work compiles");
+    Save("integer_lowering", words);
+
+    const Module module(words);
+    const uint32_t intType = module.TypeId(kOpTypeInt, {kAny, 32, 1});
+    const uint32_t int3Type = module.TypeId(kOpTypeVector, {kAny, intType, 3});
+    TestCheck(int3Type != 0 && module.Count(kOpTypeVector, {kAny, intType}) == 1, "integer vectors are vector types");
+    TestCheck(module.Count(kOpConvertSToF, {module.TypeId(kOpTypeVector, {kAny, module.TypeId(kOpTypeFloat, {}), 3})}) == 1,
+              "conversions keep the width");
+
+    // sign = a >> 31; ((a ^ sign) rem b ^ sign) + (b & sign)
+    const int remainder = module.Find(kOpSRem, {int3Type});
+    TestCheck(remainder >= 0, "the remainder is an integer vector");
+    if (remainder < 0)
+        return;
+    const uint32_t divisor = module[remainder].Operands[3];
+    const int magnitude = module.Find(kOpBitwiseXor, {int3Type, module[remainder].Operands[2]});
+    TestCheck(magnitude >= 0, "the dividend is made non-negative");
+    if (magnitude < 0)
+        return;
+    const uint32_t dividend = module[magnitude].Operands[2];
+    const uint32_t sign = module[magnitude].Operands[3];
+    TestCheck(module.Count(kOpConvertFToS, {int3Type, dividend}) == 1 && module.Count(kOpConvertFToS, {int3Type, divisor}) == 1,
+              "the operands are the converted values");
+    const int shift = module.Find(kOpShiftRightArithmetic, {int3Type, sign, dividend});
+    TestCheck(shift >= 0 && module.IsIntConstantWithin(module[shift].Operands[3], 31, 31),
+              "the sign mask is the dividend shifted by 31");
+    const int restored = module.Find(kOpBitwiseXor, {int3Type, kAny, module[remainder].Operands[1], sign});
+    const int offset = module.Find(kOpBitwiseAnd, {int3Type, kAny, divisor, sign});
+    TestCheck(restored >= 0 && offset >= 0 &&
+                  module.Count(kOpIAdd, {int3Type, kAny, module[restored].Operands[1], module[offset].Operands[1]}) == 1,
+              "a negative dividend takes the divisor's complement");
+
+    const int less = module.Find(kOpSLessThan);
+    TestCheck(less >= 0 && module.Count(kOpAll, {module.TypeId(kOpTypeBool, {}), kAny, module[less].Operands[1]}) == 1,
+              "all reduces the comparison");
+    TestCheck(module.Count(kOpISub) == 2 && module.Count(kOpIMul) == 1, "subtraction and multiplication are direct");
 }
 
 void TestDeclarationsAreUnique() {
@@ -466,6 +577,7 @@ int main(int argc, char **argv) {
     framework.Run("interface", TestInterface);
     framework.Run("resources", TestResources);
     framework.Run("lowering", TestLowering);
+    framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("declarations are unique", TestDeclarationsAreUnique);
     framework.Run("constant outputs", TestConstantOutputs);
     framework.Run("rejects", TestRejects);
