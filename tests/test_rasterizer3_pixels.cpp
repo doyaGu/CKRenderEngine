@@ -4317,6 +4317,11 @@ int main(int argc, char **argv)
         printf("SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the real-backend pixel gate.\n");
         return 77;
     }
+#ifdef CKRE_PIXEL_SDL_GPU
+    // Earlier runs must not decide what the cases compile, so they use no
+    // compiled program manifest unless one is named.
+    SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", "0", 0);
+#endif
 
     TestFramework tests;
     tests.Run("backend renders the fixed-function semantics through the private interface",

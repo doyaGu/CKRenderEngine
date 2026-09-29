@@ -23,6 +23,8 @@
 #include <cstring>
 #include <memory>
 
+class CKSdlGpuJob;
+
 template<int Count>
 struct CKSdlGpuFixedKey {
     CKDWORD Values[Count] = {};
@@ -169,6 +171,9 @@ struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     // Fallback's pipelines until the worker has created its own; a null
     // entry in Pipelines marks one that is pending or failed.
     std::shared_ptr<CKSdlGpuProgram> Fallback;
+    // The jobs of pending pipelines queued at idle priority, promoted when a
+    // draw comes to wait for one. They are only compared.
+    XSHashTable<CKSdlGpuJob *, CKSdlGpuPipelineKey, CKSdlGpuFixedKeyHash<11>> IdlePipelines;
 };
 struct CKSdlGpuTarget {
     CKRenderTargetDesc Desc;

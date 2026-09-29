@@ -13,6 +13,7 @@
 #include "CKFFContextState.h"
 #include "CKFFResourceStore.h"
 #include "CKFFShaderCache.h"
+#include "CKSdlGpuFFJitManifest.h"
 #include "CKSdlGpuPresentStage.h"
 #include "CKSdlGpuShaders.h"
 #include "XSHashTable.h"
@@ -352,7 +353,9 @@ private:
 
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
     // A program of a native artifact is compiled once on the worker; its
-    // draws use the precompiled program until the result is collected.
+    // draws use the precompiled program until the result is collected. The
+    // manifest of the device queues the programs and pipelines of earlier
+    // runs at idle priority before any draw asks for them.
     class FFJitJob;
     typedef CKSdlGpuFixedKey<CKFF_FRAGMENT_PROGRAM_LANE_COUNT + 1> FFJitKey;
     struct FFJitProgram {
@@ -360,8 +363,19 @@ private:
         Status State = QUEUED;
         CKDWORD PixelShader = 0;
         CKDWORD Programs[CKFF_PROGRAM_VARIANT_COUNT] = {};
+        // Orders the manifest: the programs draws used, by first use, then
+        // the loaded ones no draw used, in their earlier order.
+        CKDWORD Rank = 0;
+        // A loaded program's compilation, promoted when a draw uses it.
+        CKSdlGpuJob *IdleJob = nullptr;
+        // The loaded pipelines to queue once the program is compiled.
+        XArray<CKSdlGpuFFJitRecord> Prewarm;
     };
     void InitFFJit();
+    void LoadFFJitManifest();
+    void PrewarmFFJitProgram(FFJitProgram &Entry);
+    // Records the compiled programs and their pipelines for the next run.
+    void SaveFFJitManifest();
     CKDWORD ResolveFFJitProgram(const CKFFFragmentProgram &FragmentProgram,
                                 CKFFSamplerLayout Layout,
                                 CKFFProgramVariant Variant,
@@ -412,6 +426,10 @@ private:
         m_FFJitPrograms;
     // DXBC programs cannot use the DXIL vertex shaders.
     CKDWORD m_FFJitVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
+    // Empty when the manifest is disabled.
+    XString m_FFJitManifest;
+    uint64_t m_FFJitIdentity = 0;
+    CKDWORD m_FFJitUses = 0;
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKSdlGpuPresentStage m_Present;
     // Verbatim fixed-function state mirror.

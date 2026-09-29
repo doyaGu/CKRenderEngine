@@ -242,6 +242,7 @@ CKBOOL CKSdlGpuRasterizerContext::BeginShutdown()
         m_ShuttingDown = FALSE;
         return FALSE;
     }
+    SaveFFJitManifest();
     ClearNativeVertexLayouts();
     ClearNativeFFPrograms();
     Shutdown();

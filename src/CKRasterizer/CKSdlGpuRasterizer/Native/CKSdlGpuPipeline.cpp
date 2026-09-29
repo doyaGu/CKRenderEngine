@@ -113,7 +113,9 @@ public:
     }
     void Complete() override {
         const std::shared_ptr<CKSdlGpuProgram> program = Program.lock();
-        if (!program || !Result) return;
+        if (!program) return;
+        program->IdlePipelines.Remove(Key);
+        if (!Result) return;
         program->Pipelines.Insert(Key, CKSdlGpuOwn(Device, Result, SDL_ReleaseGPUGraphicsPipeline), TRUE);
         Result = nullptr;
     }
@@ -219,8 +221,16 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         // use the fallback's pipeline until the worker's result is collected.
         std::shared_ptr<SDL_GPUGraphicsPipeline> *found = program->Pipelines.FindPtr(key);
         if (found && *found) return found->get();
-        if (!found)
+        if (!found) {
             QueuePipeline(draw, color, depth, samples, CKSDLGPU_JOB_NORMAL);
+        } else {
+            // A draw now waits for a pipeline queued at idle priority.
+            CKSdlGpuJob **idle = program->IdlePipelines.FindPtr(key);
+            if (idle) {
+                Worker.Promote(*idle);
+                program->IdlePipelines.Remove(key);
+            }
+        }
         program = program->Fallback.get();
     }
     auto &pipelines = program->Pipelines;
@@ -259,7 +269,9 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
     program.Pipelines.Insert(key, std::shared_ptr<SDL_GPUGraphicsPipeline>(), FALSE);
     auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key);
     DescribePipeline(program, draw, color, depth, samples, job->Desc);
-    SubmitJob(job, priority);
+    // The worker owns the job; an idle one is kept only to promote it.
+    if (SubmitJob(job, priority) && priority == CKSDLGPU_JOB_IDLE)
+        program.IdlePipelines.Insert(key, job, TRUE);
     CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
 }
 

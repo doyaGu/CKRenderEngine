@@ -283,9 +283,11 @@ if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
             -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture
             -P ${CMAKE_CURRENT_SOURCE_DIR}/scene_capture_golden.cmake
     )
+    # Captures never depend on a compiled program manifest of earlier runs.
     set_tests_properties(scene_capture_golden PROPERTIES
         TIMEOUT 900
         SKIP_REGULAR_EXPRESSION "SKIPPED"
+        ENVIRONMENT "CKRE_SDL_GPU_FF_JIT_CACHE=0"
     )
 
     add_test(NAME scene_capture_multiframe
@@ -298,6 +300,7 @@ if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
     set_tests_properties(scene_capture_multiframe PROPERTIES
         TIMEOUT 900
         SKIP_REGULAR_EXPRESSION "SKIPPED"
+        ENVIRONMENT "CKRE_SDL_GPU_FF_JIT_CACHE=0"
     )
 endif ()
 
