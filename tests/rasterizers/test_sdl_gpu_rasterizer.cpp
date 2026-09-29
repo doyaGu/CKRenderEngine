@@ -562,6 +562,32 @@ int main()
               layout.BufferOffset(CKRST_SHADER_PIXEL, 0) == 16,
               "private image operations do not allocate or share the FFP constant layout");
     }
+    {
+        CKFFShaderSet dxil;
+        check(CKSdlGpuShaderSet(SDL_GPU_SHADERFORMAT_DXIL, dxil) != FALSE, "DXIL family for DXBC comparison");
+        CKShaderDesc fragment = dxil.Shaders[CKRST_SHADER_FF_FRAGMENT];
+        fragment.Format = CKRST_SHADER_FORMAT_DXBC;
+        for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
+            CKShaderDesc vertex;
+            const bool found = CKSdlGpuFFDxbcVertexShader((CKFFProgramVariant)variant, vertex) != FALSE;
+            check(found && vertex.Stage == CKRST_SHADER_VERTEX &&
+                      vertex.Format == CKRST_SHADER_FORMAT_DXBC &&
+                      vertex.Profile == CKRST_SHADER_PROFILE_DX12 &&
+                      vertex.CodeSize > 4 && std::memcmp(vertex.Code, "DXBC", 4) == 0 &&
+                      vertex.UniformBufferCount == dxil.Shaders[variant].UniformBufferCount &&
+                      vertex.SamplerCount == dxil.Shaders[variant].SamplerCount,
+                  "DXBC vertex shaders match their DXIL variants");
+            const CKBOOL positionT = variant == CKFF_PROGRAM_POSITIONT ||
+                variant == CKFF_PROGRAM_POSITIONT_CLIP;
+            const CKFFProgramDesc program = CKFFBuildProgramInterface(
+                1, 2, CKRST_SHADER_FORMAT_DXIL, FALSE, positionT);
+            check(found && CKFFValidateProgram(program, vertex, fragment) == CK_OK,
+                  "DXBC stages form a native fixed-function program");
+        }
+        CKShaderDesc invalid;
+        check(!CKSdlGpuFFDxbcVertexShader(CKFF_PROGRAM_VARIANT_COUNT, invalid),
+              "DXBC vertex shaders reject unknown variants");
+    }
     CKFFShaderSet rejected;
     check(!CKSdlGpuShaderSet(SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, rejected), "ambiguous payload rejected");
     CKShaderDesc invalidVertex, invalidFragment;

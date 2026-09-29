@@ -23,6 +23,10 @@
 #include "shaders/generated/dxil_fs_ff_stage_volume.h"
 #include "shaders/generated/dxil_vs_postprocess.h"
 #include "shaders/generated/dxil_fs_postprocess.h"
+#include "shaders/generated/dxbc_vs_ff_3d.h"
+#include "shaders/generated/dxbc_vs_ff_3d_clip.h"
+#include "shaders/generated/dxbc_vs_ff_positiont.h"
+#include "shaders/generated/dxbc_vs_ff_positiont_clip.h"
 #include "shaders/generated/spirv_vs_ff_3d.h"
 #include "shaders/generated/spirv_vs_ff_3d_clip.h"
 #include "shaders/generated/spirv_vs_ff_positiont.h"
@@ -74,6 +78,39 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
             out.CodeSize = sizeof(s_sdl_spirv_vs_ff_positiont_depth_pad);
         }
     } else {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
+                                  CKShaderDesc &out)
+{
+    out = CKShaderDesc();
+    out.Stage = CKRST_SHADER_VERTEX;
+    out.Format = CKRST_SHADER_FORMAT_DXBC;
+    out.Profile = CKRST_SHADER_PROFILE_DX12;
+    out.UniformBufferCount = 1;
+    switch (variant) {
+    case CKFF_PROGRAM_3D:
+        out.Code = s_sdl_dxbc_vs_ff_3d;
+        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_3d);
+        out.UniformBufferCount = 2;
+        break;
+    case CKFF_PROGRAM_3D_CLIP:
+        out.Code = s_sdl_dxbc_vs_ff_3d_clip;
+        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_3d_clip);
+        out.UniformBufferCount = 2;
+        break;
+    case CKFF_PROGRAM_POSITIONT:
+        out.Code = s_sdl_dxbc_vs_ff_positiont;
+        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont);
+        break;
+    case CKFF_PROGRAM_POSITIONT_CLIP:
+        out.Code = s_sdl_dxbc_vs_ff_positiont_clip;
+        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont_clip);
+        break;
+    default:
         return FALSE;
     }
     return TRUE;

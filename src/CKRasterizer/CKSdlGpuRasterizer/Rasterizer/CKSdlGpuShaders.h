@@ -36,5 +36,9 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
 CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat Format,
                                      CKBOOL Clipping,
                                      CKShaderDesc &Out);
+// The vertex shader of a program variant as shader model 5.1 DXBC. A D3D12
+// pipeline cannot mix DXBC and DXIL, so it pairs with a DXBC fragment shader.
+CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant Variant,
+                                  CKShaderDesc &Out);
 
 #endif
