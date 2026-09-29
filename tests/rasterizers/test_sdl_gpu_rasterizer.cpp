@@ -308,6 +308,49 @@ int main()
         check(decode(_DXT4) && pixel(0) == 0x80f50000 && pixel(1) == 0,
               "DXT4 unpremultiplies interpolated alpha and zeroes transparent pixels");
     }
+    {
+        bool seen[CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
+        CKDWORD uniqueArtifactCount = 0;
+        for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
+            for (CKDWORD requiresShaderSampling = 0;
+                 requiresShaderSampling < 2; ++requiresShaderSampling) {
+                CKFFSamplerLayoutPlan plan;
+                plan.Layout = (CKFFSamplerLayout)layout;
+                CKSdlGpuFFFragmentArtifactKey key;
+                check(CKSdlGpuBuildFFFragmentArtifactKey(
+                          plan, requiresShaderSampling != 0, key),
+                      "build no-compare fragment artifact key");
+                const CKDWORD index = CKSdlGpuFFFragmentArtifactIndex(key);
+                check(index < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
+                          !seen[index],
+                      "no-compare fragment artifact key has a unique cache index");
+                if (index < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
+                    !seen[index]) {
+                    seen[index] = true;
+                    ++uniqueArtifactCount;
+                }
+            }
+        }
+        for (CKDWORD comparisonCount = 1;
+             comparisonCount <= CKFF_MAX_TEXTURE_STAGES; ++comparisonCount) {
+            CKFFSamplerLayoutPlan plan;
+            plan.CompareSamplerCount = (CKBYTE)comparisonCount;
+            CKSdlGpuFFFragmentArtifactKey key;
+            check(CKSdlGpuBuildFFFragmentArtifactKey(plan, FALSE, key),
+                  "build comparison fragment artifact key");
+            const CKDWORD index = CKSdlGpuFFFragmentArtifactIndex(key);
+            check(index < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
+                      !seen[index],
+                  "comparison fragment artifact key has a unique cache index");
+            if (index < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
+                !seen[index]) {
+                seen[index] = true;
+                ++uniqueArtifactCount;
+            }
+        }
+        check(uniqueArtifactCount == CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT,
+              "fragment artifact cache index covers every precompiled artifact");
+    }
     for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV}) {
         CKFFShaderSet set;
         check(CKSdlGpuShaderSet(format, set) != FALSE, "complete native shader family");
@@ -341,6 +384,8 @@ int main()
             check(CKSdlGpuBuildFFFragmentArtifactKey(
                       plan, TRUE, shaderKey) &&
                       shaderKey.UsesShaderSampling &&
+                      CKSdlGpuFFFragmentArtifactIndex(shaderKey) <
+                          CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
                       CKSdlGpuFFFragmentShader(
                           format, shaderKey, shaderSampling) &&
                       shaderSampling.Code && shaderSampling.CodeSize,
@@ -348,6 +393,8 @@ int main()
             check(CKSdlGpuBuildFFFragmentArtifactKey(
                       plan, FALSE, hardwareKey) &&
                       !hardwareKey.UsesShaderSampling &&
+                      CKSdlGpuFFFragmentArtifactIndex(hardwareKey) <
+                          CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
                       CKSdlGpuFFFragmentShader(
                           format, hardwareKey, hardwareSampling) &&
                       hardwareSampling.Code && hardwareSampling.CodeSize &&

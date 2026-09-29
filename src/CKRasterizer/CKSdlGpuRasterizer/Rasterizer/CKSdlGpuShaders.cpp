@@ -115,19 +115,40 @@ CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
     return TRUE;
 }
 
+CKDWORD CKSdlGpuFFFragmentArtifactIndex(
+    const CKSdlGpuFFFragmentArtifactKey &artifactKey)
+{
+    const CKDWORD layout = (CKDWORD)artifactKey.SamplerLayout;
+    const CKDWORD compareCount = artifactKey.ComparisonResourceCount;
+    if (layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        (artifactKey.UsesShaderSampling != FALSE &&
+         artifactKey.UsesShaderSampling != TRUE))
+        return CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
+
+    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+        if (compareCount > CKFF_MAX_TEXTURE_STAGES ||
+            (compareCount != 0 && !artifactKey.UsesShaderSampling))
+            return CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
+        if (compareCount != 0)
+            return compareCount + 1;
+        return artifactKey.UsesShaderSampling ? 1u : 0u;
+    }
+
+    if (compareCount != 0)
+        return CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
+    const CKDWORD mixedLayoutBase = CKFF_MAX_TEXTURE_STAGES + 2u;
+    return mixedLayoutBase + (layout - 1u) * 2u +
+        (artifactKey.UsesShaderSampling ? 1u : 0u);
+}
+
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
                                const CKSdlGpuFFFragmentArtifactKey &artifactKey,
                                CKShaderDesc &out)
 {
     const CKFFSamplerLayout samplerLayout = artifactKey.SamplerLayout;
     const CKDWORD compareSamplerCount = artifactKey.ComparisonResourceCount;
-    if ((CKDWORD)samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
-        compareSamplerCount > CKFF_MAX_TEXTURE_STAGES ||
-        (artifactKey.UsesShaderSampling != FALSE &&
-         artifactKey.UsesShaderSampling != TRUE) ||
-        (compareSamplerCount != 0 &&
-         (samplerLayout != CKFF_SAMPLER_LAYOUT_WIDE_2D ||
-          !artifactKey.UsesShaderSampling)))
+    if (CKSdlGpuFFFragmentArtifactIndex(artifactKey) >=
+        CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT)
         return FALSE;
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_PIXEL;

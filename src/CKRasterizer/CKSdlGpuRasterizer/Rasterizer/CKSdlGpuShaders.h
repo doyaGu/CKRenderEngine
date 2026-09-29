@@ -18,11 +18,18 @@ struct CKSdlGpuFFFragmentArtifactKey {
           ComparisonResourceCount(0), UsesShaderSampling(FALSE) {}
 };
 
+enum {
+    CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT =
+        CKFF_SAMPLER_LAYOUT_COUNT * 2 + CKFF_MAX_TEXTURE_STAGES
+};
+
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat Format, CKFFShaderSet &Out);
 CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
     const CKFFSamplerLayoutPlan &SamplerLayoutPlan,
     CKBOOL RequiresShaderSampling,
     CKSdlGpuFFFragmentArtifactKey &Out);
+CKDWORD CKSdlGpuFFFragmentArtifactIndex(
+    const CKSdlGpuFFFragmentArtifactKey &ArtifactKey);
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
                                const CKSdlGpuFFFragmentArtifactKey &ArtifactKey,
                                CKShaderDesc &Out);

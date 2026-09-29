@@ -14,6 +14,7 @@
 #include "CKFFResourceStore.h"
 #include "CKFFShaderCache.h"
 #include "CKSdlGpuPresentStage.h"
+#include "CKSdlGpuShaders.h"
 #include "XSHashTable.h"
 
 #include <memory>
@@ -349,14 +350,12 @@ private:
     CKFixedFunctionPipeline m_FFP;
     CKFFShaderCache m_ShaderCache;
     CKDWORD m_NativeFFPrograms[CKFF_PROGRAM_VARIANT_COUNT]
-                                [CKFF_SAMPLER_LAYOUT_COUNT]
-                                [CKFF_MAX_TEXTURE_STAGES + 1]
-                                [2][2] = {};
+                                [CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT]
+                                [2] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     CKDWORD m_NativeFFDepthPadVertexShaders[2] = {};
-    CKDWORD m_NativeFFPixelShaders[CKFF_SAMPLER_LAYOUT_COUNT]
-                                    [CKFF_MAX_TEXTURE_STAGES + 1]
-                                    [2] = {};
+    CKDWORD m_NativeFFPixelShaders[
+        CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKSdlGpuPresentStage m_Present;
     // Verbatim fixed-function state mirror.
