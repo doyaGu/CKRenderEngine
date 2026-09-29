@@ -31,16 +31,18 @@ inline CKJitType CKJitFloatType(uint32_t components) {
 
 enum CKJitOpFlag {
     CKJIT_OPFLAG_COMMUTATIVE = 0x1,
+    CKJIT_OPFLAG_VARIADIC = 0x2,
 };
 
 enum CKJitOp : uint8_t {
-#define CKJIT_OP(NAME, flags) CKJIT_OP_##NAME,
+#define CKJIT_OP(NAME, operands, flags) CKJIT_OP_##NAME,
 #include "CKJitOps.def"
 #undef CKJIT_OP
     CKJIT_OP_COUNT
 };
 
 const char *CKJitOpName(CKJitOp op);
+uint32_t CKJitOpOperandCount(CKJitOp op); // the maximum for VARIADIC operations
 uint32_t CKJitOpFlags(CKJitOp op);
 
 enum CKJitSamplerDim : uint8_t {
@@ -101,6 +103,12 @@ struct CKJitFragmentShader {
 
     const CKJitNode &Node(CKJitValue value) const { return Nodes[(int)value.Id]; }
 };
+
+// Checks what backends rely on without re-checking it: every operation has
+// its operand count, operands precede their users, input, uniform, swizzle
+// and sampler references are in range, a sampler slot has one dimension and
+// the outputs have their types. Operand typing is CKJitBuilder's contract.
+bool CKJitVerify(const CKJitFragmentShader &shader);
 
 // Readable listing for tests and diagnostics.
 XString CKJitDump(const CKJitFragmentShader &shader);

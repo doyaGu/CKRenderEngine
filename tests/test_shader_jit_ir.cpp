@@ -298,6 +298,87 @@ void TestFailurePropagation() {
     TestCheck(!b.Finish(color, CKJitValue(), shader), "a failed builder never finishes");
 }
 
+int FindOp(const CKJitFragmentShader &shader, CKJitOp op) {
+    for (int i = 0; i < shader.Nodes.Size(); ++i) {
+        if (shader.Nodes[i].Op == op)
+            return i;
+    }
+    return -1;
+}
+
+template <typename Corrupt>
+bool VerifiesAfter(const CKJitFragmentShader &shader, Corrupt corrupt) {
+    CKJitFragmentShader copy = shader;
+    corrupt(copy);
+    return CKJitVerify(copy);
+}
+
+void TestVerify() {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord);
+    const CKJitValue position = b.Input(kFragCoord);
+    const CKJitValue sample = b.Sample(1, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue color = b.Construct({b.Swizzle(b.Mul(sample, b.Uniform(3)), "xyz"), b.Component(position, 3)});
+    const CKJitValue discard = b.Less(b.Component(color, 3), b.Float(0.5f));
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(color, discard, shader) && CKJitVerify(shader), "finished shaders verify");
+    TestCheck(CKJitOpOperandCount(CKJIT_OP_SELECT) == 3 && CKJitOpOperandCount(CKJIT_OP_CONSTANT) == 0 &&
+                  (CKJitOpFlags(CKJIT_OP_CONSTRUCT) & CKJIT_OPFLAG_VARIADIC) != 0,
+              "the op table records operand counts");
+
+    const int mul = FindOp(shader, CKJIT_OP_MUL);
+    const int input = FindOp(shader, CKJIT_OP_INPUT);
+    const int uniform = FindOp(shader, CKJIT_OP_UNIFORM);
+    const int swizzle = FindOp(shader, CKJIT_OP_SWIZZLE);
+    const int construct = FindOp(shader, CKJIT_OP_CONSTRUCT);
+    const int sampled = FindOp(shader, CKJIT_OP_SAMPLE);
+    TestCheck(mul >= 0 && input >= 0 && uniform >= 0 && swizzle >= 0 && construct >= 0 && sampled >= 0,
+              "the program has the nodes to corrupt");
+    if (mul < 0 || input < 0 || uniform < 0 || swizzle < 0 || construct < 0 || sampled < 0)
+        return;
+
+    // Each corruption is one a backend would index with.
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].Operands[0] = (uint32_t)mul; }),
+              "operands precede their users");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].OperandCount = 1; }),
+              "operations have their operand count");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[construct].OperandCount = 1; }),
+              "constructs have at least two parts");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].Op = CKJIT_OP_COUNT; }),
+              "operations are known");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[mul].Type = (CKJitType)6; }),
+              "types are known");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[input].Imm[0] = 2; }),
+              "inputs are declared");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[input].Type = CKJIT_TYPE_FLOAT4; }),
+              "an input has its declared width");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Inputs[1].Components = 3; }),
+              "the fragment position is a float4");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[uniform].Imm[0] = 4; }),
+              "uniform rows are in the block");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[swizzle].Imm[0] = 4; }),
+              "swizzles select existing components");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[0] = CKJIT_MAX_SAMPLERS; }),
+              "sampler slots are bounded");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[1] = 3; }),
+              "sampler dimensions are known");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Color = s.Discard; }), "the colour is a float4");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Discard = s.Color; }), "the discard is boolean");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Discard.Id = (uint32_t)s.Nodes.Size(); }),
+              "outputs are nodes");
+
+    CKJitBuilder dims(4);
+    const CKJitValue flat = dims.Sample(0, CKJIT_SAMPLER_2D, dims.Input(kTexCoord), dims.Float(0.0f));
+    const CKJitValue cube = dims.Sample(1, CKJIT_SAMPLER_CUBE, dims.Swizzle(dims.Input(kColor), "xyz"), dims.Float(0.0f));
+    CKJitFragmentShader twoSlots;
+    TestCheck(dims.Finish(dims.Add(flat, cube), CKJitValue(), twoSlots) && CKJitVerify(twoSlots), "two slots verify");
+    TestCheck(!VerifiesAfter(twoSlots,
+                             [&](CKJitFragmentShader &s) {
+                                 s.Nodes[FindOp(s, CKJIT_OP_SAMPLE)].Imm[0] = 1;
+                             }),
+              "a sampler slot has one dimension");
+}
+
 void TestDump() {
     // Argument evaluation order is unspecified: create the nodes one by one.
     CKJitBuilder b(4);
@@ -335,6 +416,7 @@ int main() {
     framework.Run("samples and inputs", TestSamplesAndInputs);
     framework.Run("finish", TestFinish);
     framework.Run("failure propagation", TestFailurePropagation);
+    framework.Run("verify", TestVerify);
     framework.Run("dump", TestDump);
     return framework.ExitCode();
 }

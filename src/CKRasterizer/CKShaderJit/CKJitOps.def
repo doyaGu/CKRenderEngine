@@ -1,4 +1,5 @@
-// Shader IR operations: CKJIT_OP(NAME, flags).
+// Shader IR operations: CKJIT_OP(NAME, operands, flags). A VARIADIC operation
+// takes from two up to that many operands.
 //
 // Every value is a pure function of its operands; the IR has no control flow.
 // Float operations are component-wise unless noted. Comparisons, integer and
@@ -7,53 +8,53 @@
 
 // Leaves. CONSTANT holds the component bit patterns in Imm[0..3], INPUT the
 // shader input index in Imm[0], UNIFORM the float4 row in Imm[0].
-CKJIT_OP(CONSTANT,   0)
-CKJIT_OP(INPUT,      0)
-CKJIT_OP(UNIFORM,    0)
+CKJIT_OP(CONSTANT,   0, 0)
+CKJIT_OP(INPUT,      0, 0)
+CKJIT_OP(UNIFORM,    0, 0)
 
 // Component routing. SWIZZLE selects Imm[i] of its operand for component i
 // (a scalar operand only has component 0, so it also expresses splats).
 // CONSTRUCT concatenates the components of its operands.
-CKJIT_OP(SWIZZLE,    0)
-CKJIT_OP(CONSTRUCT,  0)
+CKJIT_OP(SWIZZLE,    1, 0)
+CKJIT_OP(CONSTRUCT,  4, CKJIT_OPFLAG_VARIADIC)
 
 // Float arithmetic.
-CKJIT_OP(ADD,        CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(SUB,        0)
-CKJIT_OP(MUL,        CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(DIV,        0)
-CKJIT_OP(MIN,        CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(MAX,        CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(NEG,        0)
-CKJIT_OP(ABS,        0)
-CKJIT_OP(SATURATE,   0)
-CKJIT_OP(FLOOR,      0)
-CKJIT_OP(ROUND_EVEN, 0)
-CKJIT_OP(EXP2,       0)
-CKJIT_OP(SQRT,       0)
-CKJIT_OP(DOT,        CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(ADD,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(SUB,        2, 0)
+CKJIT_OP(MUL,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(DIV,        2, 0)
+CKJIT_OP(MIN,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(MAX,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(NEG,        1, 0)
+CKJIT_OP(ABS,        1, 0)
+CKJIT_OP(SATURATE,   1, 0)
+CKJIT_OP(FLOOR,      1, 0)
+CKJIT_OP(ROUND_EVEN, 1, 0)
+CKJIT_OP(EXP2,       1, 0)
+CKJIT_OP(SQRT,       1, 0)
+CKJIT_OP(DOT,        2, CKJIT_OPFLAG_COMMUTATIVE)
 
 // Scalar float comparisons producing BOOL. LT, LE and EQ are ordered (false
 // when either operand is NaN); NE is unordered, like HLSL and GLSL "!=".
-CKJIT_OP(LT,         0)
-CKJIT_OP(LE,         0)
-CKJIT_OP(EQ,         CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(NE,         CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(LT,         2, 0)
+CKJIT_OP(LE,         2, 0)
+CKJIT_OP(EQ,         2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(NE,         2, CKJIT_OPFLAG_COMMUTATIVE)
 
 // Scalar integers. FTOI truncates toward zero; ISHR is arithmetic.
-CKJIT_OP(FTOI,       0)
-CKJIT_OP(IEQ,        CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(IAND,       CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(ISHR,       0)
+CKJIT_OP(FTOI,       1, 0)
+CKJIT_OP(IEQ,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(IAND,       2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(ISHR,       2, 0)
 
 // Booleans.
-CKJIT_OP(AND,        CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(OR,         CKJIT_OPFLAG_COMMUTATIVE)
-CKJIT_OP(NOT,        0)
+CKJIT_OP(AND,        2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(OR,         2, CKJIT_OPFLAG_COMMUTATIVE)
+CKJIT_OP(NOT,        1, 0)
 
 // SELECT(condition, whenTrue, whenFalse) with a scalar BOOL condition.
-CKJIT_OP(SELECT,     0)
+CKJIT_OP(SELECT,     3, 0)
 
 // SAMPLE(coordinate, lodBias): implicit-LOD sample of sampler slot Imm[0]
 // with dimension Imm[1] (CKJitSamplerDim); always FLOAT4.
-CKJIT_OP(SAMPLE,     0)
+CKJIT_OP(SAMPLE,     2, 0)
