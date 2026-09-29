@@ -118,6 +118,16 @@ ckre_copy_runtime_dependencies(test_ff_program)
 add_test(NAME FFProgramTests COMMAND $<TARGET_FILE:test_ff_program>)
 set_tests_properties(FFProgramTests PROPERTIES TIMEOUT 60)
 
+# The shader compiler IR is CPU-only as well; CK2 headers serve the harness.
+add_executable(test_shader_jit_ir test_shader_jit_ir.cpp)
+target_link_libraries(test_shader_jit_ir PRIVATE CKShaderJit)
+target_include_directories(test_shader_jit_ir PRIVATE $<TARGET_PROPERTY:CK2,INTERFACE_INCLUDE_DIRECTORIES>)
+set_target_properties(test_shader_jit_ir PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
+ckre_copy_runtime_dependencies(test_shader_jit_ir)
+add_test(NAME ShaderJitIRTests COMMAND $<TARGET_FILE:test_shader_jit_ir>)
+set_tests_properties(ShaderJitIRTests PROPERTIES TIMEOUT 60)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 add_test(NAME BgfxDependencyDisabled
     COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/check_bgfx_disabled.cmake)

@@ -10,6 +10,7 @@ endif ()
 
 add_subdirectory(CKRasterizerLib)
 add_subdirectory(CKFFPLib)
+add_subdirectory(CKShaderJit)
 include(CKRERasterizers)
 ckre_get_rasterizers(_ckre_enabled_rasterizers _ckre_disabled_rasterizers FALSE)
 foreach (_ckre_rasterizer IN LISTS _ckre_enabled_rasterizers)
