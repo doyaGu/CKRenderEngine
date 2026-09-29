@@ -106,10 +106,11 @@ void TestProgramsHaveNoFixedFunctionRoles()
     one.Desc.VertexShader = ~0u;
     TestCheck(one.Validate() == CK_OK, "nonzero generation handles are resolved by the backend");
 
-    const CK_SHADER_FORMAT formats[] = {CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_FORMAT_SPIRV,
-        CKRST_SHADER_FORMAT_MSL, CKRST_SHADER_FORMAT_METALLIB};
-    const CK_SHADER_PROFILE profiles[] = {CKRST_SHADER_PROFILE_DX11, CKRST_SHADER_PROFILE_SPIRV,
-        CKRST_SHADER_PROFILE_MSL, CKRST_SHADER_PROFILE_MSL};
+    // Shader model 5.1 DXBC runs on D3D12 as well as D3D11.
+    const CK_SHADER_FORMAT formats[] = {CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_FORMAT_DXBC,
+        CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_FORMAT_MSL, CKRST_SHADER_FORMAT_METALLIB};
+    const CK_SHADER_PROFILE profiles[] = {CKRST_SHADER_PROFILE_DX11, CKRST_SHADER_PROFILE_DX12,
+        CKRST_SHADER_PROFILE_SPIRV, CKRST_SHADER_PROFILE_MSL, CKRST_SHADER_PROFILE_MSL};
     for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
         one.SetTarget(formats[i], profiles[i]);
         TestCheck(one.Validate() == CK_OK, "native program layouts are not tied to D3D12");

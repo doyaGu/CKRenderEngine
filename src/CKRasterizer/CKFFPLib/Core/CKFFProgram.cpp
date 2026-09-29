@@ -17,7 +17,8 @@ bool ValidShaderTarget(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile)
         return profile == CKRST_SHADER_PROFILE_DX11 || profile == CKRST_SHADER_PROFILE_DX12 ||
                profile == CKRST_SHADER_PROFILE_SPIRV || profile == CKRST_SHADER_PROFILE_GLSL ||
                profile == CKRST_SHADER_PROFILE_ESSL || profile == CKRST_SHADER_PROFILE_MSL;
-    case CKRST_SHADER_FORMAT_DXBC: return profile == CKRST_SHADER_PROFILE_DX11;
+    case CKRST_SHADER_FORMAT_DXBC:
+        return profile == CKRST_SHADER_PROFILE_DX11 || profile == CKRST_SHADER_PROFILE_DX12;
     case CKRST_SHADER_FORMAT_DXIL: return profile == CKRST_SHADER_PROFILE_DX12;
     case CKRST_SHADER_FORMAT_SPIRV: return profile == CKRST_SHADER_PROFILE_SPIRV;
     case CKRST_SHADER_FORMAT_MSL:
