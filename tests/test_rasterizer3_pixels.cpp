@@ -944,6 +944,161 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     DestroyTextures(ctx, textures);
 }
 
+#ifdef CKRE_PIXEL_SDL_GPU
+// The fragment programs of the native artifacts are compiled in the
+// background while their draws use the precompiled shaders. The first run of
+// the cases queued them; each further run completes the work the one before
+// queued (the shaders, then their pipelines), so the last run draws with the
+// compiled programs. They must reproduce the precompiled pixels.
+void CheckCompiledFragmentPrograms(Backend &b, const Samples &precompiled)
+{
+    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
+    if (setting && strcmp(setting, "0") == 0) {
+        printf("  compiled fragment programs: disabled\n");
+        return;
+    }
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    Samples samples;
+    for (int run = 0; run < 2; ++run) {
+        TestCheck(backend->FinishBackgroundWorkForTests(30000),
+                  "background compilation finishes");
+        RunPixelCases(b.Context, "compiled", samples);
+    }
+    const CKSdlGpuRasterizerContext::FFJitCounts counts =
+        backend->CountFFJitProgramsForTests();
+    TestCheckf(counts.Ready != 0 && counts.Programs != 0 && counts.Pipelines != 0 &&
+                   counts.Queued == 0 && counts.Rejected == 0,
+               "compiled fragment programs: queued=%u ready=%u rejected=%u programs=%u pipelines=%u",
+               (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
+               (unsigned)counts.Programs, (unsigned)counts.Pipelines);
+    for (int id = 0; id < SAMPLE_COUNT; ++id) {
+        const CKBYTE *expected = precompiled.Center[id];
+        const CKBYTE *actual = samples.Center[id];
+        bool matches = true;
+        for (int channel = 0; channel < 4; ++channel)
+            matches = matches && abs((int)actual[channel] - (int)expected[channel]) <= 1;
+        TestCheckf(matches,
+                   "compiled sample %d: BGRA=(%u,%u,%u,%u), precompiled (%u,%u,%u,%u)", id,
+                   (unsigned)actual[0], (unsigned)actual[1], (unsigned)actual[2],
+                   (unsigned)actual[3], (unsigned)expected[0], (unsigned)expected[1],
+                   (unsigned)expected[2], (unsigned)expected[3]);
+    }
+    printf("  compiled fragment programs: %u shaders, %u programs and %u pipelines match the precompiled pixels\n",
+           (unsigned)counts.Ready, (unsigned)counts.Programs, (unsigned)counts.Pipelines);
+}
+
+// Passes the vertex colour through `stages` texture stages. Every count is a
+// distinct fragment program with the same output.
+void SetPassThroughStages(CKRasterizerContext *ctx, int stages)
+{
+    ResetStagesFrom(ctx, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_DIFFUSE);
+    ctx->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+    ctx->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_DIFFUSE);
+    for (int stage = 1; stage < stages; ++stage) {
+        ctx->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_ADD);
+        ctx->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
+        ctx->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_CONSTANT);
+        ctx->SetTextureStageState(stage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
+        ctx->SetTextureStageState(stage, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+        ctx->SetTextureStageState(stage, CKRST_TSS_CONSTANT, 0);
+    }
+}
+
+// Draws a tilted quad in red with the `writer` stage count, then again in
+// green with the `tester` stage count under an EQUAL depth test.
+void DrawEqualDepthPass(CKRasterizerContext *ctx, int writer, int tester,
+                        int &red, int &green)
+{
+    VxMatrix projection;
+    projection.Perspective(1.1f, 1.0f, 0.37f, 97.3f);
+    VxVector axis(0.3f, 1.0f, 0.2f);
+    axis.Normalize();
+    VxMatrix world;
+    Vx3DMatrixFromRotation(world, axis, 0.7f);
+    world[3][0] = 0.11f;
+    world[3][1] = -0.07f;
+    world[3][2] = 3.1f;
+    const VxVector quad[2][3] = {
+        {VxVector(-1.3f, -1.1f, 0.0f), VxVector(1.2f, -1.3f, 0.4f), VxVector(-1.1f, 1.25f, -0.3f)},
+        {VxVector(1.2f, -1.3f, 0.4f), VxVector(1.35f, 1.2f, 0.2f), VxVector(-1.1f, 1.25f, -0.3f)}
+    };
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH, &projection);
+    ctx->SetTransformMatrix(VXMATRIX_WORLD, world);
+    ctx->SetRenderState(VXRENDERSTATE_ZENABLE, TRUE);
+    SetPassThroughStages(ctx, writer);
+    ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, TRUE);
+    ctx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_LESSEQUAL);
+    TestCheck(DrawColorTriangle(ctx, quad[0], kRed) && DrawColorTriangle(ctx, quad[1], kRed),
+              "depth-writing quad");
+    SetPassThroughStages(ctx, tester);
+    ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+    ctx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_EQUAL);
+    TestCheck(DrawColorTriangle(ctx, quad[0], kGreen) && DrawColorTriangle(ctx, quad[1], kGreen),
+              "EQUAL depth-testing quad");
+    EndFrame(ctx);
+    Pixels pixels;
+    ReadBackbuffer(ctx, pixels);
+    red = green = 0;
+    for (int y = 0; y < pixels.Height; ++y) {
+        for (int x = 0; x < pixels.Width; ++x) {
+            if (PixelNear(pixels, x, y, 255, 0, 0))
+                ++red;
+            else if (PixelNear(pixels, x, y, 0, 255, 0))
+                ++green;
+        }
+    }
+}
+
+// A compiled program draws in the same frame as the precompiled programs of
+// fragment programs not compiled yet. Both must produce the same depth, or
+// an EQUAL pass over the other's depth drops pixels.
+void CheckCompiledProgramDepthInvariance(Backend &b)
+{
+    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
+    if (setting && strcmp(setting, "0") == 0)
+        return;
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    CKRasterizerContext *ctx = b.Context;
+    const auto entries = [&]() {
+        const CKSdlGpuRasterizerContext::FFJitCounts counts =
+            backend->CountFFJitProgramsForTests();
+        return counts.Queued + counts.Ready + counts.Rejected;
+    };
+    SetDiffuseState(ctx);
+    int red = 0, green = 0;
+    // New programs of 3 and 4 stages draw precompiled and are queued.
+    DrawEqualDepthPass(ctx, 3, 4, red, green);
+    const int covered = green;
+    TestCheckf(red == 0 && covered > 1000,
+               "precompiled EQUAL pass: red=%d green=%d", red, green);
+    TestCheck(backend->FinishBackgroundWorkForTests(30000), "background compilation finishes");
+    const CKDWORD pipelines = backend->CountFFJitProgramsForTests().Pipelines;
+    DrawEqualDepthPass(ctx, 3, 4, red, green);
+    TestCheck(backend->FinishBackgroundWorkForTests(30000), "background pipelines finish");
+    TestCheckf(backend->CountFFJitProgramsForTests().Pipelines == pipelines + 2,
+               "both compiled programs have their pipeline");
+    const CKDWORD compiled = entries();
+    // A new program of 5 stages writes the depth, the compiled one tests it.
+    DrawEqualDepthPass(ctx, 5, 4, red, green);
+    TestCheckf(red == 0 && green == covered,
+               "compiled EQUAL pass over precompiled depth: red=%d green=%d of %d",
+               red, green, covered);
+    // The compiled program writes the depth, a new one of 6 stages tests it.
+    DrawEqualDepthPass(ctx, 3, 6, red, green);
+    TestCheckf(red == 0 && green == covered,
+               "precompiled EQUAL pass over compiled depth: red=%d green=%d of %d",
+               red, green, covered);
+    TestCheck(entries() == compiled + 2, "the 5 and 6 stage programs were not compiled yet");
+    SetDiffuseState(ctx);
+    printf("  compiled and precompiled programs produce the same depth: passed %d pixels\n",
+           covered);
+}
+#endif
+
 // Ordered updates and copies must preserve the values sampled by earlier draws.
 void CheckOrderedTextureUpdates(Backend &b)
 {
@@ -4096,6 +4251,10 @@ void BackendRendersFixedFunctionSemantics()
         CheckFirstFrame(backend);
         CheckTypedPersistentBufferUpdates(backend);
         RunPixelCases(backend.Context, "uber", samples);
+#ifdef CKRE_PIXEL_SDL_GPU
+        CheckCompiledFragmentPrograms(backend, samples);
+        CheckCompiledProgramDepthInvariance(backend);
+#endif
         CheckWideSamplerLayouts(backend);
         CheckOrderedTextureUpdates(backend);
         CheckPaddedTextureUpload(backend);
