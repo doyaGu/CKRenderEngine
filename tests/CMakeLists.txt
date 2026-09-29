@@ -134,35 +134,48 @@ ckre_add_shader_jit_test(test_shader_jit_ir ShaderJitIRTests test_shader_jit_ir.
 ckre_add_shader_jit_test(test_shader_jit_spirv ShaderJitSpirvTests test_shader_jit_spirv.cpp)
 ckre_add_shader_jit_test(test_shader_jit_dxbc ShaderJitDxbcTests test_shader_jit_dxbc.cpp)
 
-# The Vulkan SDK validator checks every module the SPIR-V tests emit.
+# Validation tests run a test target with an output directory, then check
+# every shader it writes there: the Vulkan SDK validator the SPIR-V modules,
+# D3D12 on WARP the DXBC containers.
 find_program(CKRE_SPIRV_VAL spirv-val HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
-if (CKRE_SPIRV_VAL)
-    add_test(NAME ShaderJitSpirvValidation
-        COMMAND "${CMAKE_COMMAND}"
-            -DTEST=$<TARGET_FILE:test_shader_jit_spirv>
-            -DVALIDATOR=${CKRE_SPIRV_VAL}
-            -DOUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader_jit_spirv
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/shader_jit_spirv_validation.cmake
-    )
-    set_tests_properties(ShaderJitSpirvValidation PROPERTIES TIMEOUT 60)
-endif ()
-
-# D3D12 checks every container the DXBC tests emit, on WARP.
 if (WIN32)
     add_executable(shader_jit_dxbc_validator shader_jit_dxbc_validator.cpp)
     target_link_libraries(shader_jit_dxbc_validator PRIVATE CKShaderJit d3d12 dxgi d3dcompiler)
     set_target_properties(shader_jit_dxbc_validator PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
     ckre_copy_runtime_dependencies(shader_jit_dxbc_validator)
-    add_test(NAME ShaderJitDxbcValidation
+endif ()
+
+function(ckre_add_spirv_validation TEST_NAME TARGET_NAME OUT_NAME)
+    if (NOT CKRE_SPIRV_VAL)
+        return()
+    endif ()
+    add_test(NAME ${TEST_NAME}
         COMMAND "${CMAKE_COMMAND}"
-            -DTEST=$<TARGET_FILE:test_shader_jit_dxbc>
+            -DTEST=$<TARGET_FILE:${TARGET_NAME}>
+            -DVALIDATOR=${CKRE_SPIRV_VAL}
+            -DOUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${OUT_NAME}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/shader_jit_spirv_validation.cmake
+    )
+    set_tests_properties(${TEST_NAME} PROPERTIES TIMEOUT 60)
+endfunction()
+
+function(ckre_add_dxbc_validation TEST_NAME TARGET_NAME OUT_NAME)
+    if (NOT TARGET shader_jit_dxbc_validator)
+        return()
+    endif ()
+    add_test(NAME ${TEST_NAME}
+        COMMAND "${CMAKE_COMMAND}"
+            -DTEST=$<TARGET_FILE:${TARGET_NAME}>
             -DVALIDATOR=$<TARGET_FILE:shader_jit_dxbc_validator>
-            -DOUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader_jit_dxbc
+            -DOUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/${OUT_NAME}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/shader_jit_dxbc_validation.cmake
     )
-    set_tests_properties(ShaderJitDxbcValidation PROPERTIES TIMEOUT 60)
-endif ()
+    set_tests_properties(${TEST_NAME} PROPERTIES TIMEOUT 60)
+endfunction()
+
+ckre_add_spirv_validation(ShaderJitSpirvValidation test_shader_jit_spirv shader_jit_spirv)
+ckre_add_dxbc_validation(ShaderJitDxbcValidation test_shader_jit_dxbc shader_jit_dxbc)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 add_test(NAME BgfxDependencyDisabled
@@ -344,6 +357,8 @@ ckre_add_ckff_test(ffp_state_matrix_tests
 ckre_add_ckff_test(ff_native_fragment_jit_tests
     test_ff_native_fragment_jit.cpp
 )
+ckre_add_spirv_validation(FFNativeFragmentJitSpirvValidation ff_native_fragment_jit_tests ff_native_fragment_jit_spirv)
+ckre_add_dxbc_validation(FFNativeFragmentJitDxbcValidation ff_native_fragment_jit_tests ff_native_fragment_jit_dxbc)
 
 # Real-backend pixel gate: fixed-function semantics driven through the public
 # rasterizer interface on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
