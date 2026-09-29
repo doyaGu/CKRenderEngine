@@ -4,6 +4,10 @@
 Only declarations/entry points are adapted: no bgfx containers are read or
 unwrapped. The native resource ABI is explicit and checked against reflection.
 Intermediate source, assembly and reflection live in an out-of-source directory.
+
+FXC additionally builds Shader Model 5.1 DXBC variants of the fixed-function
+vertex shaders. D3D12 accepts no pipeline that mixes DXBC with DXIL, and the
+fragment shaders compiled at runtime are DXBC, so they pair with these.
 """
 from __future__ import annotations
 
@@ -47,6 +51,8 @@ SHADERS = [
     ("fs_volume_mip", "fs_volume_mip", False, 0, 0),
     ("fs_dither_resolve", "fs_dither_resolve", False, 0, 0),
 ]
+DXBC_SHADERS = [name for name, source, _, _, _ in SHADERS
+                if source in ("vs_ff_3d", "vs_ff_positiont")]
 BLOCKS = [
     ("float4x4", "u_ffMatrices", 8),
     ("float4x4", "u_vertexBlendMatrices", 4),
@@ -332,13 +338,57 @@ def validate_dxil(assembly, source, vertex, samplers, uniforms):
             assert re.search(rf"{buffer_name};.*Size:\s*{buffer_size}\b", assembly)
 
 
+def dxbc_chunks(code: bytes):
+    assert code[:4] == b"DXBC" and int.from_bytes(code[24:28], "little") == len(code)
+    count = int.from_bytes(code[28:32], "little")
+    offsets = [int.from_bytes(code[32 + 4 * i:36 + 4 * i], "little") for i in range(count)]
+    return [code[offset:offset + 4] for offset in offsets]
+
+
+def validate_dxbc(assembly, code, source, clipping, uniforms):
+    # FXC listings: every FF vertex shader binds only its uniform buffers, in
+    # space 1, and writes the varyings at the registers of the DXIL variant,
+    # which the runtime fragment shaders read.
+    assert re.search(r"^vs_5_1$", assembly, re.M)
+    chunks = dxbc_chunks(code)
+    assert b"SHEX" in chunks and b"DXIL" not in chunks
+    bindings = re.search(r"// Resource Bindings:(.*?)\n//\n//\n", assembly, re.S)[1]
+    rows = re.findall(r"^// (\w+)\s+(\w+)\s+\S+\s+\S+\s+\S+\s+(\w+),space(\d+)\s+(\d+)\s*$", bindings, re.M)
+    layouts = uniform_layout(source)
+    assert len(layouts) == uniforms
+    assert rows == [(name, "cbuffer", f"cb{slot}", "1", "1") for slot, (name, _, _) in enumerate(layouts)]
+    for buffer_name, blocks, buffer_size in layouts:
+        definition = re.search(rf"// cbuffer {buffer_name}\n// {{\n(.*?)\n// }}", assembly, re.S)[1]
+        size = 0
+        for kind, name, count, offset in expected_members(blocks):
+            array = rf"\[{count}\]" if count > 1 else ""
+            member = count * (64 if kind == "float4x4" else 16)
+            assert re.search(rf"^//\s+{kind} {name}{array};\s*// Offset:\s*{offset} Size:\s*{member}\b",
+                             definition, re.M), f"{buffer_name}.{name}: layout mismatch"
+            size += member
+        assert size == buffer_size
+    signature = re.search(r"// Output signature:\n//\n.*?\n// -.*?\n(.*?)\n//\n", assembly, re.S)[1]
+    outputs = re.findall(r"^// (\w+)\s+(\d+)\s+(\w+)\s+(\d+)\s+(\w+)\s+(\w+)", signature, re.M)
+    expected = [("SV_Position", "0", "xyzw", "0", "POS", "float")]
+    expected += [("TEXCOORD", str(i), "xy" if varying_type(name) == "float2" else "xyzw", str(i + 1), "NONE", "float")
+                 for i, name in enumerate(VARYINGS)]
+    if clipping:
+        expected += [("SV_ClipDistance", str(i), "xyzw", str(len(VARYINGS) + 1 + i), "CLIPDST", "float")
+                     for i in range(2)]
+    assert outputs == expected, "Vertex output signature differs from the fragment input ABI"
+
+
+def shader_formats(name: str):
+    return ("dxil", "spirv", "dxbc") if name in DXBC_SHADERS else ("dxil", "spirv")
+
+
 def verify_artifacts(directory, abi, abi_hash):
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert (manifest["abi_version"], manifest["interface_hash"]) == (abi, abi_hash), "Shader ABI is stale"
     expected_abi = (f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
                     f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
     assert (directory / "abi.h").read_text(encoding="utf-8") == expected_abi, "Compiled shader identity is stale"
-    expected = {(name, format_) for name, _, _, _, _ in SHADERS for format_ in ("dxil", "spirv")}
+    expected = {(name, format_) for name, _, _, _, _ in SHADERS for format_ in shader_formats(name)}
     assert {(s["name"], s["format"]) for s in manifest["shaders"]} == expected
     sources = {name: hashlib.sha256(make_source(name, source, clipping, compare_count,
                                                 sampler_layout).encode()).hexdigest()
@@ -353,6 +403,8 @@ def verify_artifacts(directory, abi, abi_hash):
         header = (directory / f"{format_}_{name}.h").read_text(encoding="utf-8")
         payload = bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", header))
         assert hashlib.sha256(payload).hexdigest() == shader["sha256"], f"{name}: native payload hash mismatch"
+        if format_ == "dxbc":
+            assert b"DXIL" not in dxbc_chunks(payload), f"{name}: DXBC payload contains DXIL"
         assert shader["entry"] == "main" and shader["reflected"]
         assert shader["uniform_bytes"] == layouts[name], f"{name}: uniform layout mismatch"
     print("Verified complete native shader families, source hashes and ABI.")
@@ -365,6 +417,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=HERE / "generated")
     parser.add_argument("--dxc", default=shutil.which("dxc"))
     parser.add_argument("--spirv-cross", default=shutil.which("spirv-cross"))
+    parser.add_argument("--fxc", default=shutil.which("fxc"))
     args = parser.parse_args()
     abi_text = (CKFF_ROOT / "Interface" / "CKBuiltinShaderIdentity.h").read_text(encoding="utf-8")
     abi = int(re.search(r"CKFF_SHADER_ABI_VERSION = (\d+)", abi_text)[1])
@@ -382,8 +435,8 @@ def main() -> None:
     if args.verify:
         verify_artifacts(args.output_dir, abi, abi_hash)
         return
-    if not args.dxc or not args.spirv_cross or not args.work_dir:
-        parser.error("DXC, spirv-cross and --work-dir are required for offline shader generation")
+    if not args.dxc or not args.spirv_cross or not args.fxc or not args.work_dir:
+        parser.error("DXC, spirv-cross, FXC and --work-dir are required for offline shader generation")
     args.work_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     pending = {}
@@ -394,24 +447,30 @@ def main() -> None:
         hlsl = args.work_dir / f"{name}.hlsl"
         hlsl.write_text(make_source(name, source, clipping, compare_count,
                                     sampler_layout))
-        for format_ in ("dxil", "spirv"):
+        for format_ in shader_formats(name):
             output = args.work_dir / f"{format_}_{name}.bin"
             assembly = args.work_dir / f"{format_}_{name}.asm"
-            optimization = "-O3"
-            command = [args.dxc, "-T", "vs_6_0" if vertex else "ps_6_0", "-E", "main",
-                       optimization, "-Fo", str(output), "-Fc", str(assembly), str(hlsl)]
+            if format_ == "dxbc":
+                command = [args.fxc, "/nologo", "/T", "vs_5_1", "/E", "main", "/O3",
+                           "/Fo", str(output), "/Fc", str(assembly), str(hlsl)]
+            else:
+                optimization = "-O3"
+                command = [args.dxc, "-T", "vs_6_0" if vertex else "ps_6_0", "-E", "main",
+                           optimization, "-Fo", str(output), "-Fc", str(assembly), str(hlsl)]
             if format_ == "spirv":
                 command += ["-spirv", "-fspv-target-env=vulkan1.0", "-fvk-use-gl-layout"]
             subprocess.run(command, check=True)
+            code = output.read_bytes()
             if format_ == "spirv":
                 reflection = json.loads(subprocess.check_output([args.spirv_cross, str(output), "--reflect"]))
                 validate_spirv(reflection, source, vertex, samplers, uniforms,
                                sampler_layout)
                 (args.work_dir / f"{format_}_{name}.json").write_text(json.dumps(reflection, indent=2))
+            elif format_ == "dxbc":
+                validate_dxbc(assembly.read_text(encoding="utf-8"), code, source, clipping, uniforms)
             else:
                 validate_dxil(assembly.read_text(encoding="utf-8"), source, vertex, samplers, uniforms)
-            code = output.read_bytes()
-            assert code[:4] == (b"DXBC" if format_ == "dxil" else b"\x03\x02\x23\x07")
+            assert code[:4] == (b"\x03\x02\x23\x07" if format_ == "spirv" else b"DXBC")
             header = args.work_dir / f"{format_}_{name}.h"
             pending[args.output_dir / header.name] = header
             with header.open("w") as f:
@@ -432,7 +491,7 @@ def main() -> None:
     (args.output_dir / "abi.h").write_text(
         f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
         f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
-    print("Generated and reflected both complete native shader families.")
+    print("Generated and reflected both complete native shader families and the DXBC vertex shaders.")
 
 
 if __name__ == "__main__":
