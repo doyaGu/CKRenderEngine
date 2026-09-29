@@ -60,12 +60,9 @@ CKDWORD CKFFHashTextureBindingSet(CKDWORD activeTextureCount, const CKFFTextureB
     return hash;
 }
 
-CKFFFragmentSamplingMode CKFFResolveFragmentSamplingMode(
+CKBOOL CKFFRequiresShaderSampling(
     const CKFFTextureBindingSet &textures)
 {
-    if (textures.SamplerLayoutPlan.CompareSamplerCount != 0)
-        return CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
-
     const CKDWORD manualSamplingMask =
         CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT |
         CKFF_SAMPLER_SHADER_MANUAL_LOD |
@@ -78,7 +75,7 @@ CKFFFragmentSamplingMode CKFFResolveFragmentSamplingMode(
         const CKFFTextureBinding &binding = textures.Bindings[stage];
         if (binding.Texture != 0 &&
             (binding.ShaderState.Bits & manualSamplingMask) != 0)
-            return CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
+            return TRUE;
     }
-    return CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT;
+    return FALSE;
 }

@@ -143,7 +143,7 @@ def sampler_layout_source(definition: Path) -> str:
         lines.append("#if CKFF_NATIVE_SDL_GPU")
         for compare_count in range(layout.counts[0] + 1):
             lines.append(("#if" if compare_count == 0 else "#elif") +
-                         f" CKFF_NATIVE_COMPARE_COUNT == {compare_count}")
+                         f" CKFF_DEPTH_COMPARE_SAMPLER_COUNT == {compare_count}")
             lines += _dispatch_macro(
                 "CKFF_DISPATCH_2D_ORDINARY", "_ordinal", "_result",
                 "_operation", two_d[compare_count:])

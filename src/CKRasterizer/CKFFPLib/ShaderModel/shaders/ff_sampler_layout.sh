@@ -57,7 +57,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 2) { (_result) = _operation(s_textureVolume2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_textureVolume3); }
 #if CKFF_NATIVE_SDL_GPU
-#if CKFF_NATIVE_COMPARE_COUNT == 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
@@ -68,7 +68,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 6) { (_result) = _operation(s_texture6); } \
     else if ((_ordinal) == 7) { (_result) = _operation(s_texture7); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
-#elif CKFF_NATIVE_COMPARE_COUNT == 1
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 1
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
@@ -79,7 +79,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 7) { (_result) = _operation(s_texture7); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 2
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 2
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); } \
@@ -90,7 +90,7 @@ SAMPLER3D(s_textureVolume3, 15);
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 3
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 3
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 3) { (_result) = _operation(s_texture3); } \
     else if ((_ordinal) == 4) { (_result) = _operation(s_texture4); } \
@@ -101,7 +101,7 @@ SAMPLER3D(s_textureVolume3, 15);
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 4
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 4
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 4) { (_result) = _operation(s_texture4); } \
     else if ((_ordinal) == 5) { (_result) = _operation(s_texture5); } \
@@ -112,7 +112,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 5
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 5
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 5) { (_result) = _operation(s_texture5); } \
     else if ((_ordinal) == 6) { (_result) = _operation(s_texture6); } \
@@ -123,7 +123,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); } \
     else if ((_ordinal) == 4) { (_result) = _operation(s_texture4); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 6
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 6
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 6) { (_result) = _operation(s_texture6); } \
     else if ((_ordinal) == 7) { (_result) = _operation(s_texture7); }
@@ -134,7 +134,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); } \
     else if ((_ordinal) == 4) { (_result) = _operation(s_texture4); } \
     else if ((_ordinal) == 5) { (_result) = _operation(s_texture5); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 7
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 7
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 7) { (_result) = _operation(s_texture7); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
@@ -145,7 +145,7 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 4) { (_result) = _operation(s_texture4); } \
     else if ((_ordinal) == 5) { (_result) = _operation(s_texture5); } \
     else if ((_ordinal) == 6) { (_result) = _operation(s_texture6); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 8
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 8
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation)
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
@@ -217,35 +217,35 @@ SAMPLER3D(s_textureVolume3, 15);
     else if ((_ordinal) == 2) { (_result) = _operation(s_textureVolume2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_textureVolume3); }
 #if CKFF_NATIVE_SDL_GPU
-#if CKFF_NATIVE_COMPARE_COUNT == 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
-#elif CKFF_NATIVE_COMPARE_COUNT == 1
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 1
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 2
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 2
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 3
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 3
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 4
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 4
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation)
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
@@ -318,35 +318,35 @@ SAMPLER3D(s_textureVolume7, 15);
     else if ((_ordinal) == 7) { (_result) = _operation(s_textureVolume7); }
 #endif
 #if CKFF_NATIVE_SDL_GPU
-#if CKFF_NATIVE_COMPARE_COUNT == 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
-#elif CKFF_NATIVE_COMPARE_COUNT == 1
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 1
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 2
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 2
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
     else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 3
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 3
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
     if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
     else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
     else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); }
-#elif CKFF_NATIVE_COMPARE_COUNT == 4
+#elif CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 4
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation)
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \

@@ -13,19 +13,19 @@ uniform vec4 u_ffProgram[5];
 
 #include "ff_sampler_layout.sh"
 #include "fs_ff_common.sc"
-#ifndef CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
-#define CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT 0
+#ifndef CKFF_HARDWARE_SAMPLING
+#define CKFF_HARDWARE_SAMPLING 0
 #endif
 #if !CKFF_NATIVE_SDL_GPU && BGFX_SHADER_LANGUAGE_HLSL >= 600
 #define CKFF_DEFER_COMBINER_DECODE 1
 #else
 #define CKFF_DEFER_COMBINER_DECODE 0
 #endif
-#if CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
-#include "ff_sampler_native_exact.sc"
+#if CKFF_HARDWARE_SAMPLING
+#include "ff_sampler_hardware.sc"
 #else
 #include "ff_sampler_common.sc"
-#include "ff_sampler_full_exact.sc"
+#include "ff_sampler_shader_controlled.sc"
 #endif
 #include "ff_texture_ops.sc"
 
@@ -77,8 +77,9 @@ void main()
             ckffReadTextureStageProgramWords(stage,
                 fragmentProgram.SamplerOrdinals);
         // Keep only sampling fields live across CKFFSampleTexture.  Decoding
-        // all combiner fields here raises register pressure in the full-exact
-        // DXIL program even though those fields are consumed afterwards.
+        // all combiner fields here raises register pressure in the
+        // shader-controlled DXIL program even though those fields are
+        // consumed afterwards.
         CKFFTextureStageSamplingProgram samplingProgram =
             ckffDecodeTextureStageSamplingProgram(stageWords);
         int colorOp = samplingProgram.ColorOp;

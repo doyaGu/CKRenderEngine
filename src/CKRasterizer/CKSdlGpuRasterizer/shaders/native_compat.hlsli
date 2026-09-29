@@ -28,53 +28,53 @@
 #if CKFF_NATIVE_FFP_STAGE
 #define CKFF_SAMPLER2D_NORMAL(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define CKFF_SAMPLER2D_COMPARE(name, slot) CK_COMBINED Texture2D<float> name : register(t##slot, space2); CK_COMBINED SamplerComparisonState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
-#if CKFF_NATIVE_COMPARE_COUNT > 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0
 #define CKFF_SAMPLER2D_0 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_0 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 1
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 1
 #define CKFF_SAMPLER2D_1 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_1 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 2
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 2
 #define CKFF_SAMPLER2D_2 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_2 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 3
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 3
 #define CKFF_SAMPLER2D_3 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_3 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 4
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 4
 #define CKFF_SAMPLER2D_4 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_4 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 5
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 5
 #define CKFF_SAMPLER2D_5 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_5 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 6
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 6
 #define CKFF_SAMPLER2D_6 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_6 CKFF_SAMPLER2D_NORMAL
 #endif
-#if CKFF_NATIVE_COMPARE_COUNT > 7
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 7
 #define CKFF_SAMPLER2D_7 CKFF_SAMPLER2D_COMPARE
 #else
 #define CKFF_SAMPLER2D_7 CKFF_SAMPLER2D_NORMAL
 #endif
 #define CKFF_SAMPLER2D_SELECT(slot) CKFF_SAMPLER2D_##slot
 #define SAMPLER2D(name, slot) CKFF_SAMPLER2D_SELECT(slot)(name, slot)
-#if CKFF_NATIVE_COMPARE_COUNT > 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0
 #define texture2D(name, uv) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, 0.0, 0.0, 0.0)
 #define texture2DBias(name, uv, bias, minMip, maxAnisotropy) ckCompareVariantSample2DBias(name, name##Sampler, name##Slot, uv, bias, minMip, maxAnisotropy)
 #define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) ckCompareVariantSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip, maxAnisotropy)
-#elif CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
+#elif CKFF_HARDWARE_SAMPLING
 #define texture2D(name, uv) name.Sample(name##Sampler, uv)
 #define texture2DBias(name, uv, bias, minMip, maxAnisotropy) name.SampleBias(name##Sampler, uv, bias)
 #define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) name.SampleGrad(name##Sampler, uv, dx, dy)
@@ -84,7 +84,6 @@
 #define texture2DGrad(name, uv, dx, dy, minMip, maxAnisotropy) ckSample2DGrad(name, name##Sampler, name##Slot, uv, dx, dy, minMip, maxAnisotropy)
 #endif
 #define texture2DCompare(name, uv, dx, dy, bias, minMip, maxAnisotropy, reference, func) name.SampleCmp(name##Sampler, uv, reference)
-#define texture2DCompareManual(name, uv, dx, dy, bias, minMip, reference, func) ckCompareSample2D(name, name##Slot, uv, dx, dy, bias, minMip, reference, func)
 #else
 #define SAMPLER2D(name, slot) CK_COMBINED Texture2D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define texture2D(name, uv) name.Sample(name##Sampler, uv)
@@ -95,7 +94,7 @@
 #define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define textureCube(name, uv) name.Sample(name##Sampler, uv)
 #define textureCubeBias(name, uv, bias) name.SampleBias(name##Sampler, uv, bias)
-#if CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT
+#if CKFF_HARDWARE_SAMPLING
 #define texture3D(name, uv) name.Sample(name##Sampler, uv)
 #define texture3DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)
 #define texture3DGrad(name, uv, originalUv, mirrorOnceMask, bias, minMip) name.SampleBias(name##Sampler, uv, bias)

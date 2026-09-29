@@ -183,7 +183,7 @@ void SamplerShaderStateResolvesBackendResponsibilities() {
               "MIRRORONCE must preserve the original footprint without inventing manual LOD");
 }
 
-void NativeExactSamplingUsesFinalBindingState() {
+void SamplerRequirementsUseFinalBindingState() {
     CKFFTextureBindingSet textures;
     CKFFInitTextureBindingSet(&textures);
     textures.ActiveTextureCount = CKFF_MAX_TEXTURE_STAGES;
@@ -193,9 +193,8 @@ void NativeExactSamplingUsesFinalBindingState() {
             CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR |
             CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR);
     }
-    TestCheck(CKFFResolveFragmentSamplingMode(textures) ==
-                  CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT,
-              "Native-exact sampling must accept states fully represented by native samplers");
+    TestCheck(!CKFFRequiresShaderSampling(textures),
+              "Hardware sampling must accept states fully represented by sampler objects");
 
     const CKDWORD manualFlags[] = {
         CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT,
@@ -206,16 +205,14 @@ void NativeExactSamplingUsesFinalBindingState() {
     };
     for (CKDWORD flag : manualFlags) {
         textures.Bindings[5].ShaderState.Bits |= flag;
-        TestCheck(CKFFResolveFragmentSamplingMode(textures) ==
-                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT,
-                  "Every manual sampler responsibility must select the full exact fragment program");
+        TestCheck(CKFFRequiresShaderSampling(textures),
+                  "Every manual sampler responsibility must request shader sampling");
         textures.Bindings[5].ShaderState.Bits &= ~flag;
     }
 
     textures.SamplerLayoutPlan.CompareSamplerCount = 1;
-    TestCheck(CKFFResolveFragmentSamplingMode(textures) ==
-                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT,
-              "Comparison samplers must select the full exact fragment program");
+    TestCheck(!CKFFRequiresShaderSampling(textures),
+              "Comparison resource layout must remain independent of shader sampling requirements");
     textures.SamplerLayoutPlan.CompareSamplerCount = 0;
 
     const CKDWORD before = CKFFHashTextureBindingSet(
@@ -254,6 +251,8 @@ void NativeExactSamplingUsesFinalBindingState() {
     const CKSamplerDesc &bindingSampler = built.Bindings[0].Sampler;
     TestCheck(built.NativeBindings[nativeSlot].Texture == 17 &&
                   built.NativeBindings[nativeSlot].FixedStage == 0 &&
+                  built.NativeBindings[nativeSlot].ShaderState ==
+                      expected.Bits &&
                   nativeSampler.MinFilter == bindingSampler.MinFilter &&
                   nativeSampler.MagFilter == bindingSampler.MagFilter &&
                   nativeSampler.MipFilter == bindingSampler.MipFilter &&
@@ -268,8 +267,9 @@ void NativeExactSamplingUsesFinalBindingState() {
                       bindingSampler.ShaderAnisotropy &&
                   nativeSampler.MipLodBias == bindingSampler.MipLodBias,
               "Texture bindings must cache the final native slot table");
-    TestCheck(built.SamplingMode == CKFFResolveFragmentSamplingMode(built),
-              "Texture bindings must cache the fragment sampling mode resolved from final sampler state");
+    TestCheck(built.RequiresShaderSampling ==
+                  CKFFRequiresShaderSampling(built),
+              "Texture bindings must cache shader sampling requirements resolved from final sampler state");
 }
 
 void TextureBindingCacheInvalidatesEveryBindingDependency() {
@@ -1188,8 +1188,8 @@ int main() {
               &ShaderABIConstantsAreConsistent);
     tests.Run("Sampler shader state resolves backend responsibilities",
               &SamplerShaderStateResolvesBackendResponsibilities);
-    tests.Run("Native exact sampling uses final binding state",
-              &NativeExactSamplingUsesFinalBindingState);
+    tests.Run("Sampler requirements use final binding state",
+              &SamplerRequirementsUseFinalBindingState);
     tests.Run("Texture binding cache invalidates every binding dependency",
               &TextureBindingCacheInvalidatesEveryBindingDependency);
     tests.Run("Stage params pack through ABI indices",

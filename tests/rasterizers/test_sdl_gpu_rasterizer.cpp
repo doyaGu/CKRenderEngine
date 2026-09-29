@@ -334,67 +334,98 @@ int main()
         check(set.Shaders[CKRST_SHADER_PRESENT_FRAGMENT].SamplerCount == 1, "presentation uses native slot zero");
         for (CKDWORD samplerLayout = 0;
              samplerLayout < CKFF_SAMPLER_LAYOUT_COUNT; ++samplerLayout) {
-            CKShaderDesc fullSampling, nativeSampling;
-            check(CKSdlGpuFFFragmentShader(
-                      format, (CKFFSamplerLayout)samplerLayout, 0,
-                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT, fullSampling) &&
-                      fullSampling.Code && fullSampling.CodeSize,
-                  "SDL exposes every full-exact no-compare sampler layout");
-            check(CKSdlGpuFFFragmentShader(
-                      format, (CKFFSamplerLayout)samplerLayout, 0,
-                      CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT, nativeSampling) &&
-                      nativeSampling.Code && nativeSampling.CodeSize &&
-                      nativeSampling.Code != fullSampling.Code &&
-                      nativeSampling.CodeSize < fullSampling.CodeSize,
-                  "SDL exposes a smaller distinct native-exact sampler layout");
-            CKShaderDesc rejectedNativeCompare;
-            check(!CKSdlGpuFFFragmentShader(
-                      format, (CKFFSamplerLayout)samplerLayout, 1,
-                      CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT,
-                      rejectedNativeCompare),
-                  "SDL rejects comparison samplers in the native-exact family");
+            CKFFSamplerLayoutPlan plan;
+            plan.Layout = (CKFFSamplerLayout)samplerLayout;
+            CKSdlGpuFFFragmentArtifactKey shaderKey, hardwareKey;
+            CKShaderDesc shaderSampling, hardwareSampling;
+            check(CKSdlGpuBuildFFFragmentArtifactKey(
+                      plan, TRUE, shaderKey) &&
+                      shaderKey.UsesShaderSampling &&
+                      CKSdlGpuFFFragmentShader(
+                          format, shaderKey, shaderSampling) &&
+                      shaderSampling.Code && shaderSampling.CodeSize,
+                  "SDL exposes every shader-controlled sampler layout");
+            check(CKSdlGpuBuildFFFragmentArtifactKey(
+                      plan, FALSE, hardwareKey) &&
+                      !hardwareKey.UsesShaderSampling &&
+                      CKSdlGpuFFFragmentShader(
+                          format, hardwareKey, hardwareSampling) &&
+                      hardwareSampling.Code && hardwareSampling.CodeSize &&
+                      hardwareSampling.Code != shaderSampling.Code &&
+                      hardwareSampling.CodeSize < shaderSampling.CodeSize,
+                  "SDL exposes a smaller distinct hardware-sampling layout");
         }
-        CKShaderDesc compareOne, compareTwo, compareEight;
-        check(CKSdlGpuFFResolveComparisonProfile(
-                  CKFF_SAMPLER_LAYOUT_WIDE_2D, 1,
-                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT) ==
-                  CKSDL_GPU_FF_COMPARE_NATIVE_ONE &&
-              CKSdlGpuFFFragmentShader(
-                  format, CKFF_SAMPLER_LAYOUT_WIDE_2D, 1,
-                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT, compareOne),
-              "one wide-2D depth sampler retains native comparison filtering");
-        check(CKSdlGpuFFResolveComparisonProfile(
-                  CKFF_SAMPLER_LAYOUT_WIDE_2D, 2,
-                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT) ==
-                  CKSDL_GPU_FF_COMPARE_MANUAL &&
-              CKSdlGpuFFFragmentShader(
-                  format, CKFF_SAMPLER_LAYOUT_WIDE_2D, 2,
-                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT, compareTwo) &&
-              CKSdlGpuFFFragmentShader(
-                  format, CKFF_SAMPLER_LAYOUT_WIDE_2D, 8,
-                  CKFF_FRAGMENT_SAMPLING_FULL_EXACT, compareEight) &&
-              compareTwo.Code == compareEight.Code &&
-              compareTwo.Code != compareOne.Code,
-              "multiple wide-2D comparisons share one manual PCF shader");
-        for (CKFFSamplerLayout layout : {
-                 CKFF_SAMPLER_LAYOUT_WIDE_CUBE,
-                 CKFF_SAMPLER_LAYOUT_WIDE_VOLUME}) {
-            CKShaderDesc noCompare, multipleCompare;
-            const CKDWORD maximum =
-                CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, layout);
-            check(CKSdlGpuFFResolveComparisonProfile(
-                      layout, maximum,
-                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT) ==
-                      CKSDL_GPU_FF_COMPARE_BASE &&
-                  CKSdlGpuFFFragmentShader(
-                      format, layout, 0,
-                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT, noCompare) &&
-                  CKSdlGpuFFFragmentShader(
-                      format, layout, maximum,
-                      CKFF_FRAGMENT_SAMPLING_FULL_EXACT, multipleCompare) &&
-                  noCompare.Code == multipleCompare.Code,
-                  "mixed layouts reuse their ordinal-dispatched manual comparison shader");
+        for (CKDWORD layoutIndex = 0;
+             layoutIndex < CKFF_SAMPLER_LAYOUT_COUNT; ++layoutIndex) {
+            const CKFFSamplerLayout layout =
+                (CKFFSamplerLayout)layoutIndex;
+            const CKDWORD maximum = layout == CKFF_SAMPLER_LAYOUT_WIDE_2D
+                ? 8u : 3u;
+            const void *previousCode = nullptr;
+            const void *comparisonCode = nullptr;
+            for (CKDWORD count = 0; count <= maximum; ++count) {
+                CKFFSamplerLayoutPlan plan;
+                plan.Layout = layout;
+                plan.CompareSamplerCount = (CKBYTE)count;
+                CKSdlGpuFFFragmentArtifactKey hardwareKey, shaderKey;
+                CKShaderDesc hardwareRequest, shaderRequest;
+                const bool hardwareSelected =
+                    CKSdlGpuBuildFFFragmentArtifactKey(
+                        plan, FALSE, hardwareKey) &&
+                    CKSdlGpuFFFragmentShader(
+                        format, hardwareKey, hardwareRequest);
+                const bool shaderSelected =
+                    CKSdlGpuBuildFFFragmentArtifactKey(
+                        plan, TRUE, shaderKey) &&
+                    CKSdlGpuFFFragmentShader(
+                        format, shaderKey, shaderRequest);
+                bool expectedArtifact = false;
+                if (count == 0) {
+                    expectedArtifact = hardwareRequest.Code !=
+                        shaderRequest.Code &&
+                        !hardwareKey.UsesShaderSampling &&
+                        shaderKey.UsesShaderSampling;
+                } else if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
+                    expectedArtifact = hardwareRequest.Code != previousCode &&
+                        hardwareRequest.Code == shaderRequest.Code &&
+                        hardwareKey.ComparisonResourceCount == count &&
+                        shaderKey.ComparisonResourceCount == count &&
+                        hardwareKey.UsesShaderSampling &&
+                        shaderKey.UsesShaderSampling;
+                } else {
+                    if (count == 1)
+                        comparisonCode = hardwareRequest.Code;
+                    expectedArtifact = hardwareRequest.Code == comparisonCode &&
+                        hardwareRequest.Code == shaderRequest.Code &&
+                        hardwareKey.ComparisonResourceCount == 0 &&
+                        shaderKey.ComparisonResourceCount == 0 &&
+                        hardwareKey.UsesShaderSampling &&
+                        shaderKey.UsesShaderSampling;
+                }
+                check(hardwareSelected && shaderSelected &&
+                          hardwareRequest.Code && hardwareRequest.CodeSize &&
+                          shaderRequest.Code && shaderRequest.CodeSize &&
+                          expectedArtifact,
+                      "comparison ABI remains independent of shader sampling requirements");
+                previousCode = hardwareRequest.Code;
+            }
+            CKFFSamplerLayoutPlan impossiblePlan;
+            impossiblePlan.Layout = layout;
+            impossiblePlan.CompareSamplerCount = (CKBYTE)(maximum + 1);
+            CKSdlGpuFFFragmentArtifactKey impossibleComparison;
+            check(!CKSdlGpuBuildFFFragmentArtifactKey(
+                      impossiblePlan, FALSE, impossibleComparison),
+                  "SDL rejects comparison counts that cannot occur in an eight-stage layout");
         }
+        CKFFSamplerLayoutPlan validPlan;
+        CKSdlGpuFFFragmentArtifactKey invalidBoolean;
+        check(!CKSdlGpuBuildFFFragmentArtifactKey(
+                  validPlan, (CKBOOL)2, invalidBoolean),
+              "SDL rejects a non-boolean shader sampling requirement");
+        validPlan.Layout = (CKFFSamplerLayout)-1;
+        check(!CKSdlGpuBuildFFFragmentArtifactKey(
+                  validPlan, FALSE, invalidBoolean),
+              "SDL rejects a negative sampler layout");
         CKShaderDesc vertex, fragment;
         check(CKSdlGpuNativeClearShaders(format, vertex, fragment) && vertex.UniformBufferCount == 1 &&
               fragment.UniformBufferCount == 1 && !vertex.SamplerCount && !fragment.SamplerCount,

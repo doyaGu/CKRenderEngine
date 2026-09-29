@@ -939,18 +939,18 @@ void TestFixedFunctionFragmentSamplingVariants()
     for (CK_SHADER_PROFILE profile : profiles) {
         caps.ShaderProfile = profile;
         for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
-            CKShaderDesc full, native;
+            CKShaderDesc shaderControlled, hardware;
             TEST_ASSERT(CKBgfxRasterizerFFFragmentShader(
                             caps, (CKFFSamplerLayout)layout,
-                            CKFF_FRAGMENT_SAMPLING_FULL_EXACT, full) &&
-                            full.Code && full.CodeSize,
-                        "every bgfx profile exposes each full-exact sampler layout");
+                            TRUE, shaderControlled) &&
+                            shaderControlled.Code && shaderControlled.CodeSize,
+                        "every bgfx profile exposes each shader-controlled sampler layout");
             TEST_ASSERT(CKBgfxRasterizerFFFragmentShader(
                             caps, (CKFFSamplerLayout)layout,
-                            CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT, native) &&
-                            native.Code && native.CodeSize &&
-                            native.Code != full.Code,
-                        "every bgfx profile exposes a distinct native-exact sampler layout");
+                            FALSE, hardware) &&
+                            hardware.Code && hardware.CodeSize &&
+                            hardware.Code != shaderControlled.Code,
+                        "every bgfx profile exposes a distinct hardware-sampling layout");
             if (profile == CKRST_SHADER_PROFILE_GLSL ||
                 profile == CKRST_SHADER_PROFILE_ESSL) {
                 const char *expected = profile == CKRST_SHADER_PROFILE_GLSL
@@ -960,9 +960,9 @@ void TestFixedFunctionFragmentSamplingVariants()
                 CKDWORD fullSourceSize = 0;
                 CKDWORD nativeSourceSize = 0;
                 const char *fullSource = GetBgfxShaderSource(
-                    full, fullSourceSize);
+                    shaderControlled, fullSourceSize);
                 const char *nativeSource = GetBgfxShaderSource(
-                    native, nativeSourceSize);
+                    hardware, nativeSourceSize);
                 TEST_ASSERT(fullSource && fullSourceSize >= expectedSize &&
                                 memcmp(fullSource, expected, expectedSize) == 0 &&
                                 nativeSource && nativeSourceSize >= expectedSize &&
@@ -974,8 +974,11 @@ void TestFixedFunctionFragmentSamplingVariants()
     CKShaderDesc invalid;
     TEST_ASSERT(!CKBgfxRasterizerFFFragmentShader(
                     caps, CKFF_SAMPLER_LAYOUT_WIDE_2D,
-                    CKFF_FRAGMENT_SAMPLING_MODE_COUNT, invalid),
-                "bgfx rejects an invalid fragment sampling mode");
+                    (CKBOOL)2, invalid),
+                "bgfx rejects a non-boolean shader sampling requirement");
+    TEST_ASSERT(!CKBgfxRasterizerFFFragmentShader(
+                    caps, (CKFFSamplerLayout)-1, FALSE, invalid),
+                "bgfx rejects a negative sampler layout");
 }
 
 static void TestRejectedShaderTargets()

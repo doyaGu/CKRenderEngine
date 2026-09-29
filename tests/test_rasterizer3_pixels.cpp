@@ -3278,6 +3278,18 @@ void CheckFilteredDepthComparison(Backend &b)
     }, pixels);
     ExpectCenter(pixels, 255, 255, 255,
                  "LEQUAL depth comparison accepts the high-depth half");
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                              VXTEXTURE_ADDRESSMIRRORONCE);
+    for (int i = 0; i < 3; ++i)
+        coordinates[i][0] = -0.75f;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, coordinates),
+                  "draw MIRRORONCE depth comparison");
+    }, pixels);
+    ExpectCenter(pixels, 255, 255, 255,
+                 "MIRRORONCE depth comparison reflects the coordinate");
+    ctx->SetTextureStageState(0, CKRST_TSS_ADDRESS,
+                              VXTEXTURE_ADDRESSCLAMP);
     for (int i = 0; i < 3; ++i)
         coordinates[i][0] = 0.5f;
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
@@ -3342,7 +3354,7 @@ void CheckFilteredDepthComparison(Backend &b)
                   "draw two comparison stages across the depth border");
     }, pixels);
     ExpectCenter(pixels, 128, 128, 128,
-                 "manual comparison profile filters border depth per tap");
+                 "two native comparison samplers filter border depth per tap");
 
     SetDiffuseState(ctx);
     TestCheck(ctx->SetTexture(colorTexture, 0),

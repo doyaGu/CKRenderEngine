@@ -82,18 +82,19 @@
 
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
-                                        CKFFFragmentSamplingMode samplingMode,
+                                        CKBOOL requiresShaderSampling,
                                         CKShaderDesc &out)
 {
     if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX ||
-        layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
-        samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT)
+        (CKDWORD)layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        (requiresShaderSampling != FALSE &&
+         requiresShaderSampling != TRUE))
         return FALSE;
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_PIXEL;
     out.Format = caps.ShaderFormat;
     out.Profile = caps.ShaderProfile;
-#define CKFF_SELECT_FULL_LAYOUT(_backend) \
+#define CKFF_SELECT_SHADER_LAYOUT(_backend) \
     if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
         out.Code = s_##_backend##_fs_ff_stage; \
         out.CodeSize = sizeof(s_##_backend##_fs_ff_stage); \
@@ -116,10 +117,10 @@ CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
         out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_volume_native); \
     }
 #define CKFF_SELECT_LAYOUT(_backend) \
-    if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) { \
-        CKFF_SELECT_NATIVE_LAYOUT(_backend) \
+    if (requiresShaderSampling) { \
+        CKFF_SELECT_SHADER_LAYOUT(_backend) \
     } else { \
-        CKFF_SELECT_FULL_LAYOUT(_backend) \
+        CKFF_SELECT_NATIVE_LAYOUT(_backend) \
     }
     switch (caps.ShaderProfile) {
     case CKRST_SHADER_PROFILE_DX11: CKFF_SELECT_LAYOUT(dx11); break;
@@ -132,7 +133,7 @@ CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
     }
 #undef CKFF_SELECT_LAYOUT
 #undef CKFF_SELECT_NATIVE_LAYOUT
-#undef CKFF_SELECT_FULL_LAYOUT
+#undef CKFF_SELECT_SHADER_LAYOUT
     return out.Code && out.CodeSize ? TRUE : FALSE;
 }
 

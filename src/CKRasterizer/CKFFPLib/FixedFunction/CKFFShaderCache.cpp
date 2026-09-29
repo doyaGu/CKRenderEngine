@@ -99,13 +99,10 @@ CKFFProgramVariant CKFFShaderCache::ProgramVariantForKey(const CKFFShaderKey &ke
 
 CKFFProgramSelection CKFFShaderCache::ResolveProgram(
     const CKFFShaderKey &key,
-    const CKFFSamplerLayoutPlan &samplerLayoutPlan,
-    CKFFFragmentSamplingMode samplingMode)
+    const CKFFSamplerLayoutPlan &samplerLayoutPlan)
 {
     CKFFProgramSelection selection;
     selection.Variant = ProgramVariantForKey(key);
-    selection.SamplingMode = samplingMode < CKFF_FRAGMENT_SAMPLING_MODE_COUNT
-        ? samplingMode : CKFF_FRAGMENT_SAMPLING_FULL_EXACT;
     selection.SamplerLayoutPlan = samplerLayoutPlan;
     const CKFFShaderKeyFS programKey = CKFFProgramFragmentKey(key.FS);
     FragmentProgramCache &cache = m_FragmentPrograms[selection.Variant];

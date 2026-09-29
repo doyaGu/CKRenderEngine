@@ -25,13 +25,11 @@ struct CKFFProgramBinding {
 
 struct CKFFProgramSelection {
     CKFFProgramVariant Variant;
-    CKFFFragmentSamplingMode SamplingMode;
     CKFFSamplerLayoutPlan SamplerLayoutPlan;
     CKFFFragmentProgram FragmentProgram;
 
     CKFFProgramSelection()
         : Variant(CKFF_PROGRAM_3D),
-          SamplingMode(CKFF_FRAGMENT_SAMPLING_FULL_EXACT),
           SamplerLayoutPlan(), FragmentProgram() {}
 };
 
@@ -62,9 +60,7 @@ public:
     // own and cache the native shader/program objects for the chosen variant.
     CKFFProgramSelection ResolveProgram(
         const CKFFShaderKey &key,
-        const CKFFSamplerLayoutPlan &samplerLayoutPlan,
-        CKFFFragmentSamplingMode samplingMode =
-            CKFF_FRAGMENT_SAMPLING_FULL_EXACT);
+        const CKFFSamplerLayoutPlan &samplerLayoutPlan);
     CKFFProgramSelection ResolveProgram(const CKFFShaderKey &key) {
         return ResolveProgram(key, CKFFBuildSamplerLayoutPlan(key.FS));
     }

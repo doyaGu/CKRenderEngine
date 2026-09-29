@@ -13,7 +13,7 @@ struct CKRasterizerDeviceCaps;
 CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out);
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
-                                        CKFFFragmentSamplingMode samplingMode,
+                                        CKBOOL requiresShaderSampling,
                                         CKShaderDesc &out);
 CKBOOL CKBgfxRasterizerDitherFragmentShader(
     const CKRasterizerDeviceCaps &caps, CKShaderDesc &out);

@@ -34,8 +34,8 @@ SHADERS = [
     ("vs_ff_positiont_clip_depth_pad", "vs_ff_positiont", True, 0, 0),
     ("fs_ff_stage", "fs_ff_stage", False, 0, 0),
     ("fs_ff_stage_native", "fs_ff_stage", False, 0, 0),
-    ("fs_ff_stage_manual_compare", "fs_ff_stage", False, 0, 0),
-    ("fs_ff_stage_compare1", "fs_ff_stage", False, 1, 0),
+    *[(f"fs_ff_stage_compare{count}", "fs_ff_stage", False, count, 0)
+      for count in range(1, 9)],
     ("fs_ff_stage_cube", "fs_ff_stage", False, 0, 1),
     ("fs_ff_stage_cube_native", "fs_ff_stage", False, 0, 1),
     ("fs_ff_stage_volume", "fs_ff_stage", False, 0, 2),
@@ -101,6 +101,14 @@ def source_body(path: Path) -> str:
         if include:
             if include[1] != "bgfx_shader.sh":
                 result.append(source_body(path.parent / include[1]))
+                if include[1] == "ff_sampler_layout.sh":
+                    # Explicit-gradient comparison dispatches concrete sampler
+                    # resources.  Keep only that helper after the declarations;
+                    # the established native sampling source order remains
+                    # unchanged for the driver-sensitive common shader.
+                    result.append(HERE.joinpath(
+                        "depth_compare_sampling.hlsli").read_text(
+                            encoding="utf-8"))
         else:
             result.append(line)
     assert not bgfx_only
@@ -237,9 +245,8 @@ def make_source(shader_name: str, source: str, clipping: bool,
     return "\n".join([f"#define CKFF_VS_CLIP_DISTANCE {int(clipping)}",
                        f"#define CKFF_VS_DEPTH_PAD {int(shader_name.endswith('_depth_pad'))}",
                        f"#define CKFF_NATIVE_FFP_STAGE {int(source == 'fs_ff_stage')}",
-                       f"#define CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT {int(shader_name.endswith('_native'))}",
-                       f"#define CKFF_MANUAL_COMPARE_PROFILE {int(shader_name.endswith('_manual_compare'))}",
-                       f"#define CKFF_NATIVE_COMPARE_COUNT {compare_count}",
+                       f"#define CKFF_HARDWARE_SAMPLING {int(shader_name.endswith('_native'))}",
+                       f"#define CKFF_DEPTH_COMPARE_SAMPLER_COUNT {compare_count}",
                        f"#define CKFF_NATIVE_SAMPLER_LAYOUT {sampler_layout}",
                        HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8"),
                        uniform_declaration(source),

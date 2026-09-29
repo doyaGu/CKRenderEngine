@@ -9,10 +9,16 @@
 #include "shaders/generated/dxil_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/dxil_fs_ff_stage.h"
 #include "shaders/generated/dxil_fs_ff_stage_native.h"
-#include "shaders/generated/dxil_fs_ff_stage_manual_compare.h"
 #include "shaders/generated/dxil_fs_ff_stage_cube_native.h"
 #include "shaders/generated/dxil_fs_ff_stage_volume_native.h"
 #include "shaders/generated/dxil_fs_ff_stage_compare1.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare2.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare3.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare4.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare5.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare6.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare7.h"
+#include "shaders/generated/dxil_fs_ff_stage_compare8.h"
 #include "shaders/generated/dxil_fs_ff_stage_cube.h"
 #include "shaders/generated/dxil_fs_ff_stage_volume.h"
 #include "shaders/generated/dxil_vs_postprocess.h"
@@ -25,10 +31,16 @@
 #include "shaders/generated/spirv_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/spirv_fs_ff_stage.h"
 #include "shaders/generated/spirv_fs_ff_stage_native.h"
-#include "shaders/generated/spirv_fs_ff_stage_manual_compare.h"
 #include "shaders/generated/spirv_fs_ff_stage_cube_native.h"
 #include "shaders/generated/spirv_fs_ff_stage_volume_native.h"
 #include "shaders/generated/spirv_fs_ff_stage_compare1.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare2.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare3.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare4.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare5.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare6.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare7.h"
+#include "shaders/generated/spirv_fs_ff_stage_compare8.h"
 #include "shaders/generated/spirv_fs_ff_stage_cube.h"
 #include "shaders/generated/spirv_fs_ff_stage_volume.h"
 #include "shaders/generated/spirv_vs_postprocess.h"
@@ -67,21 +79,55 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
     return TRUE;
 }
 
-CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
-                               CKFFSamplerLayout samplerLayout,
-                               CKDWORD compareSamplerCount,
-                               CKFFFragmentSamplingMode samplingMode,
-                               CKShaderDesc &out)
+CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
+    const CKFFSamplerLayoutPlan &samplerLayoutPlan,
+    CKBOOL requiresShaderSampling,
+    CKSdlGpuFFFragmentArtifactKey &out)
 {
+    const CKFFSamplerLayout samplerLayout = samplerLayoutPlan.Layout;
+    const CKDWORD compareSamplerCount =
+        samplerLayoutPlan.CompareSamplerCount;
+    if ((CKDWORD)samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        (requiresShaderSampling != FALSE &&
+         requiresShaderSampling != TRUE))
+        return FALSE;
     const CKDWORD twoDCount = CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D,
                                                        samplerLayout);
-    const CKSdlGpuFFComparisonProfile comparisonProfile =
-        CKSdlGpuFFResolveComparisonProfile(
-            samplerLayout, compareSamplerCount, samplingMode);
-    if (samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
-        compareSamplerCount > twoDCount ||
-        samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT ||
-        comparisonProfile >= CKSDL_GPU_FF_COMPARE_PROFILE_COUNT)
+    // Selecting a wide cube or volume layout requires at least five stages of
+    // that type, so at most three of the eight logical stages can be depth
+    // comparison stages.
+    const CKDWORD maximumCompareSamplerCount =
+        samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D ? twoDCount : 3u;
+    if (compareSamplerCount > maximumCompareSamplerCount)
+        return FALSE;
+
+    out = CKSdlGpuFFFragmentArtifactKey();
+    out.SamplerLayout = samplerLayout;
+    out.ComparisonResourceCount =
+        samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D
+            ? (CKBYTE)compareSamplerCount : 0;
+    // Comparison resources need the shader sampling implementation for
+    // explicit-gradient comparison and for mixed resource layouts. The
+    // specialized wide-2D artifacts still use hardware SampleCmp whenever
+    // the stage does not require an explicit footprint.
+    out.UsesShaderSampling = requiresShaderSampling ||
+        compareSamplerCount != 0;
+    return TRUE;
+}
+
+CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
+                               const CKSdlGpuFFFragmentArtifactKey &artifactKey,
+                               CKShaderDesc &out)
+{
+    const CKFFSamplerLayout samplerLayout = artifactKey.SamplerLayout;
+    const CKDWORD compareSamplerCount = artifactKey.ComparisonResourceCount;
+    if ((CKDWORD)samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        compareSamplerCount > CKFF_MAX_TEXTURE_STAGES ||
+        (artifactKey.UsesShaderSampling != FALSE &&
+         artifactKey.UsesShaderSampling != TRUE) ||
+        (compareSamplerCount != 0 &&
+         (samplerLayout != CKFF_SAMPLER_LAYOUT_WIDE_2D ||
+          !artifactKey.UsesShaderSampling)))
         return FALSE;
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_PIXEL;
@@ -95,13 +141,18 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
     out.Code = s_sdl_##_format##_fs_ff_stage##_suffix; \
     out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage##_suffix)
 #define CKFF_SELECT_WIDE_2D(_format) \
-    if (comparisonProfile == CKSDL_GPU_FF_COMPARE_NATIVE_ONE) { \
-        CKFF_SET_SHADER(_format, _compare1); \
-    } else if (comparisonProfile == CKSDL_GPU_FF_COMPARE_MANUAL) { \
-        CKFF_SET_SHADER(_format, _manual_compare); \
-    } else { \
-        out.Code = s_sdl_##_format##_fs_ff_stage; \
-        out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage); \
+    switch (compareSamplerCount) { \
+    case 0: out.Code = s_sdl_##_format##_fs_ff_stage; \
+            out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage); break; \
+    case 1: CKFF_SET_SHADER(_format, _compare1); break; \
+    case 2: CKFF_SET_SHADER(_format, _compare2); break; \
+    case 3: CKFF_SET_SHADER(_format, _compare3); break; \
+    case 4: CKFF_SET_SHADER(_format, _compare4); break; \
+    case 5: CKFF_SET_SHADER(_format, _compare5); break; \
+    case 6: CKFF_SET_SHADER(_format, _compare6); break; \
+    case 7: CKFF_SET_SHADER(_format, _compare7); break; \
+    case 8: CKFF_SET_SHADER(_format, _compare8); break; \
+    default: return FALSE; \
     }
 #define CKFF_SELECT_NATIVE(_format) \
     if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
@@ -112,7 +163,10 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
         CKFF_SET_SHADER(_format, _volume_native); \
     }
     if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) {
+        if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D &&
+            compareSamplerCount != 0) {
+            CKFF_SELECT_WIDE_2D(dxil);
+        } else if (!artifactKey.UsesShaderSampling) {
             CKFF_SELECT_NATIVE(dxil);
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
             CKFF_SELECT_WIDE_2D(dxil);
@@ -122,7 +176,10 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
             CKFF_SET_SHADER(dxil, _volume);
         }
     } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
-        if (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT) {
+        if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D &&
+            compareSamplerCount != 0) {
+            CKFF_SELECT_WIDE_2D(spirv);
+        } else if (!artifactKey.UsesShaderSampling) {
             CKFF_SELECT_NATIVE(spirv);
         } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
             CKFF_SELECT_WIDE_2D(spirv);
@@ -138,29 +195,6 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
 #undef CKFF_SELECT_NATIVE
 #undef CKFF_SET_SHADER
     return out.Code && out.CodeSize;
-}
-
-CKSdlGpuFFComparisonProfile CKSdlGpuFFResolveComparisonProfile(
-    CKFFSamplerLayout samplerLayout,
-    CKDWORD compareSamplerCount,
-    CKFFFragmentSamplingMode samplingMode)
-{
-    if (samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
-        samplingMode >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT ||
-        compareSamplerCount >
-            CKFFSamplerTypeSlotCount(CKFF_SAMPLER_2D, samplerLayout) ||
-        (samplingMode == CKFF_FRAGMENT_SAMPLING_NATIVE_EXACT &&
-         compareSamplerCount != 0)) {
-        return CKSDL_GPU_FF_COMPARE_PROFILE_COUNT;
-    }
-    if (compareSamplerCount == 0)
-        return CKSDL_GPU_FF_COMPARE_BASE;
-    if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D &&
-        compareSamplerCount == 1)
-        return CKSDL_GPU_FF_COMPARE_NATIVE_ONE;
-    if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D)
-        return CKSDL_GPU_FF_COMPARE_MANUAL;
-    return CKSDL_GPU_FF_COMPARE_BASE;
 }
 
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
@@ -203,9 +237,11 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
         shader.SamplerCount = i == CKRST_SHADER_FF_FRAGMENT ? 16 : (i == CKRST_SHADER_PRESENT_FRAGMENT ? 1 : 0);
     }
     CKShaderDesc fragment;
-    if (!CKSdlGpuFFFragmentShader(format, CKFF_SAMPLER_LAYOUT_WIDE_2D,
-                                  0, CKFF_FRAGMENT_SAMPLING_FULL_EXACT,
-                                  fragment))
+    const CKFFSamplerLayoutPlan defaultSamplerLayout;
+    CKSdlGpuFFFragmentArtifactKey fragmentArtifactKey;
+    if (!CKSdlGpuBuildFFFragmentArtifactKey(
+            defaultSamplerLayout, TRUE, fragmentArtifactKey) ||
+        !CKSdlGpuFFFragmentShader(format, fragmentArtifactKey, fragment))
         return FALSE;
     out.Shaders[CKRST_SHADER_FF_FRAGMENT] = fragment;
     return out.Matches(payload, profile);

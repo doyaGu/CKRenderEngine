@@ -34,11 +34,12 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
             CKFFTextureSlot &native = set->NativeBindings[nativeSlot];
             native.Texture = textureHandles[stage];
             native.FixedStage = stage;
+            native.ShaderState = shaderStates[stage].Bits;
             native.Sampler = samplers[stage];
         }
     }
     set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);
-    set->SamplingMode = CKFFResolveFragmentSamplingMode(*set);
+    set->RequiresShaderSampling = CKFFRequiresShaderSampling(*set);
 }
 
 CKFFTextureBinder::CKFFTextureBinder(const CKFFStateStore &state,

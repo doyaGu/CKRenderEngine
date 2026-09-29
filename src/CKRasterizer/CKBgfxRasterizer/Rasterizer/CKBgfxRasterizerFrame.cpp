@@ -434,22 +434,21 @@ CKDWORD CKBgfxRasterizerContext::ResolveNativeFFProgram(
     const CKFFProgramContext &ProgramContext,
     const CKFFTextureBindingSet &Textures)
 {
-    const CKFFFragmentSamplingMode samplingMode = Textures.SamplingMode;
+    const CKBOOL requiresShaderSampling = Textures.RequiresShaderSampling;
     const CKFFProgramVariant programVariant =
         CKFFShaderCache::ProgramVariantForKey(ProgramContext.ShaderKey);
     const CKDWORD variant = (CKDWORD)programVariant;
     const CKFFSamplerLayout layout = Textures.SamplerLayoutPlan.Layout;
     const CKDWORD samplerLayout = (CKDWORD)layout;
-    const CKDWORD sampling = (CKDWORD)samplingMode;
+    const CKDWORD sampling = requiresShaderSampling ? 1u : 0u;
     if (variant >= CKFF_PROGRAM_VARIANT_COUNT ||
-        samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT ||
-        sampling >= CKFF_FRAGMENT_SAMPLING_MODE_COUNT)
+        samplerLayout >= CKFF_SAMPLER_LAYOUT_COUNT)
         return 0;
 
     if (!m_NativeFFPixelShaders[samplerLayout][sampling]) {
         CKShaderDesc pixelShader;
         if (!CKBgfxRasterizerFFFragmentShader(m_Caps, layout,
-                                              samplingMode,
+                                              requiresShaderSampling,
                                               pixelShader) ||
             CreateShader(&pixelShader,
                          &m_NativeFFPixelShaders[samplerLayout][sampling]) != CK_OK)
@@ -481,8 +480,7 @@ void CKBgfxRasterizerContext::ClearNativeFFPrograms()
     for (CKDWORD variant = 0;
         variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
         for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
-            for (CKDWORD sampling = 0;
-                 sampling < CKFF_FRAGMENT_SAMPLING_MODE_COUNT; ++sampling) {
+            for (CKDWORD sampling = 0; sampling < 2; ++sampling) {
                 if (m_NativeFFPrograms[variant][layout][sampling])
                     DestroyObject(m_NativeFFPrograms[variant][layout][sampling],
                                   CKRST_OBJ_PROGRAM);
@@ -494,8 +492,7 @@ void CKBgfxRasterizerContext::ClearNativeFFPrograms()
         m_NativeFFVertexShaders[variant] = 0;
     }
     for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
-        for (CKDWORD sampling = 0;
-             sampling < CKFF_FRAGMENT_SAMPLING_MODE_COUNT; ++sampling) {
+        for (CKDWORD sampling = 0; sampling < 2; ++sampling) {
             if (m_NativeFFPixelShaders[layout][sampling])
                 DestroyObject(m_NativeFFPixelShaders[layout][sampling],
                               CKRST_OBJ_SHADER);

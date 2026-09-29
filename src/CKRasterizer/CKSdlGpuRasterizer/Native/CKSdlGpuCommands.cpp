@@ -491,6 +491,8 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             return CKERR_INVALIDPARAMETER;
         if (nativeComparisonSampler && texture->Depth &&
             binding.Sampler.CompareFunc != CKRST_COMPARE_NONE &&
+            (binding.ShaderState &
+             CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) == 0 &&
             (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
              binding.Sampler.AddressV == CKRST_ADDRESS_BORDER)) {
             float transform[4];

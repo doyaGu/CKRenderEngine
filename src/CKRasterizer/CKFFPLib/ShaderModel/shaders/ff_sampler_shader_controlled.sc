@@ -1,12 +1,8 @@
-// Fixed-function full-exact sampler path.
+// Fixed-function shader-controlled sampler path.
 // Keep resource dispatch and typed sampling in one function: DXC otherwise
 // clones the advanced sampler graph for every resource-bearing helper.
 
 // Fixed-function depth texture sampling and comparison.
-
-#ifndef CKFF_MANUAL_COMPARE_PROFILE
-#define CKFF_MANUAL_COMPARE_PROFILE 0
-#endif
 
 float compareDepth(float depth, float ref, int func)
 {
@@ -261,21 +257,20 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
 #endif
 // CKFF_BGFX_ONLY_END
 
-#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0 && \
-    (CKFF_MANUAL_COMPARE_PROFILE || CKFF_NATIVE_SAMPLER_LAYOUT != 0)
-    if (samplerType == 2 && compareFunc != 0) {
+#if CKFF_NATIVE_SDL_GPU && \
+    (CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0 || \
+     CKFF_NATIVE_SAMPLER_LAYOUT != 0)
+    if (samplerType == 2 && compareFunc != 0 &&
+        (CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0 || requiresExplicitGradient)) {
         vec2 compareDx = dFdx(originalCoord.xy);
         vec2 compareDy = dFdy(originalCoord.xy);
-#define CKFF_COMPARE_SAMPLE_MANUAL(_sampler) texture2DCompareManual( \
-    _sampler, uv, compareDx, compareDy, lodBias, minMip, coord.z, compareFunc)
-        float compared = 0.0;
-        CKFF_DISPATCH_2D_ORDINARY(ordinal, compared,
-                                  CKFF_COMPARE_SAMPLE_MANUAL)
-#undef CKFF_COMPARE_SAMPLE_MANUAL
+        float compared = ckCompareSample2D(
+            uint(ordinal), uv, compareDx, compareDy,
+            lodBias, minMip, coord.z, compareFunc);
         return vec4_splat(compared);
     }
 #endif
-#if !CKFF_NATIVE_SDL_GPU || CKFF_NATIVE_COMPARE_COUNT > 0
+#if !CKFF_NATIVE_SDL_GPU || CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0
     if (samplerType == 2 && compareFunc != 0) {
 #if CKFF_NATIVE_SDL_GPU
 #define CKFF_COMPARE_SAMPLE(_sampler) texture2DCompare( \
@@ -329,8 +324,8 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
 // CKFF_BGFX_ONLY_END
 #endif
 #if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_SAMPLER_LAYOUT == 0 && \
-    CKFF_NATIVE_COMPARE_COUNT == 0 && !CKFF_MANUAL_COMPARE_PROFILE
-    // D3D12 requires the common wide-2D profile to retain sparse stage slots.
+    CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
+    // D3D12 requires the common wide-2D variant to retain sparse stage slots.
     CKFF_DISPATCH_2D_STAGE(stage, color, CKFF_SAMPLE_2D_FINAL)
 #else
     CKFF_DISPATCH_2D_ORDINARY(ordinal, color, CKFF_SAMPLE_2D_FINAL)
@@ -353,7 +348,7 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
 #endif
 // CKFF_BGFX_ONLY_END
     if (samplerType == 2) {
-#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_COMPARE_COUNT == 0
+#if CKFF_NATIVE_SDL_GPU && CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
         float depth = color.r;
         if (compareFunc != 0)
             return vec4_splat(compareDepth(depth, coord.z, compareFunc));

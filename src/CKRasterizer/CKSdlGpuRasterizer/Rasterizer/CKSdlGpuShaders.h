@@ -8,22 +8,23 @@
 
 // FFP/presentation artifacts supplied by the rasterizer plugin. Private
 // backend image operations have their own CKSdlGpuNativeShaders interface.
-enum CKSdlGpuFFComparisonProfile {
-    CKSDL_GPU_FF_COMPARE_BASE = 0,
-    CKSDL_GPU_FF_COMPARE_NATIVE_ONE,
-    CKSDL_GPU_FF_COMPARE_MANUAL,
-    CKSDL_GPU_FF_COMPARE_PROFILE_COUNT
+struct CKSdlGpuFFFragmentArtifactKey {
+    CKFFSamplerLayout SamplerLayout;
+    CKBYTE ComparisonResourceCount;
+    CKBOOL UsesShaderSampling;
+
+    CKSdlGpuFFFragmentArtifactKey()
+        : SamplerLayout(CKFF_SAMPLER_LAYOUT_WIDE_2D),
+          ComparisonResourceCount(0), UsesShaderSampling(FALSE) {}
 };
 
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat Format, CKFFShaderSet &Out);
-CKSdlGpuFFComparisonProfile CKSdlGpuFFResolveComparisonProfile(
-    CKFFSamplerLayout SamplerLayout,
-    CKDWORD CompareSamplerCount,
-    CKFFFragmentSamplingMode SamplingMode);
+CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
+    const CKFFSamplerLayoutPlan &SamplerLayoutPlan,
+    CKBOOL RequiresShaderSampling,
+    CKSdlGpuFFFragmentArtifactKey &Out);
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
-                               CKFFSamplerLayout SamplerLayout,
-                               CKDWORD CompareSamplerCount,
-                               CKFFFragmentSamplingMode SamplingMode,
+                               const CKSdlGpuFFFragmentArtifactKey &ArtifactKey,
                                CKShaderDesc &Out);
 CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat Format,
                                      CKBOOL Clipping,

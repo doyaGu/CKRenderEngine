@@ -1,4 +1,4 @@
-// Compact fixed-function sampler path for states fully represented by native
+// Compact fixed-function sampler path for states fully represented by hardware
 // sampler objects. Selection excludes explicit gradients, manual LOD,
 // anisotropy, border handling and depth comparison.
 
