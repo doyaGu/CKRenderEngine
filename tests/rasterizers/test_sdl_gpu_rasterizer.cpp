@@ -1,5 +1,6 @@
 // Device and command coverage for the complete SDL_gpu rasterizer.
 #include "CKSdlGpuRasterizerContext.h"
+#include "CKSdlGpuFFJitManifest.h"
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuTextureData.h"
 #include "CKSdlGpuWorker.h"
@@ -297,6 +298,119 @@ int main()
         check(deleted == 14, "stopping deletes finished jobs");
         SDL_DestroySemaphore(started);
         SDL_DestroySemaphore(gate);
+    }
+    {
+        auto record = [](CKDWORD seed) {
+            CKSdlGpuFFJitRecord result;
+            CKDWORD *values = reinterpret_cast<CKDWORD *>(&result);
+            for (size_t i = 0; i < sizeof(result) / sizeof(CKDWORD); ++i)
+                values[i] = (seed * 2654435761u + CKDWORD(i) * 40503u) & CKFFFragmentProgram::LaneMask;
+            result.SamplerLayout = seed % CKFF_SAMPLER_LAYOUT_COUNT;
+            result.Variant = seed % CKFF_PROGRAM_VARIANT_COUNT;
+            result.DepthClipEnabled = seed & 1;
+            return result;
+        };
+        auto same = [](const XArray<CKSdlGpuFFJitRecord> &a, const XArray<CKSdlGpuFFJitRecord> &b) {
+            return a.Size() == b.Size() &&
+                   (a.Size() == 0 || std::memcmp(a.Begin(), b.Begin(), a.Size() * sizeof(a[0])) == 0);
+        };
+        const uint64_t identity =
+            CKSdlGpuFFJitManifestIdentity("direct3d12", "GPU", SDL_GPU_SHADERFORMAT_DXBC);
+        check(identity == CKSdlGpuFFJitManifestIdentity("direct3d12", "GPU", SDL_GPU_SHADERFORMAT_DXBC) &&
+              identity != CKSdlGpuFFJitManifestIdentity("vulkan", "GPU", SDL_GPU_SHADERFORMAT_DXBC) &&
+              identity != CKSdlGpuFFJitManifestIdentity("direct3d12", "GPU 2", SDL_GPU_SHADERFORMAT_DXBC) &&
+              identity != CKSdlGpuFFJitManifestIdentity("direct3d12", "GPU", SDL_GPU_SHADERFORMAT_SPIRV) &&
+              identity != CKSdlGpuFFJitManifestIdentity("direct3d12G", "PU", SDL_GPU_SHADERFORMAT_DXBC),
+              "FF JIT manifest identity follows driver, device and shader format");
+        XArray<CKSdlGpuFFJitRecord> records, decoded;
+        for (CKDWORD i = 1; i <= 3; ++i) records.PushBack(record(i));
+        XArray<CKBYTE> data;
+        CKSdlGpuEncodeFFJitManifest(identity, records, data);
+        check(CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) &&
+              same(records, decoded), "FF JIT manifests round trip");
+        const XArray<CKSdlGpuFFJitRecord> none;
+        XArray<CKBYTE> emptyData;
+        CKSdlGpuEncodeFFJitManifest(identity, none, emptyData);
+        check(CKSdlGpuDecodeFFJitManifest(identity, emptyData.Begin(), emptyData.Size(), decoded) &&
+              decoded.Size() == 0, "empty FF JIT manifests round trip");
+        decoded = records;
+        bool rejected = !CKSdlGpuDecodeFFJitManifest(identity + 1, data.Begin(), data.Size(), decoded) &&
+                        decoded.Size() == 0 &&
+                        !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size() - 1, decoded) &&
+                        !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), 8, decoded) &&
+                        !CKSdlGpuDecodeFFJitManifest(identity, nullptr, data.Size(), decoded);
+        XArray<CKBYTE> longer = data;
+        longer.PushBack(0);
+        rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, longer.Begin(), longer.Size(), decoded);
+        for (int offset : {0, 4, 8, 16, 20, 24, 28, data.Size() - 1}) {
+            XArray<CKBYTE> corrupt = data;
+            corrupt[offset] ^= 1;
+            decoded = records;
+            rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, corrupt.Begin(), corrupt.Size(), decoded) &&
+                       decoded.Size() == 0;
+        }
+        check(rejected, "truncated, corrupt or foreign FF JIT manifests are rejected");
+        XArray<CKSdlGpuFFJitRecord> malformed = records;
+        malformed[1].Lanes[0] = CKFFFragmentProgram::LaneMask + 1;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        rejected = !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) && decoded.Size() == 0;
+        malformed = records;
+        malformed[2].Variant = CKFF_PROGRAM_VARIANT_COUNT;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
+        malformed = records;
+        malformed[0].SamplerLayout = CKFF_SAMPLER_LAYOUT_COUNT;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
+        malformed = records;
+        malformed[0].DepthClipEnabled = 2;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
+        check(rejected, "an FF JIT manifest with a malformed record is rejected as a whole");
+        XArray<CKSdlGpuFFJitRecord> many;
+        for (CKDWORD i = 0; i < CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS + 5; ++i) many.PushBack(record(i));
+        CKSdlGpuEncodeFFJitManifest(identity, many, data);
+        many.Resize(CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS);
+        check(CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) && same(many, decoded),
+              "FF JIT manifests keep their first records up to the limit");
+
+        XString directory(SDL_GetBasePath() ? SDL_GetBasePath() : "");
+        directory << "ffjit-manifest-test";
+        char name[32];
+        SDL_snprintf(name, sizeof(name), "ffjit-%016llX.bin", (unsigned long long)identity);
+        SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", "0", 1);
+        check(CKSdlGpuFFJitManifestPath(identity).Length() == 0,
+              "CKRE_SDL_GPU_FF_JIT_CACHE=0 disables the FF JIT manifest");
+        SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", directory.CStr(), 1);
+        const XString path = CKSdlGpuFFJitManifestPath(identity);
+        XString expected(directory);
+        expected << "/" << name;
+        check(path == expected, "CKRE_SDL_GPU_FF_JIT_CACHE names the FF JIT manifest directory");
+        SDL_unsetenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE");
+        const XString defaultPath = CKSdlGpuFFJitManifestPath(identity);
+        check(SDL_strstr(defaultPath.CStr(), "CKSdlGpuCache") && SDL_strstr(defaultPath.CStr(), name),
+              "the FF JIT manifest defaults to CKSdlGpuCache next to the rasterizer");
+        SDL_RemovePath(path.CStr());
+        decoded = records;
+        check(!CKSdlGpuLoadFFJitManifest(path.CStr(), identity, decoded) && decoded.Size() == 0,
+              "a missing FF JIT manifest does not load");
+        check(CKSdlGpuSaveFFJitManifest(path.CStr(), identity, records) &&
+              CKSdlGpuLoadFFJitManifest(path.CStr(), identity, decoded) && same(records, decoded),
+              "saving an FF JIT manifest creates its directory");
+        records.PushBack(record(9));
+        check(CKSdlGpuSaveFFJitManifest(path.CStr(), identity, records) &&
+              CKSdlGpuLoadFFJitManifest(path.CStr(), identity, decoded) && same(records, decoded),
+              "saving an FF JIT manifest replaces the file");
+        check(!CKSdlGpuLoadFFJitManifest(path.CStr(), identity + 1, decoded) && decoded.Size() == 0,
+              "an FF JIT manifest of another device does not load");
+        int files = 0;
+        SDL_EnumerateDirectory(directory.CStr(), [](void *count, const char *, const char *) {
+            ++*static_cast<int *>(count);
+            return SDL_ENUM_CONTINUE;
+        }, &files);
+        check(files == 1, "saving an FF JIT manifest leaves no temporary file");
+        SDL_RemovePath(path.CStr());
+        SDL_RemovePath(directory.CStr());
     }
     {
         CKSdlGpuRasterizerContext context;
