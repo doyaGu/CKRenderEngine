@@ -17,7 +17,8 @@ public:
 };
 
 // Idle jobs are speculative. They run only while no normal job is queued,
-// so they never delay work that a draw is waiting for.
+// so they never delay work that a draw is waiting for; one that a draw comes
+// to wait for is promoted.
 enum CKSdlGpuJobPriority {
     CKSDLGPU_JOB_NORMAL,
     CKSDLGPU_JOB_IDLE,
@@ -41,6 +42,10 @@ public:
 
     // Takes ownership. A stopped worker deletes the job and returns false.
     bool Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority = CKSDLGPU_JOB_NORMAL);
+    // Queues an idle job that has not started behind the normal jobs. False
+    // when the job no longer waits at idle priority; it is only compared, so
+    // it may have been deleted.
+    bool Promote(const CKSdlGpuJob *job);
     // Moves the jobs that have run to the caller, who then owns them.
     void Collect(XArray<CKSdlGpuJob *> &finished);
     // Jobs of either priority queued or running.

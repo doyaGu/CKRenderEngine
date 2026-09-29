@@ -49,6 +49,22 @@ bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority)
     return true;
 }
 
+bool CKSdlGpuWorker::Promote(const CKSdlGpuJob *job)
+{
+    if (!Thread || !job) return false;
+    bool promoted = false;
+    SDL_LockMutex(Lock);
+    for (int i = 0; i < IdleQueued.Size(); ++i) {
+        if (IdleQueued[i] != job) continue;
+        Queued.PushBack(IdleQueued[i]);
+        IdleQueued.RemoveAt(i);
+        promoted = true;
+        break;
+    }
+    SDL_UnlockMutex(Lock);
+    return promoted;
+}
+
 void CKSdlGpuWorker::Collect(XArray<CKSdlGpuJob *> &finished)
 {
     if (!Thread) return;
