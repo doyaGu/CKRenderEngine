@@ -54,6 +54,7 @@ void TestConstantFolding() {
     TestCheck(Same(b.Saturate(b.Float4(-1.0f, 0.25f, 1.0f, 7.0f)), b.Float4(0.0f, 0.25f, 1.0f, 1.0f)),
               "saturate folds");
     TestCheck(Same(b.Floor(b.Float(-1.5f)), b.Float(-2.0f)), "floor folds");
+    TestCheck(Same(b.Ceil(b.Float2(-1.5f, 1.25f)), b.Float2(-1.0f, 2.0f)), "ceil folds");
     TestCheck(Same(b.RoundEven(b.Float2(2.5f, 3.5f)), b.Float2(2.0f, 4.0f)), "round is to even");
     TestCheck(Same(b.Exp2(b.Float(-3.0f)), b.Float(0.125f)), "integral exp2 folds exactly");
     TestCheck(Same(b.Neg(b.Float(0.0f)), b.Float(-0.0f)), "negation flips the sign bit");
@@ -67,6 +68,12 @@ void TestConstantFolding() {
     TestCheck(IsOp(b, b.Exp2(b.Float(0.5f)), CKJIT_OP_EXP2), "fractional exp2 stays for the GPU");
     TestCheck(IsOp(b, b.Exp2(b.Float(-127.0f)), CKJIT_OP_EXP2), "exp2 into the denormal range stays");
     TestCheck(IsOp(b, b.Sqrt(b.Float(4.0f)), CKJIT_OP_SQRT), "sqrt is never folded");
+    TestCheck(IsOp(b, b.Log2(b.Float(8.0f)), CKJIT_OP_LOG2), "log2 is never folded");
+    TestCheck(Same(b.Ddx(b.Float3(1.0f, -2.0f, 0.5f)), b.Float3(0.0f, 0.0f, 0.0f)) &&
+                  Same(b.Ddy(b.Float(-3.0f)), b.Float(0.0f)),
+              "a constant has no derivative");
+    TestCheck(IsOp(b, b.Ddx(b.Float(std::numeric_limits<float>::infinity())), CKJIT_OP_DDX),
+              "the derivative of an infinity is NaN, left to the GPU");
     TestCheck(IsOp(b, b.Dot(b.Float2(1.0f, 2.0f), b.Float2(3.0f, 4.0f)), CKJIT_OP_DOT), "dot is never folded");
     TestCheck(!b.Failed(), "unfolded forms are not errors");
 }
@@ -88,6 +95,18 @@ void TestAlgebraicIdentities() {
     const CKJitValue saturated = b.Saturate(x);
     TestCheck(Same(b.Saturate(saturated), saturated), "saturate is idempotent");
     TestCheck(Same(b.Floor(b.Floor(x)), b.Floor(x)), "floor is idempotent");
+    const CKJitValue ceiled = b.Ceil(x);
+    TestCheck(Same(b.Floor(ceiled), ceiled) && Same(b.Ceil(b.Floor(x)), b.Floor(x)) &&
+                  Same(b.RoundEven(ceiled), ceiled) && Same(b.Ceil(b.RoundEven(y)), b.RoundEven(y)),
+              "rounding keeps integral values");
+    const CKJitValue converted = b.IntToFloat(b.FloatToInt(x));
+    TestCheck(Same(b.Floor(converted), converted) && Same(b.Ceil(converted), converted),
+              "converted integers are integral");
+    TestCheck(IsOp(b, b.Floor(b.Saturate(x)), CKJIT_OP_FLOOR), "other values are rounded");
+    const CKJitValue slope = b.Ddx(b.Swizzle(x, "xy"));
+    TestCheck(IsOp(b, slope, CKJIT_OP_DDX) && b.TypeOf(slope) == CKJIT_TYPE_FLOAT2 &&
+                  IsOp(b, b.Ddy(slope), CKJIT_OP_DDY),
+              "derivatives are component-wise");
     TestCheck(IsOp(b, b.Lerp(x, y, b.Float(0.0f)), CKJIT_OP_ADD), "lerp at zero still evaluates the difference");
     TestCheck(Same(b.Length(b.Component(x, 0)), b.Abs(b.Component(x, 0))), "scalar length is abs");
     TestCheck(b.TypeOf(b.Mul(x, b.Component(y, 2))) == CKJIT_TYPE_FLOAT4, "scalars splat against vectors");
@@ -233,6 +252,7 @@ void TestIntegers() {
     TestCheck(!bad.IntAdd(ints, bad.FloatToInt(bad.Input(kTexCoord))).IsValid(), "integer vectors share a width");
     TestCheck(!bad.IntToFloat(bad.Float(1.0f)).IsValid(), "only integers convert to floats");
     TestCheck(!bad.Add(ints, ints).IsValid(), "float arithmetic takes floats");
+    TestCheck(!bad.Ddx(ints).IsValid() && !bad.Ceil(ints).IsValid(), "derivatives and rounding take floats");
     TestCheck(bad.Failed(), "ill-typed integers fail the builder");
 }
 

@@ -37,12 +37,21 @@ bool FoldFloat(CKJitOp op, float a, float b, float &out) {
     case CKJIT_OP_ABS: out = std::fabs(a); break;
     case CKJIT_OP_SATURATE: out = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a); break;
     case CKJIT_OP_FLOOR: out = std::floor(a); break;
+    case CKJIT_OP_CEIL: out = std::ceil(a); break;
     case CKJIT_OP_ROUND_EVEN: out = std::nearbyint(a); break;
     case CKJIT_OP_EXP2:
         // Integral exponents give exact powers of two on every GPU.
         if (a != std::floor(a) || a < -126.0f || a > 127.0f)
             return false;
         out = std::ldexp(1.0f, (int)a);
+        break;
+    case CKJIT_OP_DDX:
+    case CKJIT_OP_DDY:
+        // Every pixel of the quad holds the constant; an infinity minus
+        // itself is NaN.
+        if (std::isinf(a))
+            return false;
+        out = 0.0f;
         break;
     default:
         return false;
@@ -536,10 +545,18 @@ CKJitValue CKJitBuilder::FloatUnary(CKJitOp op, CKJitValue x) {
             return x;
         break;
     case CKJIT_OP_SATURATE:
-    case CKJIT_OP_FLOOR:
-    case CKJIT_OP_ROUND_EVEN:
         if (node.Op == op)
             return x;
+        break;
+    case CKJIT_OP_FLOOR:
+    case CKJIT_OP_CEIL:
+    case CKJIT_OP_ROUND_EVEN:
+        // Rounding keeps an integral value, which every rounding and every
+        // conversion from an integer produces.
+        if (node.Op == CKJIT_OP_FLOOR || node.Op == CKJIT_OP_CEIL || node.Op == CKJIT_OP_ROUND_EVEN ||
+            node.Op == CKJIT_OP_ITOF) {
+            return x;
+        }
         break;
     default:
         break;
@@ -557,9 +574,13 @@ CKJitValue CKJitBuilder::Neg(CKJitValue x) { return FloatUnary(CKJIT_OP_NEG, x);
 CKJitValue CKJitBuilder::Abs(CKJitValue x) { return FloatUnary(CKJIT_OP_ABS, x); }
 CKJitValue CKJitBuilder::Saturate(CKJitValue x) { return FloatUnary(CKJIT_OP_SATURATE, x); }
 CKJitValue CKJitBuilder::Floor(CKJitValue x) { return FloatUnary(CKJIT_OP_FLOOR, x); }
+CKJitValue CKJitBuilder::Ceil(CKJitValue x) { return FloatUnary(CKJIT_OP_CEIL, x); }
 CKJitValue CKJitBuilder::RoundEven(CKJitValue x) { return FloatUnary(CKJIT_OP_ROUND_EVEN, x); }
 CKJitValue CKJitBuilder::Exp2(CKJitValue x) { return FloatUnary(CKJIT_OP_EXP2, x); }
+CKJitValue CKJitBuilder::Log2(CKJitValue x) { return FloatUnary(CKJIT_OP_LOG2, x); }
 CKJitValue CKJitBuilder::Sqrt(CKJitValue x) { return FloatUnary(CKJIT_OP_SQRT, x); }
+CKJitValue CKJitBuilder::Ddx(CKJitValue x) { return FloatUnary(CKJIT_OP_DDX, x); }
+CKJitValue CKJitBuilder::Ddy(CKJitValue x) { return FloatUnary(CKJIT_OP_DDY, x); }
 
 CKJitValue CKJitBuilder::Dot(CKJitValue a, CKJitValue b) {
     if (!Valid(a) || !Valid(b) || TypeOf(a) != TypeOf(b) || !CKJitIsFloat(TypeOf(a)) ||

@@ -51,10 +51,14 @@ public:
     CKJitValue Abs(CKJitValue x);
     CKJitValue Saturate(CKJitValue x);
     CKJitValue Floor(CKJitValue x);
+    CKJitValue Ceil(CKJitValue x);
     CKJitValue RoundEven(CKJitValue x);
     CKJitValue Exp2(CKJitValue x);
+    CKJitValue Log2(CKJitValue x);
     CKJitValue Sqrt(CKJitValue x);
     CKJitValue Dot(CKJitValue a, CKJitValue b);
+    CKJitValue Ddx(CKJitValue x);
+    CKJitValue Ddy(CKJitValue x);
 
     // HLSL intrinsics in terms of the primitives above.
     CKJitValue Lerp(CKJitValue x, CKJitValue y, CKJitValue s); // x + s * (y - x)

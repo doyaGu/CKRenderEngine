@@ -56,6 +56,8 @@ enum {
     kOpShiftRightArithmetic = 195,
     kOpBitwiseXor = 198,
     kOpBitwiseAnd = 199,
+    kOpDPdx = 207,
+    kOpDPdy = 208,
     kOpSelectionMerge = 247,
     kOpLabel = 248,
     kOpBranchConditional = 250,
@@ -83,7 +85,9 @@ enum {
     kGlslRoundEven = 2,
     kGlslFAbs = 4,
     kGlslFloor = 8,
+    kGlslCeil = 9,
     kGlslExp2 = 29,
+    kGlslLog2 = 30,
     kGlslSqrt = 31,
     kGlslSMin = 39,
     kGlslSMax = 42,
@@ -236,10 +240,11 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
     value = b.Div(value, b.Max(b.Abs(flat), b.Float(0.001f)));
     value = b.Min(value, b.Neg(diffuse));
-    const CKJitValue rounded = b.RoundEven(b.Floor(value));
+    const CKJitValue rounded = b.Add(b.RoundEven(value), b.Mul(b.Floor(diffuse), b.Ceil(tint)));
     const CKJitValue shade = b.Dot(b.Swizzle(diffuse, "xyz"), direction);
-    const CKJitValue spot = b.Sqrt(b.Exp2(b.Component(params, 1)));
-    const CKJitValue assembled = b.Construct({b.Swizzle(value, "xy"), shade, spot});
+    const CKJitValue spot = b.Sqrt(b.Exp2(b.Log2(b.Component(params, 1))));
+    const CKJitValue slope = b.Add(b.Ddx(uv), b.Ddy(b.Neg(b.Swizzle(direction, "xy"))));
+    const CKJitValue assembled = b.Construct({b.Add(b.Swizzle(value, "xy"), slope), shade, spot});
 
     const CKJitValue lanes = b.FloatToInt(b.Component(params, 2));
     const CKJitValue shifted = b.IntShiftRight(lanes, b.FloatToInt(b.Component(params, 3)));
@@ -395,9 +400,11 @@ void TestLowering() {
     TestCheck(module.CountGlsl(kGlslNMin) == 1 && module.CountGlsl(kGlslNMax) == 1, "min and max ignore NaN");
     TestCheck(module.CountGlsl(kGlslFClamp) == 1, "saturate clamps");
     TestCheck(module.CountGlsl(kGlslFAbs) == 1 && module.CountGlsl(kGlslFloor) == 1 &&
-                  module.CountGlsl(kGlslRoundEven) == 1 && module.CountGlsl(kGlslExp2) == 1 &&
+                  module.CountGlsl(kGlslCeil) == 1 && module.CountGlsl(kGlslRoundEven) == 1 &&
+                  module.CountGlsl(kGlslExp2) == 1 && module.CountGlsl(kGlslLog2) == 1 &&
                   module.CountGlsl(kGlslSqrt) == 1,
               "unary functions are GLSL.std.450 instructions");
+    TestCheck(module.Count(kOpDPdx) == 1 && module.Count(kOpDPdy) == 1, "derivatives are OpDPdx and OpDPdy");
 
     int unbiased = 0, biased = 0;
     for (int i = 0; i < module.Size(); ++i) {
@@ -449,12 +456,13 @@ void TestLowering() {
     TestCheck(branch > 0 && module[branch + 1].Opcode == kOpLabel && module[branch + 2].Opcode == kOpKill &&
                   module[branch + 3].Opcode == kOpLabel && module[branch + 4].Opcode == kOpStore,
               "the killing block precedes the colour store");
-    int lastSample = -1;
+    int lastQuad = -1;
     for (int i = 0; i < module.Size(); ++i) {
-        if (module[i].Opcode == kOpImageSampleImplicitLod)
-            lastSample = i;
+        const uint32_t opcode = module[i].Opcode;
+        if (opcode == kOpImageSampleImplicitLod || opcode == kOpDPdx || opcode == kOpDPdy)
+            lastQuad = i;
     }
-    TestCheck(lastSample < branch, "every sample runs before the discard");
+    TestCheck(lastQuad < branch, "every sample and derivative runs before the discard");
 }
 
 void TestIntegerLowering() {

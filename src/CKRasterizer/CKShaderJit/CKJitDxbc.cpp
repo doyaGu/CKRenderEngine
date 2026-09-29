@@ -29,6 +29,7 @@ enum : uint32_t {
     DxbcOpIne = 39,
     DxbcOpIshr = 42,
     DxbcOpItof = 43,
+    DxbcOpLog = 47,
     DxbcOpLt = 49,
     DxbcOpMin = 51,
     DxbcOpMax = 52,
@@ -41,6 +42,7 @@ enum : uint32_t {
     DxbcOpRet = 62,
     DxbcOpRoundNe = 64,
     DxbcOpRoundNi = 65,
+    DxbcOpRoundPi = 66,
     DxbcOpSample = 69,
     DxbcOpSampleB = 74,
     DxbcOpSqrt = 75,
@@ -54,6 +56,8 @@ enum : uint32_t {
     DxbcOpDclOutput = 101,
     DxbcOpDclTemps = 104,
     DxbcOpDclGlobalFlags = 106,
+    DxbcOpDerivRtxCoarse = 122,
+    DxbcOpDerivRtyCoarse = 124,
 
     // Opcode token controls; the instruction length is in bits 24..30.
     DxbcRefactoringAllowed = 1u << 11,
@@ -731,10 +735,14 @@ void DxbcEmitter::Translate(uint32_t index) {
     case CKJIT_OP_MAX: Binary(DxbcOpMax, dest, a, b); break;
     case CKJIT_OP_SATURATE: Unary(DxbcOpMov | DxbcSaturate, dest, a); break;
     case CKJIT_OP_FLOOR: Unary(DxbcOpRoundNi, dest, a); break;
+    case CKJIT_OP_CEIL: Unary(DxbcOpRoundPi, dest, a); break;
     case CKJIT_OP_ROUND_EVEN: Unary(DxbcOpRoundNe, dest, a); break;
     case CKJIT_OP_EXP2: Unary(DxbcOpExp, dest, a); break;
+    case CKJIT_OP_LOG2: Unary(DxbcOpLog, dest, a); break;
     case CKJIT_OP_SQRT: Unary(DxbcOpSqrt, dest, a); break;
     case CKJIT_OP_DOT: Dot(dest, a, b); break;
+    case CKJIT_OP_DDX: Unary(DxbcOpDerivRtxCoarse, dest, a); break;
+    case CKJIT_OP_DDY: Unary(DxbcOpDerivRtyCoarse, dest, a); break;
     case CKJIT_OP_LT: Binary(DxbcOpLt, dest, a, b); break;
     case CKJIT_OP_LE: Binary(DxbcOpGe, dest, b, a); break;
     case CKJIT_OP_EQ: Binary(DxbcOpEq, dest, a, b); break;
@@ -863,7 +871,7 @@ bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
         Translate(i);
 
     // Every value is computed before the discard, so no implicit-LOD sample
-    // runs after a quad neighbour was discarded.
+    // or derivative runs after a quad neighbour was discarded.
     if (m_Shader.Discard.IsValid()) {
         m_Code.Open(DxbcOpDiscard | DxbcTestNonZero);
         Source(m_Values[(int)m_Shader.Discard.Id], Leading(1));

@@ -34,6 +34,7 @@ enum {
     kOpIne = 39,
     kOpIshr = 42,
     kOpItof = 43,
+    kOpLog = 47,
     kOpLt = 49,
     kOpMin = 51,
     kOpMax = 52,
@@ -46,6 +47,7 @@ enum {
     kOpRet = 62,
     kOpRoundNe = 64,
     kOpRoundNi = 65,
+    kOpRoundPi = 66,
     kOpSample = 69,
     kOpSampleB = 74,
     kOpSqrt = 75,
@@ -59,6 +61,8 @@ enum {
     kOpDclOutput = 101,
     kOpDclTemps = 104,
     kOpDclGlobalFlags = 106,
+    kOpDerivRtxCoarse = 122,
+    kOpDerivRtyCoarse = 124,
 
     kOperandTemp = 0,
     kOperandInput = 1,
@@ -271,6 +275,10 @@ struct Instruction {
     uint32_t OperandCount;
 };
 
+// The backend declares with the shader model 4 declarations only; later
+// opcodes, like the shader model 5 derivatives, are code again.
+bool IsDeclaration(uint32_t opcode) { return opcode >= kOpDclResource && opcode <= kOpDclGlobalFlags; }
+
 // Instruction view of the SHEX chunk; the chunk must outlive it.
 class Program {
 public:
@@ -288,7 +296,7 @@ public:
             instruction.Controls = at[0] & 0x00fff800u;
             instruction.Tokens = at + 1;
             instruction.Length = length;
-            if (instruction.Opcode < kOpDclResource) {
+            if (!IsDeclaration(instruction.Opcode)) {
                 for (const uint32_t *cursor = at + 1; cursor < at + length;) {
                     if (instruction.OperandCount == kMaxOperands ||
                         !DecodeOperand(cursor, at + length, instruction.Operands[instruction.OperandCount++]))
@@ -297,7 +305,7 @@ public:
             } else if (m_FirstCode >= 0) {
                 return; // declarations precede the code
             }
-            if (instruction.Opcode < kOpDclResource && m_FirstCode < 0)
+            if (!IsDeclaration(instruction.Opcode) && m_FirstCode < 0)
                 m_FirstCode = m_Instructions.Size();
             m_Instructions.PushBack(instruction);
             at += length;
@@ -528,10 +536,11 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
     value = b.Div(value, b.Max(b.Abs(flat), b.Float(0.001f)));
     value = b.Min(value, b.Neg(diffuse));
-    const CKJitValue rounded = b.RoundEven(b.Floor(value));
+    const CKJitValue rounded = b.Add(b.RoundEven(value), b.Mul(b.Floor(diffuse), b.Ceil(tint)));
     const CKJitValue shade = b.Dot(b.Swizzle(diffuse, "xyz"), direction);
-    const CKJitValue spot = b.Sqrt(b.Exp2(b.Component(params, 1)));
-    const CKJitValue assembled = b.Construct({b.Swizzle(value, "xy"), shade, spot});
+    const CKJitValue spot = b.Sqrt(b.Exp2(b.Log2(b.Component(params, 1))));
+    const CKJitValue slope = b.Add(b.Ddx(uv), b.Ddy(b.Neg(b.Swizzle(direction, "xy"))));
+    const CKJitValue assembled = b.Construct({b.Add(b.Swizzle(value, "xy"), slope), shade, spot});
 
     const CKJitValue lanes = b.FloatToInt(b.Component(params, 2));
     const CKJitValue shifted = b.IntShiftRight(lanes, b.FloatToInt(b.Component(params, 3)));
@@ -738,9 +747,12 @@ void TestLowering() {
     TestCheck(program.Count(kOpMin) == 1 && program.Count(kOpMax) == 1 && program.Count(kOpDiv) == 1,
               "arithmetic maps to single instructions");
     TestCheck(program.Count(kOpMov, kSaturate) == 1, "saturate is a saturated move");
-    TestCheck(program.Count(kOpRoundNi) == 1 && program.Count(kOpRoundNe) == 1 && program.Count(kOpExp) == 1 &&
-                  program.Count(kOpSqrt) == 1 && program.Count(kOpDp3) == 1,
+    TestCheck(program.Count(kOpRoundNi) == 1 && program.Count(kOpRoundPi) == 1 && program.Count(kOpRoundNe) == 1 &&
+                  program.Count(kOpExp) == 1 && program.Count(kOpLog) == 1 && program.Count(kOpSqrt) == 1 &&
+                  program.Count(kOpDp3) == 1,
               "unary functions and the dot product are single instructions");
+    TestCheck(program.Count(kOpDerivRtxCoarse) == 1 && program.CountModified(kOpDerivRtyCoarse, kModifierNeg) == 1,
+              "derivatives are coarse, like HLSL ddx and ddy, and take source modifiers");
     TestCheck(program.CountModified(kOpMax, kModifierAbs) == 1, "abs is a source modifier");
     TestCheck(program.CountModified(kOpMin, kModifierNeg) == 1 && program.CountModified(kOpAdd, kModifierNeg) == 1,
               "negation and subtraction use the negate modifier");
@@ -784,8 +796,9 @@ void TestLowering() {
 
     const int kill = program.Find(kOpDiscard);
     TestCheck(program.Count(kOpDiscard, kTestNonZero) == 1 && kill > program.FindLast(kOpSampleB) &&
-                  kill > program.FindLast(kOpSample),
-              "the discard follows every sample");
+                  kill > program.FindLast(kOpSample) && kill > program.FindLast(kOpDerivRtxCoarse) &&
+                  kill > program.FindLast(kOpDerivRtyCoarse),
+              "the discard follows every sample and derivative");
     TestCheck(kill >= 0 && program[kill].Operands[0].Type == kOperandTemp && program[kill - 1].Opcode == kOpLt,
               "the discard tests the discard condition");
     TestCheck(kill >= 0 && kill + 3 == program.Size() && program[kill + 1].Opcode == kOpMov &&

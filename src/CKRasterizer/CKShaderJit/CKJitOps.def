@@ -29,10 +29,18 @@ CKJIT_OP(NEG,        1, 0)
 CKJIT_OP(ABS,        1, 0)
 CKJIT_OP(SATURATE,   1, 0)
 CKJIT_OP(FLOOR,      1, 0)
+CKJIT_OP(CEIL,       1, 0)
 CKJIT_OP(ROUND_EVEN, 1, 0)
 CKJIT_OP(EXP2,       1, 0)
+CKJIT_OP(LOG2,       1, 0)
 CKJIT_OP(SQRT,       1, 0)
 CKJIT_OP(DOT,        2, CKJIT_OPFLAG_COMMUTATIVE)
+
+// Screen-space derivatives: the difference across the pixel quad along x or
+// y, at the precision of HLSL ddx and ddy. The IR has no control flow, so
+// they are taken with the whole quad running.
+CKJIT_OP(DDX,        1, 0)
+CKJIT_OP(DDY,        1, 0)
 
 // Float comparisons. LT, LE and EQ are ordered (false when either operand is
 // NaN); NE is unordered, like HLSL and GLSL "!=".

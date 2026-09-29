@@ -74,6 +74,8 @@ enum {
     SpvOpShiftRightArithmetic = 195,
     SpvOpBitwiseXor = 198,
     SpvOpBitwiseAnd = 199,
+    SpvOpDPdx = 207,
+    SpvOpDPdy = 208,
     SpvOpSelectionMerge = 247,
     SpvOpLabel = 248,
     SpvOpBranchConditional = 250,
@@ -112,7 +114,9 @@ enum {
     GLSLstd450RoundEven = 2,
     GLSLstd450FAbs = 4,
     GLSLstd450Floor = 8,
+    GLSLstd450Ceil = 9,
     GLSLstd450Exp2 = 29,
+    GLSLstd450Log2 = 30,
     GLSLstd450Sqrt = 31,
     GLSLstd450SMin = 39,
     GLSLstd450SMax = 42,
@@ -477,10 +481,14 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
     case CKJIT_OP_SATURATE:
         return Glsl(GLSLstd450FClamp, type, {a, FloatSplat(0.0f, node.Type), FloatSplat(1.0f, node.Type)});
     case CKJIT_OP_FLOOR: return Glsl(GLSLstd450Floor, type, {a});
+    case CKJIT_OP_CEIL: return Glsl(GLSLstd450Ceil, type, {a});
     case CKJIT_OP_ROUND_EVEN: return Glsl(GLSLstd450RoundEven, type, {a});
     case CKJIT_OP_EXP2: return Glsl(GLSLstd450Exp2, type, {a});
+    case CKJIT_OP_LOG2: return Glsl(GLSLstd450Log2, type, {a});
     case CKJIT_OP_SQRT: return Glsl(GLSLstd450Sqrt, type, {a});
     case CKJIT_OP_DOT: return Op(SpvOpDot, type, {a, b});
+    case CKJIT_OP_DDX: return Op(SpvOpDPdx, type, {a});
+    case CKJIT_OP_DDY: return Op(SpvOpDPdy, type, {a});
     case CKJIT_OP_LT: return Op(SpvOpFOrdLessThan, type, {a, b});
     case CKJIT_OP_LE: return Op(SpvOpFOrdLessThanEqual, type, {a, b});
     case CKJIT_OP_EQ: return Op(SpvOpFOrdEqual, type, {a, b});
@@ -522,7 +530,7 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
         m_Values[i] = Translate(m_Shader.Nodes[i]);
 
     // Every value is computed before the discard, so no implicit-LOD sample
-    // runs after a quad neighbour was killed.
+    // or derivative runs after a quad neighbour was killed.
     if (m_Shader.Discard.IsValid()) {
         const uint32_t kill = NewId();
         const uint32_t merge = NewId();
