@@ -734,17 +734,33 @@ CKERROR CKSdlGpuRasterizerContext::CreateVertexLayout(const CKVertexLayoutDesc *
     return *out ? CK_OK : CKERR_OUTOFMEMORY;
 }
 
+SDL_GPUShaderFormat CKSdlGpuRasterizerContext::NativeShaderFormat(
+    CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile) const
+{
+    if (format == Caps.ShaderFormat && profile == Caps.ShaderProfile)
+        return ShaderFormat;
+    // D3D12 devices also run shader model 5.1 DXBC. A pipeline cannot mix it
+    // with DXIL, so a DXBC program supplies both of its stages.
+    if (format == CKRST_SHADER_FORMAT_DXBC && profile == CKRST_SHADER_PROFILE_DX12 &&
+        ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL &&
+        (SDL_GetGPUShaderFormats(Device) & SDL_GPU_SHADERFORMAT_DXBC))
+        return SDL_GPU_SHADERFORMAT_DXBC;
+    return SDL_GPU_SHADERFORMAT_INVALID;
+}
+
 CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWORD *out)
 {
     if (out) *out = 0;
     if (!Ready()) return CKERR_INVALIDOPERATION;
+    const SDL_GPUShaderFormat format = desc
+        ? NativeShaderFormat(desc->Format, desc->Profile) : SDL_GPU_SHADERFORMAT_INVALID;
     if (!desc || !out || !desc->Code || !desc->CodeSize || !desc->EntryPoint || !*desc->EntryPoint ||
-        desc->Format != Caps.ShaderFormat || desc->Profile != Caps.ShaderProfile ||
+        format == SDL_GPU_SHADERFORMAT_INVALID ||
         desc->SamplerCount > 16 || desc->UniformBufferCount > 4 || desc->StorageBufferCount || desc->StorageTextureCount ||
         (desc->Stage != CKRST_SHADER_VERTEX && desc->Stage != CKRST_SHADER_PIXEL)) return CKERR_INVALIDPARAMETER;
     SDL_GPUShaderCreateInfo info = {};
     info.code = desc->Code; info.code_size = desc->CodeSize; info.entrypoint = desc->EntryPoint;
-    info.format = ShaderFormat;
+    info.format = format;
     info.stage = desc->Stage == CKRST_SHADER_VERTEX ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
     info.num_samplers = desc->SamplerCount; info.num_uniform_buffers = desc->UniformBufferCount;
     auto shader = std::make_shared<CKSdlGpuShader>();

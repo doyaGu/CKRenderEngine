@@ -193,6 +193,10 @@ private:
         return Device && SDL_GetCurrentThreadID() == Thread && Error == CK_OK;
     }
     CKERROR Fail(const char *Operation);
+    // The SDL payload format for a shader target, or INVALID when this
+    // device cannot create it.
+    SDL_GPUShaderFormat NativeShaderFormat(CK_SHADER_FORMAT Format,
+                                           CK_SHADER_PROFILE Profile) const;
     bool EnsureCommands();
     CKERROR AcquireSwapchain();
     CKERROR Flush(bool PresentWindow = true);
