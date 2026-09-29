@@ -183,6 +183,13 @@ public:
     CKERROR AcquireSwapchainForTests();
     void CollectForTests();
     CKBOOL CompleteEmptySubmissionsForTests();
+    // Waits for background compilation, then completes it as a frame
+    // boundary would. Call between frames.
+    CKBOOL FinishBackgroundWorkForTests(Sint32 TimeoutMs);
+    struct FFJitCounts {
+        CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
+    };
+    FFJitCounts CountFFJitProgramsForTests() const;
 private:
     typedef CKFFVertexBufferData VertexBufferData;
     typedef CKFFIndexBufferData IndexBufferData;
@@ -333,6 +340,29 @@ private:
         CKBOOL PositionTDepthPad);
     void ClearNativeFFPrograms();
 
+    // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
+    // A program of a native artifact is compiled once on the worker; its
+    // draws use the precompiled program until the result is collected.
+    class FFJitJob;
+    typedef CKSdlGpuFixedKey<CKFF_FRAGMENT_PROGRAM_LANE_COUNT + 1> FFJitKey;
+    struct FFJitProgram {
+        enum Status { QUEUED, READY, REJECTED };
+        Status State = QUEUED;
+        CKDWORD PixelShader = 0;
+        CKDWORD Programs[CKFF_PROGRAM_VARIANT_COUNT] = {};
+    };
+    void InitFFJit();
+    CKDWORD ResolveFFJitProgram(const CKFFFragmentProgram &FragmentProgram,
+                                CKFFSamplerLayout Layout,
+                                CKFFProgramVariant Variant,
+                                CKDWORD Precompiled);
+    CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
+                               CKFFProgramVariant Variant,
+                               CKDWORD Precompiled);
+    // Code is null when compilation failed.
+    void CompleteFFJitProgram(const FFJitKey &Key, const XArray<uint32_t> *Code);
+    void ClearFFJitPrograms();
+
     // Readback helpers
     CKBOOL BuildReadbackImage(const PendingReadback &Readback, VxImageDescEx &Desc,
                               XArray<CKBYTE> &Pixels) const;
@@ -365,6 +395,13 @@ private:
     CKDWORD m_NativeFFDepthPadVertexShaders[2] = {};
     CKDWORD m_NativeFFPixelShaders[
         CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
+    // INVALID when every program draws with the precompiled shaders.
+    SDL_GPUShaderFormat m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    XSHashTable<FFJitProgram, FFJitKey,
+                CKSdlGpuFixedKeyHash<CKFF_FRAGMENT_PROGRAM_LANE_COUNT + 1>>
+        m_FFJitPrograms;
+    // DXBC programs cannot use the DXIL vertex shaders.
+    CKDWORD m_FFJitVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     XSHashTable<CKDWORD, CKDWORD> m_NativeVertexLayouts;
     CKSdlGpuPresentStage m_Present;
     // Verbatim fixed-function state mirror.

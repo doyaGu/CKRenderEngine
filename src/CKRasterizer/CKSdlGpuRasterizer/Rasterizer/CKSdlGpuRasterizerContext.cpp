@@ -87,6 +87,7 @@ CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, 
         Shutdown();
         return FALSE;
     }
+    InitFFJit();
     m_Present.Init(this, shaders);
     if (m_Ready)
         m_Ready(m_ReadyUser, *this);

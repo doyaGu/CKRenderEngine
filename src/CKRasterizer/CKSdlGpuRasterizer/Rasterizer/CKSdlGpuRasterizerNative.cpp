@@ -276,6 +276,14 @@ void CKSdlGpuRasterizerContext::CollectForTests()
     Collect();
 }
 
+CKBOOL CKSdlGpuRasterizerContext::FinishBackgroundWorkForTests(Sint32 timeoutMs)
+{
+    if (!Worker.WaitIdle(timeoutMs))
+        return FALSE;
+    CollectJobs();
+    return TRUE;
+}
+
 CKBOOL CKSdlGpuRasterizerContext::CompleteEmptySubmissionsForTests()
 {
     Submissions.PushBack(CKSdlGpuSubmission());

@@ -12,6 +12,7 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Rasterizer/CKSdlGpuPresentStage.cpp
     Rasterizer/CKSdlGpuRasterizer.cpp
     Rasterizer/CKSdlGpuRasterizerContext.cpp
+    Rasterizer/CKSdlGpuRasterizerFFJit.cpp
     Rasterizer/CKSdlGpuRasterizerFrame.cpp
     Rasterizer/CKSdlGpuRasterizerNative.cpp
     Rasterizer/CKSdlGpuRasterizerReadback.cpp

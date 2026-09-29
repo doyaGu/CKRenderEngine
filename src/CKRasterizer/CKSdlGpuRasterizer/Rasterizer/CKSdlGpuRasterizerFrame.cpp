@@ -502,11 +502,17 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
             return 0;
         program->CompareSamplerCount = comparisonResourceCount;
     }
-    return m_NativeFFPrograms[variant][fragmentArtifact][pad];
+    const CKDWORD precompiled = m_NativeFFPrograms[variant][fragmentArtifact][pad];
+    // Only the native artifacts have a compiler.
+    if (fragmentArtifactKey.UsesShaderSampling || comparisonResourceCount != 0)
+        return precompiled;
+    return ResolveFFJitProgram(ProgramContext.FragmentProgram, layout,
+                               programVariant, precompiled);
 }
 
 void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()
 {
+    ClearFFJitPrograms();
     for (CKDWORD variant = 0;
          variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
         for (CKDWORD artifact = 0;
