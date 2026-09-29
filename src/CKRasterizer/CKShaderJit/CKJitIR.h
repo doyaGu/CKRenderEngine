@@ -104,6 +104,14 @@ struct CKJitFragmentShader {
     const CKJitNode &Node(CKJitValue value) const { return Nodes[(int)value.Id]; }
 };
 
+// Where a backend places the fragment resources. Sampler slot s is one
+// combined texture and sampler at binding (register) s of SamplerSpace.
+struct CKJitResourceLayout {
+    uint32_t UniformSpace;   // SPIR-V descriptor set / DXBC register space
+    uint32_t UniformBinding; // SPIR-V binding / DXBC constant buffer register
+    uint32_t SamplerSpace;
+};
+
 // Checks what backends rely on without re-checking it: every operation has
 // its operand count, operands precede their users, input, uniform, swizzle
 // and sampler references are in range, a sampler slot has one dimension and

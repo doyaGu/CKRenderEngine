@@ -1,0 +1,473 @@
+#include "CKJitBuilder.h"
+#include "CKJitSpirv.h"
+#include "TestTriangleMultiset.h"
+
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+
+// Structural checks of the SPIR-V backend. With a directory argument every
+// module is also written there as <name>.spv for spirv-val.
+
+namespace {
+
+// The SPIR-V numbers the checks look for.
+enum {
+    kMagic = 0x07230203,
+    kOpExtInstImport = 11,
+    kOpExtInst = 12,
+    kOpMemoryModel = 14,
+    kOpEntryPoint = 15,
+    kOpExecutionMode = 16,
+    kOpCapability = 17,
+    kOpTypeVoid = 19,
+    kOpTypeBool = 20,
+    kOpTypeInt = 21,
+    kOpTypeFunction = 33,
+    kOpTypeVector = 23,
+    kOpTypeImage = 25,
+    kOpTypeArray = 28,
+    kOpConstantTrue = 41,
+    kOpConstant = 43,
+    kOpConstantComposite = 44,
+    kOpVariable = 59,
+    kOpLoad = 61,
+    kOpStore = 62,
+    kOpAccessChain = 65,
+    kOpDecorate = 71,
+    kOpMemberDecorate = 72,
+    kOpImageSampleImplicitLod = 87,
+    kOpFOrdLessThan = 184,
+    kOpSelect = 169,
+    kOpShiftRightArithmetic = 195,
+    kOpBitwiseAnd = 199,
+    kOpSelectionMerge = 247,
+    kOpLabel = 248,
+    kOpBranchConditional = 250,
+    kOpKill = 252,
+    kOpReturn = 253,
+    kOpFunctionEnd = 56,
+
+    kDecorationBlock = 2,
+    kDecorationArrayStride = 6,
+    kDecorationBuiltIn = 11,
+    kDecorationFlat = 14,
+    kDecorationLocation = 30,
+    kDecorationBinding = 33,
+    kDecorationDescriptorSet = 34,
+    kDecorationOffset = 35,
+    kBuiltInFragCoord = 15,
+    kStorageUniformConstant = 0,
+    kStorageInput = 1,
+    kStorageUniform = 2,
+    kStorageOutput = 3,
+    kDim2D = 1,
+    kDim3D = 2,
+    kDimCube = 3,
+
+    kGlslRoundEven = 2,
+    kGlslFAbs = 4,
+    kGlslFloor = 8,
+    kGlslExp2 = 29,
+    kGlslSqrt = 31,
+    kGlslFClamp = 43,
+    kGlslNMin = 79,
+    kGlslNMax = 80,
+};
+
+// Matches any operand word in an instruction pattern.
+const uint32_t kAny = 0xffffffffu;
+
+// The SDL_gpu fragment ABI: uniforms in set 3, samplers in set 2.
+const CKJitResourceLayout kLayout = {3, 0, 2};
+
+const CKJitInput kColor0 = {"TEXCOORD", 0, 1, 0, 4, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFlatColor0 = {"TEXCOORD", 2, 3, 2, 4, CKJIT_INPUT_FLAT};
+const CKJitInput kTexCoord0 = {"TEXCOORD", 4, 5, 4, 2, CKJIT_INPUT_SMOOTH};
+const CKJitInput kTexCoord1 = {"TEXCOORD", 5, 6, 5, 3, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFragCoord = {"SV_Position", 0, 0, 0, 4, CKJIT_INPUT_FRAG_COORD};
+
+const char *g_ModuleDirectory = nullptr;
+
+struct Instruction {
+    uint32_t Opcode;
+    const uint32_t *Operands;
+    uint32_t Count;
+
+    bool Matches(uint32_t opcode, std::initializer_list<uint32_t> pattern) const {
+        if (Opcode != opcode || Count < (uint32_t)pattern.size())
+            return false;
+        uint32_t i = 0;
+        for (uint32_t word : pattern) {
+            if (word != kAny && Operands[i] != word)
+                return false;
+            ++i;
+        }
+        return true;
+    }
+};
+
+// Instruction view of a module; the words must outlive it.
+class Module {
+public:
+    explicit Module(const XArray<uint32_t> &words) : m_WellFormed(false) {
+        if (words.Size() < 5 || words[0] != kMagic)
+            return;
+        for (int offset = 5; offset < words.Size();) {
+            const uint32_t length = words[offset] >> 16;
+            if (length == 0 || offset + (int)length > words.Size())
+                return;
+            m_Instructions.PushBack(Instruction{words[offset] & 0xffffu, words.Begin() + offset + 1, length - 1});
+            offset += (int)length;
+        }
+        m_WellFormed = true;
+    }
+
+    bool WellFormed() const { return m_WellFormed; }
+    int Size() const { return m_Instructions.Size(); }
+    const Instruction &operator[](int i) const { return m_Instructions[i]; }
+
+    int Count(uint32_t opcode, std::initializer_list<uint32_t> pattern = {}) const {
+        int count = 0;
+        for (int i = 0; i < m_Instructions.Size(); ++i)
+            count += m_Instructions[i].Matches(opcode, pattern) ? 1 : 0;
+        return count;
+    }
+
+    // Index of the first match, or -1.
+    int Find(uint32_t opcode, std::initializer_list<uint32_t> pattern = {}) const {
+        for (int i = 0; i < m_Instructions.Size(); ++i) {
+            if (m_Instructions[i].Matches(opcode, pattern))
+                return i;
+        }
+        return -1;
+    }
+
+    // The result id of the first match (types lead with it, others follow
+    // their result type).
+    uint32_t TypeId(uint32_t opcode, std::initializer_list<uint32_t> pattern) const {
+        const int index = Find(opcode, pattern);
+        return index < 0 ? 0 : m_Instructions[index].Operands[0];
+    }
+
+    bool IsIntConstant(uint32_t id, uint32_t value) const {
+        return Count(kOpConstant, {TypeId(kOpTypeInt, {kAny, 32, 1}), id, value}) == 1;
+    }
+
+    uint32_t GlslImport() const { return TypeId(kOpExtInstImport, {}); }
+
+    int CountGlsl(uint32_t instruction) const {
+        return Count(kOpExtInst, {kAny, kAny, GlslImport(), instruction});
+    }
+
+private:
+    XArray<Instruction> m_Instructions;
+    bool m_WellFormed;
+};
+
+void Save(const char *name, const XArray<uint32_t> &words) {
+    if (!g_ModuleDirectory)
+        return;
+    char path[512];
+    std::snprintf(path, sizeof(path), "%s/%s.spv", g_ModuleDirectory, name);
+    FILE *file = std::fopen(path, "wb");
+    TestCheck(file != nullptr, "the module file opens");
+    if (file) {
+        TestCheck(std::fwrite(words.Begin(), sizeof(uint32_t), (size_t)words.Size(), file) == (size_t)words.Size(),
+                  "the module is written");
+        std::fclose(file);
+    }
+}
+
+bool Compile(const CKJitBuilder &b, CKJitValue color, CKJitValue discard, XArray<uint32_t> &words,
+             const CKJitResourceLayout &layout = kLayout) {
+    CKJitFragmentShader shader;
+    return b.Finish(color, discard, shader) && CKJitEmitSpirv(shader, layout, words);
+}
+
+// Every IR operation, all reachable from the outputs.
+void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
+    const CKJitValue diffuse = b.Input(kColor0);
+    const CKJitValue flat = b.Input(kFlatColor0);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue direction = b.Input(kTexCoord1);
+    const CKJitValue position = b.Input(kFragCoord);
+    const CKJitValue tint = b.Uniform(36);
+    const CKJitValue params = b.Uniform(37);
+    const CKJitValue bias = b.Component(params, 0);
+
+    const CKJitValue base = b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue cube = b.Sample(9, CKJIT_SAMPLER_CUBE, direction, bias);
+    const CKJitValue volume = b.Sample(13, CKJIT_SAMPLER_3D, b.Saturate(direction), bias);
+
+    CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
+    value = b.Div(value, b.Max(b.Abs(flat), b.Float(0.001f)));
+    value = b.Min(value, b.Neg(diffuse));
+    const CKJitValue rounded = b.RoundEven(b.Floor(value));
+    const CKJitValue shade = b.Dot(b.Swizzle(diffuse, "xyz"), direction);
+    const CKJitValue spot = b.Sqrt(b.Exp2(b.Component(params, 1)));
+    const CKJitValue assembled = b.Construct({b.Swizzle(value, "xy"), shade, spot});
+
+    const CKJitValue lanes = b.FloatToInt(b.Component(params, 2));
+    const CKJitValue shifted = b.IntShiftRight(lanes, b.FloatToInt(b.Component(params, 3)));
+    const CKJitValue bit = b.IntEqual(b.IntAnd(b.IntShiftRight(lanes, b.Int(33)), b.Int(1)), b.Int(1));
+    const CKJitValue less = b.Less(shade, spot);
+    const CKJitValue lessEqual = b.LessEqual(b.Component(position, 0), b.Component(position, 1));
+    const CKJitValue equal = b.Equal(shade, b.Component(tint, 3));
+    const CKJitValue notEqual = b.NotEqual(spot, b.Component(tint, 2));
+    const CKJitValue picked = b.Select(less, equal, notEqual);
+    const CKJitValue mask = b.Select(lessEqual, shifted, b.Int(7));
+    const CKJitValue condition = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
+    const CKJitValue alpha = b.Select(condition, shade, spot);
+    color = b.Mul(b.Select(condition, assembled, rounded), alpha);
+    discard = b.Less(b.Component(color, 3), b.Component(position, 2));
+}
+
+void TestModuleLayout() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Input(kColor0);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, CKJitValue(), words), "a pass-through shader compiles");
+    Save("pass_through", words);
+
+    const Module module(words);
+    TestCheck(module.WellFormed(), "the instruction stream covers the module exactly");
+    TestCheck(words[1] == 0x00010000u && words[4] == 0, "SPIR-V 1.0 with schema 0");
+    TestCheck(module.Size() >= 5 && module[0].Opcode == kOpCapability && module[1].Opcode == kOpExtInstImport &&
+                  module[2].Opcode == kOpMemoryModel && module[3].Opcode == kOpEntryPoint &&
+                  module[4].Opcode == kOpExecutionMode,
+              "the preamble comes in logical layout order");
+    TestCheck(module.Count(kOpCapability) == 1 && module.Count(kOpCapability, {1}) == 1, "only the Shader capability");
+    TestCheck(module.Count(kOpMemoryModel, {0, 1}) == 1, "logical addressing, GLSL450 memory model");
+    TestCheck(module.Count(kOpExecutionMode, {kAny, 7}) == 1, "the origin is upper left");
+
+    const Instruction &entry = module[3];
+    uint32_t name[2];
+    std::memcpy(name, "main\0\0\0", sizeof(name));
+    TestCheck(entry.Matches(kOpEntryPoint, {4, kAny, name[0], name[1]}), "the fragment entry point is main");
+    TestCheck(entry.Count == 4 + 2, "the interface is the input and the output");
+    for (uint32_t i = 4; i < entry.Count; ++i)
+        TestCheck(entry.Operands[i] < words[3], "interface ids are within the bound");
+
+    TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageUniform}) == 0 &&
+                  module.Count(kOpVariable, {kAny, kAny, kStorageUniformConstant}) == 0,
+              "unused resources are not declared");
+    TestCheck(module.Count(kOpKill) == 0 && module.Count(kOpSelectionMerge) == 0, "no discard, no branch");
+    TestCheck(module.Count(kOpStore) == 1 && module.Count(kOpReturn) == 1 && module.Count(kOpFunctionEnd) == 1,
+              "the colour is stored once and the function returns");
+    TestCheck(module[module.Size() - 1].Opcode == kOpFunctionEnd, "the function ends the module");
+}
+
+void TestInterface() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Input(kColor0);
+    const CKJitValue flat = b.Input(kFlatColor0);
+    b.Input(kTexCoord0); // declared, never read
+    const CKJitValue position = b.Input(kFragCoord);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Add(b.Mul(color, flat), position), CKJitValue(), words), "the shader compiles");
+    Save("interface", words);
+
+    const Module module(words);
+    const Instruction &entry = module[module.Find(kOpEntryPoint)];
+    TestCheck(entry.Count == 4 + 5, "every declared input and the output are in the interface");
+    TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageInput}) == 4, "one variable per input");
+    TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageOutput}) == 1, "one output");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationLocation, 0}) == 2, "colour 0 and the target share location 0");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationLocation, 2}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationLocation, 4}) == 1,
+              "inputs keep their locations");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationFlat}) == 1, "flat inputs are decorated");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBuiltIn, kBuiltInFragCoord}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationLocation}) == 4,
+              "the position is the FragCoord built-in without a location");
+    TestCheck(module.Count(kOpLoad) == 3, "only read inputs are loaded");
+}
+
+void TestResources() {
+    CKJitBuilder b(89);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue direction = b.Input(kTexCoord1);
+    const CKJitValue first = b.Uniform(0);
+    const CKJitValue last = b.Uniform(88);
+    CKJitValue color = b.Mul(b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f)), first);
+    color = b.Add(color, b.Sample(0, CKJIT_SAMPLER_2D, b.Swizzle(uv, "yx"), b.Float(0.0f)));
+    color = b.Add(color, b.Sample(9, CKJIT_SAMPLER_CUBE, direction, b.Float(0.0f)));
+    color = b.Mul(color, b.Sample(13, CKJIT_SAMPLER_3D, direction, b.Component(last, 0)));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, CKJitValue(), words), "the shader compiles");
+    Save("resources", words);
+
+    const Module module(words);
+    TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageUniform}) == 1, "one uniform block");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBlock}) == 1 &&
+                  module.Count(kOpMemberDecorate, {kAny, 0, kDecorationOffset, 0}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationArrayStride, 16}) == 1,
+              "the block is an array of float4 rows");
+    const int array = module.Find(kOpTypeArray);
+    TestCheck(array >= 0 && module.IsIntConstant(module[array].Operands[2], 89), "the block has every row");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationDescriptorSet, 3}) == 1, "the block is in set 3");
+    TestCheck(module.Count(kOpAccessChain) == 2, "each row is read once");
+
+    TestCheck(module.Count(kOpTypeImage, {kAny, kAny, kDim2D, 0, 0, 0, 1, 0}) == 1 &&
+                  module.Count(kOpTypeImage, {kAny, kAny, kDimCube, 0, 0, 0, 1, 0}) == 1 &&
+                  module.Count(kOpTypeImage, {kAny, kAny, kDim3D, 0, 0, 0, 1, 0}) == 1,
+              "one sampled colour image type per dimension");
+    TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageUniformConstant}) == 3, "one sampler per used slot");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationDescriptorSet, 2}) == 3, "samplers are in set 2");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBinding, 0}) == 2 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationBinding, 9}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationBinding, 13}) == 1,
+              "a sampler binds at its slot, beside uniform binding 0");
+    for (int i = 0; i < module.Size(); ++i) {
+        if (module[i].Matches(kOpVariable, {kAny, kAny, kStorageUniformConstant}))
+            TestCheck(module.Count(kOpLoad, {kAny, kAny, module[i].Operands[1]}) == 1, "a slot is loaded once");
+    }
+
+    CKJitBuilder moved(89);
+    XArray<uint32_t> relocated;
+    const CKJitValue sampled = moved.Sample(1, CKJIT_SAMPLER_2D, moved.Input(kTexCoord0), moved.Float(0.0f));
+    TestCheck(Compile(moved, moved.Mul(sampled, moved.Uniform(5)), CKJitValue(), relocated, {7, 4, 1}),
+              "another layout compiles");
+    const Module other(relocated);
+    TestCheck(other.Count(kOpDecorate, {kAny, kDecorationDescriptorSet, 7}) == 1 &&
+                  other.Count(kOpDecorate, {kAny, kDecorationBinding, 4}) == 1 &&
+                  other.Count(kOpDecorate, {kAny, kDecorationDescriptorSet, 1}) == 1 &&
+                  other.Count(kOpDecorate, {kAny, kDecorationBinding, 1}) == 1,
+              "the resource layout places the block and the samplers");
+}
+
+void TestLowering() {
+    CKJitBuilder b(89);
+    CKJitValue color, discard;
+    BuildEveryOperation(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "every operation compiles");
+    Save("every_operation", words);
+
+    const Module module(words);
+    TestCheck(module.WellFormed(), "the module is well formed");
+    TestCheck(module.CountGlsl(kGlslNMin) == 1 && module.CountGlsl(kGlslNMax) == 1, "min and max ignore NaN");
+    TestCheck(module.CountGlsl(kGlslFClamp) == 1, "saturate clamps");
+    TestCheck(module.CountGlsl(kGlslFAbs) == 1 && module.CountGlsl(kGlslFloor) == 1 &&
+                  module.CountGlsl(kGlslRoundEven) == 1 && module.CountGlsl(kGlslExp2) == 1 &&
+                  module.CountGlsl(kGlslSqrt) == 1,
+              "unary functions are GLSL.std.450 instructions");
+
+    int unbiased = 0, biased = 0;
+    for (int i = 0; i < module.Size(); ++i) {
+        if (module[i].Opcode == kOpImageSampleImplicitLod) {
+            unbiased += module[i].Count == 4 ? 1 : 0;
+            biased += module[i].Count == 6 && module[i].Operands[4] == 0x1u ? 1 : 0;
+        }
+    }
+    TestCheck(unbiased == 1 && biased == 2, "a zero bias is omitted, others are Bias operands");
+
+    const uint32_t boolType = module.TypeId(kOpTypeBool, {});
+    TestCheck(module.Count(kOpSelect) == 4, "every select is one instruction");
+    TestCheck(module.Count(kOpTypeVector, {kAny, boolType, 4}) == 1, "a vector select splats its condition");
+
+    int masked = 0;
+    for (int i = 0; i < module.Size(); ++i) {
+        if (module[i].Opcode != kOpShiftRightArithmetic)
+            continue;
+        const uint32_t count = module[i].Operands[3];
+        if (module.IsIntConstant(count, 1))
+            ++masked;
+        else if (module.Count(kOpBitwiseAnd, {kAny, count}) == 1 &&
+                 module.IsIntConstant(module[module.Find(kOpBitwiseAnd, {kAny, count})].Operands[3], 31))
+            ++masked;
+    }
+    TestCheck(masked == 2, "shift counts use their low five bits");
+
+    // The discard branches around a kill after every sample.
+    const int branch = module.Find(kOpBranchConditional);
+    TestCheck(module.Count(kOpSelectionMerge) == 1 && branch > 0 &&
+                  module[branch - 1].Opcode == kOpSelectionMerge,
+              "the discard is a structured selection");
+    TestCheck(branch > 0 && module.Count(kOpFOrdLessThan, {kAny, module[branch].Operands[0]}) == 1,
+              "the branch tests the discard condition");
+    TestCheck(branch > 0 && module[branch + 1].Opcode == kOpLabel && module[branch + 2].Opcode == kOpKill &&
+                  module[branch + 3].Opcode == kOpLabel && module[branch + 4].Opcode == kOpStore,
+              "the killing block precedes the colour store");
+    int lastSample = -1;
+    for (int i = 0; i < module.Size(); ++i) {
+        if (module[i].Opcode == kOpImageSampleImplicitLod)
+            lastSample = i;
+    }
+    TestCheck(lastSample < branch, "every sample runs before the discard");
+}
+
+void TestDeclarationsAreUnique() {
+    CKJitBuilder b(89);
+    CKJitValue color, discard;
+    BuildEveryOperation(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "the shader compiles");
+
+    const Module module(words);
+    for (int i = 0; i < module.Size(); ++i) {
+        const Instruction &a = module[i];
+        const bool type = a.Opcode >= kOpTypeVoid && a.Opcode <= kOpTypeFunction;
+        const bool constant = a.Opcode >= kOpConstantTrue && a.Opcode <= kOpConstantComposite;
+        if (!type && !constant)
+            continue;
+        for (int j = i + 1; j < module.Size(); ++j) {
+            const Instruction &other = module[j];
+            if (other.Opcode != a.Opcode || other.Count != a.Count)
+                continue;
+            // Compare everything but the result id.
+            const uint32_t result = type ? 0 : 1;
+            bool same = true;
+            for (uint32_t w = 0; w < a.Count && same; ++w)
+                same = w == result || a.Operands[w] == other.Operands[w];
+            TestCheck(!same, "types and constants are declared once");
+        }
+    }
+
+    CKJitFragmentShader shader;
+    XArray<uint32_t> again;
+    TestCheck(b.Finish(color, discard, shader) && CKJitEmitSpirv(shader, kLayout, again), "the shader compiles again");
+    TestCheck(again.Size() == words.Size() &&
+                  std::memcmp(again.Begin(), words.Begin(), (size_t)words.Size() * sizeof(uint32_t)) == 0,
+              "emission is deterministic");
+}
+
+void TestConstantOutputs() {
+    CKJitBuilder b(4);
+    b.Input(kColor0);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Float4(0.25f, 0.5f, 0.75f, 1.0f), b.Bool(true), words), "constant outputs compile");
+    Save("constant_outputs", words);
+
+    const Module module(words);
+    TestCheck(module.Count(kOpConstantComposite) == 1 && module.Count(kOpConstantTrue) == 1, "outputs are constants");
+    TestCheck(module.Count(kOpKill) == 1, "an unconditional discard still kills");
+    TestCheck(module.Count(kOpLoad) == 0, "nothing is read");
+}
+
+void TestRejects() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Mul(b.Input(kColor0), b.Uniform(1));
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(color, CKJitValue(), shader), "the shader finishes");
+    shader.Nodes[shader.Nodes.Size() - 1].Operands[0] = (uint32_t)shader.Nodes.Size() - 1;
+    XArray<uint32_t> words;
+    TestCheck(!CKJitEmitSpirv(shader, kLayout, words), "shaders that fail verification are refused");
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+    if (argc > 1)
+        g_ModuleDirectory = argv[1];
+    TestFramework framework;
+    framework.Run("module layout", TestModuleLayout);
+    framework.Run("interface", TestInterface);
+    framework.Run("resources", TestResources);
+    framework.Run("lowering", TestLowering);
+    framework.Run("declarations are unique", TestDeclarationsAreUnique);
+    framework.Run("constant outputs", TestConstantOutputs);
+    framework.Run("rejects", TestRejects);
+    return framework.ExitCode();
+}

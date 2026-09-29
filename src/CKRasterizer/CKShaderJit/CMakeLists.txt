@@ -2,12 +2,14 @@
 set(CKSHADERJIT_SOURCES
     CKJitBuilder.cpp
     CKJitIR.cpp
+    CKJitSpirv.cpp
 )
 
 set(CKSHADERJIT_HEADERS
     CKJitBuilder.h
     CKJitIR.h
     CKJitOps.def
+    CKJitSpirv.h
 )
 
 add_library(CKShaderJit STATIC ${CKSHADERJIT_SOURCES} ${CKSHADERJIT_HEADERS})
