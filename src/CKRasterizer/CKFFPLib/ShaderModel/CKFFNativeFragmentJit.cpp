@@ -315,6 +315,21 @@ struct ShaderSampler {
     CKJitValue MaxAnisotropy; // FLOAT
 };
 
+// A depth texture a shader-sampling shader of a layout without stage-indexed
+// textures compares texel by texel (depth_compare_sampling.hlsli). Its
+// metadata rows are its ordinal's, and a texture the layout does not declare
+// is a single texel of the border depth.
+struct DepthComparison {
+    uint32_t Slot;
+    bool Declared;
+    CKJitValue Border;    // FLOAT: the border depth
+    CKJitValue Modes;     // INT2: an address mode an axis
+    CKJitValue MipFilter; // INT
+    CKJitValue Levels;    // INT
+    CKJitValue Reference; // FLOAT
+    CKDWORD Func;
+};
+
 // The taps a 2D filter averages (PlanTaps2D): a single one at the coordinate,
 // or those an anisotropic filter spreads along the longer gradient.
 struct FilterTaps {
@@ -387,7 +402,7 @@ private:
     ShaderSampler Sampler(CKDWORD stage, uint32_t slot, CKJitSamplerDim dim);
     CKJitValue MirrorOnce(CKJitValue coordinate, CKDWORD sampling);
     FilterTaps PlanTaps2D(CKJitValue info, CKJitValue size, CKJitValue dx, CKJitValue dy, CKJitValue implicitLod,
-                          CKJitValue lodBias, CKJitValue minMip, CKJitValue maxAnisotropy);
+                          CKJitValue lodBias, CKJitValue minMip, CKJitValue maxAnisotropy, bool comparison);
     MipBlend PlanMips(CKJitValue levels, CKJitValue mipFilter, CKJitValue lod);
     // The mip of an iteration over those a mip filter blends.
     CKJitValue MipAt(const MipBlend &mips, CKJitValue first) {
@@ -410,6 +425,13 @@ private:
     CKJitValue BorderLevel3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue mip, CKJitValue filtered);
     CKJitValue Texel(const ShaderSampler &sampler, CKJitValue texel, CKJitValue outside, CKJitValue mip);
     void Address(CKJitValue texel, CKJitValue extent, CKJitValue mode, CKJitValue &index, CKJitValue &outside);
+    CKJitValue CompareSample2D(CKDWORD stage, CKJitValue coordinate, CKJitValue lodBias, CKDWORD func);
+    CKJitValue CompareMips(const DepthComparison &comparison, CKJitValue uv, CKJitValue lod, CKJitValue filtered);
+    CKJitValue CompareLevel(const DepthComparison &comparison, CKJitValue uv, CKJitValue mip, CKJitValue filtered);
+    CKJitValue CompareTap(const DepthComparison &comparison, CKJitValue texel, CKJitValue outside, CKJitValue mip);
+    CKJitValue CompareExtent(const DepthComparison &comparison, CKJitValue mip) {
+        return comparison.Declared ? m_B.TextureSize(comparison.Slot, CKJIT_SAMPLER_2D, mip) : m_B.Splat(m_B.Int(1), 2);
+    }
     CKJitValue CompareDepth(CKJitValue depth, CKJitValue reference, CKDWORD func);
     Color Argument(CKDWORD packedArg, const Color &texture, const Color &current, const Color &stageConstant);
     CKJitValue Combine(CKDWORD op, Channel channel, const Color &arg1, const Color &arg2, const Color &arg0,
@@ -599,19 +621,27 @@ CKJitValue NativeFragmentCompiler::SampleCoordinate(CKDWORD stage, uint32_t comp
 CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
     if (!Switch(CKFF_NATIVE_FRAGMENT_TEXTURE, stage))
         return m_B.Float4(0.0f, 0.0f, 0.0f, 1.0f);
+    const CKDWORD type = StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+    const bool shaderSampling = Switch(CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING);
+    const CKDWORD func = shaderSampling && type == CKFF_SAMPLER_DEPTH
+        ? CanonicalCompareFunc(StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC), m_Layout)
+        : 0;
+    const CKJitValue lodBias = Switch(CKFF_NATIVE_FRAGMENT_LOD_BIAS, stage)
+        ? m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 2)
+        : m_B.Float(0.0f);
+    // The layouts without stage-indexed textures compare the texels of depth
+    // textures, and the border depth of those they do not declare.
+    if (func != 0 && m_Layout != CKFF_SAMPLER_LAYOUT_WIDE_2D)
+        return m_B.Splat(CompareSample2D(stage, SampleCoordinate(stage, 3), lodBias, func), 4);
     // An index past the textures the layout declares samples nothing.
     if (!SamplerDeclared(m_Program, stage, m_Layout))
         return m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-    const CKDWORD type = StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
     const CKJitSamplerDim dim = type == CKFF_SAMPLER_CUBE ? CKJIT_SAMPLER_CUBE
                               : type == CKFF_SAMPLER_VOLUME ? CKJIT_SAMPLER_3D
                                                             : CKJIT_SAMPLER_2D;
     const uint32_t slot = CKFFSamplerSlot(type, SamplerIndex(m_Program, stage, m_Layout), m_Layout);
-    const CKJitValue lodBias = Switch(CKFF_NATIVE_FRAGMENT_LOD_BIAS, stage)
-        ? m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 2)
-        : m_B.Float(0.0f);
-    if (dim == CKJIT_SAMPLER_CUBE || !Switch(CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING)) {
+    if (dim == CKJIT_SAMPLER_CUBE || !shaderSampling) {
         const CKJitValue color = m_B.Sample(slot, dim, SampleCoordinate(stage, dim == CKJIT_SAMPLER_2D ? 2 : 3), lodBias);
         return type == CKFF_SAMPLER_DEPTH ? m_B.Swizzle(color, "xxxx") : color;
     }
@@ -625,9 +655,6 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
     const CKJitValue color = ShaderSample2D(stage, slot, m_B.Swizzle(coordinate, "xy"), lodBias);
     if (type != CKFF_SAMPLER_DEPTH)
         return color;
-    const CKDWORD func = m_Layout == CKFF_SAMPLER_LAYOUT_WIDE_2D
-        ? CanonicalCompareFunc(StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC), m_Layout)
-        : 0;
     return func != 0 ? m_B.Splat(CompareDepth(m_B.Component(color, 0), m_B.Component(coordinate, 2), func), 4)
                      : m_B.Swizzle(color, "xxxx");
 }
@@ -749,11 +776,11 @@ CKJitValue NativeFragmentCompiler::MirrorOnce(CKJitValue coordinate, CKDWORD sam
 // Plans the taps of a 2D filter at the level of the gradients, or of the
 // implicit ones, with the LOD bias, no lower than the minimum mip level. An
 // anisotropic filter minifying averages taps along the longer gradient at the
-// level of the shorter, as many as fit, up to the maximum anisotropy; the
-// others take a single tap at the coordinate.
+// level of the shorter, as many as fit, up to the maximum anisotropy, which a
+// comparison needs above one; the others take a single tap at the coordinate.
 FilterTaps NativeFragmentCompiler::PlanTaps2D(CKJitValue info, CKJitValue size, CKJitValue dx, CKJitValue dy,
                                               CKJitValue implicitLod, CKJitValue lodBias, CKJitValue minMip,
-                                              CKJitValue maxAnisotropy) {
+                                              CKJitValue maxAnisotropy, bool comparison) {
     const CKJitValue lengthX = m_B.Length(m_B.Mul(dx, size));
     const CKJitValue lengthY = m_B.Length(m_B.Mul(dy, size));
     const CKJitValue major = m_B.Max(lengthX, lengthY);
@@ -762,8 +789,10 @@ FilterTaps NativeFragmentCompiler::PlanTaps2D(CKJitValue info, CKJitValue size, 
 
     const CKJitValue minifies = m_B.Greater(lod, m_B.Float(0.0f));
     const CKJitValue filter = m_B.FloatToInt(m_B.Select(minifies, m_B.Component(info, 1), m_B.Component(info, 2)));
-    const CKJitValue anisotropic = m_B.And(m_B.IntEqual(filter, m_B.Int(VXTEXTUREFILTER_ANISOTROPIC)), minifies);
+    CKJitValue anisotropic = m_B.And(m_B.IntEqual(filter, m_B.Int(VXTEXTUREFILTER_ANISOTROPIC)), minifies);
     const CKJitValue tapLimit = m_B.Max(maxAnisotropy, m_B.Float(1.0f));
+    if (comparison)
+        anisotropic = m_B.And(anisotropic, m_B.Greater(tapLimit, m_B.Float(1.0f)));
     const CKJitValue minor = m_B.Max(m_B.Min(lengthX, lengthY), m_B.Div(major, tapLimit));
     const CKJitValue ratio = m_B.Ceil(m_B.Div(major, m_B.Max(minor, m_B.Float(1.0f))));
     FilterTaps taps;
@@ -785,7 +814,7 @@ CKJitValue NativeFragmentCompiler::Filter2D(const ShaderSampler &sampler, CKJitV
     const CKJitValue size = m_B.IntToFloat(m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_2D, m_B.Int(0)));
     const FilterTaps taps =
         PlanTaps2D(sampler.Info, size, dx, dy, implicitLod, implicitLod.IsValid() ? lodBias : m_B.Float(0.0f),
-                   sampler.MinMip, sampler.MaxAnisotropy);
+                   sampler.MinMip, sampler.MaxAnisotropy, false);
     CKJitValue sum;
     const CKJitValue tap =
         m_B.Loop(taps.Count, CKFF_SAMPLER_SHADER_ANISOTROPY_MASK, {m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f)}, &sum);
@@ -995,8 +1024,102 @@ void NativeFragmentCompiler::Address(CKJitValue texel, CKJitValue extent, CKJitV
                       m_B.Or(m_B.IntLess(texel, m_B.Int(0)), m_B.IntGreaterEqual(texel, extent)));
 }
 
+// Compares the depths of a texture of a layout without stage-indexed ones as
+// depth_compare_sampling.hlsli: a filter blends the comparisons of the texels
+// with the reference, the coordinate's z, at the level of the gradients of the
+// unfolded coordinate with the LOD bias.
+CKJitValue NativeFragmentCompiler::CompareSample2D(CKDWORD stage, CKJitValue coordinate, CKJitValue lodBias,
+                                                   CKDWORD func) {
+    // The sampler information packs the maximum anisotropy in eight bits.
+    const uint32_t kTapLimit = 255;
+    const CKJitValue original = m_B.Swizzle(coordinate, "xy");
+    // Derivatives are taken ahead of the taps, which not every pixel of a
+    // quad may run.
+    const CKJitValue dx = m_B.Ddx(original);
+    const CKJitValue dy = m_B.Ddy(original);
+    const uint32_t ordinal = m_Program.GetSamplerOrdinal(stage);
+    const CKJitValue info = m_B.Uniform(m_Rows.SamplerInfo + ordinal);
+    const CKJitValue modes = m_B.FloatToInt(m_B.Component(info, 0));
+    const CKJitValue packed = m_B.FloatToInt(m_B.Component(info, 3));
+    DepthComparison comparison;
+    comparison.Declared = SamplerDeclared(m_Program, stage, m_Layout);
+    comparison.Slot = comparison.Declared ? CKFFSamplerSlot(CKFF_SAMPLER_DEPTH, ordinal, m_Layout) : 0;
+    comparison.Border = m_B.Component(m_B.Uniform(m_Rows.BorderColor + ordinal), 0);
+    comparison.Modes = m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15)});
+    comparison.MipFilter = Bits(packed, 0, 15);
+    comparison.Levels = comparison.Declared ? m_B.TextureLevels(comparison.Slot, CKJIT_SAMPLER_2D) : m_B.Int(1);
+    comparison.Reference = m_B.Component(coordinate, 2);
+    comparison.Func = func;
+
+    const CKJitValue state = m_B.FloatToInt(m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 3));
+    const CKJitValue minMip =
+        m_B.IntToFloat(Bits(state, CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT, CKFF_SAMPLER_SHADER_MIN_MIP_MASK));
+    const CKJitValue size = m_B.IntToFloat(CompareExtent(comparison, m_B.Int(0)));
+    const CKJitValue maxAnisotropy = m_B.IntToFloat(m_B.IntShiftRight(packed, m_B.Int(4)));
+    const FilterTaps taps = PlanTaps2D(info, size, dx, dy, CKJitValue(), lodBias, minMip, maxAnisotropy, true);
+    const CKJitValue uv = MirrorOnce(original, Sampling(m_Switches, stage));
+
+    CKJitValue sum;
+    const CKJitValue tap = m_B.Loop(taps.Count, kTapLimit, {m_B.Float(0.0f)}, &sum);
+    const CKJitValue offset = m_B.Mul(m_B.Sub(m_B.IntToFloat(tap), taps.Center), taps.Step);
+    const CKJitValue compared = CompareMips(comparison, m_B.Add(uv, offset), taps.Lod, taps.Filtered);
+    return m_B.Div(m_B.EndLoop(m_B.Add(sum, compared)), taps.Total);
+}
+
+// The comparison at the mips the mip filter blends for a level, each weighted
+// by its share of the blend.
+CKJitValue NativeFragmentCompiler::CompareMips(const DepthComparison &comparison, CKJitValue uv, CKJitValue lod,
+                                               CKJitValue filtered) {
+    const MipBlend mips = PlanMips(comparison.Levels, comparison.MipFilter, lod);
+    const CKJitValue lowerShare = m_B.Sub(m_B.Float(1.0f), mips.Weight);
+    CKJitValue sum;
+    const CKJitValue index = m_B.Loop(mips.Count, 2, {m_B.Float(0.0f)}, &sum);
+    const CKJitValue first = m_B.IntEqual(index, m_B.Int(0));
+    const CKJitValue share = m_B.Select(mips.Linear, m_B.Select(first, lowerShare, mips.Weight), m_B.Float(1.0f));
+    const CKJitValue compared = CompareLevel(comparison, uv, MipAt(mips, first), filtered);
+    return m_B.EndLoop(m_B.Add(sum, m_B.Mul(compared, share)));
+}
+
+// The comparison at the texel of a mip at a coordinate, or the bilinear blend
+// of those at the four around it, summed row by row.
+CKJitValue NativeFragmentCompiler::CompareLevel(const DepthComparison &comparison, CKJitValue uv, CKJitValue mip,
+                                                CKJitValue filtered) {
+    const CKJitValue extent = CompareExtent(comparison, mip);
+    const CKJitValue scaled = m_B.Mul(uv, m_B.IntToFloat(extent));
+    m_B.If(filtered);
+    const BilinearTexels texels = PlanBilinear(scaled, extent, comparison.Modes);
+    const CKJitValue wx = m_B.Component(texels.Weight, 0);
+    const CKJitValue wy = m_B.Component(texels.Weight, 1);
+    const CKJitValue across[2] = {m_B.Sub(m_B.Float(1.0f), wx), wx};
+    const CKJitValue down[2] = {m_B.Sub(m_B.Float(1.0f), wy), wy};
+    static const char *const kCorners[4] = {"xy", "zy", "xw", "zw"};
+    CKJitValue bilinear = m_B.Float(0.0f);
+    for (uint32_t i = 0; i < 4; ++i) {
+        const CKJitValue compared = CompareTap(comparison, m_B.Swizzle(texels.Index, kCorners[i]),
+                                               m_B.Any(m_B.Swizzle(texels.Outside, kCorners[i])), mip);
+        bilinear = m_B.Add(bilinear, m_B.Mul(compared, m_B.Mul(across[i & 1], down[i >> 1])));
+    }
+    m_B.Else({bilinear});
+    CKJitValue index, outside;
+    Address(m_B.FloatToInt(m_B.Floor(scaled)), extent, comparison.Modes, index, outside);
+    return m_B.EndIf(CompareTap(comparison, index, m_B.Any(outside), mip));
+}
+
+// The comparison of a texel with the reference; the texels outside a border
+// addressed texture, and those of an undeclared one, have the border depth.
+CKJitValue NativeFragmentCompiler::CompareTap(const DepthComparison &comparison, CKJitValue texel,
+                                              CKJitValue outside, CKJitValue mip) {
+    CKJitValue depth = comparison.Border;
+    if (comparison.Declared) {
+        const CKJitValue loaded = m_B.Load(comparison.Slot, CKJIT_SAMPLER_2D, m_B.Construct({texel, mip}));
+        depth = m_B.Select(outside, comparison.Border, m_B.Component(loaded, 0));
+    }
+    return CompareDepth(depth, comparison.Reference, comparison.Func);
+}
+
 // A comparison of a reference with a depth, 1 where it passes: functions 1
-// to 6 are less to not equal, 7 never passes and 8 always does.
+// to 6 are less to not equal, 7 never passes and 8 always does. The others
+// pass the depth through.
 CKJitValue NativeFragmentCompiler::CompareDepth(CKJitValue depth, CKJitValue reference, CKDWORD func) {
     CKJitValue pass;
     switch (func) {
@@ -1007,7 +1130,8 @@ CKJitValue NativeFragmentCompiler::CompareDepth(CKJitValue depth, CKJitValue ref
     case 5: pass = m_B.Greater(reference, depth); break;
     case 6: pass = m_B.NotEqual(reference, depth); break;
     case 7: return m_B.Float(0.0f);
-    default: return m_B.Float(1.0f);
+    case 8: return m_B.Float(1.0f);
+    default: return depth;
     }
     return m_B.Select(pass, m_B.Float(1.0f), m_B.Float(0.0f));
 }
@@ -1323,15 +1447,6 @@ bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamp
     UniformRows rows;
     if ((unsigned)layout >= CKFF_SAMPLER_LAYOUT_COUNT || !ResolveUniformRows(layout, rows))
         return false;
-    // Not emulated yet: depth comparisons outside the wide 2D layout.
-    CKFFNativeFragmentKey canonical = key;
-    CKFFCanonicalizeNativeFragmentKey(canonical, layout);
-    if ((canonical.Switches[0] & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0 && layout != CKFF_SAMPLER_LAYOUT_WIDE_2D) {
-        for (CKDWORD stage = 0; stage < kStageCount; ++stage) {
-            if (canonical.Program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) != 0)
-                return false;
-        }
-    }
     NativeFragmentCompiler compiler(key, layout, rows);
     return compiler.Compile(out);
 }

@@ -83,8 +83,7 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
 // register, the fragment uniform block of the native program interface, and
 // the layout's sampler slots.
 //
-// Returns false for a layout without native shaders, for a shader-sampling
-// key that compares depths outside the wide 2D layout, or if the IR builder
+// Returns false for a layout without native shaders, or if the IR builder
 // rejects the program, which is a front end bug.
 bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
                                       CKJitFragmentShader &out);
