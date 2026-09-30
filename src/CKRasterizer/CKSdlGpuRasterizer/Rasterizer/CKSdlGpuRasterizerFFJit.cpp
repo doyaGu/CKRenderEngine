@@ -228,15 +228,28 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
         }
         return Precompiled;
     }
-    if (!entry.Programs[Variant]) {
-        entry.Programs[Variant] =
-            CreateFFJitProgram(entry.PixelShader, Variant, Precompiled);
-        if (!entry.Programs[Variant]) {
-            entry.State = FFJitProgram::REJECTED;
-            return Precompiled;
-        }
+    const CKDWORD program = BindFFJitProgram(entry, Variant, Precompiled);
+    return program ? program : Precompiled;
+}
+
+CKDWORD CKSdlGpuRasterizerContext::BindFFJitProgram(
+    FFJitProgram &Entry,
+    CKFFProgramVariant Variant,
+    CKDWORD Precompiled)
+{
+    for (int i = 0; i < Entry.Programs.Size(); ++i) {
+        if (Entry.Programs[i].Precompiled == Precompiled)
+            return Entry.Programs[i].Program;
     }
-    return entry.Programs[Variant];
+    const FFJitProgram::Binding binding = {
+        Precompiled, Variant, CreateFFJitProgram(Entry.PixelShader, Variant, Precompiled)};
+    // The entry's draws are then drawn precompiled.
+    if (!binding.Program) {
+        Entry.State = FFJitProgram::REJECTED;
+        return 0;
+    }
+    Entry.Programs.PushBack(binding);
+    return binding.Program;
 }
 
 CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
@@ -309,20 +322,17 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
         if (!PrewarmablePipeline(Device, record))
             continue;
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
-        if (!Entry.Programs[variant]) {
-            CKSdlGpuFFFragmentArtifactKey artifact;
-            artifact.SamplerLayout = (CKFFSamplerLayout)record.SamplerLayout;
-            const CKDWORD precompiled = NativeFFProgram(variant, artifact, FALSE);
-            Entry.Programs[variant] = precompiled
-                ? CreateFFJitProgram(Entry.PixelShader, variant, precompiled) : 0;
-            // As when a draw creates it, the program is then drawn precompiled.
-            if (!Entry.Programs[variant]) {
-                Entry.State = FFJitProgram::REJECTED;
-                break;
-            }
+        CKSdlGpuFFFragmentArtifactKey artifact;
+        artifact.SamplerLayout = (CKFFSamplerLayout)record.SamplerLayout;
+        const CKDWORD precompiled = NativeFFProgram(variant, artifact, FALSE);
+        // As when a draw creates it, the program is then drawn precompiled.
+        const CKDWORD handle = precompiled ? BindFFJitProgram(Entry, variant, precompiled) : 0;
+        if (!handle) {
+            Entry.State = FFJitProgram::REJECTED;
+            break;
         }
         const CKDWORD layout = GetNativeVertexLayout(record.VertexFormat);
-        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(Entry.Programs[variant]);
+        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(handle);
         const std::shared_ptr<CKSdlGpuLayout> &vertexLayout = Layouts.Borrow(layout);
         if (!program || !vertexLayout)
             continue;
@@ -372,12 +382,12 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
         std::memcpy(record.Switches, entry.Key.Values + CKFF_FRAGMENT_PROGRAM_LANE_COUNT,
                     sizeof(record.Switches));
         record.SamplerLayout = entry.Key.Values[FF_JIT_KEY_LAYOUT];
-        for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
+        for (int b = 0; b < entry.Programs.Size(); ++b) {
             const std::shared_ptr<CKSdlGpuProgram> &program =
-                Programs.Borrow(entry.Programs[variant]);
+                Programs.Borrow(entry.Programs[b].Program);
             if (!program)
                 continue;
-            record.Variant = variant;
+            record.Variant = entry.Programs[b].Variant;
             // Pending and failed pipelines are recorded too.
             for (auto it = program->Pipelines.Begin(); it != program->Pipelines.End(); ++it) {
                 const CKDWORD *key = it.GetKey().Values;
@@ -405,10 +415,8 @@ void CKSdlGpuRasterizerContext::ClearFFJitPrograms()
 {
     for (int i = 0; i < m_FFJitPrograms.Size(); ++i) {
         const FFJitProgram &entry = m_FFJitPrograms[i];
-        for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
-            if (entry.Programs[variant])
-                DestroyObject(entry.Programs[variant], CKRST_OBJ_PROGRAM);
-        }
+        for (int b = 0; b < entry.Programs.Size(); ++b)
+            DestroyObject(entry.Programs[b].Program, CKRST_OBJ_PROGRAM);
         if (entry.PixelShader)
             DestroyObject(entry.PixelShader, CKRST_OBJ_SHADER);
     }
@@ -434,9 +442,9 @@ CKSdlGpuRasterizerContext::CountFFJitProgramsForTests() const
             ++counts.Ready;
         else
             ++counts.Rejected;
-        for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
+        for (int b = 0; b < entry.Programs.Size(); ++b) {
             const std::shared_ptr<CKSdlGpuProgram> &program =
-                Programs.Borrow(entry.Programs[variant]);
+                Programs.Borrow(entry.Programs[b].Program);
             if (!program)
                 continue;
             ++counts.Programs;

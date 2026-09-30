@@ -377,7 +377,14 @@ private:
         FFJitKey Key;
         Status State = QUEUED;
         CKDWORD PixelShader = 0;
-        CKDWORD Programs[CKFF_PROGRAM_VARIANT_COUNT] = {};
+        // A program of the shader for the draws of each precompiled program
+        // they replace, whose interface and pipelines it takes.
+        struct Binding {
+            CKDWORD Precompiled;
+            CKFFProgramVariant Variant;
+            CKDWORD Program;
+        };
+        XArray<Binding> Programs;
         // Orders the manifest: the programs draws used, by first use, then
         // the loaded ones no draw used, in their earlier order.
         CKDWORD Rank = 0;
@@ -400,6 +407,10 @@ private:
     int AddFFJitDrawKey(const FFJitKey &DrawKey, CKFFNativeFragmentKey Fragment,
                         CKFFSamplerLayout Layout);
     int AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank);
+    // The program of an entry for the draws of a precompiled program,
+    // created on first use. When it cannot be, the entry is rejected.
+    CKDWORD BindFFJitProgram(FFJitProgram &Entry, CKFFProgramVariant Variant,
+                             CKDWORD Precompiled);
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
                                CKFFProgramVariant Variant,
                                CKDWORD Precompiled);
