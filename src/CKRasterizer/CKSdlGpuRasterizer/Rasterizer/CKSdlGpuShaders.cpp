@@ -27,6 +27,8 @@
 #include "shaders/generated/dxbc_vs_ff_3d_clip.h"
 #include "shaders/generated/dxbc_vs_ff_positiont.h"
 #include "shaders/generated/dxbc_vs_ff_positiont_clip.h"
+#include "shaders/generated/dxbc_vs_ff_positiont_depth_pad.h"
+#include "shaders/generated/dxbc_vs_ff_positiont_clip_depth_pad.h"
 #include "shaders/generated/spirv_vs_ff_3d.h"
 #include "shaders/generated/spirv_vs_ff_3d_clip.h"
 #include "shaders/generated/spirv_vs_ff_positiont.h"
@@ -56,12 +58,11 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
 {
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_VERTEX;
-    out.Format = format == SDL_GPU_SHADERFORMAT_DXIL ?
-        CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_SPIRV;
-    out.Profile = format == SDL_GPU_SHADERFORMAT_DXIL ?
-        CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
+    out.Profile = format == SDL_GPU_SHADERFORMAT_SPIRV ?
+        CKRST_SHADER_PROFILE_SPIRV : CKRST_SHADER_PROFILE_DX12;
     out.UniformBufferCount = 1;
     if (format == SDL_GPU_SHADERFORMAT_DXIL) {
+        out.Format = CKRST_SHADER_FORMAT_DXIL;
         if (clipping) {
             out.Code = s_sdl_dxil_vs_ff_positiont_clip_depth_pad;
             out.CodeSize = sizeof(s_sdl_dxil_vs_ff_positiont_clip_depth_pad);
@@ -69,7 +70,17 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
             out.Code = s_sdl_dxil_vs_ff_positiont_depth_pad;
             out.CodeSize = sizeof(s_sdl_dxil_vs_ff_positiont_depth_pad);
         }
+    } else if (format == SDL_GPU_SHADERFORMAT_DXBC) {
+        out.Format = CKRST_SHADER_FORMAT_DXBC;
+        if (clipping) {
+            out.Code = s_sdl_dxbc_vs_ff_positiont_clip_depth_pad;
+            out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont_clip_depth_pad);
+        } else {
+            out.Code = s_sdl_dxbc_vs_ff_positiont_depth_pad;
+            out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont_depth_pad);
+        }
     } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
+        out.Format = CKRST_SHADER_FORMAT_SPIRV;
         if (clipping) {
             out.Code = s_sdl_spirv_vs_ff_positiont_clip_depth_pad;
             out.CodeSize = sizeof(s_sdl_spirv_vs_ff_positiont_clip_depth_pad);

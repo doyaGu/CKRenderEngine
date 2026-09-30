@@ -8,8 +8,8 @@
 #include <cstring>
 
 // CKSdlGpuRasterizerContext runtime compilation of fixed-function fragment
-// programs. A native artifact decodes the fragment program and the draw state
-// per fragment; the compiled program has both constant and keeps the
+// programs. A precompiled artifact decodes the fragment program and the draw
+// state per fragment; the compiled program has both constant and keeps the
 // artifact's interface, so it replaces the precompiled program in the same
 // draws and falls back to it for every pipeline the worker has not created
 // yet. The manifest of an earlier run queues its programs, then their
@@ -166,6 +166,17 @@ CKSdlGpuRasterizerContext::FFJitKey CKSdlGpuRasterizerContext::MakeFFJitKey(
     return key;
 }
 
+CKSdlGpuFFFragmentArtifactKey CKSdlGpuRasterizerContext::FFJitArtifact(const FFJitKey &Key)
+{
+    const CKDWORD switches = Key.Values[CKFF_FRAGMENT_PROGRAM_LANE_COUNT];
+    CKSdlGpuFFFragmentArtifactKey artifact;
+    artifact.SamplerLayout = (CKFFSamplerLayout)Key.Values[FF_JIT_KEY_LAYOUT];
+    artifact.UsesShaderSampling = (switches & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0;
+    artifact.ComparisonResourceCount =
+        (CKBYTE)((switches & CKFF_NATIVE_FRAGMENT_COMPARISONS) >> CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT);
+    return artifact;
+}
+
 int CKSdlGpuRasterizerContext::AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank)
 {
     FFJitProgram entry;
@@ -203,18 +214,19 @@ int CKSdlGpuRasterizerContext::AddFFJitDrawKey(
 CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
     const CKFFFragmentProgram &FragmentProgram,
     const CKFFConstantSet *Constants,
-    CKFFSamplerLayout Layout,
+    const CKSdlGpuFFFragmentArtifactKey &Artifact,
     CKFFProgramVariant Variant,
     CKDWORD Precompiled)
 {
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_INVALID || !Constants)
         return Precompiled;
     // A draw computes its key, canonicalizing it only when it is new.
-    const CKFFNativeFragmentKey fragment =
-        CKFFNativeFragmentDrawKey(FragmentProgram, *Constants, false, 0);
-    const FFJitKey drawKey = MakeFFJitKey(fragment, Layout);
+    const CKFFNativeFragmentKey fragment = CKFFNativeFragmentDrawKey(
+        FragmentProgram, *Constants, Artifact.UsesShaderSampling != FALSE,
+        Artifact.ComparisonResourceCount);
+    const FFJitKey drawKey = MakeFFJitKey(fragment, Artifact.SamplerLayout);
     const int *found = m_FFJitDrawKeys.FindPtr(drawKey);
-    const int index = found ? *found : AddFFJitDrawKey(drawKey, fragment, Layout);
+    const int index = found ? *found : AddFFJitDrawKey(drawKey, fragment, Artifact.SamplerLayout);
     if (index < 0)
         return Precompiled;
     FFJitProgram &entry = m_FFJitPrograms[index];
@@ -265,10 +277,16 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     CKFFProgramDesc desc = fallback->Interface;
     desc.PixelShader = PixelShader;
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC) {
-        CKDWORD &vertexShader = m_FFJitVertexShaders[Variant];
+        // The DXBC shader of the variant, padding depth if the fallback's does.
+        const CKDWORD clip = Variant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
+        const bool pad = desc.VertexShader != 0 &&
+            desc.VertexShader == m_NativeFFDepthPadVertexShaders[clip];
+        CKDWORD &vertexShader =
+            pad ? m_FFJitDepthPadVertexShaders[clip] : m_FFJitVertexShaders[Variant];
         CKShaderDesc vertexDesc;
         if (!vertexShader &&
-            (!CKSdlGpuFFDxbcVertexShader(Variant, vertexDesc) ||
+            (!(pad ? CKSdlGpuFFDepthPadVertexShader(m_FFJitFormat, clip != 0, vertexDesc)
+                   : CKSdlGpuFFDxbcVertexShader(Variant, vertexDesc)) ||
              CreateShader(&vertexDesc, &vertexShader) != CK_OK))
             return 0;
         desc.VertexShader = vertexShader;
@@ -298,11 +316,9 @@ void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
                      "FF fragment program compilation failed; drawing it precompiled");
         return;
     }
-    // The compiled shader replaces the artifact of its layout.
-    CKSdlGpuFFFragmentArtifactKey artifact;
-    artifact.SamplerLayout = (CKFFSamplerLayout)Key.Values[FF_JIT_KEY_LAYOUT];
+    // The compiled shader declares the resources of its artifact.
     CKShaderDesc desc;
-    if (!CKSdlGpuFFFragmentShader(ShaderFormat, artifact, desc))
+    if (!CKSdlGpuFFFragmentShader(ShaderFormat, FFJitArtifact(Key), desc))
         return;
     const bool dxbc = m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC;
     desc.Format = dxbc ? CKRST_SHADER_FORMAT_DXBC : CKRST_SHADER_FORMAT_SPIRV;
@@ -317,13 +333,14 @@ void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
 
 void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
 {
+    // The draws of the keys that canonicalize to the entry's may replace
+    // other artifacts, and bind programs of their own.
+    const CKSdlGpuFFFragmentArtifactKey artifact = FFJitArtifact(Entry.Key);
     for (int i = 0; i < Entry.Prewarm.Size(); ++i) {
         const CKSdlGpuFFJitRecord &record = Entry.Prewarm[i];
         if (!PrewarmablePipeline(Device, record))
             continue;
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
-        CKSdlGpuFFFragmentArtifactKey artifact;
-        artifact.SamplerLayout = (CKFFSamplerLayout)record.SamplerLayout;
         const CKDWORD precompiled = NativeFFProgram(variant, artifact, FALSE);
         // As when a draw creates it, the program is then drawn precompiled.
         const CKDWORD handle = precompiled ? BindFFJitProgram(Entry, variant, precompiled) : 0;
@@ -427,6 +444,11 @@ void CKSdlGpuRasterizerContext::ClearFFJitPrograms()
         if (m_FFJitVertexShaders[variant])
             DestroyObject(m_FFJitVertexShaders[variant], CKRST_OBJ_SHADER);
         m_FFJitVertexShaders[variant] = 0;
+    }
+    for (CKDWORD clip = 0; clip < 2; ++clip) {
+        if (m_FFJitDepthPadVertexShaders[clip])
+            DestroyObject(m_FFJitDepthPadVertexShaders[clip], CKRST_OBJ_SHADER);
+        m_FFJitDepthPadVertexShaders[clip] = 0;
     }
 }
 

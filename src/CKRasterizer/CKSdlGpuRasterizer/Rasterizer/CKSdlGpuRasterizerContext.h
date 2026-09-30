@@ -354,11 +354,11 @@ private:
     void ClearNativeFFPrograms();
 
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
-    // A draw of a native artifact names the key of its fragment program and
-    // of the draw state the shader branches on. The draws of keys that
-    // compile alike share one entry, compiled once on the worker; they use
-    // the precompiled program until the result is collected. The manifest of
-    // the device queues the programs and pipelines of earlier runs at idle
+    // A draw names the key of its fragment program and of the draw state the
+    // shader of its artifact branches on. The draws of keys that compile
+    // alike share one entry, compiled once on the worker; they use the
+    // precompiled program until the result is collected. The manifest of the
+    // device queues the programs and pipelines of earlier runs at idle
     // priority before any draw asks for them.
     class FFJitJob;
     // The lanes and switches of a CKFFNativeFragmentKey, then the sampler
@@ -371,6 +371,9 @@ private:
     typedef CKSdlGpuFixedKeyHash<FF_JIT_KEY_LAYOUT + 1> FFJitKeyHash;
     static FFJitKey MakeFFJitKey(const CKFFNativeFragmentKey &Fragment,
                                  CKFFSamplerLayout Layout);
+    // The artifact a key names: its layout, and the shader sampling and
+    // comparison samplers of its switches.
+    static CKSdlGpuFFFragmentArtifactKey FFJitArtifact(const FFJitKey &Key);
     struct FFJitProgram {
         enum Status { QUEUED, READY, REJECTED };
         // Canonical.
@@ -400,7 +403,7 @@ private:
     void SaveFFJitManifest();
     CKDWORD ResolveFFJitProgram(const CKFFFragmentProgram &FragmentProgram,
                                 const CKFFConstantSet *Constants,
-                                CKFFSamplerLayout Layout,
+                                const CKSdlGpuFFFragmentArtifactKey &Artifact,
                                 CKFFProgramVariant Variant,
                                 CKDWORD Precompiled);
     // The entry of a draw key no draw had, -1 past the entry limit.
@@ -460,6 +463,7 @@ private:
     XSHashTable<int, FFJitKey, FFJitKeyHash> m_FFJitDrawKeys;
     // DXBC programs cannot use the DXIL vertex shaders.
     CKDWORD m_FFJitVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
+    CKDWORD m_FFJitDepthPadVertexShaders[2] = {};
     // Empty when the manifest is disabled.
     XString m_FFJitManifest;
     uint64_t m_FFJitIdentity = 0;

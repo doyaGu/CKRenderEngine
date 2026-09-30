@@ -443,12 +443,10 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
         return 0;
     const CKDWORD precompiled =
         NativeFFProgram(variant, artifact, PositionTDepthPad);
-    // Only the native artifacts have a compiler.
-    if (!precompiled || artifact.UsesShaderSampling ||
-        artifact.ComparisonResourceCount != 0)
-        return precompiled;
+    if (!precompiled)
+        return 0;
     return ResolveFFJitProgram(ProgramContext.FragmentProgram, Constants,
-                               artifact.SamplerLayout, variant, precompiled);
+                               artifact, variant, precompiled);
 }
 
 CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(

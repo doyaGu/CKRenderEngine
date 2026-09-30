@@ -963,8 +963,8 @@ void CheckMatchingSamples(const char *mode, const Samples &samples, const Sample
     }
 }
 
-// The fragment programs of the native artifacts are compiled in the
-// background while their draws use the precompiled shaders. The first run of
+// The fragment programs of the artifacts are compiled in the background
+// while their draws use the precompiled shaders. The first run of
 // the cases queued them; each further run completes the work the one before
 // queued (the shaders, then their pipelines), so the last run draws with the
 // compiled programs. They must reproduce the precompiled pixels.
@@ -1119,6 +1119,38 @@ void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCo
                (unsigned)expected.Programs, (unsigned)expected.Pipelines);
 }
 
+// Runs a check until its draws use compiled fragment programs, as
+// CheckCompiledFragmentPrograms runs the cases: the last run creates nothing.
+// Every run checks its own pixels, which the compiled programs reproduce.
+// The draws of a check may use the programs of earlier ones.
+void CheckCompiled(Backend &b, const char *name, void (*check)(Backend &))
+{
+    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
+    if (setting && strcmp(setting, "0") == 0) {
+        check(b);
+        return;
+    }
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    const CKSdlGpuRasterizerContext::FFJitCounts before = backend->CountFFJitProgramsForTests();
+    CKSdlGpuRasterizerContext::FFJitCounts counts = before;
+    for (int run = 0; run < 3; ++run) {
+        if (run != 0) {
+            TestCheck(backend->FinishBackgroundWorkForTests(30000),
+                      "background compilation finishes");
+            counts = backend->CountFFJitProgramsForTests();
+        }
+        check(b);
+    }
+    char what[96];
+    snprintf(what, sizeof(what), "compiled %s checks", name);
+    CheckFFJitCounts(what, backend->CountFFJitProgramsForTests(), counts);
+    TestCheckf(counts.Rejected == 0, "%s: %u programs rejected", what, (unsigned)counts.Rejected);
+    printf("  %s: %u more shaders, %u programs and %u pipelines\n", what,
+           (unsigned)(counts.Ready - before.Ready), (unsigned)(counts.Programs - before.Programs),
+           (unsigned)(counts.Pipelines - before.Pipelines));
+}
+
 void RemoveManifestDirectory(const char *directory)
 {
     int count = 0;
@@ -1197,6 +1229,12 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
         SDL_unsetenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE");
     printf("  prewarmed fragment programs: %u shaders, %u programs and %u pipelines before any draw\n",
            (unsigned)saved.Ready, (unsigned)saved.Programs, (unsigned)saved.Pipelines);
+}
+#else
+// Only SDL_gpu compiles fragment programs.
+void CheckCompiled(Backend &b, const char *, void (*check)(Backend &))
+{
+    check(b);
 }
 #endif
 
@@ -4357,7 +4395,7 @@ void BackendRendersFixedFunctionSemantics()
         CheckCompiledFragmentPrograms(backend, samples);
         CheckCompiledProgramDepthInvariance(backend);
 #endif
-        CheckWideSamplerLayouts(backend);
+        CheckCompiled(backend, "wide sampler layout", CheckWideSamplerLayouts);
         CheckOrderedTextureUpdates(backend);
         CheckPaddedTextureUpload(backend);
         CheckOrderedBufferUpdates(backend);
@@ -4369,18 +4407,18 @@ void BackendRendersFixedFunctionSemantics()
         CheckPointFillTriangleCulling(backend);
         CheckPointFilledTriangleSizes(backend);
         CheckClippingDisablesUserPlanes(backend);
-        CheckBorderFiltering(backend);
+        CheckCompiled(backend, "border filtering", CheckBorderFiltering);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);
         CheckMipPreservation(backend);
-        CheckMipLodBias(backend);
-        CheckLayeredMinimumMip(backend);
-        CheckAnisotropyLimit(backend);
-        CheckLayeredAnisotropyLimit(backend);
+        CheckCompiled(backend, "mip LOD bias", CheckMipLodBias);
+        CheckCompiled(backend, "layered minimum mip", CheckLayeredMinimumMip);
+        CheckCompiled(backend, "anisotropy limit", CheckAnisotropyLimit);
+        CheckCompiled(backend, "layered anisotropy limit", CheckLayeredAnisotropyLimit);
         CheckMemoryCopyPixelIdentity(backend);
         CheckScaledTextureCopies(backend);
         CheckIndependentAttachmentClears(backend);
-        CheckFilteredDepthComparison(backend);
+        CheckCompiled(backend, "filtered depth comparison", CheckFilteredDepthComparison);
         CheckStencilWriteMasks(backend);
         CheckOrderedReadbacks(backend);
         CheckResizeAndReadback(backend);
