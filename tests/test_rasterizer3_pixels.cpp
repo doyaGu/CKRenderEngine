@@ -698,6 +698,8 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     }, pixels);
     TestCheck(PixelNear(pixels, 20, 40, 255, 0, 0),
               "affine texture interpolation selects the red texel");
+    // Another run of the cases draws as this one did.
+    ctx->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, TRUE);
 
     SetDiffuseState(ctx);
     ctx->SetTexture(textures.Transform, 0);
