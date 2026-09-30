@@ -312,8 +312,8 @@ int main()
             CKDWORD *values = reinterpret_cast<CKDWORD *>(&result);
             for (size_t i = 0; i < sizeof(result) / sizeof(CKDWORD); ++i)
                 values[i] = (seed * 2654435761u + CKDWORD(i) * 40503u) & CKFFFragmentProgram::LaneMask;
-            // Switch word 0 has no bits 3 to 7, and the sampling bytes no bit 7.
-            result.Switches[0] &= ~0xf8u;
+            // Switch word 0 has no bit 3, and the sampling bytes no bit 7.
+            result.Switches[0] &= ~0x08u;
             result.Switches[3] &= 0x7f7f7f7fu;
             result.Switches[4] &= 0x7f7f7f7fu;
             result.SamplerLayout = seed % CKFF_SAMPLER_LAYOUT_COUNT;

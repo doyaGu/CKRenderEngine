@@ -20,7 +20,7 @@ static_assert(sizeof(CKSdlGpuFFJitRecord) == kRecordDwords * sizeof(CKDWORD),
               "manifest records are plain DWORDs");
 // The switches of switch word 0, of every stage for the per-stage ones.
 const CKDWORD kSwitchMask = CKFF_NATIVE_FRAGMENT_AFFINE | CKFF_NATIVE_FRAGMENT_LINE |
-    CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING |
+    CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING | CKFF_NATIVE_FRAGMENT_COMPARISONS |
     0xffu * (CKFF_NATIVE_FRAGMENT_TEXTURE | CKFF_NATIVE_FRAGMENT_BUMP_UNORM |
              CKFF_NATIVE_FRAGMENT_LOD_BIAS);
 // The sampling flags of switch words 3 and 4, of every stage.
