@@ -345,6 +345,7 @@ private:
     CKDWORD ResolveNativeFFProgram(
         const CKFFProgramContext &ProgramContext,
         const CKFFTextureBindingSet &Textures,
+        const CKFFConstantSet *Constants,
         CKBOOL PositionTDepthPad);
     // The precompiled program of an artifact, created on first use.
     CKDWORD NativeFFProgram(CKFFProgramVariant Variant,
@@ -353,14 +354,27 @@ private:
     void ClearNativeFFPrograms();
 
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
-    // A program of a native artifact is compiled once on the worker; its
-    // draws use the precompiled program until the result is collected. The
-    // manifest of the device queues the programs and pipelines of earlier
-    // runs at idle priority before any draw asks for them.
+    // A draw of a native artifact names the key of its fragment program and
+    // of the draw state the shader branches on. The draws of keys that
+    // compile alike share one entry, compiled once on the worker; they use
+    // the precompiled program until the result is collected. The manifest of
+    // the device queues the programs and pipelines of earlier runs at idle
+    // priority before any draw asks for them.
     class FFJitJob;
-    typedef CKSdlGpuFixedKey<CKFF_FRAGMENT_PROGRAM_LANE_COUNT + 1> FFJitKey;
+    // The lanes and switches of a CKFFNativeFragmentKey, then the sampler
+    // layout.
+    enum {
+        FF_JIT_KEY_LAYOUT = CKFF_FRAGMENT_PROGRAM_LANE_COUNT +
+                            CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT,
+    };
+    typedef CKSdlGpuFixedKey<FF_JIT_KEY_LAYOUT + 1> FFJitKey;
+    typedef CKSdlGpuFixedKeyHash<FF_JIT_KEY_LAYOUT + 1> FFJitKeyHash;
+    static FFJitKey MakeFFJitKey(const CKFFNativeFragmentKey &Fragment,
+                                 CKFFSamplerLayout Layout);
     struct FFJitProgram {
         enum Status { QUEUED, READY, REJECTED };
+        // Canonical.
+        FFJitKey Key;
         Status State = QUEUED;
         CKDWORD PixelShader = 0;
         CKDWORD Programs[CKFF_PROGRAM_VARIANT_COUNT] = {};
@@ -378,9 +392,14 @@ private:
     // Records the compiled programs and their pipelines for the next run.
     void SaveFFJitManifest();
     CKDWORD ResolveFFJitProgram(const CKFFFragmentProgram &FragmentProgram,
+                                const CKFFConstantSet *Constants,
                                 CKFFSamplerLayout Layout,
                                 CKFFProgramVariant Variant,
                                 CKDWORD Precompiled);
+    // The entry of a draw key no draw had, -1 past the entry limit.
+    int AddFFJitDrawKey(const FFJitKey &DrawKey, CKFFNativeFragmentKey Fragment,
+                        CKFFSamplerLayout Layout);
+    int AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank);
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
                                CKFFProgramVariant Variant,
                                CKDWORD Precompiled);
@@ -422,9 +441,12 @@ private:
         CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
     // INVALID when every program draws with the precompiled shaders.
     SDL_GPUShaderFormat m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
-    XSHashTable<FFJitProgram, FFJitKey,
-                CKSdlGpuFixedKeyHash<CKFF_FRAGMENT_PROGRAM_LANE_COUNT + 1>>
-        m_FFJitPrograms;
+    // Entries by creation, and the index of each canonical key's entry.
+    XClassArray<FFJitProgram> m_FFJitPrograms;
+    XSHashTable<int, FFJitKey, FFJitKeyHash> m_FFJitKeys;
+    // The entry index of every draw key drawn, so that a draw canonicalizes
+    // only a key it has not drawn before.
+    XSHashTable<int, FFJitKey, FFJitKeyHash> m_FFJitDrawKeys;
     // DXBC programs cannot use the DXIL vertex shaders.
     CKDWORD m_FFJitVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     // Empty when the manifest is disabled.

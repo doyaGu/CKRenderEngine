@@ -431,6 +431,7 @@ void CKSdlGpuRasterizerContext::RecordDrawApproximations()
 CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     const CKFFProgramContext &ProgramContext,
     const CKFFTextureBindingSet &Textures,
+    const CKFFConstantSet *Constants,
     CKBOOL PositionTDepthPad)
 {
     const CKFFProgramVariant variant =
@@ -446,7 +447,7 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     if (!precompiled || artifact.UsesShaderSampling ||
         artifact.ComparisonResourceCount != 0)
         return precompiled;
-    return ResolveFFJitProgram(ProgramContext.FragmentProgram,
+    return ResolveFFJitProgram(ProgramContext.FragmentProgram, Constants,
                                artifact.SamplerLayout, variant, precompiled);
 }
 
@@ -576,7 +577,7 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
         }
     }
     const CKDWORD program = ResolveNativeFFProgram(
-        programContext, drawTextures,
+        programContext, drawTextures, draw.Constants,
         positionTDepthPad);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
     if (!program || !vertexLayout)

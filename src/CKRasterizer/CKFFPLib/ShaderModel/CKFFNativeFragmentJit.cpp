@@ -4,7 +4,11 @@
 #include "CKFFStageState.h"
 #include "CKJitBuilder.h"
 
+#include <cstring>
+
 namespace {
+
+const CKDWORD kStageCount = CKFF_FRAGMENT_PROGRAM_STAGE_COUNT;
 
 // Rows of the native fragment uniform block (CKFFBuildProgramInterface).
 struct UniformRows {
@@ -44,7 +48,7 @@ bool ResolveUniformRows(CKFFSamplerLayout layout, UniformRows &rows) {
     };
     const Block blocks[] = {
         {CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_VEC4_COUNT, &rows.DrawParams},
-        {CKRST_BLOCK_BUMP_ENV, CKFF_FRAGMENT_PROGRAM_STAGE_COUNT * BUMP_ENV_ROWS_PER_STAGE, &rows.BumpEnv},
+        {CKRST_BLOCK_BUMP_ENV, kStageCount * BUMP_ENV_ROWS_PER_STAGE, &rows.BumpEnv},
         {CKRST_BLOCK_STAGE_PARAMS, CKFF_STAGE_PARAM_VEC4_COUNT, &rows.StageParams},
     };
 
@@ -79,6 +83,118 @@ bool ResolveUniformRows(CKFFSamplerLayout layout, UniformRows &rows) {
     return rows.Count != 0;
 }
 
+// ---------------------------------------------------------------------------
+// Keys.
+
+bool StageSwitch(const CKDWORD *switches, CKFFNativeFragmentSwitch first, CKDWORD stage) {
+    return (switches[0] & (CKDWORD)first << stage) != 0;
+}
+
+CKDWORD BlendPair(const CKDWORD *switches, CKDWORD stage) {
+    return switches[1 + stage / 4] >> (stage % 4 * 8) & 0xFFu;
+}
+
+void SetBlendPair(CKDWORD *switches, CKDWORD stage, CKDWORD pair) {
+    CKDWORD &word = switches[1 + stage / 4];
+    const CKDWORD shift = stage % 4 * 8;
+    word = (word & ~(0xFFu << shift)) | (pair & 0xFFu) << shift;
+}
+
+// A STAGEBLEND factor as the shaders evaluate it: the BOTH* modes as their
+// source factor, and values without a factor as ZERO.
+CKDWORD CanonicalFactor(CKDWORD factor) {
+    if (factor == VXBLEND_BOTHSRCALPHA)
+        return VXBLEND_SRCALPHA;
+    if (factor == VXBLEND_BOTHINVSRCALPHA)
+        return VXBLEND_INVSRCALPHA;
+    return factor >= VXBLEND_ZERO && factor <= VXBLEND_SRCALPHASAT ? factor : VXBLEND_ZERO;
+}
+
+// A factor pair, the source in the high nibble; the BOTH* source modes imply
+// their destination.
+CKDWORD CanonicalBlendPair(CKDWORD pair) {
+    const CKDWORD source = pair >> 4 & 15;
+    CKDWORD destination = pair & 15;
+    if (source == VXBLEND_BOTHSRCALPHA)
+        destination = VXBLEND_INVSRCALPHA;
+    else if (source == VXBLEND_BOTHINVSRCALPHA)
+        destination = VXBLEND_SRCALPHA;
+    return CanonicalFactor(source) << 4 | CanonicalFactor(destination);
+}
+
+// The wide 2D layout keeps a 2D texture per stage; everything else is
+// addressed by the stage's ordinal among the textures of its type.
+bool StageIndexed(CKDWORD samplerType, CKFFSamplerLayout layout) {
+    return (samplerType == CKFF_SAMPLER_2D || samplerType == CKFF_SAMPLER_DEPTH) &&
+           layout == CKFF_SAMPLER_LAYOUT_WIDE_2D;
+}
+
+CKDWORD SamplerIndex(const CKFFFragmentProgram &program, CKDWORD stage, CKFFSamplerLayout layout) {
+    const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+    return StageIndexed(type, layout) ? stage : program.GetSamplerOrdinal(stage);
+}
+
+// Whether the layout declares the texture a stage samples.
+bool SamplerDeclared(const CKFFFragmentProgram &program, CKDWORD stage, CKFFSamplerLayout layout) {
+    const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+    return SamplerIndex(program, stage, layout) < CKFFSamplerTypeSlotCount(type, layout);
+}
+
+// A float of a constant block, or zero past its end.
+float ConstantFloat(const CKFFConstantSet &constants, CKFFConstantBlock block, CKDWORD row, CKDWORD component) {
+    const XArray<CKBYTE> &bytes = constants[block].Bytes;
+    const CKDWORD offset = (row * 4 + component) * (CKDWORD)sizeof(float);
+    float value = 0.0f;
+    if (offset + sizeof(float) <= (CKDWORD)bytes.Size())
+        std::memcpy(&value, bytes.Begin() + offset, sizeof(value));
+    return value;
+}
+
+// The shaders' float to int conversion where it is defined; saturating
+// elsewhere, and 0 for NaN.
+int32_t FloatToInt(float value) {
+    if (!(value == value))
+        return 0;
+    if (value <= -2147483648.0f)
+        return INT32_MIN;
+    if (value >= 2147483648.0f)
+        return INT32_MAX;
+    return (int32_t)value;
+}
+
+// The combiner arguments an operation reads.
+enum {
+    READS_ARG1 = 1,
+    READS_ARG2 = 2,
+    READS_ARG0 = 4,
+};
+
+CKDWORD ArgumentsRead(CKDWORD op) {
+    switch (op) {
+    case CKRST_TOP_SELECTARG1:
+    case CKRST_TOP_PREMODULATE: return READS_ARG1;
+    case CKRST_TOP_SELECTARG2: return READS_ARG2;
+    case CKRST_TOP_MULTIPLYADD:
+    case CKRST_TOP_LERP: return READS_ARG1 | READS_ARG2 | READS_ARG0;
+    default:
+        return (op >= CKRST_TOP_MODULATE && op <= CKRST_TOP_BLENDCURRENTALPHA) ||
+                       (op >= CKRST_TOP_MODULATEALPHA_ADDCOLOR && op <= CKRST_TOP_MODULATEINVCOLOR_ADDALPHA) ||
+                       op == CKRST_TOP_DOTPRODUCT3
+                   ? READS_ARG1 | READS_ARG2
+                   : 0;
+    }
+}
+
+const CKFFFragmentProgramStageField kArguments[2][3] = {
+    {CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG2,
+     CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0},
+    {CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG1, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG2,
+     CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG0},
+};
+
+// ---------------------------------------------------------------------------
+// Compiler.
+
 // A combiner register or argument viewed as its colour and alpha channels,
 // which the combiners evaluate separately.
 struct Color {
@@ -90,8 +206,8 @@ enum Channel { CHANNEL_RGB, CHANNEL_ALPHA };
 
 class NativeFragmentCompiler {
 public:
-    NativeFragmentCompiler(const CKFFFragmentProgram &program, CKFFSamplerLayout layout, const UniformRows &rows)
-        : m_B(rows.Count), m_Program(program), m_Layout(layout), m_Rows(rows) {}
+    NativeFragmentCompiler(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout, const UniformRows &rows)
+        : m_B(rows.Count), m_Program(key.Program), m_Switches(key.Switches), m_Layout(layout), m_Rows(rows) {}
 
     bool Compile(CKJitFragmentShader &out);
 
@@ -106,32 +222,33 @@ private:
     CKDWORD StageField(CKDWORD stage, CKFFFragmentProgramStageField field) const {
         return m_Program.GetStage(stage, field);
     }
+    bool Switch(CKFFNativeFragmentSwitch flag) const { return (m_Switches[0] & (CKDWORD)flag) != 0; }
+    bool Switch(CKFFNativeFragmentSwitch first, CKDWORD stage) const {
+        return StageSwitch(m_Switches, first, stage);
+    }
 
     Color Split(CKJitValue value) { return {m_B.Swizzle(value, "xyz"), m_B.Component(value, 3)}; }
     CKJitValue Join(const Color &color) { return m_B.Construct({color.Rgb, color.A}); }
     CKJitValue Pick(const Color &color, Channel channel) const { return channel == CHANNEL_RGB ? color.Rgb : color.A; }
-    Color Select(CKJitValue condition, const Color &whenTrue, const Color &whenFalse) {
-        return {m_B.Select(condition, whenTrue.Rgb, whenFalse.Rgb), m_B.Select(condition, whenTrue.A, whenFalse.A)};
-    }
     // abs(v) < epsilon ? (v < 0 ? -epsilon : epsilon) : v
     CKJitValue SafeDivisor(CKJitValue v, float epsilon);
 
     void DeclareInputs();
-    CKJitValue LineCoverage(CKJitValue &discard);
     void EvaluateStage(CKDWORD stage);
     CKJitValue SampleCoordinate(CKDWORD stage, uint32_t components);
-    CKJitValue SampleTexture(CKDWORD stage, CKJitValue hasTexture);
+    CKJitValue SampleTexture(CKDWORD stage);
     Color Argument(CKDWORD packedArg, const Color &texture, const Color &current, const Color &stageConstant);
     CKJitValue Combine(CKDWORD op, Channel channel, const Color &arg1, const Color &arg2, const Color &arg0,
                        const Color &destination, const Color &texture);
     CKJitValue DotProduct3(const Color &a, const Color &b);
-    CKJitValue StageBlend(const Color &source, const Color &destination, CKJitValue packedFactors);
-    CKJitValue BlendFactor(CKJitValue factor, const Color &source, const Color &destination);
+    CKJitValue StageBlend(const Color &source, const Color &destination, CKDWORD pair);
+    CKJitValue BlendFactor(CKDWORD factor, const Color &source, const Color &destination);
     CKJitValue AlphaTestPass(CKJitValue alpha);
     CKJitValue FogFactor();
 
     CKJitBuilder m_B;
     const CKFFFragmentProgram &m_Program;
+    const CKDWORD *m_Switches;
     CKFFSamplerLayout m_Layout;
     UniformRows m_Rows;
 
@@ -144,8 +261,8 @@ private:
     Color m_Current;
     Color m_Temp;
     Color m_TextureFactor;
-    CKJitValue m_PreviousTexture;    // FLOAT4
-    CKJitValue m_PreviousBumpUnorm;  // BOOL
+    CKJitValue m_PreviousTexture; // FLOAT4
+    bool m_PreviousBumpUnorm = false;
     CKDWORD m_PreviousColorOp = 0;
     CKDWORD m_PreviousAlphaOp = 0;
 };
@@ -167,21 +284,17 @@ void NativeFragmentCompiler::DeclareInputs() {
     }
 }
 
-CKJitValue NativeFragmentCompiler::LineCoverage(CKJitValue &discard) {
-    // Antialiased lines fade with the distance to the line centre.
-    const CKJitValue lineMode =
-        m_B.Greater(m_B.Component(DrawParam(CKFF_DRAW_PARAM_MATERIAL_POWER), 3), m_B.Float(2.5f));
-    const CKJitValue offset = m_B.Mul(m_Varyings[VARYING_LINE_OFFSET], m_B.Component(m_FragCoord, 3));
-    const CKJitValue coverage = m_B.Saturate(m_B.Sub(m_B.Float(1.0f), m_B.Length(offset)));
-    discard = m_B.And(lineMode, m_B.LessEqual(coverage, m_B.Float(0.0f)));
-    return m_B.Select(lineMode, coverage, m_B.Float(1.0f));
-}
-
 bool NativeFragmentCompiler::Compile(CKJitFragmentShader &out) {
     DeclareInputs();
 
-    CKJitValue discard;
-    const CKJitValue edgeCoverage = LineCoverage(discard);
+    // Antialiased lines fade with the distance to the line centre.
+    CKJitValue discard = m_B.Bool(false);
+    CKJitValue edgeCoverage;
+    if (Switch(CKFF_NATIVE_FRAGMENT_LINE)) {
+        const CKJitValue offset = m_B.Mul(m_Varyings[VARYING_LINE_OFFSET], m_B.Component(m_FragCoord, 3));
+        edgeCoverage = m_B.Saturate(m_B.Sub(m_B.Float(1.0f), m_B.Length(offset)));
+        discard = m_B.LessEqual(edgeCoverage, m_B.Float(0.0f));
+    }
 
     const bool flatShade = m_Program.Get(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE) != 0;
     m_Diffuse = Split(m_Varyings[flatShade ? VARYING_FLAT_COLOR0 : VARYING_COLOR0]);
@@ -190,10 +303,9 @@ bool NativeFragmentCompiler::Compile(CKJitFragmentShader &out) {
     m_Temp = {m_B.Float3(0.0f, 0.0f, 0.0f), m_B.Float(0.0f)};
     m_TextureFactor = Split(DrawParam(CKFF_DRAW_PARAM_TEXTURE_FACTOR));
     m_PreviousTexture = m_B.Float4(0.0f, 0.0f, 0.0f, 1.0f);
-    m_PreviousBumpUnorm = m_B.Bool(false);
 
     const CKDWORD lastStage = m_Program.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE);
-    for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT && stage <= lastStage; ++stage) {
+    for (CKDWORD stage = 0; stage < kStageCount && stage <= lastStage; ++stage) {
         if (StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) == CKRST_TOP_DISABLE)
             break;
         EvaluateStage(stage);
@@ -207,7 +319,8 @@ bool NativeFragmentCompiler::Compile(CKJitFragmentShader &out) {
         const CKJitValue fogColor = m_B.Swizzle(DrawParam(CKFF_DRAW_PARAM_FOG_COLOR), "xyz");
         m_Current.Rgb = m_B.Lerp(fogColor, m_Current.Rgb, FogFactor());
     }
-    m_Current.A = m_B.Mul(m_Current.A, edgeCoverage);
+    if (edgeCoverage.IsValid())
+        m_Current.A = m_B.Mul(m_Current.A, edgeCoverage);
 
     return m_B.Finish(m_B.Saturate(Join(m_Current)), discard, out);
 }
@@ -215,16 +328,10 @@ bool NativeFragmentCompiler::Compile(CKJitFragmentShader &out) {
 void NativeFragmentCompiler::EvaluateStage(CKDWORD stage) {
     const CKDWORD colorOp = StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP);
     const CKDWORD alphaOp = StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP);
-
-    const CKJitValue coordParams = StageParam(stage, CKFF_STAGE_PARAM_COORD);
     const Color stageConstant = Split(StageParam(stage, CKFF_STAGE_PARAM_CONSTANT));
-    const CKJitValue hasTexture = m_B.Greater(m_B.Component(coordParams, 2), m_B.Float(0.5f));
-    const CKJitValue stageBlend = m_B.FloatToInt(m_B.Add(m_B.Component(coordParams, 3), m_B.Float(0.5f)));
-    const CKJitValue transformFlags = m_B.FloatToInt(m_B.Component(coordParams, 1));
-    const CKJitValue bumpUnorm =
-        m_B.Not(m_B.IntEqual(m_B.IntAnd(transformFlags, m_B.Int((int32_t)CKFF_TTF_BUMP_UNORM)), m_B.Int(0)));
+    const bool hasTexture = Switch(CKFF_NATIVE_FRAGMENT_TEXTURE, stage);
 
-    CKJitValue texture = SampleTexture(stage, hasTexture);
+    CKJitValue texture = SampleTexture(stage);
     if (stage != 0 && m_PreviousColorOp == CKRST_TOP_BUMPENVMAPLUMINANCE) {
         const CKJitValue luminance = BumpEnv(stage - 1, BUMP_ENV_LUMINANCE);
         texture = m_B.Mul(texture, m_B.Saturate(m_B.Add(m_B.Mul(m_B.Component(m_PreviousTexture, 2),
@@ -234,12 +341,11 @@ void NativeFragmentCompiler::EvaluateStage(CKDWORD stage) {
     const Color tex = Split(texture);
 
     // CURRENT after a PREMODULATE stage is modulated by this stage's texture,
-    // separately for the colour and the alpha combiner.
-    const Color premodulated = {m_B.Mul(m_Current.Rgb, tex.Rgb), m_B.Mul(m_Current.A, tex.A)};
-    const Color colorCurrent =
-        m_PreviousColorOp == CKRST_TOP_PREMODULATE ? Select(hasTexture, premodulated, m_Current) : m_Current;
-    const Color alphaCurrent =
-        m_PreviousAlphaOp == CKRST_TOP_PREMODULATE ? Select(hasTexture, premodulated, m_Current) : m_Current;
+    // if it has one, separately for the colour and the alpha combiner.
+    const Color premodulated =
+        hasTexture ? Color{m_B.Mul(m_Current.Rgb, tex.Rgb), m_B.Mul(m_Current.A, tex.A)} : m_Current;
+    const Color colorCurrent = m_PreviousColorOp == CKRST_TOP_PREMODULATE ? premodulated : m_Current;
+    const Color alphaCurrent = m_PreviousAlphaOp == CKRST_TOP_PREMODULATE ? premodulated : m_Current;
 
     const Color colorArg1 =
         Argument(StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1), tex, colorCurrent, stageConstant);
@@ -259,7 +365,7 @@ void NativeFragmentCompiler::EvaluateStage(CKDWORD stage) {
 
     Color result;
     result.Rgb = colorOp == CKFF_TOP_STAGEBLEND
-        ? StageBlend(tex, m_Current, stageBlend)
+        ? StageBlend(tex, m_Current, BlendPair(m_Switches, stage))
         : Combine(colorOp, CHANNEL_RGB, colorArg1, colorArg2, colorArg0, destination, tex);
     result.A = Combine(alphaOp, CHANNEL_ALPHA, alphaArg1, alphaArg2, alphaArg0, destination, tex);
     // DOTPRODUCT3 replicates into alpha whatever the alpha combiner computes.
@@ -271,7 +377,7 @@ void NativeFragmentCompiler::EvaluateStage(CKDWORD stage) {
     else
         m_Current = result;
     m_PreviousTexture = texture;
-    m_PreviousBumpUnorm = bumpUnorm;
+    m_PreviousBumpUnorm = Switch(CKFF_NATIVE_FRAGMENT_BUMP_UNORM, stage);
     m_PreviousColorOp = colorOp;
     m_PreviousAlphaOp = alphaOp;
 }
@@ -284,12 +390,13 @@ CKJitValue NativeFragmentCompiler::SampleCoordinate(CKDWORD stage, uint32_t comp
 
     // Affine interpolation undoes the perspective division; the last stage
     // shares its register with the vertex fog factor in z.
-    const CKJitValue affine = m_B.Greater(m_B.Component(DrawParam(CKFF_DRAW_PARAM_MATERIAL_POWER), 2), m_B.Float(0.5f));
-    const CKJitValue affineW = SafeDivisor(m_B.Component(m_Varyings[VARYING_FOG_POS], 0), 0.000001f);
-    xy = m_B.Select(affine, m_B.Div(xy, affineW), xy);
-    if (VARYING_TEXCOORD0 + stage != VARYING_TEXCOORD7_FOG)
-        z = m_B.Select(affine, m_B.Div(z, affineW), z);
-    w = m_B.Select(affine, m_B.Div(w, affineW), w);
+    if (Switch(CKFF_NATIVE_FRAGMENT_AFFINE)) {
+        const CKJitValue affineW = SafeDivisor(m_B.Component(m_Varyings[VARYING_FOG_POS], 0), 0.000001f);
+        xy = m_B.Div(xy, affineW);
+        if (VARYING_TEXCOORD0 + stage != VARYING_TEXCOORD7_FOG)
+            z = m_B.Div(z, affineW);
+        w = m_B.Div(w, affineW);
+    }
 
     if (StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED)) {
         const CKJitValue divisor = SafeDivisor(w, 0.0001f);
@@ -300,12 +407,13 @@ CKJitValue NativeFragmentCompiler::SampleCoordinate(CKDWORD stage, uint32_t comp
     // BUMPENVMAP stages perturb the next stage's coordinate by their texel.
     if (stage != 0 &&
         (m_PreviousColorOp == CKRST_TOP_BUMPENVMAP || m_PreviousColorOp == CKRST_TOP_BUMPENVMAPLUMINANCE)) {
-        const CKJitValue texel = m_B.Swizzle(m_PreviousTexture, "xy");
-        const CKJitValue decoded = m_B.Min(
-            m_B.Max(m_B.Div(m_B.Sub(m_B.Mul(texel, m_B.Float(255.0f)), m_B.Float(128.0f)), m_B.Float(127.0f)),
-                    m_B.Float(-1.0f)),
-            m_B.Float(1.0f));
-        const CKJitValue bump = m_B.Select(m_PreviousBumpUnorm, decoded, texel);
+        CKJitValue bump = m_B.Swizzle(m_PreviousTexture, "xy");
+        if (m_PreviousBumpUnorm) {
+            bump = m_B.Min(
+                m_B.Max(m_B.Div(m_B.Sub(m_B.Mul(bump, m_B.Float(255.0f)), m_B.Float(128.0f)), m_B.Float(127.0f)),
+                        m_B.Float(-1.0f)),
+                m_B.Float(1.0f));
+        }
         const CKJitValue matrix = BumpEnv(stage - 1, BUMP_ENV_MATRIX);
         xy = m_B.Add(xy, m_B.Construct({m_B.Dot(m_B.Swizzle(matrix, "xy"), bump),
                                         m_B.Dot(m_B.Swizzle(matrix, "zw"), bump)}));
@@ -314,26 +422,24 @@ CKJitValue NativeFragmentCompiler::SampleCoordinate(CKDWORD stage, uint32_t comp
     return components == 2 ? xy : m_B.Construct({xy, z});
 }
 
-CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage, CKJitValue hasTexture) {
+CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
+    if (!Switch(CKFF_NATIVE_FRAGMENT_TEXTURE, stage))
+        return m_B.Float4(0.0f, 0.0f, 0.0f, 1.0f);
+    // An index past the textures the layout declares samples nothing.
+    if (!SamplerDeclared(m_Program, stage, m_Layout))
+        return m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f);
+
     const CKDWORD type = StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
     const CKJitSamplerDim dim = type == CKFF_SAMPLER_CUBE ? CKJIT_SAMPLER_CUBE
                               : type == CKFF_SAMPLER_VOLUME ? CKJIT_SAMPLER_3D
                                                             : CKJIT_SAMPLER_2D;
-    // The wide 2D layout keeps a 2D texture per stage; everything else is
-    // addressed by the stage's ordinal among the textures of its type.
-    const CKDWORD index =
-        dim == CKJIT_SAMPLER_2D && m_Layout == CKFF_SAMPLER_LAYOUT_WIDE_2D ? stage : m_Program.GetSamplerOrdinal(stage);
-
-    // An index past the textures the layout declares samples nothing.
-    CKJitValue color = m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f);
-    if (index < CKFFSamplerTypeSlotCount(type, m_Layout)) {
-        const CKJitValue coordinate = SampleCoordinate(stage, dim == CKJIT_SAMPLER_2D ? 2 : 3);
-        const CKJitValue lodBias = m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 2);
-        color = m_B.Sample(CKFFSamplerSlot(type, index, m_Layout), dim, coordinate, lodBias);
-        if (type == CKFF_SAMPLER_DEPTH)
-            color = m_B.Swizzle(color, "xxxx");
-    }
-    return m_B.Select(hasTexture, color, m_B.Float4(0.0f, 0.0f, 0.0f, 1.0f));
+    const CKJitValue coordinate = SampleCoordinate(stage, dim == CKJIT_SAMPLER_2D ? 2 : 3);
+    const CKJitValue lodBias = Switch(CKFF_NATIVE_FRAGMENT_LOD_BIAS, stage)
+        ? m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 2)
+        : m_B.Float(0.0f);
+    const CKJitValue color =
+        m_B.Sample(CKFFSamplerSlot(type, SamplerIndex(m_Program, stage, m_Layout), m_Layout), dim, coordinate, lodBias);
+    return type == CKFF_SAMPLER_DEPTH ? m_B.Swizzle(color, "xxxx") : color;
 }
 
 Color NativeFragmentCompiler::Argument(CKDWORD packedArg, const Color &texture, const Color &current,
@@ -405,48 +511,28 @@ CKJitValue NativeFragmentCompiler::Combine(CKDWORD op, Channel channel, const Co
     }
 }
 
-CKJitValue NativeFragmentCompiler::BlendFactor(CKJitValue factor, const Color &source, const Color &destination) {
-    // The factors are draw state, so the selection stays in the shader.
+CKJitValue NativeFragmentCompiler::BlendFactor(CKDWORD factor, const Color &source, const Color &destination) {
     const CKJitValue one = m_B.Float(1.0f);
-    const struct {
-        VXBLEND_MODE Mode;
-        CKJitValue Rgb;
-    } factors[] = {
-        {VXBLEND_ZERO, m_B.Float3(0.0f, 0.0f, 0.0f)},
-        {VXBLEND_ONE, m_B.Float3(1.0f, 1.0f, 1.0f)},
-        {VXBLEND_SRCCOLOR, source.Rgb},
-        {VXBLEND_INVSRCCOLOR, m_B.Sub(one, source.Rgb)},
-        {VXBLEND_SRCALPHA, m_B.Splat(source.A, 3)},
-        {VXBLEND_INVSRCALPHA, m_B.Splat(m_B.Sub(one, source.A), 3)},
-        {VXBLEND_DESTALPHA, m_B.Splat(destination.A, 3)},
-        {VXBLEND_INVDESTALPHA, m_B.Splat(m_B.Sub(one, destination.A), 3)},
-        {VXBLEND_DESTCOLOR, destination.Rgb},
-        {VXBLEND_INVDESTCOLOR, m_B.Sub(one, destination.Rgb)},
-        {VXBLEND_SRCALPHASAT, m_B.Splat(m_B.Min(source.A, m_B.Sub(one, destination.A)), 3)},
-        {VXBLEND_BOTHSRCALPHA, m_B.Splat(source.A, 3)},
-        {VXBLEND_BOTHINVSRCALPHA, m_B.Splat(m_B.Sub(one, source.A), 3)},
-    };
-    CKJitValue result = m_B.Float3(0.0f, 0.0f, 0.0f);
-    for (int i = (int)(sizeof(factors) / sizeof(factors[0])); i-- > 0;)
-        result = m_B.Select(m_B.IntEqual(factor, m_B.Int((int32_t)factors[i].Mode)), factors[i].Rgb, result);
-    return result;
+    switch (factor) {
+    case VXBLEND_ONE: return m_B.Float3(1.0f, 1.0f, 1.0f);
+    case VXBLEND_SRCCOLOR: return source.Rgb;
+    case VXBLEND_INVSRCCOLOR: return m_B.Sub(one, source.Rgb);
+    case VXBLEND_SRCALPHA: return m_B.Splat(source.A, 3);
+    case VXBLEND_INVSRCALPHA: return m_B.Splat(m_B.Sub(one, source.A), 3);
+    case VXBLEND_DESTALPHA: return m_B.Splat(destination.A, 3);
+    case VXBLEND_INVDESTALPHA: return m_B.Splat(m_B.Sub(one, destination.A), 3);
+    case VXBLEND_DESTCOLOR: return destination.Rgb;
+    case VXBLEND_INVDESTCOLOR: return m_B.Sub(one, destination.Rgb);
+    case VXBLEND_SRCALPHASAT: return m_B.Splat(m_B.Min(source.A, m_B.Sub(one, destination.A)), 3);
+    default: return m_B.Float3(0.0f, 0.0f, 0.0f);
+    }
 }
 
-CKJitValue NativeFragmentCompiler::StageBlend(const Color &source, const Color &destination, CKJitValue packedFactors) {
-    // STAGEBLEND carries a source and destination blend factor pair; the
-    // BOTH* source modes imply their destination.
-    const CKJitValue fifteen = m_B.Int(15);
-    CKJitValue sourceFactor = m_B.IntAnd(m_B.IntShiftRight(packedFactors, m_B.Int(4)), fifteen);
-    CKJitValue destinationFactor = m_B.IntAnd(packedFactors, fifteen);
-    const CKJitValue srcAlpha = m_B.Int((int32_t)VXBLEND_SRCALPHA);
-    const CKJitValue invSrcAlpha = m_B.Int((int32_t)VXBLEND_INVSRCALPHA);
-    const CKJitValue bothSource = m_B.IntEqual(sourceFactor, m_B.Int((int32_t)VXBLEND_BOTHSRCALPHA));
-    const CKJitValue bothInverse = m_B.IntEqual(sourceFactor, m_B.Int((int32_t)VXBLEND_BOTHINVSRCALPHA));
-    destinationFactor =
-        m_B.Select(bothSource, invSrcAlpha, m_B.Select(bothInverse, srcAlpha, destinationFactor));
-    sourceFactor = m_B.Select(bothSource, srcAlpha, m_B.Select(bothInverse, invSrcAlpha, sourceFactor));
-    return m_B.Saturate(m_B.Add(m_B.Mul(source.Rgb, BlendFactor(sourceFactor, source, destination)),
-                                m_B.Mul(destination.Rgb, BlendFactor(destinationFactor, source, destination))));
+CKJitValue NativeFragmentCompiler::StageBlend(const Color &source, const Color &destination, CKDWORD pair) {
+    // STAGEBLEND blends this stage's texture over CURRENT with a factor pair.
+    pair = CanonicalBlendPair(pair);
+    return m_B.Saturate(m_B.Add(m_B.Mul(source.Rgb, BlendFactor(pair >> 4, source, destination)),
+                                m_B.Mul(destination.Rgb, BlendFactor(pair & 15, source, destination))));
 }
 
 CKJitValue NativeFragmentCompiler::AlphaTestPass(CKJitValue alpha) {
@@ -488,11 +574,157 @@ CKJitValue NativeFragmentCompiler::FogFactor() {
 
 } // namespace
 
-bool CKFFCompileNativeFragmentProgram(const CKFFFragmentProgram &program, CKFFSamplerLayout layout,
+bool CKFFNativeFragmentKey::operator==(const CKFFNativeFragmentKey &other) const {
+    return Program == other.Program && std::memcmp(Switches, other.Switches, sizeof(Switches)) == 0;
+}
+
+CKFFNativeFragmentKey CKFFNativeFragmentDrawKey(const CKFFFragmentProgram &program, const CKFFConstantSet &constants) {
+    CKFFNativeFragmentKey key;
+    key.Program = program;
+    CKDWORD &switches = key.Switches[0];
+    if (ConstantFloat(constants, CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_MATERIAL_POWER, 2) > 0.5f)
+        switches |= CKFF_NATIVE_FRAGMENT_AFFINE;
+    if (ConstantFloat(constants, CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_MATERIAL_POWER, 3) > 2.5f)
+        switches |= CKFF_NATIVE_FRAGMENT_LINE;
+    for (CKDWORD stage = 0; stage < kStageCount; ++stage) {
+        const CKDWORD coord = CKFFStageParamIndex(stage, CKFF_STAGE_PARAM_COORD);
+        const CKDWORD luminance = stage * BUMP_ENV_ROWS_PER_STAGE + BUMP_ENV_LUMINANCE;
+        if (ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 2) > 0.5f)
+            switches |= (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << stage;
+        if ((FloatToInt(ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 1)) & CKFF_TTF_BUMP_UNORM) != 0)
+            switches |= (CKDWORD)CKFF_NATIVE_FRAGMENT_BUMP_UNORM << stage;
+        if (ConstantFloat(constants, CKRST_BLOCK_BUMP_ENV, luminance, 2) != 0.0f)
+            switches |= (CKDWORD)CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage;
+        const float pair = ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 3) + 0.5f;
+        SetBlendPair(key.Switches, stage, (CKDWORD)FloatToInt(pair));
+    }
+    return key;
+}
+
+void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLayout layout) {
+    const CKFFNativeFragmentKey raw = key;
+    const CKFFFragmentProgram &from = raw.Program;
+    CKFFFragmentProgram &to = key.Program;
+    to = CKFFFragmentProgram();
+    for (CKDWORD word = 0; word < CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT; ++word)
+        key.Switches[word] = 0;
+
+    // The stages the shaders evaluate.
+    const CKDWORD lastStage = from.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE);
+    CKDWORD count = 0;
+    while (count < kStageCount && count <= lastStage &&
+           from.GetStage(count, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) != CKRST_TOP_DISABLE) {
+        ++count;
+    }
+    to.Set(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE, count != 0 ? count - 1 : 0);
+    if (count == 0)
+        to.SetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP, CKRST_TOP_DISABLE);
+
+    // Operations as the combiners evaluate them, and the arguments they read.
+    // A stage reads its texture in its combiners, or to premodulate CURRENT.
+    CKDWORD colorOps[kStageCount];
+    bool readsTexture[kStageCount + 1] = {};
+    CKDWORD previousColorOp = 0;
+    CKDWORD previousAlphaOp = 0;
+    for (CKDWORD stage = 0; stage < count; ++stage) {
+        CKDWORD colorOp = from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP);
+        CKDWORD alphaOp = from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP);
+        // Unknown operations keep CURRENT, like 0; DOTPRODUCT3 overwrites the
+        // alpha combiner's result, whose operation then only premodulates.
+        if (colorOp > CKFF_TOP_STAGEBLEND)
+            colorOp = 0;
+        const bool alphaLive = colorOp != CKRST_TOP_DOTPRODUCT3;
+        if (!alphaLive)
+            alphaOp = alphaOp == CKRST_TOP_PREMODULATE ? alphaOp : 0;
+        else if (alphaOp == CKRST_TOP_BUMPENVMAP || alphaOp == CKRST_TOP_BUMPENVMAPLUMINANCE)
+            alphaOp = CKRST_TOP_DISABLE; // the destination, like DISABLE
+        else if (alphaOp >= CKFF_TOP_STAGEBLEND)
+            alphaOp = 0;
+        to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP, colorOp);
+        to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP, alphaOp);
+        to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP,
+                    from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP));
+
+        bool reads = colorOp == CKRST_TOP_BLENDTEXTUREALPHA || colorOp == CKRST_TOP_BLENDTEXTUREALPHAPM ||
+                     colorOp == CKFF_TOP_STAGEBLEND || alphaOp == CKRST_TOP_BLENDTEXTUREALPHA ||
+                     alphaOp == CKRST_TOP_BLENDTEXTUREALPHAPM;
+        const CKDWORD ops[2] = {colorOp, alphaOp};
+        const bool premodulated[2] = {previousColorOp == CKRST_TOP_PREMODULATE,
+                                      previousAlphaOp == CKRST_TOP_PREMODULATE};
+        for (int channel = 0; channel < 2; ++channel) {
+            const CKDWORD read = channel == CHANNEL_ALPHA && !alphaLive ? 0 : ArgumentsRead(ops[channel]);
+            for (int k = 0; k < 3; ++k) {
+                if ((read & 1u << k) == 0)
+                    continue;
+                const CKDWORD arg = from.GetStage(stage, kArguments[channel][k]);
+                to.SetStage(stage, kArguments[channel][k], arg);
+                const CKDWORD base = CKFFFragmentProgram::UnpackArg(arg) & 7u;
+                reads = reads || base == CKRST_TA_TEXTURE || (premodulated[channel] && base == CKRST_TA_CURRENT);
+            }
+        }
+        colorOps[stage] = colorOp;
+        readsTexture[stage] = reads;
+        previousColorOp = colorOp;
+        previousAlphaOp = alphaOp;
+    }
+
+    // From the last stage back: a texture is also read by the next stage's
+    // bump offset where that samples, and by its luminance where its texture
+    // is read. A texture no value depends on is dropped.
+    bool samples[kStageCount + 1] = {};
+    bool anySamples = false;
+    for (CKDWORD stage = count; stage-- > 0;) {
+        const bool bump = colorOps[stage] == CKRST_TOP_BUMPENVMAP || colorOps[stage] == CKRST_TOP_BUMPENVMAPLUMINANCE;
+        if ((bump && samples[stage + 1]) ||
+            (colorOps[stage] == CKRST_TOP_BUMPENVMAPLUMINANCE && readsTexture[stage + 1])) {
+            readsTexture[stage] = true;
+        }
+        const bool textured = readsTexture[stage] && StageSwitch(raw.Switches, CKFF_NATIVE_FRAGMENT_TEXTURE, stage);
+        samples[stage] = textured && SamplerDeclared(from, stage, layout);
+        anySamples = anySamples || samples[stage];
+
+        if (textured) {
+            const CKDWORD type = from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+            key.Switches[0] |= (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << stage;
+            to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, type);
+            if (!StageIndexed(type, layout))
+                to.SetSamplerOrdinal(stage, from.GetSamplerOrdinal(stage));
+        }
+        if (samples[stage]) {
+            to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED,
+                        from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED));
+            key.Switches[0] |= raw.Switches[0] & (CKDWORD)CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage;
+        }
+        if (bump && samples[stage + 1])
+            key.Switches[0] |= raw.Switches[0] & (CKDWORD)CKFF_NATIVE_FRAGMENT_BUMP_UNORM << stage;
+        if (colorOps[stage] == CKFF_TOP_STAGEBLEND)
+            SetBlendPair(key.Switches, stage, CanonicalBlendPair(BlendPair(raw.Switches, stage)));
+    }
+    if (anySamples)
+        key.Switches[0] |= raw.Switches[0] & CKFF_NATIVE_FRAGMENT_AFFINE;
+    key.Switches[0] |= raw.Switches[0] & CKFF_NATIVE_FRAGMENT_LINE;
+
+    // The fragment state; the vertex fog mode and range fog are the vertex
+    // shaders', and a test without a comparison passes every fragment.
+    const CKDWORD alphaFunc = from.Get(CKFF_FRAGMENT_PROGRAM_ALPHA_FUNC);
+    if (from.Get(CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED) && alphaFunc >= VXCMP_NEVER &&
+        alphaFunc <= VXCMP_GREATEREQUAL) {
+        to.Set(CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED, 1);
+        to.Set(CKFF_FRAGMENT_PROGRAM_ALPHA_FUNC, alphaFunc);
+    }
+    if (from.Get(CKFF_FRAGMENT_PROGRAM_FOG_ENABLED)) {
+        to.Set(CKFF_FRAGMENT_PROGRAM_FOG_ENABLED, 1);
+        to.Set(CKFF_FRAGMENT_PROGRAM_PIXEL_FOG_MODE, from.Get(CKFF_FRAGMENT_PROGRAM_PIXEL_FOG_MODE));
+    }
+    to.Set(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE, from.Get(CKFF_FRAGMENT_PROGRAM_FLAT_SHADE));
+    to.Set(CKFF_FRAGMENT_PROGRAM_GLOBAL_SPECULAR_ENABLED, from.Get(CKFF_FRAGMENT_PROGRAM_GLOBAL_SPECULAR_ENABLED));
+}
+
+bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
                                       CKJitFragmentShader &out) {
     UniformRows rows;
     if ((unsigned)layout >= CKFF_SAMPLER_LAYOUT_COUNT || !ResolveUniformRows(layout, rows))
         return false;
-    NativeFragmentCompiler compiler(program, layout, rows);
+    NativeFragmentCompiler compiler(key, layout, rows);
     return compiler.Compile(out);
 }

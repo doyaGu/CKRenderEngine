@@ -1,4 +1,5 @@
 #include "CKFFNativeFragmentJit.h"
+#include "CKFFShaderInterface.h"
 #include "CKFFStageState.h"
 #include "CKFFStateDesc.h"
 #include "CKJitDxbc.h"
@@ -11,13 +12,13 @@
 #include <cstring>
 
 // The native fixed-function fragment JIT against the shaders it replaces.
-// Compiled programs run in an IR interpreter and must reproduce, bit for bit,
-// a statement-by-statement transliteration of ckffEvaluate() of
+// Compiled keys run in an IR interpreter and must reproduce, bit for bit, a
+// statement-by-statement transliteration of ckffEvaluate() of
 // fs_ff_stage_native, fs_ff_stage_cube_native and fs_ff_stage_volume_native
-// on random programs, draw state and fragments. Both sides run the same
-// float operations in the same order, so any difference is a front end bug.
-// With a directory argument the SPIR-V and DXBC of some programs are also
-// written there for the validators.
+// on random programs, draw state and fragments, both as the keys of their
+// draws and canonical. Both sides run the same float operations in the same
+// order, so any difference is a front end bug. With a directory argument the
+// SPIR-V and DXBC of some keys are also written there for the validators.
 
 namespace {
 
@@ -704,7 +705,7 @@ void RandomFragment(Random &random, Fragment &fragment) {
         float *luminance = fragment.Uniforms[ROW_BUMP_ENV + stage * 2 + 1];
         luminance[0] = random.Range(0.0f, 2.0f);
         luminance[1] = random.Range(-0.5f, 0.5f);
-        luminance[2] = random.Range(-2.0f, 2.0f); // LOD bias
+        luminance[2] = random.OneIn(3) ? (random.OneIn(2) ? -0.0f : 0.0f) : random.Range(-2.0f, 2.0f); // LOD bias
 
         float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
         coord[1] = (float)random.Below(0x4000);                            // texture transform flags
@@ -714,10 +715,211 @@ void RandomFragment(Random &random, Fragment &fragment) {
     }
 }
 
+// Gives a fragment the draw state of another that keys depend on: the line
+// and affine modes, the texture coordinate parameters, and which LOD biases
+// are zero.
+void ShareDrawState(const Fragment &from, Fragment &to, Random &random) {
+    to.Uniforms[ROW_DRAW_PARAMS + 4][2] = from.Uniforms[ROW_DRAW_PARAMS + 4][2];
+    to.Uniforms[ROW_DRAW_PARAMS + 4][3] = from.Uniforms[ROW_DRAW_PARAMS + 4][3];
+    for (int stage = 0; stage < 8; ++stage) {
+        std::memcpy(to.Uniforms[ROW_STAGE_PARAMS + stage * 2], from.Uniforms[ROW_STAGE_PARAMS + stage * 2],
+                    sizeof(to.Uniforms[0]));
+        const float fromBias = from.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][2];
+        float &bias = to.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][2];
+        if (fromBias == 0.0f)
+            bias = random.OneIn(2) ? -0.0f : 0.0f;
+        else if (bias == 0.0f)
+            bias = fromBias;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Keys.
+
+// The key of a fragment's draw, from the constant blocks the runtime passes.
+CKFFNativeFragmentKey DrawKey(const CKFFFragmentProgram &program, const Fragment &fragment) {
+    CKFFConstantSet constants;
+    constants.Set(CKRST_BLOCK_DRAW_PARAMS, fragment.Uniforms[ROW_DRAW_PARAMS], (ROW_BUMP_ENV - ROW_DRAW_PARAMS) * 16);
+    constants.Set(CKRST_BLOCK_BUMP_ENV, fragment.Uniforms[ROW_BUMP_ENV], (ROW_STAGE_PARAMS - ROW_BUMP_ENV) * 16);
+    constants.Set(CKRST_BLOCK_STAGE_PARAMS, fragment.Uniforms[ROW_STAGE_PARAMS], (ROW_PROGRAM - ROW_STAGE_PARAMS) * 16);
+    return CKFFNativeFragmentDrawKey(program, constants);
+}
+
+CKFFNativeFragmentKey Canonical(CKFFNativeFragmentKey key, CKFFSamplerLayout layout) {
+    CKFFCanonicalizeNativeFragmentKey(key, layout);
+    return key;
+}
+
+// The stages a program evaluates, as the shaders decode them.
+CKDWORD EvaluatedStages(const CKFFFragmentProgram &program) {
+    CKDWORD count = 0;
+    while (count < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT &&
+           count <= program.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE) &&
+           program.GetStage(count, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP) != CKRST_TOP_DISABLE) {
+        ++count;
+    }
+    return count;
+}
+
+// The arguments an operation ignores: bit 0 for ARG1, 1 for ARG2, 2 for ARG0.
+CKDWORD IgnoredArguments(CKDWORD op) {
+    if (op == CKRST_TOP_SELECTARG1 || op == CKRST_TOP_PREMODULATE)
+        return 6;
+    if (op == CKRST_TOP_SELECTARG2)
+        return 5;
+    if (op == CKRST_TOP_MULTIPLYADD || op == CKRST_TOP_LERP)
+        return 0;
+    if ((op >= CKRST_TOP_MODULATE && op <= CKRST_TOP_BLENDCURRENTALPHA) ||
+        (op >= CKRST_TOP_MODULATEALPHA_ADDCOLOR && op <= CKRST_TOP_MODULATEINVCOLOR_ADDALPHA) ||
+        op == CKRST_TOP_DOTPRODUCT3) {
+        return 4;
+    }
+    return 7;
+}
+
+void Scramble(CKFFFragmentProgram &program, CKFFFragmentProgramGlobalField field, Random &random) {
+    if (random.OneIn(2))
+        program.Set(field, random.Next());
+}
+
+void Scramble(CKFFFragmentProgram &program, CKDWORD stage, CKFFFragmentProgramStageField field, Random &random) {
+    if (random.OneIn(2))
+        program.SetStage(stage, field, random.Next());
+}
+
+void Scramble(CKDWORD &switches, CKDWORD bits, Random &random) {
+    switches ^= bits & random.Next();
+}
+
+// Scrambles, each with even odds, what the shaders never read in a key: the
+// reserved lanes and the vertex shaders' state, stages past the evaluated
+// ones, unread arguments, the state of tests that pass everything, switches
+// of stages without textures or with operations that ignore them, and
+// operations the combiners evaluate like others.
+void Scramble(CKFFNativeFragmentKey &key, Random &random) {
+    CKFFFragmentProgram &program = key.Program;
+    const CKDWORD count = EvaluatedStages(program);
+    const CKDWORD lastStage = program.Get(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE);
+    const CKDWORD textures = key.Switches[0] >> 8 & ((1u << count) - 1u);
+
+    CKDWORD lanes[CKFFFragmentProgram::LaneCount];
+    std::memcpy(lanes, program.Lanes(), sizeof(lanes));
+    for (CKDWORD i = 18; i < CKFFFragmentProgram::LaneCount; ++i)
+        lanes[i] = random.OneIn(2) ? random.Next() & CKFFFragmentProgram::LaneMask : lanes[i];
+    program.SetLanes(lanes, CKFFFragmentProgram::LaneCount);
+    Scramble(program, CKFF_FRAGMENT_PROGRAM_VERTEX_FOG_MODE, random);
+    Scramble(program, CKFF_FRAGMENT_PROGRAM_RANGE_FOG, random);
+    const CKDWORD alphaFunc = program.Get(CKFF_FRAGMENT_PROGRAM_ALPHA_FUNC);
+    if (alphaFunc < VXCMP_NEVER || alphaFunc > VXCMP_GREATEREQUAL)
+        Scramble(program, CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED, random);
+    if (!program.Get(CKFF_FRAGMENT_PROGRAM_ALPHA_TEST_ENABLED))
+        Scramble(program, CKFF_FRAGMENT_PROGRAM_ALPHA_FUNC, random);
+    if (!program.Get(CKFF_FRAGMENT_PROGRAM_FOG_ENABLED))
+        Scramble(program, CKFF_FRAGMENT_PROGRAM_PIXEL_FOG_MODE, random);
+    if (textures == 0)
+        Scramble(key.Switches[0], CKFF_NATIVE_FRAGMENT_AFFINE, random);
+
+    static const CKFFFragmentProgramStageField kFields[] = {
+        CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP,       CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1,
+        CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG2,     CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0,
+        CKFF_FRAGMENT_PROGRAM_STAGE_RESULT_IS_TEMP, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE,
+        CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED,      CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP,
+        CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG1,     CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG2,
+        CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG0,     CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC,
+    };
+    static const CKFFFragmentProgramStageField kArguments[2][3] = {
+        {CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG1, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG2,
+         CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_ARG0},
+        {CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG1, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG2,
+         CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_ARG0},
+    };
+    for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
+        const CKDWORD perStage = CKFF_NATIVE_FRAGMENT_TEXTURE | CKFF_NATIVE_FRAGMENT_BUMP_UNORM |
+                                 CKFF_NATIVE_FRAGMENT_LOD_BIAS;
+        const CKDWORD pair = 0xFFu << (stage % 4 * 8);
+        if (stage >= count) {
+            // The stage ending the evaluated ones stays disabled.
+            for (const CKFFFragmentProgramStageField field : kFields) {
+                if (field != CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP || stage != count || count > lastStage)
+                    Scramble(program, stage, field, random);
+            }
+            if (random.OneIn(2))
+                program.SetSamplerOrdinal(stage, random.Below(8));
+            Scramble(key.Switches[0], perStage << stage, random);
+            Scramble(key.Switches[1 + stage / 4], pair, random);
+            continue;
+        }
+
+        Scramble(program, stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, random);
+        if ((textures & 1u << stage) == 0) {
+            Scramble(program, stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, random);
+            Scramble(program, stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED, random);
+            if (random.OneIn(2))
+                program.SetSamplerOrdinal(stage, random.Below(8));
+            Scramble(key.Switches[0], CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage, random);
+        }
+        const CKDWORD colorOp = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP);
+        const CKDWORD alphaOp = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP);
+        if ((colorOp != CKRST_TOP_BUMPENVMAP && colorOp != CKRST_TOP_BUMPENVMAPLUMINANCE) || stage + 1 == count)
+            Scramble(key.Switches[0], CKFF_NATIVE_FRAGMENT_BUMP_UNORM << stage, random);
+        if (colorOp != CKFF_TOP_STAGEBLEND)
+            Scramble(key.Switches[1 + stage / 4], pair, random);
+
+        // DOTPRODUCT3 overwrites what the alpha combiner computes.
+        const CKDWORD ignored[2] = {IgnoredArguments(colorOp),
+                                    colorOp == CKRST_TOP_DOTPRODUCT3 ? 7u : IgnoredArguments(alphaOp)};
+        for (int channel = 0; channel < 2; ++channel) {
+            for (int k = 0; k < 3; ++k) {
+                if (ignored[channel] & 1u << k)
+                    Scramble(program, stage, kArguments[channel][k], random);
+            }
+        }
+
+        // Unknown operations keep CURRENT like 0, the bump operations
+        // compute no alpha, like DISABLE, and under DOTPRODUCT3 an alpha
+        // operation only matters if it premodulates.
+        if (colorOp == 0 || colorOp > CKFF_TOP_STAGEBLEND) {
+            program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP,
+                             random.OneIn(2) ? 0u : CKFF_TOP_STAGEBLEND + 1 + random.Below(4));
+        }
+        if (colorOp == CKRST_TOP_DOTPRODUCT3) {
+            if (alphaOp != CKRST_TOP_PREMODULATE) {
+                const CKDWORD op = random.Below(31);
+                program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP, op + (op >= CKRST_TOP_PREMODULATE));
+            }
+        } else if (alphaOp == 0 || alphaOp >= CKFF_TOP_STAGEBLEND) {
+            program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP,
+                             random.OneIn(2) ? 0u : CKFF_TOP_STAGEBLEND + random.Below(5));
+        } else if (alphaOp == CKRST_TOP_DISABLE || alphaOp == CKRST_TOP_BUMPENVMAP ||
+                   alphaOp == CKRST_TOP_BUMPENVMAPLUMINANCE) {
+            static const CKDWORD kDisabled[] = {CKRST_TOP_DISABLE, CKRST_TOP_BUMPENVMAP,
+                                                CKRST_TOP_BUMPENVMAPLUMINANCE};
+            program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_ALPHA_OP, kDisabled[random.Below(3)]);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 
-bool Compile(const CKFFFragmentProgram &program, CKFFSamplerLayout layout, CKJitFragmentShader &shader) {
-    return CKFFCompileNativeFragmentProgram(program, layout, shader) && CKJitVerify(shader);
+bool Compile(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout, CKJitFragmentShader &shader) {
+    return CKFFCompileNativeFragmentProgram(key, layout, shader) && CKJitVerify(shader);
+}
+
+// Whether a shader only reads uniforms its key leaves open: none of
+// u_ffProgram and the emulated sampler state, the line and affine modes, or
+// the texture coordinate parameters.
+bool ReadsOnlyOpenUniforms(const CKJitFragmentShader &shader) {
+    for (int n = 0; n < shader.Nodes.Size(); ++n) {
+        const CKJitNode &node = shader.Nodes[n];
+        if (node.Op != CKJIT_OP_UNIFORM)
+            continue;
+        const uint32_t row = node.Imm[0];
+        if (row >= ROW_PROGRAM || row == ROW_DRAW_PARAMS + 4 ||
+            (row >= ROW_STAGE_PARAMS && (row - ROW_STAGE_PARAMS) % 2 == 0)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool SameOutcome(const Outcome &a, const Outcome &b) {
@@ -730,11 +932,12 @@ bool SameOutcome(const Outcome &a, const Outcome &b) {
     return true;
 }
 
-void Report(CKFFSamplerLayout layout, const CKFFFragmentProgram &program, const CKJitFragmentShader &shader,
+void Report(CKFFSamplerLayout layout, const CKFFNativeFragmentKey &key, const CKJitFragmentShader &shader,
             const Outcome &expected, const Outcome &actual) {
     std::printf("\n%s, lanes:", kShaderNames[layout]);
     for (CKDWORD i = 0; i < CKFFFragmentProgram::LaneCount; ++i)
-        std::printf(" %06x", program.Lanes()[i]);
+        std::printf(" %06x", key.Program.Lanes()[i]);
+    std::printf("\nswitches: %08x %08x %08x", key.Switches[0], key.Switches[1], key.Switches[2]);
     const Outcome *outcomes[] = {&expected, &actual};
     const char *labels[] = {"expected", "actual"};
     for (int i = 0; i < 2; ++i) {
@@ -747,35 +950,84 @@ void Report(CKFFSamplerLayout layout, const CKFFFragmentProgram &program, const 
 
 void TestMatchesUberShaders() {
     const int kPrograms = 2000;
-    const int kFragments = 6;
+    const int kDraws = 2;
+    const int kFragments = 3;
     Random random(0x4a17f7a9e1ull);
     for (CKFFSamplerLayout layout : kLayouts) {
         for (int p = 0; p < kPrograms; ++p) {
             const CKFFFragmentProgram program = RandomProgram(random, p % 4 == 0);
-            CKJitFragmentShader shader;
-            TestCheck(Compile(program, layout, shader), "every program compiles");
-            for (int n = 0; n < shader.Nodes.Size(); ++n) {
-                TestCheck(shader.Nodes[n].Op != CKJIT_OP_UNIFORM || shader.Nodes[n].Imm[0] < ROW_PROGRAM,
-                          "programs never read u_ffProgram or the emulated sampler state");
-            }
-            for (int f = 0; f < kFragments; ++f) {
-                Fragment fragment;
-                RandomFragment(random, fragment);
-                const Outcome expected = Reference{fragment, layout}.Evaluate(program.Lanes());
-                const Outcome actual = Execute(shader, fragment);
-                if (!SameOutcome(expected, actual)) {
-                    Report(layout, program, shader, expected, actual);
-                    TestFail("compiled programs compute what the uber shader computes");
+            for (int d = 0; d < kDraws; ++d) {
+                Fragment fragments[kFragments];
+                RandomFragment(random, fragments[0]);
+                const CKFFNativeFragmentKey key = DrawKey(program, fragments[0]);
+                for (int f = 1; f < kFragments; ++f) {
+                    RandomFragment(random, fragments[f]);
+                    ShareDrawState(fragments[0], fragments[f], random);
+                    TestCheck(DrawKey(program, fragments[f]) == key, "draws sharing the state keys read share keys");
+                }
+
+                const CKFFNativeFragmentKey keys[] = {key, Canonical(key, layout)};
+                TestCheck(Canonical(keys[1], layout) == keys[1], "canonical keys are left unchanged");
+                for (const CKFFNativeFragmentKey &compiled : keys) {
+                    CKJitFragmentShader shader;
+                    TestCheck(Compile(compiled, layout, shader), "every key compiles");
+                    TestCheck(ReadsOnlyOpenUniforms(shader), "shaders never read the state their key decides");
+                    for (const Fragment &fragment : fragments) {
+                        const Outcome expected = Reference{fragment, layout}.Evaluate(program.Lanes());
+                        const Outcome actual = Execute(shader, fragment);
+                        if (!SameOutcome(expected, actual)) {
+                            Report(layout, compiled, shader, expected, actual);
+                            TestFail("compiled keys compute what the uber shader computes");
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+void TestCanonicalKeys() {
+    const int kKeys = 1000;
+    const int kScrambles = 4;
+    Random random(0x51c3a0e7d2ull);
+    for (CKFFSamplerLayout layout : kLayouts) {
+        for (int p = 0; p < kKeys; ++p) {
+            Fragment fragment;
+            RandomFragment(random, fragment);
+            if (p % 4 == 0) { // no textures, so nothing reads the affine mode
+                for (int stage = 0; stage < 8; ++stage)
+                    fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2][2] = 0.0f;
+            }
+            const CKFFNativeFragmentKey key = DrawKey(RandomProgram(random, p % 8 == 0), fragment);
+            const CKFFNativeFragmentKey canonical = Canonical(key, layout);
+            for (int s = 0; s < kScrambles; ++s) {
+                CKFFNativeFragmentKey scrambled = key;
+                Scramble(scrambled, random);
+                TestCheck(Canonical(scrambled, layout) == canonical, "canonical keys hold only what shaders read");
+            }
+        }
+    }
+
+    // The BOTH* source factors imply their destination factor.
+    CKFFNativeFragmentKey blend;
+    blend.Program.SetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_COLOR_OP, CKFF_TOP_STAGEBLEND);
+    const CKDWORD pairs[][2] = {
+        {VXBLEND_BOTHSRCALPHA << 4 | VXBLEND_ONE, VXBLEND_SRCALPHA << 4 | VXBLEND_INVSRCALPHA},
+        {VXBLEND_BOTHINVSRCALPHA << 4 | VXBLEND_ZERO, VXBLEND_INVSRCALPHA << 4 | VXBLEND_SRCALPHA},
+        {VXBLEND_ONE << 4 | VXBLEND_BOTHSRCALPHA, VXBLEND_ONE << 4 | VXBLEND_SRCALPHA},
+        {0xE << 4 | 0, VXBLEND_ZERO << 4 | VXBLEND_ZERO},
+    };
+    for (const CKDWORD *pair : pairs) {
+        blend.Switches[1] = pair[0];
+        TestCheck(Canonical(blend, CKFF_SAMPLER_LAYOUT_WIDE_2D).Switches[1] == pair[1],
+                  "STAGEBLEND factor pairs are canonical");
+    }
+}
+
 void TestInterface() {
     for (CKFFSamplerLayout layout : kLayouts) {
         CKJitFragmentShader shader;
-        TestCheck(Compile(CKFFFragmentProgram(), layout, shader), "the empty program compiles");
+        TestCheck(Compile(CKFFNativeFragmentKey(), layout, shader), "the empty key compiles");
         TestCheck(shader.UniformVec4Count == ROW_COUNT, "the uniform block is the native fragment block");
         TestCheck(shader.Inputs.Size() == REG_COUNT, "every native varying is declared");
 
@@ -796,7 +1048,7 @@ void TestInterface() {
     }
 
     CKJitFragmentShader shader;
-    TestCheck(!CKFFCompileNativeFragmentProgram(CKFFFragmentProgram(), CKFF_SAMPLER_LAYOUT_COUNT, shader),
+    TestCheck(!CKFFCompileNativeFragmentProgram(CKFFNativeFragmentKey(), CKFF_SAMPLER_LAYOUT_COUNT, shader),
               "layouts without native shaders are refused");
 }
 
@@ -809,19 +1061,23 @@ void SetSelectArg1(CKFFFragmentProgram &program, CKDWORD stage, CKDWORD arg) {
 }
 
 void TestSpecialization() {
-    // Diffuse pass-through keeps only the antialiased-line coverage.
-    CKFFFragmentProgram passThrough;
-    SetSelectArg1(passThrough, 0, CKRST_TA_DIFFUSE);
+    // Diffuse pass-through reads no uniforms; only antialiased lines discard.
+    CKFFNativeFragmentKey passThrough;
+    SetSelectArg1(passThrough.Program, 0, CKRST_TA_DIFFUSE);
     CKJitFragmentShader shader;
-    TestCheck(Compile(passThrough, CKFF_SAMPLER_LAYOUT_WIDE_2D, shader), "the pass-through program compiles");
-    for (int n = 0; n < shader.Nodes.Size(); ++n) {
-        const CKJitNode &node = shader.Nodes[n];
-        TestCheck(node.Op != CKJIT_OP_SAMPLE, "the pass-through program samples nothing");
-        TestCheck(node.Op != CKJIT_OP_UNIFORM || node.Imm[0] == ROW_DRAW_PARAMS + 4,
-                  "the pass-through program reads only the line mode");
+    for (int line = 0; line < 2; ++line) {
+        passThrough.Switches[0] = line ? CKFF_NATIVE_FRAGMENT_LINE : 0;
+        TestCheck(Compile(passThrough, CKFF_SAMPLER_LAYOUT_WIDE_2D, shader), "the pass-through program compiles");
+        for (int n = 0; n < shader.Nodes.Size(); ++n) {
+            const CKJitNode &node = shader.Nodes[n];
+            TestCheck(node.Op != CKJIT_OP_SAMPLE && node.Op != CKJIT_OP_UNIFORM,
+                      "the pass-through program samples and reads nothing");
+        }
+        TestCheck(shader.Discard.IsValid() == (line != 0), "only antialiased lines discard");
     }
 
-    // A texture stage samples the one texture its type and ordinal select.
+    // A texture stage samples the one texture its type and ordinal select, if
+    // it has one, and reads its LOD bias if that is not zero.
     struct Case {
         CKFFSamplerLayout Layout;
         CKDWORD Stage;
@@ -845,25 +1101,38 @@ void TestSpecialization() {
         {CKFF_SAMPLER_LAYOUT_WIDE_VOLUME, 7, CKFF_SAMPLER_VOLUME, 7, 15, CKJIT_SAMPLER_3D},
     };
     for (const Case &c : cases) {
-        CKFFFragmentProgram program;
+        CKFFNativeFragmentKey key;
+        CKFFFragmentProgram &program = key.Program;
         for (CKDWORD stage = 0; stage < c.Stage; ++stage)
             SetSelectArg1(program, stage, CKRST_TA_CURRENT);
         SetSelectArg1(program, c.Stage, CKRST_TA_TEXTURE);
         program.SetStage(c.Stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, c.SamplerType);
         program.SetSamplerOrdinal(c.Stage, c.Ordinal);
         program.Set(CKFF_FRAGMENT_PROGRAM_LAST_ACTIVE_TEXTURE_STAGE, c.Stage);
-        TestCheck(Compile(program, c.Layout, shader), "the texture program compiles");
 
-        int samples = 0;
-        for (int n = 0; n < shader.Nodes.Size(); ++n) {
-            const CKJitNode &node = shader.Nodes[n];
-            if (node.Op != CKJIT_OP_SAMPLE)
-                continue;
-            ++samples;
-            TestCheck(node.Imm[0] == (uint32_t)c.Slot && node.Imm[1] == c.Dim,
-                      "the stage samples the texture register of the native shader");
+        // Without a texture, with one, and with one and a LOD bias.
+        for (int variant = 0; variant < 3; ++variant) {
+            key.Switches[0] = variant == 0 ? 0u : (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << c.Stage;
+            if (variant == 2)
+                key.Switches[0] |= (CKDWORD)CKFF_NATIVE_FRAGMENT_LOD_BIAS << c.Stage;
+            TestCheck(Compile(key, c.Layout, shader), "the texture program compiles");
+            const bool sampled = variant != 0 && c.Slot >= 0;
+
+            int samples = 0;
+            for (int n = 0; n < shader.Nodes.Size(); ++n) {
+                const CKJitNode &node = shader.Nodes[n];
+                if (node.Op == CKJIT_OP_UNIFORM) {
+                    TestCheck(sampled && variant == 2 && node.Imm[0] == ROW_BUMP_ENV + c.Stage * 2 + 1,
+                              "a texture stage reads only its LOD bias, and only if it has one");
+                }
+                if (node.Op != CKJIT_OP_SAMPLE)
+                    continue;
+                ++samples;
+                TestCheck(node.Imm[0] == (uint32_t)c.Slot && node.Imm[1] == c.Dim,
+                          "the stage samples the texture register of the native shader");
+            }
+            TestCheck(samples == (sampled ? 1 : 0), "a stage samples once, or not at all without a texture");
         }
-        TestCheck(samples == (c.Slot < 0 ? 0 : 1), "a stage samples once, or not at all without a texture");
     }
 }
 
@@ -885,9 +1154,11 @@ void TestEmission() {
     Random random(0x2f6b3c1d5eull);
     for (CKFFSamplerLayout layout : kLayouts) {
         for (int p = 0; p < kPrograms; ++p) {
-            const CKFFFragmentProgram program = RandomProgram(random, p % 2 == 0);
+            Fragment fragment;
+            RandomFragment(random, fragment);
+            const CKFFNativeFragmentKey key = Canonical(DrawKey(RandomProgram(random, p % 2 == 0), fragment), layout);
             CKJitFragmentShader shader;
-            TestCheck(Compile(program, layout, shader), "every program compiles");
+            TestCheck(Compile(key, layout, shader), "every key compiles");
             XArray<uint32_t> spirv;
             XArray<uint32_t> dxbc;
             TestCheck(CKJitEmitSpirv(shader, kLayout, spirv) && spirv.Size() > 0, "every program emits SPIR-V");
@@ -909,6 +1180,7 @@ int main(int argc, char **argv) {
     framework.Run("interface", TestInterface);
     framework.Run("specialization", TestSpecialization);
     framework.Run("matches the uber shaders", TestMatchesUberShaders);
+    framework.Run("canonical keys", TestCanonicalKeys);
     framework.Run("emission", TestEmission);
     return framework.ExitCode();
 }

@@ -1,7 +1,7 @@
 #ifndef CKSDLGPU_FFJIT_MANIFEST_H
 #define CKSDLGPU_FFJIT_MANIFEST_H
 
-#include "CKFFFragmentProgram.h"
+#include "CKFFNativeFragmentJit.h"
 #include "XArray.h"
 #include "XString.h"
 
@@ -15,7 +15,9 @@
 // prewarmed pipeline has the key of the draw it came from, so a record that
 // no draw needs again costs background work only.
 struct CKSdlGpuFFJitRecord {
+    // The canonical CKFFNativeFragmentKey of the program.
     CKDWORD Lanes[CKFF_FRAGMENT_PROGRAM_LANE_COUNT];
+    CKDWORD Switches[CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT];
     CKDWORD SamplerLayout;
     CKDWORD Variant;
     // Vertex format flags, which name the draw's native vertex layout.
