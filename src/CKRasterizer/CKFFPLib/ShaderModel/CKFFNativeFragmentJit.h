@@ -84,7 +84,9 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
 // the layout's sampler slots.
 //
 // Returns false for a layout without native shaders, for a shader-sampling
-// key, or if the IR builder rejects the program, which is a front end bug.
+// key that samples volume textures itself or compares depths outside the
+// wide 2D layout, or if the IR builder rejects the program, which is a front
+// end bug.
 bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
                                       CKJitFragmentShader &out);
 

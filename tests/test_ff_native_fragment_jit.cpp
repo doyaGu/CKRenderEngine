@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 // The native fixed-function fragment JIT against the shaders it replaces.
 // Compiled keys run in an IR interpreter and must reproduce, bit for bit, a
@@ -45,7 +46,9 @@ enum Row {
     ROW_DRAW_PARAMS = 0,
     ROW_BUMP_ENV = 20,
     ROW_STAGE_PARAMS = 36,
-    ROW_PROGRAM = 52, // u_ffProgram, then the emulated sampler state
+    ROW_PROGRAM = 52,       // u_ffProgram
+    ROW_BORDER_COLOR = 57,  // of each sampler slot, then
+    ROW_SAMPLER_INFO = 73,  // their address modes and filters
     ROW_COUNT = 89,
 };
 
@@ -56,9 +59,16 @@ const CKFFSamplerLayout kLayouts[] = {
 };
 const char *const kShaderNames[] = {"fs_ff_stage_native", "fs_ff_stage_cube_native", "fs_ff_stage_volume_native"};
 
+// The texture bound to a sampler slot: its base mip's extent and mip count.
+struct Texture {
+    int32_t Size[3];
+    int32_t Levels;
+};
+
 struct Fragment {
     float Registers[REG_COUNT][4];
     float Uniforms[ROW_COUNT][4];
+    Texture Textures[CKJIT_MAX_SAMPLERS];
 };
 
 struct Outcome {
@@ -87,8 +97,10 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Textures: a texel is a hash of the slot, dimension, coordinate and LOD bias,
-// so a sample only matches when all of them match.
+// Textures: a texel is a hash of the access, its slot and dimension, and its
+// operands, so an access only matches one of the same kind with all of them
+// equal. Screen-space derivatives are a hash of the value too, so equal
+// expressions have equal derivatives in a program and the reference.
 
 uint32_t Mix(uint32_t h, uint32_t value) {
     h ^= value;
@@ -107,17 +119,68 @@ uint32_t HashBits(float value) {
     return bits;
 }
 
-void Texel(uint32_t slot, CKJitSamplerDim dim, const float *coordinate, float lodBias, float out[4]) {
-    uint32_t h = Mix(0x6a09e667u, slot * 4u + (uint32_t)dim);
-    const uint32_t components = dim == CKJIT_SAMPLER_2D ? 2u : 3u;
-    for (uint32_t i = 0; i < components; ++i)
-        h = Mix(h, HashBits(coordinate[i]));
-    h = Mix(h, HashBits(lodBias));
-    for (uint32_t i = 0; i < 4; ++i) {
-        h = Mix(h, i);
-        // Some texels are exact 8-bit values, like most real textures.
-        out[i] = (h & 3u) == 0 ? (float)((h >> 8) & 255u) / 255.0f : (float)(h >> 8) * (1.0f / 16777216.0f);
+uint32_t CoordinateCount(CKJitSamplerDim dim) {
+    return dim == CKJIT_SAMPLER_2D || dim == CKJIT_SAMPLER_2D_COMPARE ? 2u : 3u;
+}
+
+class TexelHash {
+public:
+    TexelHash(CKJitOp op, uint32_t slot, CKJitSamplerDim dim)
+        : m_Hash(Mix(Mix(0x6a09e667u, (uint32_t)op), slot * 4u + (uint32_t)dim)) {}
+
+    TexelHash &Add(const float *values, uint32_t count) {
+        for (uint32_t i = 0; i < count; ++i)
+            m_Hash = Mix(m_Hash, HashBits(values[i]));
+        return *this;
     }
+    TexelHash &Add(const int32_t *values, uint32_t count) {
+        for (uint32_t i = 0; i < count; ++i)
+            m_Hash = Mix(m_Hash, (uint32_t)values[i]);
+        return *this;
+    }
+
+    void Color(float out[4]) const {
+        uint32_t h = m_Hash;
+        for (uint32_t i = 0; i < 4; ++i) {
+            h = Mix(h, i);
+            // Some texels are exact 8-bit values, like most real textures.
+            out[i] = (h & 3u) == 0 ? (float)((h >> 8) & 255u) / 255.0f : (float)(h >> 8) * (1.0f / 16777216.0f);
+        }
+    }
+
+private:
+    uint32_t m_Hash;
+};
+
+// The derivative of a value along the x (axis 0) or y axis: magnitudes from
+// 2^-12 to 1 of either sign, and some zero.
+float Derivative(float value, uint32_t axis) {
+    const uint32_t h = Mix(Mix(0x3c6ef372u, axis), HashBits(value));
+    if ((h & 15u) == 0)
+        return 0.0f;
+    const float magnitude = std::exp2((float)((h >> 8) & 0xfffu) * (12.0f / 4096.0f) - 12.0f);
+    return (h & 16u) != 0 ? -magnitude : magnitude;
+}
+
+// The LOD SAMPLE takes, before clamping: of the longer derivative, in texels
+// of the base mip.
+float CalcLod(const Texture &texture, const float *coordinate, uint32_t count) {
+    float lengths[2];
+    for (uint32_t axis = 0; axis < 2; ++axis) {
+        float sum = 0.0f;
+        for (uint32_t i = 0; i < count; ++i) {
+            const float texels = Derivative(coordinate[i], axis) * (float)texture.Size[i];
+            sum = sum + texels * texels;
+        }
+        lengths[axis] = std::sqrt(sum);
+    }
+    return std::log2(std::fmax(lengths[0], lengths[1]));
+}
+
+// The extent of a mip along an axis.
+int32_t MipExtent(const Texture &texture, uint32_t axis, int32_t mip) {
+    const int32_t extent = texture.Size[axis] >> mip;
+    return extent > 0 ? extent : 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,28 +188,66 @@ void Texel(uint32_t slot, CKJitSamplerDim dim, const float *coordinate, float lo
 
 struct Value {
     float F[4];
-    int32_t I;
-    bool B;
+    int32_t I[4];
+    bool B[4];
 };
 
+int32_t Truncate(float x) {
+    if (!(x > -2147483648.0f))
+        return x != x ? 0 : INT32_MIN;
+    return x < 2147483648.0f ? (int32_t)x : INT32_MAX;
+}
+
+// Runs a shader for a fragment. Regions and loops run as structured control
+// flow: an IF skips the arm it does not take, and a loop's body runs again
+// from its ENDLOOP.
 Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
+    const int count = shader.Nodes.Size();
     XArray<Value> values;
-    values.Resize(shader.Nodes.Size());
-    for (int n = 0; n < shader.Nodes.Size(); ++n) {
+    values.Resize(count);
+    // The ELSE of an IF, the ENDIF of an ELSE and the ENDLOOP of a LOOP; the
+    // arm an IF takes, or a loop's iterations and the iteration it runs.
+    XArray<int> closing;
+    XArray<int32_t> taken;
+    XArray<int32_t> iteration;
+    closing.Resize(count);
+    taken.Resize(count);
+    iteration.Resize(count);
+    for (int n = 0; n < count; ++n) {
+        const CKJitNode &node = shader.Nodes[n];
+        if (node.Op == CKJIT_OP_ELSE || node.Op == CKJIT_OP_ENDIF || node.Op == CKJIT_OP_ENDLOOP)
+            closing[(int)node.Operands[0]] = n;
+    }
+    // The first node of a loop's body, past its INDEX and CARRY nodes.
+    auto body = [&](int loop) {
+        int n = loop + 1;
+        while (n < count && (shader.Nodes[n].Op == CKJIT_OP_INDEX || shader.Nodes[n].Op == CKJIT_OP_CARRY))
+            ++n;
+        return n;
+    };
+
+    for (int n = 0; n < count; ++n) {
         const CKJitNode &node = shader.Nodes[n];
         Value &out = values[n];
         std::memset(&out, 0, sizeof(out));
         const Value &a = values[node.OperandCount > 0 ? (int)node.Operands[0] : n];
         const Value &b = values[node.OperandCount > 1 ? (int)node.Operands[1] : n];
+        const Value &c = values[node.OperandCount > 2 ? (int)node.Operands[2] : n];
         const uint32_t width = CKJitComponentCount(node.Type);
+        const uint32_t operandWidth =
+            node.OperandCount > 0 ? CKJitComponentCount(shader.Nodes[(int)node.Operands[0]].Type) : 0;
+        const Texture &texture = fragment.Textures[node.Imm[0] % CKJIT_MAX_SAMPLERS];
+        const CKJitSamplerDim dim = (CKJitSamplerDim)node.Imm[1];
         switch (node.Op) {
         case CKJIT_OP_CONSTANT:
-            if (node.Type == CKJIT_TYPE_BOOL)
-                out.B = node.Imm[0] != 0;
-            else if (node.Type == CKJIT_TYPE_INT)
-                out.I = (int32_t)node.Imm[0];
-            else
-                std::memcpy(out.F, node.Imm, width * sizeof(float));
+            for (uint32_t i = 0; i < width; ++i) {
+                if (CKJitIsBool(node.Type))
+                    out.B[i] = node.Imm[i] != 0;
+                else if (CKJitIsInt(node.Type))
+                    out.I[i] = (int32_t)node.Imm[i];
+                else
+                    std::memcpy(&out.F[i], &node.Imm[i], sizeof(float));
+            }
             break;
         case CKJIT_OP_INPUT: {
             const CKJitInput &input = shader.Inputs[(int)node.Imm[0]];
@@ -159,15 +260,21 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
             std::memcpy(out.F, fragment.Uniforms[node.Imm[0]], sizeof(out.F));
             break;
         case CKJIT_OP_SWIZZLE:
-            for (uint32_t i = 0; i < width; ++i)
+            for (uint32_t i = 0; i < width; ++i) {
                 out.F[i] = a.F[node.Imm[i]];
+                out.I[i] = a.I[node.Imm[i]];
+                out.B[i] = a.B[node.Imm[i]];
+            }
             break;
         case CKJIT_OP_CONSTRUCT: {
             uint32_t component = 0;
             for (uint32_t o = 0; o < node.OperandCount; ++o) {
                 const int part = (int)node.Operands[o];
-                for (uint32_t i = 0; i < CKJitComponentCount(shader.Nodes[part].Type); ++i)
-                    out.F[component++] = values[part].F[i];
+                for (uint32_t i = 0; i < CKJitComponentCount(shader.Nodes[part].Type); ++i, ++component) {
+                    out.F[component] = values[part].F[i];
+                    out.I[component] = values[part].I[i];
+                    out.B[component] = values[part].B[i];
+                }
             }
             break;
         }
@@ -184,39 +291,170 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
                 out.F[i] = std::fmin(std::fmax(a.F[i], 0.0f), 1.0f);
             break;
         case CKJIT_OP_FLOOR: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::floor(a.F[i]); break;
+        case CKJIT_OP_CEIL: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::ceil(a.F[i]); break;
         case CKJIT_OP_ROUND_EVEN: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::nearbyint(a.F[i]); break;
         case CKJIT_OP_EXP2: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::exp2(a.F[i]); break;
+        case CKJIT_OP_LOG2: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::log2(a.F[i]); break;
         case CKJIT_OP_SQRT: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::sqrt(a.F[i]); break;
         case CKJIT_OP_DOT: {
-            const uint32_t components = CKJitComponentCount(shader.Nodes[(int)node.Operands[0]].Type);
             float sum = a.F[0] * b.F[0];
-            for (uint32_t i = 1; i < components; ++i) {
+            for (uint32_t i = 1; i < operandWidth; ++i) {
                 const float product = a.F[i] * b.F[i];
                 sum = sum + product;
             }
             out.F[0] = sum;
             break;
         }
-        case CKJIT_OP_LT: out.B = a.F[0] < b.F[0]; break;
-        case CKJIT_OP_LE: out.B = a.F[0] <= b.F[0]; break;
-        case CKJIT_OP_EQ: out.B = a.F[0] == b.F[0]; break;
-        case CKJIT_OP_NE: out.B = a.F[0] != b.F[0]; break;
-        case CKJIT_OP_FTOI: out.I = (int32_t)a.F[0]; break;
-        case CKJIT_OP_IEQ: out.B = a.I == b.I; break;
-        case CKJIT_OP_IAND: out.I = a.I & b.I; break;
-        case CKJIT_OP_ISHR: out.I = a.I >> b.I; break;
-        case CKJIT_OP_AND: out.B = a.B && b.B; break;
-        case CKJIT_OP_OR: out.B = a.B || b.B; break;
-        case CKJIT_OP_NOT: out.B = !a.B; break;
-        case CKJIT_OP_SELECT: out = a.B ? b : values[(int)node.Operands[2]]; break;
-        case CKJIT_OP_SAMPLE: Texel(node.Imm[0], (CKJitSamplerDim)node.Imm[1], a.F, b.F[0], out.F); break;
+        case CKJIT_OP_DDX: for (uint32_t i = 0; i < width; ++i) out.F[i] = Derivative(a.F[i], 0); break;
+        case CKJIT_OP_DDY: for (uint32_t i = 0; i < width; ++i) out.F[i] = Derivative(a.F[i], 1); break;
+        case CKJIT_OP_LT: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.F[i] < b.F[i]; break;
+        case CKJIT_OP_LE: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.F[i] <= b.F[i]; break;
+        case CKJIT_OP_EQ: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.F[i] == b.F[i]; break;
+        case CKJIT_OP_NE: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.F[i] != b.F[i]; break;
+        case CKJIT_OP_FTOI: for (uint32_t i = 0; i < width; ++i) out.I[i] = Truncate(a.F[i]); break;
+        case CKJIT_OP_ITOF: for (uint32_t i = 0; i < width; ++i) out.F[i] = (float)a.I[i]; break;
+        case CKJIT_OP_IADD:
+            for (uint32_t i = 0; i < width; ++i)
+                out.I[i] = (int32_t)((uint32_t)a.I[i] + (uint32_t)b.I[i]);
+            break;
+        case CKJIT_OP_ISUB:
+            for (uint32_t i = 0; i < width; ++i)
+                out.I[i] = (int32_t)((uint32_t)a.I[i] - (uint32_t)b.I[i]);
+            break;
+        case CKJIT_OP_IMUL:
+            for (uint32_t i = 0; i < width; ++i)
+                out.I[i] = (int32_t)((uint32_t)a.I[i] * (uint32_t)b.I[i]);
+            break;
+        case CKJIT_OP_IMIN: for (uint32_t i = 0; i < width; ++i) out.I[i] = a.I[i] < b.I[i] ? a.I[i] : b.I[i]; break;
+        case CKJIT_OP_IMAX: for (uint32_t i = 0; i < width; ++i) out.I[i] = a.I[i] > b.I[i] ? a.I[i] : b.I[i]; break;
+        case CKJIT_OP_IMOD:
+            for (uint32_t i = 0; i < width; ++i) {
+                TestCheck(b.I[i] > 0, "remainders have positive divisors");
+                const int32_t r = a.I[i] % b.I[i];
+                out.I[i] = r < 0 ? r + b.I[i] : r;
+            }
+            break;
+        case CKJIT_OP_IAND: for (uint32_t i = 0; i < width; ++i) out.I[i] = a.I[i] & b.I[i]; break;
+        case CKJIT_OP_ISHR: for (uint32_t i = 0; i < width; ++i) out.I[i] = a.I[i] >> (b.I[i] & 31); break;
+        case CKJIT_OP_ILT: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.I[i] < b.I[i]; break;
+        case CKJIT_OP_ILE: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.I[i] <= b.I[i]; break;
+        case CKJIT_OP_IEQ: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.I[i] == b.I[i]; break;
+        case CKJIT_OP_INE: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.I[i] != b.I[i]; break;
+        case CKJIT_OP_AND: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.B[i] && b.B[i]; break;
+        case CKJIT_OP_OR: for (uint32_t i = 0; i < width; ++i) out.B[i] = a.B[i] || b.B[i]; break;
+        case CKJIT_OP_NOT: for (uint32_t i = 0; i < width; ++i) out.B[i] = !a.B[i]; break;
+        case CKJIT_OP_ANY:
+            for (uint32_t i = 0; i < operandWidth; ++i)
+                out.B[0] = out.B[0] || a.B[i];
+            break;
+        case CKJIT_OP_ALL:
+            out.B[0] = true;
+            for (uint32_t i = 0; i < operandWidth; ++i)
+                out.B[0] = out.B[0] && a.B[i];
+            break;
+        case CKJIT_OP_SELECT:
+            // A BOOL condition picks whole arms, a vector one components.
+            for (uint32_t i = 0; i < 4; ++i) {
+                const bool pick = a.B[operandWidth == 1 ? 0 : i];
+                out.F[i] = pick ? b.F[i] : c.F[i];
+                out.I[i] = pick ? b.I[i] : c.I[i];
+                out.B[i] = pick ? b.B[i] : c.B[i];
+            }
+            break;
+
+        case CKJIT_OP_IF:
+            taken[n] = a.B[0];
+            if (!a.B[0])
+                n = closing[n]; // on past the ELSE
+            break;
+        case CKJIT_OP_ELSE:
+            if (taken[(int)node.Operands[0]])
+                n = closing[n]; // on past the ENDIF
+            break;
+        case CKJIT_OP_ENDIF: break;
+        case CKJIT_OP_PHI: {
+            const int ifNode = (int)shader.Nodes[(int)shader.Nodes[(int)node.Operands[2]].Operands[0]].Operands[0];
+            out = taken[ifNode] ? a : b;
+            break;
+        }
+        case CKJIT_OP_LOOP:
+            taken[n] = a.I[0] < (int32_t)node.Imm[0] ? a.I[0] : (int32_t)node.Imm[0];
+            iteration[n] = 0;
+            if (taken[n] <= 0) {
+                // The carried values keep their initials.
+                for (int m = n + 1; m < body(n); ++m) {
+                    if (shader.Nodes[m].Op == CKJIT_OP_CARRY)
+                        values[m] = values[(int)shader.Nodes[m].Operands[0]];
+                }
+                n = closing[n]; // on past the ENDLOOP
+            }
+            break;
+        case CKJIT_OP_INDEX: out.I[0] = iteration[(int)node.Operands[0]]; break;
+        case CKJIT_OP_CARRY: out = a; break;
+        case CKJIT_OP_ENDLOOP: {
+            // The RESULT nodes following it pair each carried value with its next.
+            const int loop = (int)node.Operands[0];
+            XArray<Value> nexts;
+            for (int m = n + 1;
+                 m < count && shader.Nodes[m].Op == CKJIT_OP_RESULT && (int)shader.Nodes[m].Operands[2] == n; ++m)
+                nexts.PushBack(values[(int)shader.Nodes[m].Operands[1]]);
+            for (int r = 0; r < nexts.Size(); ++r)
+                values[(int)shader.Nodes[n + 1 + r].Operands[0]] = nexts[r];
+            if (++iteration[loop] < taken[loop]) {
+                const int start = body(loop);
+                for (int m = loop + 1; m < start; ++m) {
+                    if (shader.Nodes[m].Op == CKJIT_OP_INDEX)
+                        values[m].I[0] = iteration[loop];
+                }
+                n = start - 1;
+            }
+            break;
+        }
+        case CKJIT_OP_RESULT: out = a; break;
+
+        case CKJIT_OP_SAMPLE:
+            TexelHash(node.Op, node.Imm[0], dim).Add(a.F, CoordinateCount(dim)).Add(b.F, 1).Color(out.F);
+            break;
+        case CKJIT_OP_SAMPLE_LEVEL:
+            TexelHash(node.Op, node.Imm[0], dim).Add(a.F, CoordinateCount(dim)).Add(b.F, 1).Color(out.F);
+            break;
+        case CKJIT_OP_SAMPLE_GRAD:
+            TexelHash(node.Op, node.Imm[0], dim)
+                .Add(a.F, CoordinateCount(dim))
+                .Add(b.F, CoordinateCount(dim))
+                .Add(c.F, CoordinateCount(dim))
+                .Color(out.F);
+            break;
+        case CKJIT_OP_CALC_LOD: out.F[0] = CalcLod(texture, a.F, CoordinateCount(dim)); break;
+        case CKJIT_OP_SAMPLE_CMP:
+        case CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO: {
+            float texel[4];
+            TexelHash(node.Op, node.Imm[0], dim).Add(a.F, 2).Add(b.F, 1).Color(texel);
+            out.F[0] = texel[0];
+            break;
+        }
+        case CKJIT_OP_LOAD: {
+            const uint32_t axes = operandWidth - 1;
+            const int32_t mip = a.I[axes];
+            TestCheck(mip >= 0 && mip < texture.Levels, "loads read mips of the texture");
+            for (uint32_t i = 0; i < axes; ++i)
+                TestCheck(a.I[i] >= 0 && a.I[i] < MipExtent(texture, i, mip), "loads read texels within the mip");
+            TexelHash(node.Op, node.Imm[0], dim).Add(a.I, operandWidth).Color(out.F);
+            break;
+        }
+        case CKJIT_OP_SIZE:
+            TestCheck(a.I[0] >= 0 && a.I[0] < texture.Levels, "sizes are of mips of the texture");
+            for (uint32_t i = 0; i < width; ++i)
+                out.I[i] = MipExtent(texture, i, a.I[0]);
+            break;
+        case CKJIT_OP_LEVELS: out.I[0] = texture.Levels; break;
         default: TestFail("the interpreter knows every operation");
         }
     }
 
     Outcome outcome;
     std::memcpy(outcome.Color, values[(int)shader.Color.Id].F, sizeof(outcome.Color));
-    outcome.Discard = shader.Discard.IsValid() && values[(int)shader.Discard.Id].B;
+    outcome.Discard = shader.Discard.IsValid() && values[(int)shader.Discard.Id].B[0];
     return outcome;
 }
 
@@ -244,6 +482,7 @@ float Exp(float x) { return std::exp2(x * 1.4426950408889634f); } // HLSL exp() 
 struct Reference {
     const Fragment &F;
     CKFFSamplerLayout Layout;
+    bool ShaderSampling = false;
 
     Float4 Varying(int reg) const {
         const float *v = F.Registers[reg];
@@ -262,7 +501,7 @@ struct Reference {
     Float4 SampleSlot(int slot, CKJitSamplerDim dim, const Float4 &coord, float lodBias) const {
         const float c[3] = {coord.x, coord.y, coord.z};
         float texel[4];
-        Texel((uint32_t)slot, dim, c, lodBias, texel);
+        TexelHash(CKJIT_OP_SAMPLE, (uint32_t)slot, dim).Add(c, CoordinateCount(dim)).Add(&lodBias, 1).Color(texel);
         return {texel[0], texel[1], texel[2], texel[3]};
     }
 
@@ -293,10 +532,197 @@ struct Reference {
         return index < r.Count2D ? SampleSlot(index, CKJIT_SAMPLER_2D, coord, lodBias) : Splat(0);
     }
 
-    Float4 SampleTexture(int stage, const Float4 &coord, int samplerType, int samplerOrdinal, bool hasTexture) const {
+    // native_sampling.hlsli, which the shader-sampling shaders sample 2D
+    // textures with. The address of a texel along an axis, and whether it is
+    // outside a border-addressed texture.
+    static int Address(int i, int extent, int mode, bool &outside) {
+        if (mode == 4)
+            outside = outside || i < 0 || i >= extent;
+        if (mode == 1)
+            return ((i % extent) + extent) % extent;
+        if (mode == 2) {
+            const int period = extent * 2;
+            const int folded = ((i % period) + period) % period;
+            return folded < extent ? folded : period - folded - 1;
+        }
+        return i < 0 ? 0 : i > extent - 1 ? extent - 1 : i;
+    }
+
+    Float4 Tap2D(int slot, int x, int y, int mip, int width, int height) const {
+        const int modes = (int)Uniform(ROW_SAMPLER_INFO + slot).x;
+        bool outside = false;
+        const int texel[3] = {Address(x, width, modes & 15, outside), Address(y, height, (modes >> 4) & 15, outside),
+                              mip};
+        if (outside)
+            return Uniform(ROW_BORDER_COLOR + slot);
+        float color[4];
+        TexelHash(CKJIT_OP_LOAD, (uint32_t)slot, CKJIT_SAMPLER_2D).Add(texel, 3).Color(color);
+        return {color[0], color[1], color[2], color[3]};
+    }
+
+    static int Next(int i) { return (int)((uint32_t)i + 1u); }
+
+    Float4 Level2D(int slot, float u, float v, int mip, bool filtered) const {
+        const Texture &texture = F.Textures[slot];
+        const int width = MipExtent(texture, 0, mip);
+        const int height = MipExtent(texture, 1, mip);
+        const float x = u * (float)width;
+        const float y = v * (float)height;
+        if (!filtered)
+            return Tap2D(slot, Truncate(std::floor(x)), Truncate(std::floor(y)), mip, width, height);
+        const float cx = x - 0.5f;
+        const float cy = y - 0.5f;
+        const float bx = std::floor(cx);
+        const float by = std::floor(cy);
+        const int x0 = Truncate(bx);
+        const int y0 = Truncate(by);
+        const Float4 top = Lerp(Tap2D(slot, x0, y0, mip, width, height), Tap2D(slot, Next(x0), y0, mip, width, height),
+                                cx - bx);
+        const Float4 bottom = Lerp(Tap2D(slot, x0, Next(y0), mip, width, height),
+                                   Tap2D(slot, Next(x0), Next(y0), mip, width, height), cx - bx);
+        return Lerp(top, bottom, cy - by);
+    }
+
+    Float4 Mips2D(int slot, float u, float v, float lod, bool filtered) const {
+        const int levels = F.Textures[slot].Levels;
+        const int mipFilter = (int)Uniform(ROW_SAMPLER_INFO + slot).w & 15;
+        lod = mipFilter == 0 ? 0.0f : std::fmin(std::fmax(lod, 0.0f), (float)(levels - 1));
+        if (mipFilter != 2 && mipFilter != 7)
+            return Level2D(slot, u, v, Truncate(std::floor(lod + 0.5f)), filtered);
+        const float below = std::floor(lod);
+        const int lower = Truncate(below);
+        const int upper = lower + 1 < levels - 1 ? lower + 1 : levels - 1;
+        return Lerp(Level2D(slot, u, v, lower, filtered), Level2D(slot, u, v, upper, filtered), lod - below);
+    }
+
+    static float Length(float x, float y) {
+        const float xx = x * x;
+        const float yy = y * y;
+        return std::sqrt(xx + yy);
+    }
+
+    // Anisotropic filtering: taps along the longer derivative, each at the
+    // LOD of the shorter.
+    Float4 Anisotropic2D(int slot, float u, float v, const float dx[2], const float dy[2], float tapBias,
+                         float minMip, float maxAnisotropy) const {
+        const Texture &texture = F.Textures[slot];
+        const float width = (float)MipExtent(texture, 0, 0);
+        const float height = (float)MipExtent(texture, 1, 0);
+        const float lx = Length(dx[0] * width, dx[1] * height);
+        const float ly = Length(dy[0] * width, dy[1] * height);
+        const float major = std::fmax(lx, ly);
+        const float tapLimit = std::fmax(maxAnisotropy, 1.0f);
+        const float minor = std::fmax(std::fmin(lx, ly), major / tapLimit);
+        const int taps = Truncate(std::fmin(std::fmax(std::ceil(major / std::fmax(minor, 1.0f)), 1.0f), tapLimit));
+        const float *axis = lx > ly ? dx : dy;
+        const float step[2] = {axis[0] / (float)taps, axis[1] / (float)taps};
+        const float tapLod = std::fmax(std::log2(std::fmax(minor, 1.0f)) + tapBias, minMip);
+        Float4 result = Splat(0.0f);
+        for (int i = 0; i < taps; ++i) {
+            const float offset = (float)i - (float)(taps - 1) * 0.5f;
+            result = result + Mips2D(slot, u + offset * step[0], v + offset * step[1], tapLod, true);
+        }
+        return result / (float)taps;
+    }
+
+    bool Border2D(int slot) const {
+        const int modes = (int)Uniform(ROW_SAMPLER_INFO + slot).x;
+        return (modes & 15) == 4 || ((modes >> 4) & 15) == 4;
+    }
+
+    Float4 Sample2DBias(int slot, float u, float v, float lodBias, float minMip, float maxAnisotropy) const {
+        if (!Border2D(slot))
+            return SampleSlot(slot, CKJIT_SAMPLER_2D, {u, v, 0.0f, 0.0f}, lodBias);
+        const float uv[2] = {u, v};
+        const float lod = std::fmax(CalcLod(F.Textures[slot], uv, 2) + lodBias, minMip);
+        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
+        const int filter = Truncate(lod > 0.0f ? info.y : info.z);
+        if (filter == 7 && lod > 0.0f) {
+            const float dx[2] = {Derivative(u, 0), Derivative(v, 0)};
+            const float dy[2] = {Derivative(u, 1), Derivative(v, 1)};
+            return Anisotropic2D(slot, u, v, dx, dy, lodBias, minMip, maxAnisotropy);
+        }
+        return Mips2D(slot, u, v, lod, filter != 1);
+    }
+
+    Float4 Sample2DGrad(int slot, float u, float v, const float dx[2], const float dy[2], float minMip,
+                        float maxAnisotropy) const {
+        if (!Border2D(slot)) {
+            const float uv[2] = {u, v};
+            float texel[4];
+            TexelHash(CKJIT_OP_SAMPLE_GRAD, (uint32_t)slot, CKJIT_SAMPLER_2D).Add(uv, 2).Add(dx, 2).Add(dy, 2).Color(texel);
+            return {texel[0], texel[1], texel[2], texel[3]};
+        }
+        const Texture &texture = F.Textures[slot];
+        const float width = (float)MipExtent(texture, 0, 0);
+        const float height = (float)MipExtent(texture, 1, 0);
+        const float lx = Length(dx[0] * width, dx[1] * height);
+        const float ly = Length(dy[0] * width, dy[1] * height);
+        const float lod = std::fmax(std::log2(std::fmax(std::fmax(lx, ly), 0.000001f)), minMip);
+        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
+        const int filter = Truncate(lod > 0.0f ? info.y : info.z);
+        if (filter == 7 && lod > 0.0f)
+            return Anisotropic2D(slot, u, v, dx, dy, 0.0f, minMip, maxAnisotropy);
+        return Mips2D(slot, u, v, lod, filter != 1);
+    }
+
+    static float CompareDepth(float depth, float reference, int func) {
+        switch (func) {
+        case 1: return reference < depth ? 1.0f : 0.0f;
+        case 2: return reference <= depth ? 1.0f : 0.0f;
+        case 3: return reference == depth ? 1.0f : 0.0f;
+        case 4: return reference >= depth ? 1.0f : 0.0f;
+        case 5: return reference > depth ? 1.0f : 0.0f;
+        case 6: return reference != depth ? 1.0f : 0.0f;
+        case 7: return 0.0f;
+        case 8: return 1.0f;
+        default: return depth;
+        }
+    }
+
+    // The shader-sampling shaders' 2D and depth textures: mirror-once folds
+    // the coordinate, and explicit gradients are of the unfolded one.
+    Float4 ShaderSample2D(int stage, const Float4 &coord, bool depth, int ordinal, int flags, int compareFunc,
+                          float lodBias) const {
+        const bool wide = Layout == CKFF_SAMPLER_LAYOUT_WIDE_2D;
+        if (!wide && ordinal >= 4)
+            return Splat(0.0f);
+        const int slot = wide ? stage : ordinal;
+        const int state = (int)BumpEnv(stage * 2 + 1).w;
+        const float minMip = (float)(state & 31);
+        const float maxAnisotropy = (float)((state >> 5) & 31);
+        const int mirror = (flags >> 9) & 7;
+        const float u = (mirror & 1) != 0 ? Clamp(std::fabs(coord.x), 0.0f, 1.0f) : coord.x;
+        const float v = (mirror & 2) != 0 ? Clamp(std::fabs(coord.y), 0.0f, 1.0f) : coord.y;
+        Float4 color;
+        if ((state & 0x8000) != 0) {
+            const float scale = std::exp2(lodBias);
+            const float dx[2] = {Derivative(coord.x, 0) * scale, Derivative(coord.y, 0) * scale};
+            const float dy[2] = {Derivative(coord.x, 1) * scale, Derivative(coord.y, 1) * scale};
+            color = Sample2DGrad(slot, u, v, dx, dy, minMip, maxAnisotropy);
+        } else {
+            color = Sample2DBias(slot, u, v, lodBias, minMip, maxAnisotropy);
+        }
+        if (!depth)
+            return color;
+        return Splat(wide && compareFunc != 0 ? CompareDepth(color.x, coord.z, compareFunc) : color.x);
+    }
+
+    Float4 SampleTexture(int stage, const Float4 &coord, int samplerType, int samplerOrdinal, bool hasTexture,
+                         int flags, int compareFunc) const {
         if (!hasTexture)
             return {0.0f, 0.0f, 0.0f, 1.0f};
         const float lodBias = BumpEnv(stage * 2 + 1).z;
+        if (ShaderSampling && (samplerType == 0 || samplerType == 2))
+            return ShaderSample2D(stage, coord, samplerType == 2, samplerOrdinal, flags, compareFunc, lodBias);
+        if (ShaderSampling && samplerType == 3 &&
+            (CKDWORD)samplerOrdinal < CKFFSamplerTypeSlotCount(CKFF_SAMPLER_VOLUME, Layout)) {
+            // Until shader sampling emulates volume textures, their draws
+            // sample them as the native shaders do.
+            const int state = (int)BumpEnv(stage * 2 + 1).w;
+            TestCheck(((flags >> 9) & 7) == 0 && (state & (31 | 7 << 10 | 0x20000)) == 0,
+                      "shader-sampling draws do not fold, border or clamp volume textures yet");
+        }
         if (samplerType == 1 || samplerType == 3)
             return Sample(samplerType, stage, samplerOrdinal, coord, lodBias);
         const Float4 color = Sample(samplerType, stage, samplerOrdinal, coord, lodBias);
@@ -538,7 +964,8 @@ struct Reference {
                 sampleCoord.x += matrix.x * bump.x + matrix.y * bump.y;
                 sampleCoord.y += matrix.z * bump.x + matrix.w * bump.y;
             }
-            Float4 texColor = SampleTexture(stage, sampleCoord, samplerType, samplerOrdinal, hasTexture);
+            Float4 texColor = SampleTexture(stage, sampleCoord, samplerType, samplerOrdinal, hasTexture, flags,
+                                            (alphaWord >> 20) & 0xf);
             if (stage != 0 && previousColorOp == 23) {
                 const Float4 luminance = BumpEnv((stage - 1) * 2 + 1);
                 const float lum = Clamp(previousTexture.z * luminance.x + luminance.y, 0.0f, 1.0f);
@@ -666,7 +1093,22 @@ float RandomDivisor(Random &random, float epsilon, float lo, float hi) {
     }
 }
 
+// A texture of powers of two or not, with some or all of its mips.
+void RandomTexture(Random &random, Texture &texture) {
+    int32_t largest = 1;
+    for (int32_t &extent : texture.Size) {
+        extent = random.OneIn(4) ? 1 + (int32_t)random.Below(256) : 1 << random.Below(9);
+        largest = extent > largest ? extent : largest;
+    }
+    int32_t chain = 1;
+    while (largest >> chain != 0)
+        ++chain;
+    texture.Levels = random.OneIn(2) ? chain : 1 + (int32_t)random.Below((uint32_t)chain);
+}
+
 void RandomFragment(Random &random, Fragment &fragment) {
+    for (Texture &texture : fragment.Textures)
+        RandomTexture(random, texture);
     for (int reg = 0; reg < REG_COUNT; ++reg) {
         for (int i = 0; i < 4; ++i)
             fragment.Registers[reg][i] = random.Range(-2.0f, 2.0f);
@@ -712,6 +1154,98 @@ void RandomFragment(Random &random, Fragment &fragment) {
         coord[2] = random.OneIn(4) ? random.Unit() : 1.0f;                 // texture presence
         coord[3] = (float)random.Below(256) + random.Range(-0.49f, 0.49f); // stage blend factors
         RandomColor(random, fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2 + 1]);
+    }
+}
+
+// The samplers the runtime resolves for a draw's slots: the metadata rows of
+// the emulated sampler state, and the state word of the stages sampling them.
+struct DrawSamplers {
+    float Border[CKFF_SAMPLER_SLOT_COUNT][4];
+    float Info[CKFF_SAMPLER_SLOT_COUNT][4];
+    int32_t State[CKFF_SAMPLER_SLOT_COUNT];
+};
+
+void RandomSamplers(Random &random, CKFFSamplerLayout layout, DrawSamplers &samplers) {
+    const CKDWORD volumeBase = CKFFSamplerTypeSlotBase(CKFF_SAMPLER_VOLUME, layout);
+    for (CKDWORD slot = 0; slot < CKFF_SAMPLER_SLOT_COUNT; ++slot) {
+        // Not emulated yet: volume textures shader sampling folds, borders or
+        // clamps to a mip.
+        const bool volume = slot >= volumeBase;
+        int modes[3];
+        for (int &mode : modes) {
+            mode = 1 + (int)random.Below(5);
+            if (volume && mode == 4)
+                mode = 5;
+        }
+        const int mipFilter = (int)random.Below(8);
+        const int anisotropy = (int)random.Below(volume || random.OneIn(3) ? 2 : 32);
+        float *info = samplers.Info[slot];
+        info[0] = (float)(modes[0] | modes[1] << 4 | modes[2] << 8);
+        info[1] = random.OneIn(3) ? 7.0f : (float)(1 + random.Below(7)); // minification filter
+        info[2] = (float)(1 + random.Below(7));                          // magnification filter
+        info[3] = (float)(mipFilter | anisotropy << 4);
+        for (float &channel : samplers.Border[slot])
+            channel = (float)random.Below(256) / 255.0f;
+
+        const int minMip = volume || random.OneIn(2) ? 0 : (int)random.Below(32);
+        const bool manualAnisotropy = anisotropy >= 2;
+        const bool explicitGradient = manualAnisotropy || random.OneIn(2);
+        const int borderAxes = (modes[0] == 4 ? 1 : 0) | (modes[1] == 4 ? 2 : 0) | (volume && modes[2] == 4 ? 4 : 0);
+        const int ignored = (int)(random.Next() & (CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR |
+                                                   CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR | CKFF_SAMPLER_SHADER_MANUAL_LOD |
+                                                   CKFF_SAMPLER_SHADER_MANUAL_BORDER |
+                                                   CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE));
+        samplers.State[slot] = (int32_t)(minMip << CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT |
+                                         anisotropy << CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT |
+                                         borderAxes << CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT |
+                                         (explicitGradient ? CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT : 0u) |
+                                         (manualAnisotropy ? CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY : 0u) | ignored);
+    }
+}
+
+// The sampler slot of a stage's texture. Nothing samples a texture the
+// layout does not declare, whose stage may have any sampler's state.
+CKDWORD StageSlot(const CKFFFragmentProgram &program, CKDWORD stage, CKFFSamplerLayout layout) {
+    const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+    const bool stageIndexed =
+        (type == CKFF_SAMPLER_2D || type == CKFF_SAMPLER_DEPTH) && layout == CKFF_SAMPLER_LAYOUT_WIDE_2D;
+    const CKDWORD index = stageIndexed ? stage : program.GetSamplerOrdinal(stage);
+    return index < CKFFSamplerTypeSlotCount(type, layout) ? CKFFSamplerSlot(type, index, layout) : stage;
+}
+
+// Gives a fragment a draw's samplers: its stages' state words are those of
+// the samplers they sample, if they are textured.
+void ApplySamplers(const CKFFFragmentProgram &program, CKFFSamplerLayout layout, const DrawSamplers &samplers,
+                   Fragment &fragment) {
+    std::memcpy(fragment.Uniforms[ROW_BORDER_COLOR], samplers.Border, sizeof(samplers.Border));
+    std::memcpy(fragment.Uniforms[ROW_SAMPLER_INFO], samplers.Info, sizeof(samplers.Info));
+    for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
+        const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+        const CKDWORD slot = StageSlot(program, stage, layout);
+        float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
+        if (type == CKFF_SAMPLER_VOLUME) // not emulated yet: mirror-once volume textures
+            coord[1] = (float)((int)coord[1] & ~(7 << 9));
+        fragment.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][3] = coord[2] > 0.5f ? (float)samplers.State[slot] : 0.0f;
+    }
+}
+
+// Not emulated yet: depth comparisons of the shader-sampling shaders outside
+// the wide 2D layout.
+void ClearComparisons(CKFFFragmentProgram &program, CKFFSamplerLayout layout) {
+    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D)
+        return;
+    for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage)
+        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, 0);
+}
+
+// Gives the depth stages of a fragment their border's depth as the reference
+// depth, which comparisons of border texels then meet exactly unless the
+// coordinate is projected or affine.
+void MeetBorderDepths(const CKFFFragmentProgram &program, CKFFSamplerLayout layout, const DrawSamplers &samplers,
+                      Fragment &fragment) {
+    for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
+        if (program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH)
+            fragment.Registers[REG_TEXCOORD0 + stage][2] = samplers.Border[StageSlot(program, stage, layout)][0];
     }
 }
 
@@ -962,16 +1496,16 @@ bool Compile(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout, CKJitFr
 }
 
 // Whether a shader only reads uniforms its key leaves open: none of
-// u_ffProgram and the emulated sampler state, the line and affine modes, or
-// the texture coordinate parameters.
+// u_ffProgram, the line and affine modes, or the texture coordinate
+// parameters.
 bool ReadsOnlyOpenUniforms(const CKJitFragmentShader &shader) {
     for (int n = 0; n < shader.Nodes.Size(); ++n) {
         const CKJitNode &node = shader.Nodes[n];
         if (node.Op != CKJIT_OP_UNIFORM)
             continue;
         const uint32_t row = node.Imm[0];
-        if (row >= ROW_PROGRAM || row == ROW_DRAW_PARAMS + 4 ||
-            (row >= ROW_STAGE_PARAMS && (row - ROW_STAGE_PARAMS) % 2 == 0)) {
+        if ((row >= ROW_PROGRAM && row < ROW_BORDER_COLOR) || row == ROW_DRAW_PARAMS + 4 ||
+            (row >= ROW_STAGE_PARAMS && row < ROW_PROGRAM && (row - ROW_STAGE_PARAMS) % 2 == 0)) {
             return false;
         }
     }
@@ -1036,6 +1570,53 @@ void TestMatchesUberShaders() {
                         if (!SameOutcome(expected, actual)) {
                             Report(layout, compiled, shader, expected, actual);
                             TestFail("compiled keys compute what the uber shader computes");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Shader-sampling draws: their keys hold the sampling of the samplers the
+// runtime resolves, whose emulated state the shaders read.
+void TestMatchesShaderSampling() {
+    const int kPrograms = 1000;
+    const int kDraws = 2;
+    const int kFragments = 3;
+    Random random(0x9e0c2d4b37ull);
+    for (CKFFSamplerLayout layout : kLayouts) {
+        for (int p = 0; p < kPrograms; ++p) {
+            CKFFFragmentProgram program = RandomProgram(random, p % 4 == 0);
+            ClearComparisons(program, layout);
+            for (int d = 0; d < kDraws; ++d) {
+                DrawSamplers samplers;
+                RandomSamplers(random, layout, samplers);
+                Fragment fragments[kFragments];
+                for (int f = 0; f < kFragments; ++f) {
+                    RandomFragment(random, fragments[f]);
+                    if (f != 0)
+                        ShareDrawState(fragments[0], fragments[f], random);
+                    ApplySamplers(program, layout, samplers, fragments[f]);
+                    if (random.OneIn(2))
+                        MeetBorderDepths(program, layout, samplers, fragments[f]);
+                }
+                const CKFFNativeFragmentKey key = DrawKey(program, fragments[0], true);
+                for (int f = 1; f < kFragments; ++f)
+                    TestCheck(DrawKey(program, fragments[f], true) == key, "draws sharing the state keys read share keys");
+
+                const CKFFNativeFragmentKey keys[] = {key, Canonical(key, layout)};
+                TestCheck(Canonical(keys[1], layout) == keys[1], "canonical keys are left unchanged");
+                for (const CKFFNativeFragmentKey &compiled : keys) {
+                    CKJitFragmentShader shader;
+                    TestCheck(Compile(compiled, layout, shader), "every key compiles");
+                    TestCheck(ReadsOnlyOpenUniforms(shader), "shaders never read the state their key decides");
+                    for (const Fragment &fragment : fragments) {
+                        const Outcome expected = Reference{fragment, layout, true}.Evaluate(program.Lanes());
+                        const Outcome actual = Execute(shader, fragment);
+                        if (!SameOutcome(expected, actual)) {
+                            Report(layout, compiled, shader, expected, actual);
+                            TestFail("compiled keys compute what the shader-sampling shader computes");
                         }
                     }
                 }
@@ -1275,19 +1856,30 @@ void TestEmission() {
     const int kSaved = 12;
     Random random(0x2f6b3c1d5eull);
     for (CKFFSamplerLayout layout : kLayouts) {
-        for (int p = 0; p < kPrograms; ++p) {
-            Fragment fragment;
-            RandomFragment(random, fragment);
-            const CKFFNativeFragmentKey key = Canonical(DrawKey(RandomProgram(random, p % 2 == 0), fragment), layout);
-            CKJitFragmentShader shader;
-            TestCheck(Compile(key, layout, shader), "every key compiles");
-            XArray<uint32_t> spirv;
-            XArray<uint32_t> dxbc;
-            TestCheck(CKJitEmitSpirv(shader, kLayout, spirv) && spirv.Size() > 0, "every program emits SPIR-V");
-            TestCheck(CKJitEmitDxbc(shader, kLayout, dxbc) && dxbc.Size() > 0, "every program emits DXBC");
-            if (g_ShaderDirectory && p < kSaved) {
-                Save(kShaderNames[layout], p, "spv", spirv);
-                Save(kShaderNames[layout], p, "dxbc", dxbc);
+        for (bool shaderSampling : {false, true}) {
+            char name[64];
+            std::snprintf(name, sizeof(name), "%s%s", kShaderNames[layout], shaderSampling ? "_sampling" : "");
+            for (int p = 0; p < kPrograms; ++p) {
+                CKFFFragmentProgram program = RandomProgram(random, p % 2 == 0);
+                Fragment fragment;
+                RandomFragment(random, fragment);
+                if (shaderSampling) {
+                    ClearComparisons(program, layout);
+                    DrawSamplers samplers;
+                    RandomSamplers(random, layout, samplers);
+                    ApplySamplers(program, layout, samplers, fragment);
+                }
+                const CKFFNativeFragmentKey key = Canonical(DrawKey(program, fragment, shaderSampling), layout);
+                CKJitFragmentShader shader;
+                TestCheck(Compile(key, layout, shader), "every key compiles");
+                XArray<uint32_t> spirv;
+                XArray<uint32_t> dxbc;
+                TestCheck(CKJitEmitSpirv(shader, kLayout, spirv) && spirv.Size() > 0, "every program emits SPIR-V");
+                TestCheck(CKJitEmitDxbc(shader, kLayout, dxbc) && dxbc.Size() > 0, "every program emits DXBC");
+                if (g_ShaderDirectory && p < kSaved) {
+                    Save(name, p, "spv", spirv);
+                    Save(name, p, "dxbc", dxbc);
+                }
             }
         }
     }
@@ -1302,6 +1894,7 @@ int main(int argc, char **argv) {
     framework.Run("interface", TestInterface);
     framework.Run("specialization", TestSpecialization);
     framework.Run("matches the uber shaders", TestMatchesUberShaders);
+    framework.Run("matches the shader-sampling shaders", TestMatchesShaderSampling);
     framework.Run("canonical keys", TestCanonicalKeys);
     framework.Run("emission", TestEmission);
     return framework.ExitCode();
