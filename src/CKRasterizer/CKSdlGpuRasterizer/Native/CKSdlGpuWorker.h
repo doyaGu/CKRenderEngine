@@ -31,22 +31,26 @@ private:
     bool Ran = false;
 };
 
-// One low-priority thread that runs jobs of each priority in submission
-// order, except that a job waiting for another runs as soon as that one has
-// run. The owner submits and collects without waiting for a running job;
-// only Stop waits.
+// Low-priority threads that start the jobs of each priority in submission
+// order, except that a job waiting for another starts as soon as that one
+// has run. The owner submits and collects without waiting for a running
+// job; only Stop waits.
 class CKSdlGpuWorker {
 public:
+    enum { MaxThreads = 4 };
+
     CKSdlGpuWorker() = default;
     ~CKSdlGpuWorker() { Stop(); }
     CKSdlGpuWorker(const CKSdlGpuWorker &) = delete;
     CKSdlGpuWorker &operator=(const CKSdlGpuWorker &) = delete;
 
-    bool Start(const char *name);
-    // Waits for the running job, then deletes every job still owned here,
+    // Starts threads, clamped to 1..MaxThreads. Succeeds when at least one
+    // thread starts.
+    bool Start(const char *name, int threads = 1);
+    // Waits for the running jobs, then deletes every job still owned here,
     // including queued jobs that never ran.
     void Stop();
-    bool Running() const { return Thread != nullptr; }
+    bool Running() const { return ThreadCount != 0; }
 
     // Takes ownership. A stopped worker deletes the job and returns false.
     // A job submitted after another waits until that one has run, then runs
@@ -69,11 +73,13 @@ public:
 
 private:
     static int SDLCALL Main(void *data);
-    // Queues the jobs that waited for one that has run.
+    // Queues the jobs that waited for one that has run, and wakes a thread
+    // for each.
     void Release(const CKSdlGpuJob *job);
     bool Idling() const;
 
-    SDL_Thread *Thread = nullptr;
+    SDL_Thread *Threads[MaxThreads] = {};
+    int ThreadCount = 0;
     SDL_Mutex *Lock = nullptr;
     SDL_Condition *Work = nullptr;
     SDL_Condition *Idle = nullptr;
@@ -81,7 +87,8 @@ private:
     XArray<CKSdlGpuJob *> IdleQueued;
     XArray<CKSdlGpuJob *> Waiting;
     XArray<CKSdlGpuJob *> Finished;
-    bool Active = false;
+    // Jobs running.
+    int Active = 0;
     bool Stopping = false;
 };
 

@@ -237,10 +237,21 @@ void CKSdlGpuRasterizerContext::Collect()
     }
 }
 
+// CKRE_SDL_GPU_WORKERS sets the number of worker threads. By default a
+// second one compiles and creates alongside the first when the machine has
+// cores to spare for both.
+static int WorkerThreads()
+{
+    const char *setting = SDL_getenv("CKRE_SDL_GPU_WORKERS");
+    if (setting && *setting)
+        return SDL_atoi(setting);
+    return SDL_GetNumLogicalCPUCores() >= 4 ? 2 : 1;
+}
+
 bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
                                           const CKSdlGpuJob *after)
 {
-    if (!Worker.Running() && !Worker.Start("CKSdlGpuWorker")) {
+    if (!Worker.Running() && !Worker.Start("CKSdlGpuWorker", WorkerThreads())) {
         delete job;
         return false;
     }

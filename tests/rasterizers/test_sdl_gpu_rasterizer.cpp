@@ -345,6 +345,28 @@ int main()
               worker.WaitIdle(5000), "a stopped worker restarts");
         worker.Stop();
         check(deleted == 25, "stopping deletes finished jobs");
+        check(worker.Start("CKSdlGpuWorkerTest", 2) && worker.Running(), "worker starts two threads");
+        worker.Submit(job(started, gate));
+        worker.Submit(job(started, gate));
+        check(SDL_WaitSemaphoreTimeout(started, 5000) && SDL_WaitSemaphoreTimeout(started, 5000),
+              "two threads run two jobs at once");
+        check(worker.Pending() == 2 && !worker.WaitIdle(10), "both running jobs are pending work");
+        SDL_SignalSemaphore(gate);
+        SDL_SignalSemaphore(gate);
+        check(worker.WaitIdle(5000) && worker.Pending() == 0, "two threads drain their jobs");
+        Job *before = job(started, gate);
+        worker.Submit(before);
+        check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
+        worker.Submit(job(started, gate), CKSDLGPU_JOB_NORMAL, before);
+        worker.Submit(job(started, gate), CKSDLGPU_JOB_NORMAL, before);
+        SDL_SignalSemaphore(gate);
+        check(SDL_WaitSemaphoreTimeout(started, 5000) && SDL_WaitSemaphoreTimeout(started, 5000),
+              "the jobs waiting for one that has run start on both threads");
+        SDL_SignalSemaphore(gate);
+        SDL_SignalSemaphore(gate);
+        worker.Stop();
+        check(!worker.Running() && deleted == 30 && worker.Pending() == 0,
+              "stopping two threads deletes their jobs");
         SDL_DestroySemaphore(started);
         SDL_DestroySemaphore(gate);
     }

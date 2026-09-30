@@ -9,36 +9,40 @@ static int Position(const XArray<CKSdlGpuJob *> &jobs, const CKSdlGpuJob *job)
     return -1;
 }
 
-bool CKSdlGpuWorker::Start(const char *name)
+bool CKSdlGpuWorker::Start(const char *name, int threads)
 {
-    if (Thread) return true;
+    if (Running()) return true;
     Lock = SDL_CreateMutex();
     Work = SDL_CreateCondition();
     Idle = SDL_CreateCondition();
     Stopping = false;
-    if (Lock && Work && Idle)
-        Thread = SDL_CreateThread(Main, name, this);
-    if (Thread) return true;
+    threads = threads < 1 ? 1 : threads > MaxThreads ? MaxThreads : threads;
+    while (Lock && Work && Idle && ThreadCount < threads) {
+        SDL_Thread *thread = SDL_CreateThread(Main, name, this);
+        if (!thread) break;
+        Threads[ThreadCount++] = thread;
+    }
+    if (Running()) return true;
     Stop();
     return false;
 }
 
 void CKSdlGpuWorker::Stop()
 {
-    if (Thread) {
+    if (Running()) {
         SDL_LockMutex(Lock);
         Stopping = true;
-        SDL_SignalCondition(Work);
+        SDL_BroadcastCondition(Work);
         SDL_UnlockMutex(Lock);
-        SDL_WaitThread(Thread, nullptr);
-        Thread = nullptr;
+        for (int i = 0; i < ThreadCount; ++i) SDL_WaitThread(Threads[i], nullptr);
+        ThreadCount = 0;
     }
     for (int i = 0; i < Queued.Size(); ++i) delete Queued[i];
     for (int i = 0; i < IdleQueued.Size(); ++i) delete IdleQueued[i];
     for (int i = 0; i < Waiting.Size(); ++i) delete Waiting[i];
     for (int i = 0; i < Finished.Size(); ++i) delete Finished[i];
     Queued.Clear(); IdleQueued.Clear(); Waiting.Clear(); Finished.Clear();
-    Active = false;
+    Active = 0;
     if (Idle) SDL_DestroyCondition(Idle);
     if (Work) SDL_DestroyCondition(Work);
     if (Lock) SDL_DestroyMutex(Lock);
@@ -49,7 +53,7 @@ bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
                             const CKSdlGpuJob *after)
 {
     if (!job) return false;
-    if (!Thread) {
+    if (!Running()) {
         delete job;
         return false;
     }
@@ -68,7 +72,7 @@ bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
 
 bool CKSdlGpuWorker::Promote(const CKSdlGpuJob *job)
 {
-    if (!Thread || !job) return false;
+    if (!Running() || !job) return false;
     bool promoted = false;
     SDL_LockMutex(Lock);
     // A waiting job is queued at its priority once the job it waits for has
@@ -90,7 +94,7 @@ bool CKSdlGpuWorker::Promote(const CKSdlGpuJob *job)
 
 CKSdlGpuJob *CKSdlGpuWorker::Collect()
 {
-    if (!Thread) return nullptr;
+    if (!Running()) return nullptr;
     CKSdlGpuJob *job = nullptr;
     SDL_LockMutex(Lock);
     if (Finished.Size() != 0) {
@@ -103,16 +107,16 @@ CKSdlGpuJob *CKSdlGpuWorker::Collect()
 
 int CKSdlGpuWorker::Pending() const
 {
-    if (!Thread) return 0;
+    if (!Running()) return 0;
     SDL_LockMutex(Lock);
-    const int pending = Queued.Size() + IdleQueued.Size() + Waiting.Size() + (Active ? 1 : 0);
+    const int pending = Queued.Size() + IdleQueued.Size() + Waiting.Size() + Active;
     SDL_UnlockMutex(Lock);
     return pending;
 }
 
 bool CKSdlGpuWorker::WaitIdle(Sint32 timeoutMs)
 {
-    if (!Thread) return true;
+    if (!Running()) return true;
     const Uint64 deadline = SDL_GetTicks() + Uint64(timeoutMs < 0 ? 0 : timeoutMs);
     SDL_LockMutex(Lock);
     while (!Idling()) {
@@ -139,12 +143,13 @@ void CKSdlGpuWorker::Release(const CKSdlGpuJob *job)
         const bool idle = waiting->Priority == CKSDLGPU_JOB_IDLE;
         (idle ? IdleQueued : Queued).Insert(front[idle]++, waiting);
         Waiting.RemoveAt(i);
+        SDL_SignalCondition(Work);
     }
 }
 
 bool CKSdlGpuWorker::Idling() const
 {
-    return !Active && Queued.Size() == 0 && IdleQueued.Size() == 0 && Waiting.Size() == 0;
+    return Active == 0 && Queued.Size() == 0 && IdleQueued.Size() == 0 && Waiting.Size() == 0;
 }
 
 int SDLCALL CKSdlGpuWorker::Main(void *data)
@@ -162,11 +167,11 @@ int SDLCALL CKSdlGpuWorker::Main(void *data)
             worker.Queued.Size() != 0 ? worker.Queued : worker.IdleQueued;
         CKSdlGpuJob *job = queue.Front();
         queue.PopFront();
-        worker.Active = true;
+        ++worker.Active;
         SDL_UnlockMutex(worker.Lock);
         job->Run();
         SDL_LockMutex(worker.Lock);
-        worker.Active = false;
+        --worker.Active;
         job->Ran = true;
         worker.Release(job);
         worker.Finished.PushBack(job);
