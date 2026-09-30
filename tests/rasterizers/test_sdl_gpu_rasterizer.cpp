@@ -287,22 +287,60 @@ int main()
         check(!worker.Promote(idle[0]), "a finished job is not promoted");
         for (int i = 0; i < finished.Size(); ++i) delete finished[i];
         finished.Clear();
+        Job *first = job(started, gate), *queued = job(), *next = job(), *last = job();
+        worker.Submit(first);
+        check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
+        worker.Submit(queued);
+        worker.Submit(next, CKSDLGPU_JOB_NORMAL, first);
+        worker.Submit(last, CKSDLGPU_JOB_NORMAL, next);
+        check(worker.Pending() == 4 && !worker.WaitIdle(10), "waiting jobs are pending work");
+        SDL_SignalSemaphore(gate);
+        check(worker.WaitIdle(5000) && worker.Pending() == 0, "worker drains waiting jobs");
+        worker.Collect(finished);
+        check(finished.Size() == 4 && first->Order < next->Order && next->Order < last->Order &&
+              last->Order < queued->Order,
+              "a job runs once the one it waits for has run, before the jobs queued");
+        Job *after = job();
+        check(worker.Submit(after, CKSDLGPU_JOB_NORMAL, first) && worker.WaitIdle(5000) &&
+              worker.Pending() == 0 && after->Order > last->Order,
+              "a job submitted after one that has run is queued");
+        worker.Collect(finished);
+        for (int i = 0; i < finished.Size(); ++i) delete finished[i];
+        finished.Clear();
+        Job *gated = job(started, gate), *idleFirst = job(), *compile = job(), *pipeline = job();
+        worker.Submit(gated);
+        check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
+        worker.Submit(idleFirst, CKSDLGPU_JOB_IDLE);
+        worker.Submit(compile, CKSDLGPU_JOB_IDLE);
+        worker.Submit(pipeline, CKSDLGPU_JOB_IDLE, compile);
+        check(worker.Promote(pipeline) && !worker.Promote(pipeline) && !worker.Promote(compile),
+              "a waiting job is promoted with the job it waits for");
+        SDL_SignalSemaphore(gate);
+        check(worker.WaitIdle(5000), "worker drains promoted waiting jobs");
+        worker.Collect(finished);
+        check(finished.Size() == 4 && compile->Order < pipeline->Order &&
+              pipeline->Order < idleFirst->Order,
+              "promoted waiting jobs run before queued idle jobs");
+        for (int i = 0; i < finished.Size(); ++i) delete finished[i];
+        finished.Clear();
+        Job *idleLast = job();
         worker.Submit(job(started, gate));
-        worker.Submit(job(), CKSDLGPU_JOB_IDLE);
+        worker.Submit(idleLast, CKSDLGPU_JOB_IDLE);
         worker.Submit(job());
+        worker.Submit(job(), CKSDLGPU_JOB_NORMAL, idleLast);
         check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
         worker.Collect(finished);
-        check(finished.Size() == 0 && worker.Pending() == 3 && !worker.WaitIdle(10),
+        check(finished.Size() == 0 && worker.Pending() == 4 && !worker.WaitIdle(10),
               "collection does not wait for a running job");
         SDL_SignalSemaphore(gate);
         worker.Stop();
-        check(!worker.Running() && deleted == 13 && worker.Pending() == 0,
-              "stopping deletes running, queued, idle and uncollected jobs");
-        check(!worker.Submit(job()) && deleted == 14, "a stopped worker rejects jobs");
+        check(!worker.Running() && deleted == 23 && worker.Pending() == 0,
+              "stopping deletes running, queued, idle, waiting and uncollected jobs");
+        check(!worker.Submit(job()) && deleted == 24, "a stopped worker rejects jobs");
         check(worker.Start("CKSdlGpuWorkerTest") && worker.Submit(job()) &&
               worker.WaitIdle(5000), "a stopped worker restarts");
         worker.Stop();
-        check(deleted == 15, "stopping deletes finished jobs");
+        check(deleted == 25, "stopping deletes finished jobs");
         SDL_DestroySemaphore(started);
         SDL_DestroySemaphore(gate);
     }

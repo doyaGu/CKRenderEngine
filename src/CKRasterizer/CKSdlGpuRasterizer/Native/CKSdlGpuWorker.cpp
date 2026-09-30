@@ -1,5 +1,14 @@
 #include "CKSdlGpuWorker.h"
 
+// The position of a job in a list, or -1.
+static int Position(const XArray<CKSdlGpuJob *> &jobs, const CKSdlGpuJob *job)
+{
+    for (int i = 0; i < jobs.Size(); ++i) {
+        if (jobs[i] == job) return i;
+    }
+    return -1;
+}
+
 bool CKSdlGpuWorker::Start(const char *name)
 {
     if (Thread) return true;
@@ -26,8 +35,9 @@ void CKSdlGpuWorker::Stop()
     }
     for (int i = 0; i < Queued.Size(); ++i) delete Queued[i];
     for (int i = 0; i < IdleQueued.Size(); ++i) delete IdleQueued[i];
+    for (int i = 0; i < Waiting.Size(); ++i) delete Waiting[i];
     for (int i = 0; i < Finished.Size(); ++i) delete Finished[i];
-    Queued.Clear(); IdleQueued.Clear(); Finished.Clear();
+    Queued.Clear(); IdleQueued.Clear(); Waiting.Clear(); Finished.Clear();
     Active = false;
     if (Idle) SDL_DestroyCondition(Idle);
     if (Work) SDL_DestroyCondition(Work);
@@ -35,7 +45,8 @@ void CKSdlGpuWorker::Stop()
     Idle = Work = nullptr; Lock = nullptr;
 }
 
-bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority)
+bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
+                            const CKSdlGpuJob *after)
 {
     if (!job) return false;
     if (!Thread) {
@@ -43,8 +54,14 @@ bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority)
         return false;
     }
     SDL_LockMutex(Lock);
-    (priority == CKSDLGPU_JOB_IDLE ? IdleQueued : Queued).PushBack(job);
-    SDL_SignalCondition(Work);
+    job->Priority = priority;
+    job->After = after && !after->Ran ? after : nullptr;
+    if (job->After) {
+        Waiting.PushBack(job);
+    } else {
+        (priority == CKSDLGPU_JOB_IDLE ? IdleQueued : Queued).PushBack(job);
+        SDL_SignalCondition(Work);
+    }
     SDL_UnlockMutex(Lock);
     return true;
 }
@@ -54,12 +71,18 @@ bool CKSdlGpuWorker::Promote(const CKSdlGpuJob *job)
     if (!Thread || !job) return false;
     bool promoted = false;
     SDL_LockMutex(Lock);
-    for (int i = 0; i < IdleQueued.Size(); ++i) {
-        if (IdleQueued[i] != job) continue;
-        Queued.PushBack(IdleQueued[i]);
-        IdleQueued.RemoveAt(i);
+    // A waiting job is queued at its priority once the job it waits for has
+    // run, so that one is promoted too.
+    for (int waiting; (waiting = Position(Waiting, job)) >= 0; job = Waiting[waiting]->After) {
+        if (Waiting[waiting]->Priority == CKSDLGPU_JOB_NORMAL) continue;
+        Waiting[waiting]->Priority = CKSDLGPU_JOB_NORMAL;
         promoted = true;
-        break;
+    }
+    const int idle = Position(IdleQueued, job);
+    if (idle >= 0) {
+        Queued.PushBack(IdleQueued[idle]);
+        IdleQueued.RemoveAt(idle);
+        promoted = true;
     }
     SDL_UnlockMutex(Lock);
     return promoted;
@@ -78,7 +101,7 @@ int CKSdlGpuWorker::Pending() const
 {
     if (!Thread) return 0;
     SDL_LockMutex(Lock);
-    const int pending = Queued.Size() + IdleQueued.Size() + (Active ? 1 : 0);
+    const int pending = Queued.Size() + IdleQueued.Size() + Waiting.Size() + (Active ? 1 : 0);
     SDL_UnlockMutex(Lock);
     return pending;
 }
@@ -88,14 +111,36 @@ bool CKSdlGpuWorker::WaitIdle(Sint32 timeoutMs)
     if (!Thread) return true;
     const Uint64 deadline = SDL_GetTicks() + Uint64(timeoutMs < 0 ? 0 : timeoutMs);
     SDL_LockMutex(Lock);
-    while (Active || Queued.Size() != 0 || IdleQueued.Size() != 0) {
+    while (!Idling()) {
         const Uint64 now = SDL_GetTicks();
         if (now >= deadline) break;
         SDL_WaitConditionTimeout(Idle, Lock, Sint32(deadline - now));
     }
-    const bool idle = !Active && Queued.Size() == 0 && IdleQueued.Size() == 0;
+    const bool idle = Idling();
     SDL_UnlockMutex(Lock);
     return idle;
+}
+
+void CKSdlGpuWorker::Release(const CKSdlGpuJob *job)
+{
+    // Ahead of the queued jobs, in the order they were submitted.
+    int front[2] = {};
+    for (int i = 0; i < Waiting.Size();) {
+        CKSdlGpuJob *waiting = Waiting[i];
+        if (waiting->After != job) {
+            ++i;
+            continue;
+        }
+        waiting->After = nullptr;
+        const bool idle = waiting->Priority == CKSDLGPU_JOB_IDLE;
+        (idle ? IdleQueued : Queued).Insert(front[idle]++, waiting);
+        Waiting.RemoveAt(i);
+    }
+}
+
+bool CKSdlGpuWorker::Idling() const
+{
+    return !Active && Queued.Size() == 0 && IdleQueued.Size() == 0 && Waiting.Size() == 0;
 }
 
 int SDLCALL CKSdlGpuWorker::Main(void *data)
@@ -118,8 +163,10 @@ int SDLCALL CKSdlGpuWorker::Main(void *data)
         job->Run();
         SDL_LockMutex(worker.Lock);
         worker.Active = false;
+        job->Ran = true;
+        worker.Release(job);
         worker.Finished.PushBack(job);
-        if (worker.Queued.Size() == 0 && worker.IdleQueued.Size() == 0)
+        if (worker.Idling())
             SDL_BroadcastCondition(worker.Idle);
     }
     SDL_UnlockMutex(worker.Lock);
