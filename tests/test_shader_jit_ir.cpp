@@ -531,6 +531,93 @@ void TestDump() {
     TestCheck(std::strcmp(dump.CStr(), expected) == 0, "the listing names every node");
 }
 
+void TestTextureAccess() {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord);
+    const CKJitValue direction = b.Swizzle(b.Input(kColor), "xyz");
+    const CKJitValue level = b.SampleLevel(0, CKJIT_SAMPLER_2D, uv, b.Float(1.5f));
+    const CKJitValue graded = b.SampleGrad(1, CKJIT_SAMPLER_CUBE, direction, b.Ddx(direction), b.Ddy(direction));
+    const CKJitValue lod = b.CalcLod(0, CKJIT_SAMPLER_2D, uv);
+    const CKJitValue loaded = b.Load(2, CKJIT_SAMPLER_3D, b.Construct({b.FloatToInt(direction), b.Int(1)}));
+    const CKJitValue fetched = b.Load(0, CKJIT_SAMPLER_2D, b.Construct({b.FloatToInt(uv), b.Int(0)}));
+    const CKJitValue size = b.TextureSize(1, CKJIT_SAMPLER_CUBE, b.Int(0));
+    const CKJitValue extent = b.TextureSize(2, CKJIT_SAMPLER_3D, b.Int(1));
+    const CKJitValue levels = b.TextureLevels(0, CKJIT_SAMPLER_2D);
+    TestCheck(IsOp(b, level, CKJIT_OP_SAMPLE_LEVEL) && b.TypeOf(level) == CKJIT_TYPE_FLOAT4 &&
+                  IsOp(b, graded, CKJIT_OP_SAMPLE_GRAD) && b.TypeOf(graded) == CKJIT_TYPE_FLOAT4,
+              "explicit-LOD samples are float4");
+    TestCheck(IsOp(b, lod, CKJIT_OP_CALC_LOD) && b.TypeOf(lod) == CKJIT_TYPE_FLOAT, "an LOD is a float");
+    TestCheck(IsOp(b, loaded, CKJIT_OP_LOAD) && b.TypeOf(loaded) == CKJIT_TYPE_FLOAT4 &&
+                  b.TypeOf(fetched) == CKJIT_TYPE_FLOAT4,
+              "loads are float4");
+    TestCheck(b.TypeOf(size) == CKJIT_TYPE_INT2 && b.TypeOf(extent) == CKJIT_TYPE_INT3 &&
+                  IsOp(b, levels, CKJIT_OP_LEVELS) && b.TypeOf(levels) == CKJIT_TYPE_INT,
+              "a size has the slot's dimensions and the mip count is an int");
+    TestCheck(b.Node(graded).Imm[0] == 1 && b.Node(graded).Imm[1] == CKJIT_SAMPLER_CUBE &&
+                  b.Node(levels).Imm[0] == 0 && b.Node(levels).Imm[1] == CKJIT_SAMPLER_2D,
+              "texture operations record slot and dim");
+    TestCheck(Same(b.TextureLevels(0, CKJIT_SAMPLER_2D), levels) && Same(b.CalcLod(0, CKJIT_SAMPLER_2D, uv), lod) &&
+                  !Same(b.TextureLevels(3, CKJIT_SAMPLER_2D), levels),
+              "equal texture operations are shared");
+    TestCheck(!b.Failed(), "texture access is well typed");
+
+    CKJitBuilder bad(4);
+    const CKJitValue badUv = bad.Input(kTexCoord);
+    const CKJitValue texel = bad.Construct({bad.FloatToInt(badUv), bad.Int(0)});
+    TestCheck(!bad.Load(0, CKJIT_SAMPLER_CUBE, texel).IsValid(), "cubes are not loaded from");
+    TestCheck(!bad.Load(0, CKJIT_SAMPLER_2D, bad.FloatToInt(badUv)).IsValid(), "a load takes the mip after the texel");
+    TestCheck(!bad.Load(0, CKJIT_SAMPLER_2D, bad.Construct({badUv, bad.Float(0.0f)})).IsValid(),
+              "load addresses are integers");
+    TestCheck(!bad.TextureSize(0, CKJIT_SAMPLER_2D, bad.Float(0.0f)).IsValid(), "mips are integers");
+    TestCheck(!bad.SampleLevel(0, CKJIT_SAMPLER_2D, badUv, bad.Int(0)).IsValid(), "LODs are floats");
+    TestCheck(!bad.SampleGrad(0, CKJIT_SAMPLER_2D, badUv, bad.Ddx(badUv), bad.Float(0.0f)).IsValid(),
+              "derivatives have the coordinate's type");
+    TestCheck(!bad.CalcLod(0, CKJIT_SAMPLER_3D, badUv).IsValid(), "volume LODs take three coordinates");
+    TestCheck(!bad.TextureLevels(CKJIT_MAX_SAMPLERS, CKJIT_SAMPLER_2D).IsValid(), "slots are bounded");
+    TestCheck(!bad.TextureLevels(0, (CKJitSamplerDim)3).IsValid(), "dimensions are known");
+    TestCheck(bad.Failed(), "ill-typed texture access fails the builder");
+
+    CKJitBuilder dims(4);
+    const CKJitValue cube = dims.Sample(1, CKJIT_SAMPLER_CUBE, dims.Swizzle(dims.Input(kColor), "xyz"), dims.Float(0.0f));
+    TestCheck(cube.IsValid() && !dims.TextureSize(1, CKJIT_SAMPLER_2D, dims.Int(0)).IsValid(),
+              "a slot keeps its dimension across operations");
+
+    CKJitFragmentShader shader;
+    const CKJitValue sampled = b.Add(b.Add(level, graded), b.Mul(loaded, fetched));
+    const CKJitValue sizes = b.IntToFloat(b.Construct({size, b.Component(extent, 2), levels}));
+    TestCheck(b.Finish(b.Add(b.Mul(sampled, sizes), lod), CKJitValue(), shader) && CKJitVerify(shader),
+              "texture access verifies");
+    const auto redimension = [](CKJitFragmentShader &s, uint32_t slot, CKJitSamplerDim dim) {
+        for (int i = 0; i < s.Nodes.Size(); ++i) {
+            if ((CKJitOpFlags(s.Nodes[i].Op) & CKJIT_OPFLAG_TEXTURE) != 0 && s.Nodes[i].Imm[0] == slot)
+                s.Nodes[i].Imm[1] = dim;
+        }
+    };
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { redimension(s, 2, CKJIT_SAMPLER_CUBE); }),
+              "no cube is loaded from");
+    TestCheck(VerifiesAfter(shader, [&](CKJitFragmentShader &s) { redimension(s, 1, CKJIT_SAMPLER_3D); }),
+              "other operations take any dimension");
+    TestCheck(!VerifiesAfter(shader,
+                             [&](CKJitFragmentShader &s) {
+                                 s.Nodes[FindOp(s, CKJIT_OP_LEVELS)].Imm[0] = CKJIT_MAX_SAMPLERS;
+                             }),
+              "every texture operation's slot is checked");
+    TestCheck(!VerifiesAfter(shader,
+                             [&](CKJitFragmentShader &s) { s.Nodes[FindOp(s, CKJIT_OP_SIZE)].Imm[1] = 2; }),
+              "every texture operation's slot has one dimension");
+
+    CKJitBuilder listed(4);
+    const CKJitValue mips = listed.TextureLevels(3, CKJIT_SAMPLER_3D);
+    const CKJitValue color = listed.Splat(listed.IntToFloat(mips), 4);
+    CKJitFragmentShader listing;
+    TestCheck(listed.Finish(color, CKJitValue(), listing), "the query finishes");
+    const char *expected = "%0 = LEVELS int slot 3 dim 2\n"
+                           "%1 = ITOF float %0\n"
+                           "%2 = SWIZZLE float4 %1 .xxxx\n"
+                           "color %2\n";
+    TestCheck(std::strcmp(CKJitDump(listing).CStr(), expected) == 0, "the listing names texture slots");
+}
+
 } // namespace
 
 int main() {
@@ -549,5 +636,6 @@ int main() {
     framework.Run("failure propagation", TestFailurePropagation);
     framework.Run("verify", TestVerify);
     framework.Run("dump", TestDump);
+    framework.Run("texture access", TestTextureAccess);
     return framework.ExitCode();
 }

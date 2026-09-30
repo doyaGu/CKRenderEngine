@@ -45,6 +45,7 @@ inline CKJitType CKJitFloatType(uint32_t components) { return CKJitMakeType(CKJI
 enum CKJitOpFlag {
     CKJIT_OPFLAG_COMMUTATIVE = 0x1,
     CKJIT_OPFLAG_VARIADIC = 0x2,
+    CKJIT_OPFLAG_TEXTURE = 0x4, // reads sampler slot Imm[0] of dimension Imm[1]
 };
 
 enum CKJitOp : uint8_t {
@@ -127,8 +128,9 @@ struct CKJitResourceLayout {
 
 // Checks what backends rely on without re-checking it: every operation has
 // its operand count, operands precede their users, input, uniform, swizzle
-// and sampler references are in range, a sampler slot has one dimension and
-// the outputs have their types. Operand typing is CKJitBuilder's contract.
+// and sampler references are in range, a sampler slot has one dimension, no
+// cube is loaded from and the outputs have their types. Operand typing is
+// CKJitBuilder's contract.
 bool CKJitVerify(const CKJitFragmentShader &shader);
 
 // Readable listing for tests and diagnostics.

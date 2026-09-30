@@ -81,6 +81,24 @@ CKJIT_OP(ALL,        1, 0)
 // one of the arms' width picks per component.
 CKJIT_OP(SELECT,     3, 0)
 
-// SAMPLE(coordinate, lodBias): implicit-LOD sample of sampler slot Imm[0]
-// with dimension Imm[1] (CKJitSamplerDim); always FLOAT4.
-CKJIT_OP(SAMPLE,     2, 0)
+// Texture access through sampler slot Imm[0] with dimension Imm[1]
+// (CKJitSamplerDim); a slot has one dimension. Coordinates are FLOAT2 for 2D
+// slots and FLOAT3 for cube directions and volume coordinates, derivatives
+// have the coordinate's type, LODs and biases are FLOATs.
+//
+// SAMPLE(coordinate, lodBias) takes the LOD from the coordinate's quad
+// derivatives, SAMPLE_LEVEL(coordinate, lod) and SAMPLE_GRAD(coordinate, dx,
+// dy) take it explicitly; all three are FLOAT4. CALC_LOD(coordinate) is the
+// FLOAT LOD SAMPLE would compute, before clamping.
+CKJIT_OP(SAMPLE,       2, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(SAMPLE_LEVEL, 2, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(SAMPLE_GRAD,  3, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(CALC_LOD,     1, CKJIT_OPFLAG_TEXTURE)
+
+// Unfiltered access, apart from the sampler state. LOAD(texel) reads the
+// FLOAT4 at an INT3 (x, y, mip) of a 2D slot or an INT4 (x, y, z, mip) of a
+// volume slot, for texels within the mip only (no cube). SIZE(mip) is the INT2
+// (INT3 for volumes) extent of a mip below LEVELS(), the INT mip count.
+CKJIT_OP(LOAD,         1, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(SIZE,         1, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(LEVELS,       0, CKJIT_OPFLAG_TEXTURE)

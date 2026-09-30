@@ -143,6 +143,10 @@ int SwizzleIndex(char c) {
     }
 }
 
+CKJitType CoordinateType(CKJitSamplerDim dim) {
+    return dim == CKJIT_SAMPLER_2D ? CKJIT_TYPE_FLOAT2 : CKJIT_TYPE_FLOAT3;
+}
+
 } // namespace
 
 int CKJitBuilder::NodeHash::operator()(const CKJitNode &node) const {
@@ -848,17 +852,57 @@ CKJitValue CKJitBuilder::Select(CKJitValue condition, CKJitValue whenTrue, CKJit
     return Emit(CKJIT_OP_SELECT, TypeOf(whenTrue), {condition, whenTrue, whenFalse});
 }
 
-CKJitValue CKJitBuilder::Sample(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lodBias) {
-    const CKJitType coordinateType = dim == CKJIT_SAMPLER_2D ? CKJIT_TYPE_FLOAT2 : CKJIT_TYPE_FLOAT3;
-    if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_3D || !Valid(coordinate) || !Valid(lodBias) ||
-        TypeOf(coordinate) != coordinateType || TypeOf(lodBias) != CKJIT_TYPE_FLOAT) {
+CKJitValue CKJitBuilder::Texture(CKJitOp op, CKJitType type, uint32_t slot, CKJitSamplerDim dim,
+                                 std::initializer_list<CKJitValue> operands) {
+    // One slot is one resource declaration.
+    if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_3D ||
+        (m_SamplerDims[slot] != 0xff && m_SamplerDims[slot] != dim)) {
         return Fail();
     }
-    // One slot is one resource declaration.
-    if (m_SamplerDims[slot] != 0xff && m_SamplerDims[slot] != dim)
-        return Fail();
     m_SamplerDims[slot] = dim;
-    return Emit(CKJIT_OP_SAMPLE, CKJIT_TYPE_FLOAT4, {coordinate, lodBias}, {slot, (uint32_t)dim});
+    return Emit(op, type, operands, {slot, (uint32_t)dim});
+}
+
+CKJitValue CKJitBuilder::Sample(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lodBias) {
+    if (!HasType(coordinate, CoordinateType(dim)) || !HasType(lodBias, CKJIT_TYPE_FLOAT))
+        return Fail();
+    return Texture(CKJIT_OP_SAMPLE, CKJIT_TYPE_FLOAT4, slot, dim, {coordinate, lodBias});
+}
+
+CKJitValue CKJitBuilder::SampleLevel(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lod) {
+    if (!HasType(coordinate, CoordinateType(dim)) || !HasType(lod, CKJIT_TYPE_FLOAT))
+        return Fail();
+    return Texture(CKJIT_OP_SAMPLE_LEVEL, CKJIT_TYPE_FLOAT4, slot, dim, {coordinate, lod});
+}
+
+CKJitValue CKJitBuilder::SampleGrad(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue dx,
+                                    CKJitValue dy) {
+    const CKJitType type = CoordinateType(dim);
+    if (!HasType(coordinate, type) || !HasType(dx, type) || !HasType(dy, type))
+        return Fail();
+    return Texture(CKJIT_OP_SAMPLE_GRAD, CKJIT_TYPE_FLOAT4, slot, dim, {coordinate, dx, dy});
+}
+
+CKJitValue CKJitBuilder::CalcLod(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate) {
+    if (!HasType(coordinate, CoordinateType(dim)))
+        return Fail();
+    return Texture(CKJIT_OP_CALC_LOD, CKJIT_TYPE_FLOAT, slot, dim, {coordinate});
+}
+
+CKJitValue CKJitBuilder::Load(uint32_t slot, CKJitSamplerDim dim, CKJitValue texel) {
+    if (dim == CKJIT_SAMPLER_CUBE || !HasType(texel, dim == CKJIT_SAMPLER_3D ? CKJIT_TYPE_INT4 : CKJIT_TYPE_INT3))
+        return Fail();
+    return Texture(CKJIT_OP_LOAD, CKJIT_TYPE_FLOAT4, slot, dim, {texel});
+}
+
+CKJitValue CKJitBuilder::TextureSize(uint32_t slot, CKJitSamplerDim dim, CKJitValue mip) {
+    if (!HasType(mip, CKJIT_TYPE_INT))
+        return Fail();
+    return Texture(CKJIT_OP_SIZE, dim == CKJIT_SAMPLER_3D ? CKJIT_TYPE_INT3 : CKJIT_TYPE_INT2, slot, dim, {mip});
+}
+
+CKJitValue CKJitBuilder::TextureLevels(uint32_t slot, CKJitSamplerDim dim) {
+    return Texture(CKJIT_OP_LEVELS, CKJIT_TYPE_INT, slot, dim, {});
 }
 
 bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentShader &out) const {

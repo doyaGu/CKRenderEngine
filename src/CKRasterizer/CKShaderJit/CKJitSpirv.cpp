@@ -45,6 +45,12 @@ enum {
     SpvOpCompositeConstruct = 80,
     SpvOpCompositeExtract = 81,
     SpvOpImageSampleImplicitLod = 87,
+    SpvOpImageSampleExplicitLod = 88,
+    SpvOpImageFetch = 95,
+    SpvOpImage = 100,
+    SpvOpImageQuerySizeLod = 103,
+    SpvOpImageQueryLod = 105,
+    SpvOpImageQueryLevels = 106,
     SpvOpConvertFToS = 110,
     SpvOpConvertSToF = 111,
     SpvOpFNegate = 127,
@@ -83,6 +89,7 @@ enum {
     SpvOpReturn = 253,
 
     SpvCapabilityShader = 1,
+    SpvCapabilityImageQuery = 50,
     SpvAddressingModelLogical = 0,
     SpvMemoryModelGLSL450 = 1,
     SpvExecutionModelFragment = 4,
@@ -108,6 +115,8 @@ enum {
     SpvDimCube = 3,
     SpvImageFormatUnknown = 0,
     SpvImageOperandsBiasMask = 0x1,
+    SpvImageOperandsLodMask = 0x2,
+    SpvImageOperandsGradMask = 0x4,
     SpvFunctionControlNone = 0,
     SpvSelectionControlNone = 0,
 
@@ -206,12 +215,16 @@ private:
 
     void DeclareInterface();
     uint32_t UniformBlock();
-    uint32_t SampledImage(uint32_t slot, uint32_t dim);
+    uint32_t ImageType(uint32_t dim);
+    uint32_t SampledImage(const CKJitNode &node);
+    uint32_t Image(const CKJitNode &node);
+    uint32_t Query(uint32_t opcode, uint32_t type, std::initializer_list<uint32_t> operands);
     uint32_t Value(uint32_t node) const { return m_Values[(int)node]; }
     uint32_t Translate(const CKJitNode &node);
     uint32_t Swizzle(const CKJitNode &node);
     uint32_t Select(const CKJitNode &node);
     uint32_t Sample(const CKJitNode &node);
+    uint32_t Load(const CKJitNode &node, uint32_t texel);
     uint32_t Modulo(const CKJitNode &node, uint32_t a, uint32_t b);
     uint32_t ShiftCount(uint32_t node);
 
@@ -225,11 +238,13 @@ private:
     XArray<uint32_t> m_Inputs;    // variable of every shader input
     XArray<uint32_t> m_Interface; // entry point interface: inputs and output
     uint32_t m_SampledImages[CKJIT_MAX_SAMPLERS]; // loaded on first use
+    uint32_t m_Images[CKJIT_MAX_SAMPLERS];        // taken from the sampled image on first use
     uint32_t m_Bound;
     uint32_t m_Main;
     uint32_t m_GlslImport;
     uint32_t m_Output;
     uint32_t m_UniformBlock;
+    bool m_ImageQuery; // a size, level or LOD query needs the capability
 };
 
 int SpirvEmitter::DeclarationHash::operator()(const Declaration &declaration) const {
@@ -245,8 +260,9 @@ int SpirvEmitter::DeclarationEqual::operator()(const Declaration &a, const Decla
 }
 
 SpirvEmitter::SpirvEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Output(0), m_UniformBlock(0) {
+    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Output(0), m_UniformBlock(0), m_ImageQuery(false) {
     std::memset(m_SampledImages, 0, sizeof(m_SampledImages));
+    std::memset(m_Images, 0, sizeof(m_Images));
     m_Main = NewId();
     m_GlslImport = NewId();
 }
@@ -369,20 +385,39 @@ uint32_t SpirvEmitter::UniformBlock() {
     return m_UniformBlock;
 }
 
-// The combined image sampler of a slot, declared and loaded when first
-// sampled. The body is one block until the discard, so the load dominates
-// every later use.
-uint32_t SpirvEmitter::SampledImage(uint32_t slot, uint32_t dim) {
+uint32_t SpirvEmitter::ImageType(uint32_t dim) {
+    static const uint32_t kDims[] = {SpvDim2D, SpvDimCube, SpvDim3D};
+    return DeclareType(SpvOpTypeImage, {FloatType(1), kDims[dim], 0, 0, 0, 1, SpvImageFormatUnknown});
+}
+
+// The combined image sampler of a node's slot, declared and loaded when first
+// used. The body is one block until the discard, so the load dominates every
+// later use.
+uint32_t SpirvEmitter::SampledImage(const CKJitNode &node) {
+    const uint32_t slot = node.Imm[0];
     if (m_SampledImages[slot] == 0) {
-        static const uint32_t kDims[] = {SpvDim2D, SpvDimCube, SpvDim3D};
-        const uint32_t image = DeclareType(SpvOpTypeImage, {FloatType(1), kDims[dim], 0, 0, 0, 1, SpvImageFormatUnknown});
-        const uint32_t sampledImage = DeclareType(SpvOpTypeSampledImage, {image});
+        const uint32_t sampledImage = DeclareType(SpvOpTypeSampledImage, {ImageType(node.Imm[1])});
         const uint32_t variable = Variable(SpvStorageClassUniformConstant, sampledImage);
         Decorate(variable, SpvDecorationDescriptorSet, m_Layout.SamplerSpace);
         Decorate(variable, SpvDecorationBinding, slot);
         m_SampledImages[slot] = Op(SpvOpLoad, sampledImage, {variable});
     }
     return m_SampledImages[slot];
+}
+
+// Fetches and size queries take the image without its sampler.
+uint32_t SpirvEmitter::Image(const CKJitNode &node) {
+    const uint32_t slot = node.Imm[0];
+    if (m_Images[slot] == 0) {
+        const uint32_t sampledImage = SampledImage(node);
+        m_Images[slot] = Op(SpvOpImage, ImageType(node.Imm[1]), {sampledImage});
+    }
+    return m_Images[slot];
+}
+
+uint32_t SpirvEmitter::Query(uint32_t opcode, uint32_t type, std::initializer_list<uint32_t> operands) {
+    m_ImageQuery = true;
+    return Op(opcode, type, operands);
 }
 
 uint32_t SpirvEmitter::Swizzle(const CKJitNode &node) {
@@ -416,13 +451,23 @@ uint32_t SpirvEmitter::Select(const CKJitNode &node) {
 }
 
 uint32_t SpirvEmitter::Sample(const CKJitNode &node) {
-    const uint32_t image = SampledImage(node.Imm[0], node.Imm[1]);
+    const uint32_t image = SampledImage(node);
     const uint32_t coordinate = Value(node.Operands[0]);
     const CKJitNode &bias = m_Shader.Nodes[(int)node.Operands[1]];
     if (bias.Op == CKJIT_OP_CONSTANT && (bias.Imm[0] & 0x7fffffffu) == 0)
         return Op(SpvOpImageSampleImplicitLod, FloatType(4), {image, coordinate});
     return Op(SpvOpImageSampleImplicitLod, FloatType(4),
               {image, coordinate, SpvImageOperandsBiasMask, Value(node.Operands[1])});
+}
+
+// A fetch takes the texel and its mip apart.
+uint32_t SpirvEmitter::Load(const CKJitNode &node, uint32_t texel) {
+    const uint32_t image = Image(node);
+    const uint32_t count = CKJitComponentCount(m_Shader.Nodes[(int)node.Operands[0]].Type) - 1;
+    const uint32_t selectors[5] = {texel, texel, 0, 1, 2};
+    const uint32_t coordinate = Op(SpvOpVectorShuffle, TypeOf(CKJitIntType(count)), selectors, count + 2);
+    const uint32_t mip = Op(SpvOpCompositeExtract, IntType(), {texel, count});
+    return Op(SpvOpImageFetch, TypeOf(node.Type), {image, coordinate, SpvImageOperandsLodMask, mip});
 }
 
 // Vulkan leaves OpSRem and OpSMod undefined for negative operands, so the
@@ -514,6 +559,19 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
     case CKJIT_OP_ALL: return Op(SpvOpAll, type, {a});
     case CKJIT_OP_SELECT: return Select(node);
     case CKJIT_OP_SAMPLE: return Sample(node);
+    case CKJIT_OP_SAMPLE_LEVEL:
+        return Op(SpvOpImageSampleExplicitLod, type, {SampledImage(node), a, SpvImageOperandsLodMask, b});
+    case CKJIT_OP_SAMPLE_GRAD:
+        return Op(SpvOpImageSampleExplicitLod, type,
+                  {SampledImage(node), a, SpvImageOperandsGradMask, b, Value(node.Operands[2])});
+    case CKJIT_OP_CALC_LOD: {
+        // The second component is the LOD before clamping.
+        const uint32_t lods = Query(SpvOpImageQueryLod, FloatType(2), {SampledImage(node), a});
+        return Op(SpvOpCompositeExtract, type, {lods, 1});
+    }
+    case CKJIT_OP_LOAD: return Load(node, a);
+    case CKJIT_OP_SIZE: return Query(SpvOpImageQuerySizeLod, type, {Image(node), a});
+    case CKJIT_OP_LEVELS: return Query(SpvOpImageQueryLevels, type, {Image(node)});
     case CKJIT_OP_COUNT: break;
     }
     return 0;
@@ -529,8 +587,8 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
     for (int i = 0; i < m_Shader.Nodes.Size(); ++i)
         m_Values[i] = Translate(m_Shader.Nodes[i]);
 
-    // Every value is computed before the discard, so no implicit-LOD sample
-    // or derivative runs after a quad neighbour was killed.
+    // Every value is computed before the discard, so no implicit-LOD sample,
+    // LOD query or derivative runs after a quad neighbour was killed.
     if (m_Shader.Discard.IsValid()) {
         const uint32_t kill = NewId();
         const uint32_t merge = NewId();
@@ -548,6 +606,8 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
     XArray<uint32_t> operands;
     SpirvSection preamble;
     preamble.Emit(SpvOpCapability, {SpvCapabilityShader});
+    if (m_ImageQuery)
+        preamble.Emit(SpvOpCapability, {SpvCapabilityImageQuery});
     operands.PushBack(m_GlslImport);
     AppendString(operands, "GLSL.std.450");
     preamble.Emit(SpvOpExtInstImport, operands.Begin(), (uint32_t)operands.Size());

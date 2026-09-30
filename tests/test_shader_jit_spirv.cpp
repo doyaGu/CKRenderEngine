@@ -37,8 +37,16 @@ enum {
     kOpAccessChain = 65,
     kOpDecorate = 71,
     kOpMemberDecorate = 72,
+    kOpVectorShuffle = 79,
     kOpCompositeConstruct = 80,
+    kOpCompositeExtract = 81,
     kOpImageSampleImplicitLod = 87,
+    kOpImageSampleExplicitLod = 88,
+    kOpImageFetch = 95,
+    kOpImage = 100,
+    kOpImageQuerySizeLod = 103,
+    kOpImageQueryLod = 105,
+    kOpImageQueryLevels = 106,
     kOpConvertFToS = 110,
     kOpConvertSToF = 111,
     kOpIAdd = 128,
@@ -81,6 +89,10 @@ enum {
     kDim2D = 1,
     kDim3D = 2,
     kDimCube = 3,
+    kImageOperandsBias = 0x1,
+    kImageOperandsLod = 0x2,
+    kImageOperandsGrad = 0x4,
+    kCapabilityImageQuery = 50,
 
     kGlslRoundEven = 2,
     kGlslFAbs = 4,
@@ -236,8 +248,12 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue base = b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
     const CKJitValue cube = b.Sample(9, CKJIT_SAMPLER_CUBE, direction, bias);
     const CKJitValue volume = b.Sample(13, CKJIT_SAMPLER_3D, b.Saturate(direction), bias);
+    const CKJitValue lodSample = b.SampleLevel(9, CKJIT_SAMPLER_CUBE, direction, b.CalcLod(0, CKJIT_SAMPLER_2D, uv));
+    const CKJitValue gradSample =
+        b.SampleGrad(13, CKJIT_SAMPLER_3D, direction, b.Swizzle(tint, "xyz"), b.Neg(b.Swizzle(params, "xyz")));
 
     CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
+    value = b.Add(value, b.Mul(lodSample, gradSample));
     value = b.Div(value, b.Max(b.Abs(flat), b.Float(0.001f)));
     value = b.Min(value, b.Neg(diffuse));
     const CKJitValue rounded = b.Add(b.RoundEven(value), b.Mul(b.Floor(diffuse), b.Ceil(tint)));
@@ -263,13 +279,19 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue inside = b.All(b.IntLessEqual(offset, extent));
     const CKJitValue moved = b.Any(b.IntNotEqual(offset, texel));
     const CKJitValue low = b.IntLess(b.Component(wrapped, 0), b.Int(16));
+    const CKJitValue fetched = b.Load(0, CKJIT_SAMPLER_2D, b.Construct({wrapped, mask}));
+    const CKJitValue slice = b.Load(13, CKJIT_SAMPLER_3D, b.Construct({wrapped, lanes, mask}));
+    const CKJitValue extents = b.Construct({b.TextureSize(9, CKJIT_SAMPLER_CUBE, mask),
+                                            b.Component(b.TextureSize(13, CKJIT_SAMPLER_3D, lanes), 2),
+                                            b.TextureLevels(0, CKJIT_SAMPLER_2D)});
+    const CKJitValue texels = b.Add(b.Mul(fetched, slice), b.IntToFloat(extents));
 
     const CKJitValue flags = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
     const CKJitValue condition = b.Or(flags, b.And(b.And(inside, moved), low));
     const CKJitValue alpha = b.Select(condition, shade, spot);
     const CKJitValue ramp = b.Construct({b.IntToFloat(offset), b.Swizzle(rounded, "zw")});
     const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
-    color = b.Mul(b.Select(condition, graded, rounded), alpha);
+    color = b.Mul(b.Select(condition, graded, b.Add(rounded, texels)), alpha);
     discard = b.Less(b.Component(color, 3), b.Component(position, 2));
 }
 
@@ -410,10 +432,14 @@ void TestLowering() {
     for (int i = 0; i < module.Size(); ++i) {
         if (module[i].Opcode == kOpImageSampleImplicitLod) {
             unbiased += module[i].Count == 4 ? 1 : 0;
-            biased += module[i].Count == 6 && module[i].Operands[4] == 0x1u ? 1 : 0;
+            biased += module[i].Count == 6 && module[i].Operands[4] == kImageOperandsBias ? 1 : 0;
         }
     }
     TestCheck(unbiased == 1 && biased == 2, "a zero bias is omitted, others are Bias operands");
+    TestCheck(module.Count(kOpImageSampleExplicitLod) == 2 && module.Count(kOpImageQueryLod) == 1 &&
+                  module.Count(kOpImageFetch) == 2 && module.Count(kOpImageQuerySizeLod) == 2 &&
+                  module.Count(kOpImageQueryLevels) == 1,
+              "texture operations map to single instructions");
 
     const uint32_t boolType = module.TypeId(kOpTypeBool, {});
     const uint32_t bool4Type = module.TypeId(kOpTypeVector, {kAny, boolType, 4});
@@ -425,7 +451,7 @@ void TestLowering() {
 
     TestCheck(module.Count(kOpIAdd) == 2 && module.Count(kOpISub) == 1 && module.Count(kOpIMul) == 1 &&
                   module.CountGlsl(kGlslSMin) == 1 && module.CountGlsl(kGlslSMax) == 1 &&
-                  module.Count(kOpConvertSToF) == 1,
+                  module.Count(kOpConvertSToF) == 2,
               "integer arithmetic maps to single instructions");
     TestCheck(module.Count(kOpSLessThan) == 1 && module.Count(kOpSLessThanEqual) == 1 &&
                   module.Count(kOpINotEqual) == 1 && module.Count(kOpAny) == 1 && module.Count(kOpAll) == 1,
@@ -446,7 +472,7 @@ void TestLowering() {
     }
     TestCheck(shifts == 3 && masked == 3, "shift counts use their low five bits");
 
-    // The discard branches around a kill after every sample.
+    // The discard branches around a kill after every sample and LOD query.
     const int branch = module.Find(kOpBranchConditional);
     TestCheck(module.Count(kOpSelectionMerge) == 1 && branch > 0 &&
                   module[branch - 1].Opcode == kOpSelectionMerge,
@@ -459,10 +485,88 @@ void TestLowering() {
     int lastQuad = -1;
     for (int i = 0; i < module.Size(); ++i) {
         const uint32_t opcode = module[i].Opcode;
-        if (opcode == kOpImageSampleImplicitLod || opcode == kOpDPdx || opcode == kOpDPdy)
+        if (opcode == kOpImageSampleImplicitLod || opcode == kOpImageQueryLod || opcode == kOpDPdx ||
+            opcode == kOpDPdy)
             lastQuad = i;
     }
-    TestCheck(lastQuad < branch, "every sample and derivative runs before the discard");
+    TestCheck(lastQuad < branch, "every sample, LOD query and derivative runs before the discard");
+}
+
+void TestTextureAccess() {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue direction = b.Input(kTexCoord1);
+    const CKJitValue position = b.Input(kFragCoord);
+
+    // Slots 0 and 6 are only loaded from and queried, 1 and 4 are sampled.
+    const CKJitValue mip = b.IntSub(b.TextureLevels(0, CKJIT_SAMPLER_2D), b.Int(1));
+    const CKJitValue last = b.IntSub(b.TextureSize(0, CKJIT_SAMPLER_2D, mip), b.Int(1));
+    const CKJitValue texel = b.IntMin(b.FloatToInt(b.Swizzle(position, "xy")), last);
+    const CKJitValue fetched = b.Load(0, CKJIT_SAMPLER_2D, b.Construct({texel, mip}));
+    const CKJitValue slice = b.Load(6, CKJIT_SAMPLER_3D, b.Construct({b.FloatToInt(direction), b.Int(0)}));
+    const CKJitValue lod = b.CalcLod(1, CKJIT_SAMPLER_2D, uv);
+    const CKJitValue level = b.SampleLevel(1, CKJIT_SAMPLER_2D, uv, b.Max(lod, b.Float(0.0f)));
+    const CKJitValue graded = b.SampleGrad(4, CKJIT_SAMPLER_CUBE, direction, b.Ddx(direction), b.Ddy(direction));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Add(b.Mul(fetched, slice), b.Mul(level, graded)), b.Less(lod, b.Float(0.0f)), words),
+              "texture access compiles");
+    Save("texture_access", words);
+
+    const Module module(words);
+    TestCheck(module.WellFormed(), "the module is well formed");
+    TestCheck(module.Count(kOpCapability, {kCapabilityImageQuery}) == 1, "queries need the ImageQuery capability");
+    const uint32_t intType = module.TypeId(kOpTypeInt, {kAny, 32, 1});
+    const uint32_t floatType = module.TypeId(kOpTypeFloat, {});
+
+    const int lodSample = module.Find(kOpImageSampleExplicitLod, {kAny, kAny, kAny, kAny, kImageOperandsLod});
+    TestCheck(lodSample >= 0 && module[lodSample].Count == 6 &&
+                  module.Count(kOpExtInst, {kAny, module[lodSample].Operands[5], module.GlslImport(), kGlslNMax}) == 1,
+              "an explicit LOD is a Lod operand");
+    const int gradSample = module.Find(kOpImageSampleExplicitLod, {kAny, kAny, kAny, kAny, kImageOperandsGrad});
+    TestCheck(gradSample >= 0 && module[gradSample].Count == 7 &&
+                  module.Count(kOpDPdx, {kAny, module[gradSample].Operands[5]}) == 1 &&
+                  module.Count(kOpDPdy, {kAny, module[gradSample].Operands[6]}) == 1,
+              "explicit derivatives are Grad operands");
+    const int query = module.Find(kOpImageQueryLod);
+    TestCheck(query >= 0 && module[query].Operands[0] == module.TypeId(kOpTypeVector, {kAny, floatType, 2}) &&
+                  module.Count(kOpCompositeExtract, {floatType, kAny, module[query].Operands[1], 1}) == 1,
+              "the LOD is the query's unclamped second component");
+    TestCheck(module.Count(kOpImageQuerySizeLod, {module.TypeId(kOpTypeVector, {kAny, intType, 2})}) == 1 &&
+                  module.Count(kOpImageQueryLevels, {intType}) == 1,
+              "size queries return the extent and the mip count");
+
+    TestCheck(module.Count(kOpImage) == 2, "loaded and queried slots take their image once");
+    int fetches = 0;
+    for (int i = 0; i < module.Size(); ++i) {
+        const uint32_t opcode = module[i].Opcode;
+        if (opcode != kOpImageFetch && opcode != kOpImageQuerySizeLod && opcode != kOpImageQueryLevels)
+            continue;
+        TestCheck(module.Count(kOpImage, {kAny, module[i].Operands[2]}) == 1,
+                  "fetches and size queries take the image without its sampler");
+        if (opcode != kOpImageFetch)
+            continue;
+        ++fetches;
+        const int coordinate = module.Find(kOpVectorShuffle, {kAny, module[i].Operands[3]});
+        const int lodOperand = module.Find(kOpCompositeExtract, {intType, module[i].Operands[5]});
+        TestCheck(module[i].Count == 6 && module[i].Operands[4] == kImageOperandsLod && coordinate >= 0 &&
+                      lodOperand >= 0 && module[coordinate].Operands[2] == module[lodOperand].Operands[2] &&
+                      module[lodOperand].Operands[3] == module[coordinate].Count - 4 &&
+                      module[coordinate].Operands[0] ==
+                          module.TypeId(kOpTypeVector, {kAny, intType, module[coordinate].Count - 4}),
+                  "a fetch splits the texel into its coordinate and the mip after it");
+    }
+    TestCheck(fetches == 2, "every load is a fetch");
+    const int branch = module.Find(kOpBranchConditional);
+    TestCheck(query >= 0 && query < branch, "the LOD query runs before the discard");
+
+    CKJitBuilder plain(4);
+    const CKJitValue origin = plain.FloatToInt(plain.Swizzle(plain.Input(kFragCoord), "xy"));
+    const CKJitValue loaded = plain.Load(0, CKJIT_SAMPLER_2D, plain.Construct({origin, plain.Int(0)}));
+    const CKJitValue sampled = plain.SampleLevel(1, CKJIT_SAMPLER_2D, plain.Input(kTexCoord0), plain.Float(0.0f));
+    XArray<uint32_t> unqueried;
+    TestCheck(Compile(plain, plain.Add(loaded, sampled), CKJitValue(), unqueried), "fetches and explicit samples compile");
+    Save("unqueried_access", unqueried);
+    TestCheck(Module(unqueried).Count(kOpCapability) == 1, "fetches and explicit samples need no query capability");
 }
 
 void TestIntegerLowering() {
@@ -585,6 +689,7 @@ int main(int argc, char **argv) {
     framework.Run("interface", TestInterface);
     framework.Run("resources", TestResources);
     framework.Run("lowering", TestLowering);
+    framework.Run("texture access", TestTextureAccess);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("declarations are unique", TestDeclarationsAreUnique);
     framework.Run("constant outputs", TestConstantOutputs);

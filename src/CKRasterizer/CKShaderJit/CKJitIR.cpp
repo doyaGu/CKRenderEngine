@@ -95,6 +95,15 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
             if (node.Operands[operand] >= i)
                 return false;
         }
+        if ((kOps[node.Op].Flags & CKJIT_OPFLAG_TEXTURE) != 0) {
+            const uint32_t slot = node.Imm[0];
+            const uint32_t dim = node.Imm[1];
+            if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_3D || (dims[slot] != 0xff && dims[slot] != dim) ||
+                (node.Op == CKJIT_OP_LOAD && dim == CKJIT_SAMPLER_CUBE)) {
+                return false;
+            }
+            dims[slot] = (uint8_t)dim;
+        }
         switch (node.Op) {
         case CKJIT_OP_INPUT:
             if (node.Imm[0] >= (uint32_t)shader.Inputs.Size() ||
@@ -114,14 +123,6 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
                 if (node.Imm[c] >= CKJitComponentCount(source))
                     return false;
             }
-            break;
-        }
-        case CKJIT_OP_SAMPLE: {
-            const uint32_t slot = node.Imm[0];
-            const uint32_t dim = node.Imm[1];
-            if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_3D || (dims[slot] != 0xff && dims[slot] != dim))
-                return false;
-            dims[slot] = (uint8_t)dim;
             break;
         }
         default:
@@ -160,10 +161,9 @@ XString CKJitDump(const CKJitFragmentShader &shader) {
             for (uint32_t c = 0; c < CKJitComponentCount(node.Type); ++c)
                 out << kComponents[node.Imm[c] & 3];
             break;
-        case CKJIT_OP_SAMPLE:
-            Append(out, " slot %u dim %u", node.Imm[0], node.Imm[1]);
-            break;
         default:
+            if ((kOps[node.Op].Flags & CKJIT_OPFLAG_TEXTURE) != 0)
+                Append(out, " slot %u dim %u", node.Imm[0], node.Imm[1]);
             break;
         }
         out << "\n";

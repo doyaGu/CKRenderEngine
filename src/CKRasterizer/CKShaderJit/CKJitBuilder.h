@@ -104,7 +104,17 @@ public:
     // A BOOL condition picks whole arms; a vector one picks per component
     // (scalar arms splat to its width).
     CKJitValue Select(CKJitValue condition, CKJitValue whenTrue, CKJitValue whenFalse);
+
+    // Texture access through a sampler slot, with FLOAT2 coordinates for 2D
+    // slots and FLOAT3 for cube and volume slots. A slot keeps the dimension
+    // it is first used with.
     CKJitValue Sample(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lodBias);
+    CKJitValue SampleLevel(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lod);
+    CKJitValue SampleGrad(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue dx, CKJitValue dy);
+    CKJitValue CalcLod(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate);
+    CKJitValue Load(uint32_t slot, CKJitSamplerDim dim, CKJitValue texel); // the mip last, as HLSL Load
+    CKJitValue TextureSize(uint32_t slot, CKJitSamplerDim dim, CKJitValue mip);
+    CKJitValue TextureLevels(uint32_t slot, CKJitSamplerDim dim);
 
     // Constant inspection: every component of a constant of the kind is x;
     // false for non-constant values.
@@ -145,9 +155,12 @@ private:
     CKJitValue IntBinary(CKJitOp op, CKJitValue a, CKJitValue b);
     CKJitValue BoolBinary(CKJitOp op, CKJitValue a, CKJitValue b);
     CKJitValue Reduce(CKJitOp op, CKJitValue x);
+    CKJitValue Texture(CKJitOp op, CKJitType type, uint32_t slot, CKJitSamplerDim dim,
+                       std::initializer_list<CKJitValue> operands);
     bool Operands(CKJitType kind, CKJitValue &a, CKJitValue &b);
     bool Unify(CKJitValue &a, CKJitValue &b);
     bool Valid(CKJitValue value) const { return value.Id < (uint32_t)m_Nodes.Size(); }
+    bool HasType(CKJitValue value, CKJitType type) const { return Valid(value) && TypeOf(value) == type; }
     bool IsOp(CKJitValue value, CKJitOp op) const { return m_Nodes[value.Id].Op == op; }
     ComponentRef Source(CKJitValue value, uint32_t component) const;
     CKJitValue Fail();
@@ -156,7 +169,7 @@ private:
     XArray<CKJitInput> m_Inputs;
     XSHashTable<uint32_t, CKJitNode, NodeHash, NodeEqual> m_Lookup;
     uint32_t m_UniformVec4Count;
-    uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS]; // 0xff until a slot is sampled
+    uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS]; // 0xff until a slot is used
     bool m_Failed;
 };
 

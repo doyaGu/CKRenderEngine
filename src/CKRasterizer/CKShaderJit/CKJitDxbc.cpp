@@ -29,6 +29,7 @@ enum : uint32_t {
     DxbcOpIne = 39,
     DxbcOpIshr = 42,
     DxbcOpItof = 43,
+    DxbcOpLd = 45,
     DxbcOpLog = 47,
     DxbcOpLt = 49,
     DxbcOpMin = 51,
@@ -39,11 +40,14 @@ enum : uint32_t {
     DxbcOpNe = 57,
     DxbcOpNot = 59,
     DxbcOpOr = 60,
+    DxbcOpResinfo = 61,
     DxbcOpRet = 62,
     DxbcOpRoundNe = 64,
     DxbcOpRoundNi = 65,
     DxbcOpRoundPi = 66,
     DxbcOpSample = 69,
+    DxbcOpSampleL = 72,
+    DxbcOpSampleD = 73,
     DxbcOpSampleB = 74,
     DxbcOpSqrt = 75,
     DxbcOpUdiv = 78,
@@ -56,6 +60,7 @@ enum : uint32_t {
     DxbcOpDclOutput = 101,
     DxbcOpDclTemps = 104,
     DxbcOpDclGlobalFlags = 106,
+    DxbcOpLod = 108,
     DxbcOpDerivRtxCoarse = 122,
     DxbcOpDerivRtyCoarse = 124,
 
@@ -63,6 +68,7 @@ enum : uint32_t {
     DxbcRefactoringAllowed = 1u << 11,
     DxbcSaturate = 1u << 13,
     DxbcTestNonZero = 1u << 18,
+    DxbcResinfoUint = 2u << 11,
     DxbcInterpolationConstant = 1u << 11,
     DxbcInterpolationLinear = 2u << 11,
     DxbcInterpolationLinearNoPerspective = 4u << 11,
@@ -263,6 +269,45 @@ uint32_t DxbcTemps::Allocate(uint32_t count, uint32_t lanes[4]) {
     return (uint32_t)reg;
 }
 
+// Components for the operands a texture instruction must move first: it
+// takes no source modifiers. The instruction reads its operands before it
+// writes, so the destination lends its components while it has enough and
+// is a temporary; the others are allocated and released with the scratch.
+class DxbcScratch {
+public:
+    DxbcScratch(DxbcTemps &temps, const DxbcValue &dest) : m_Temps(temps), m_Dest(dest), m_Lent(0), m_Allocated(0) {}
+    ~DxbcScratch() {
+        for (uint32_t i = 0; i < m_Allocated; ++i)
+            m_Temps.Release(m_Allocations[i].Index, LaneMask(m_Allocations[i]));
+    }
+
+    DxbcValue Take(uint32_t count);
+
+private:
+    DxbcTemps &m_Temps;
+    const DxbcValue m_Dest;
+    uint32_t m_Lent;
+    DxbcValue m_Allocations[3]; // one per operand of the widest instruction
+    uint32_t m_Allocated;
+};
+
+DxbcValue DxbcScratch::Take(uint32_t count) {
+    DxbcValue value;
+    std::memset(&value, 0, sizeof(value));
+    value.File = DxbcOperandTemp;
+    value.Count = count;
+    if (m_Dest.File == DxbcOperandTemp && m_Lent + count <= m_Dest.Count) {
+        value.Index = m_Dest.Index;
+        for (uint32_t k = 0; k < count; ++k)
+            value.Lanes[k] = m_Dest.Lanes[m_Lent + k];
+        m_Lent += count;
+        return value;
+    }
+    value.Index = m_Temps.Allocate(count, value.Lanes);
+    m_Allocations[m_Allocated++] = value;
+    return value;
+}
+
 struct DxbcSignatureElement {
     const char *Name;
     uint32_t SemanticIndex;
@@ -372,7 +417,10 @@ private:
     void Reduce(uint32_t opcode, const DxbcValue &dest, const DxbcValue &a);
     void Construct(const CKJitNode &node, const DxbcValue &dest);
     void Select(const CKJitNode &node, const DxbcValue &dest);
-    void Sample(const CKJitNode &node, const DxbcValue &dest);
+    DxbcValue Unmodified(const DxbcValue &value, DxbcScratch &scratch);
+    void Resource(uint32_t slot, const DxbcValue &dest, uint32_t first);
+    void Sampler(uint32_t slot);
+    void Texture(const CKJitNode &node, const DxbcValue &dest);
 
     void Declare(DxbcStream &out) const;
     void Signatures(XArray<uint32_t> &input, XArray<uint32_t> &output) const;
@@ -387,16 +435,19 @@ private:
     int m_InputByRegister[DxbcMaxInputRegisters]; // input index, or -1
     uint8_t m_InputReads[DxbcMaxInputRegisters];  // components read of every input register
     uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS];    // 0xff for an unused slot
-    uint32_t m_SamplerIds[CKJIT_MAX_SAMPLERS];    // range ids, dense over the used slots
+    uint32_t m_SampledSlots;                      // mask of the slots whose sampler is read
+    uint32_t m_ResourceIds[CKJIT_MAX_SAMPLERS];   // range ids, dense over the used slots
+    uint32_t m_SamplerIds[CKJIT_MAX_SAMPLERS];    // range ids, dense over the sampled slots
     bool m_ColorInOutput;
     bool m_ReadsUniforms;
 };
 
 DxbcEmitter::DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_ColorInOutput(false), m_ReadsUniforms(false) {
+    : m_Shader(shader), m_Layout(layout), m_SampledSlots(0), m_ColorInOutput(false), m_ReadsUniforms(false) {
     std::memset(m_InputByRegister, 0xff, sizeof(m_InputByRegister));
     std::memset(m_InputReads, 0, sizeof(m_InputReads));
     std::memset(m_SamplerDims, 0xff, sizeof(m_SamplerDims));
+    std::memset(m_ResourceIds, 0, sizeof(m_ResourceIds));
     std::memset(m_SamplerIds, 0, sizeof(m_SamplerIds));
 }
 
@@ -430,10 +481,16 @@ void DxbcEmitter::Analyze() {
         case CKJIT_OP_ABS:
             m_Roots[(int)i] = m_Roots[(int)node.Operands[0]];
             continue;
-        case CKJIT_OP_SAMPLE:
+        case CKJIT_OP_LOAD:
+        case CKJIT_OP_SIZE:
+        case CKJIT_OP_LEVELS: // the texture without its sampler
             m_SamplerDims[node.Imm[0]] = (uint8_t)node.Imm[1];
             break;
         default:
+            if ((CKJitOpFlags(node.Op) & CKJIT_OPFLAG_TEXTURE) != 0) {
+                m_SamplerDims[node.Imm[0]] = (uint8_t)node.Imm[1];
+                m_SampledSlots |= 1u << node.Imm[0];
+            }
             break;
         }
         m_Roots[(int)i] = i;
@@ -452,10 +509,12 @@ void DxbcEmitter::Analyze() {
     if (m_Shader.Discard.IsValid() && m_Roots[(int)m_Shader.Discard.Id] != NoRoot)
         m_LastUse[(int)m_Roots[(int)m_Shader.Discard.Id]] = count;
 
-    uint32_t id = 0;
+    uint32_t resources = 0, samplers = 0;
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
         if (m_SamplerDims[slot] != 0xff)
-            m_SamplerIds[slot] = id++;
+            m_ResourceIds[slot] = resources++;
+        if ((m_SampledSlots >> slot & 1u) != 0)
+            m_SamplerIds[slot] = samplers++;
     }
 }
 
@@ -666,50 +725,82 @@ void DxbcEmitter::Select(const CKJitNode &node, const DxbcValue &dest) {
     m_Code.Close();
 }
 
-// Sample operands take no modifiers: a modified coordinate or bias first
-// moves to a scratch register, the destination unless that is the output.
-void DxbcEmitter::Sample(const CKJitNode &node, const DxbcValue &dest) {
-    const uint32_t slot = node.Imm[0];
-    DxbcValue coordinate = m_Values[(int)node.Operands[0]];
-    DxbcValue bias = m_Values[(int)node.Operands[1]];
-    const CKJitNode &biasNode = m_Shader.Nodes[(int)node.Operands[1]];
-    const bool biased = biasNode.Op != CKJIT_OP_CONSTANT || (biasNode.Imm[0] & 0x7fffffffu) != 0;
+DxbcValue DxbcEmitter::Unmodified(const DxbcValue &value, DxbcScratch &scratch) {
+    if (value.Modifier == 0)
+        return value;
+    const DxbcValue moved = scratch.Take(value.Count);
+    Unary(DxbcOpMov, moved, value);
+    return moved;
+}
 
-    DxbcValue scratch = dest;
-    const bool spill = coordinate.Modifier != 0 || (biased && bias.Modifier != 0);
-    const bool borrowed = spill && dest.File != DxbcOperandTemp;
-    if (borrowed)
-        scratch.Index = m_Temps.Allocate(4, scratch.Lanes);
-    scratch.File = DxbcOperandTemp;
-    if (coordinate.Modifier != 0) {
-        DxbcValue moved = scratch;
-        moved.Count = coordinate.Count;
-        Unary(DxbcOpMov, moved, coordinate);
-        coordinate = moved;
+// A slot's texture; its swizzle routes result component first + k to the
+// destination's component k.
+void DxbcEmitter::Resource(uint32_t slot, const DxbcValue &dest, uint32_t first) {
+    uint32_t swizzle = DxbcSwizzleIdentity;
+    for (uint32_t k = 0; k < dest.Count; ++k) {
+        const uint32_t shift = 2 * dest.Lanes[k];
+        swizzle = (swizzle & ~(3u << shift)) | (first + k) << shift;
     }
-    if (biased && bias.Modifier != 0) {
-        DxbcValue moved = scratch;
-        moved.Count = 1;
-        moved.Lanes[0] = scratch.Lanes[3]; // coordinates have at most three components
-        Unary(DxbcOpMov, moved, bias);
-        bias = moved;
-    }
-
-    m_Code.Open(biased ? DxbcOpSampleB : DxbcOpSample);
-    Dest(dest);
-    Source(coordinate, Leading(coordinate.Count));
-    m_Code.Token(DxbcOperandResource | DxbcComponents4 | DxbcSelectSwizzle | DxbcSwizzleIdentity << DxbcSelectorShift |
-                 DxbcIndex2D);
-    m_Code.Token(m_SamplerIds[slot]);
+    m_Code.Token(DxbcOperandResource | DxbcComponents4 | DxbcSelectSwizzle | swizzle << DxbcSelectorShift | DxbcIndex2D);
+    m_Code.Token(m_ResourceIds[slot]);
     m_Code.Token(slot);
+}
+
+void DxbcEmitter::Sampler(uint32_t slot) {
     m_Code.Token(DxbcOperandSampler | DxbcIndex2D);
     m_Code.Token(m_SamplerIds[slot]);
     m_Code.Token(slot);
-    if (biased)
-        Source(bias, Leading(1));
+}
+
+// dest, address, texture[, sampler][, extra operands]: the bias, the LOD or
+// the two derivatives. Loads and size queries leave the sampler out.
+void DxbcEmitter::Texture(const CKJitNode &node, const DxbcValue &dest) {
+    DxbcScratch scratch(m_Temps, dest);
+    DxbcValue operands[3] = {};
+    for (uint32_t i = 0; i < node.OperandCount; ++i)
+        operands[i] = Unmodified(m_Values[(int)node.Operands[i]], scratch);
+
+    uint32_t opcode = DxbcOpSample;
+    DxbcValue address = operands[0];
+    DxbcReads reads = Leading(address.Count);
+    uint32_t first = 0; // the result component of the value's first
+    uint32_t extra = 0;
+    bool sampled = true;
+    switch (node.Op) {
+    case CKJIT_OP_SAMPLE: {
+        const CKJitNode &bias = m_Shader.Nodes[(int)node.Operands[1]];
+        extra = bias.Op != CKJIT_OP_CONSTANT || (bias.Imm[0] & 0x7fffffffu) != 0 ? 1 : 0;
+        opcode = extra != 0 ? DxbcOpSampleB : DxbcOpSample;
+        break;
+    }
+    case CKJIT_OP_SAMPLE_LEVEL: opcode = DxbcOpSampleL; extra = 1; break;
+    case CKJIT_OP_SAMPLE_GRAD: opcode = DxbcOpSampleD; extra = 2; break;
+    case CKJIT_OP_CALC_LOD: opcode = DxbcOpLod; first = 1; break; // x is clamped, y is not
+    case CKJIT_OP_LOAD:
+        // The mip is the address's w, after the texel.
+        opcode = DxbcOpLd;
+        reads = address.Count == 3 ? DxbcReads{{0, 1, -1, 2}} : Leading(4);
+        sampled = false;
+        break;
+    case CKJIT_OP_SIZE: opcode = DxbcOpResinfo | DxbcResinfoUint; sampled = false; break;
+    default: // LEVELS: the mip count is the w of every mip's extent
+        opcode = DxbcOpResinfo | DxbcResinfoUint;
+        address = Immediate(1, 0);
+        reads = Leading(1);
+        first = 3;
+        sampled = false;
+        break;
+    }
+
+    m_Code.Open(opcode);
+    Dest(dest);
+    Source(address, reads);
+    Resource(node.Imm[0], dest, first);
+    if (sampled)
+        Sampler(node.Imm[0]);
+    for (uint32_t i = 1; i <= extra; ++i)
+        Source(operands[i], Leading(operands[i].Count));
     m_Code.Close();
-    if (borrowed)
-        m_Temps.Release(scratch.Index, 0xf);
 }
 
 void DxbcEmitter::Translate(uint32_t index) {
@@ -777,7 +868,13 @@ void DxbcEmitter::Translate(uint32_t index) {
     case CKJIT_OP_ANY: Reduce(DxbcOpOr, dest, a); break;
     case CKJIT_OP_ALL: Reduce(DxbcOpAnd, dest, a); break;
     case CKJIT_OP_SELECT: Select(node, dest); break;
-    case CKJIT_OP_SAMPLE: Sample(node, dest); break;
+    case CKJIT_OP_SAMPLE:
+    case CKJIT_OP_SAMPLE_LEVEL:
+    case CKJIT_OP_SAMPLE_GRAD:
+    case CKJIT_OP_CALC_LOD:
+    case CKJIT_OP_LOAD:
+    case CKJIT_OP_SIZE:
+    case CKJIT_OP_LEVELS: Texture(node, dest); break;
     default: break; // leaves and views are handled above
     }
 
@@ -799,7 +896,7 @@ void DxbcEmitter::Declare(DxbcStream &out) const {
                                                   m_Layout.UniformSpace});
     }
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
-        if (m_SamplerDims[slot] != 0xff) {
+        if ((m_SampledSlots >> slot & 1u) != 0) {
             out.Instruction(DxbcOpDclSampler,
                             {DxbcOperandSampler | range, m_SamplerIds[slot], slot, slot, m_Layout.SamplerSpace});
         }
@@ -808,7 +905,7 @@ void DxbcEmitter::Declare(DxbcStream &out) const {
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
         if (m_SamplerDims[slot] != 0xff) {
             out.Instruction(DxbcOpDclResource | kDimensions[m_SamplerDims[slot]],
-                            {DxbcOperandResource | range, m_SamplerIds[slot], slot, slot, DxbcReturnTypeFloat,
+                            {DxbcOperandResource | range, m_ResourceIds[slot], slot, slot, DxbcReturnTypeFloat,
                              m_Layout.SamplerSpace});
         }
     }
@@ -870,8 +967,8 @@ bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
     for (uint32_t i = 0; i < (uint32_t)m_Shader.Nodes.Size(); ++i)
         Translate(i);
 
-    // Every value is computed before the discard, so no implicit-LOD sample
-    // or derivative runs after a quad neighbour was discarded.
+    // Every value is computed before the discard, so no implicit-LOD sample,
+    // LOD query or derivative runs after a quad neighbour was discarded.
     if (m_Shader.Discard.IsValid()) {
         m_Code.Open(DxbcOpDiscard | DxbcTestNonZero);
         Source(m_Values[(int)m_Shader.Discard.Id], Leading(1));
