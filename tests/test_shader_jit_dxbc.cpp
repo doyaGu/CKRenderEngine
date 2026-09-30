@@ -17,11 +17,13 @@ namespace {
 enum {
     kOpAdd = 0,
     kOpAnd = 1,
+    kOpBreakc = 3,
     kOpDiscard = 13,
     kOpDiv = 14,
     kOpDp3 = 16,
     kOpElse = 18,
     kOpEndIf = 21,
+    kOpEndLoop = 22,
     kOpEq = 24,
     kOpExp = 25,
     kOpFtoi = 27,
@@ -39,6 +41,7 @@ enum {
     kOpItof = 43,
     kOpLd = 45,
     kOpLog = 47,
+    kOpLoop = 48,
     kOpLt = 49,
     kOpMin = 51,
     kOpMax = 52,
@@ -385,7 +388,8 @@ private:
 // How many leading operands are destinations: imul and udiv write two
 // results, the first of which the backend discards.
 uint32_t DestinationCount(uint32_t opcode) {
-    if (opcode == kOpDiscard || opcode == kOpRet || opcode == kOpIf || opcode == kOpElse || opcode == kOpEndIf)
+    if (opcode == kOpDiscard || opcode == kOpRet || opcode == kOpIf || opcode == kOpElse || opcode == kOpEndIf ||
+        opcode == kOpLoop || opcode == kOpBreakc || opcode == kOpEndLoop)
         return 0;
     return opcode == kOpImul || opcode == kOpUdiv ? 2 : 1;
 }
@@ -395,16 +399,21 @@ struct Written {
     uint8_t Lanes[64];
 };
 
-// What was written before a region, and on its then arm.
+// What was written before a region, and on its then arm; for a loop, on
+// every path breaking out of it.
 struct RegionWrites {
     Written Before;
-    Written Then;
+    Written Then; // or where a loop breaks
     bool InElse;
+    bool IsLoop;
+    bool Breaks;
 };
 
 // What the runtime and the driver rely on: the digest, the chunks, declared
-// inputs, resources and temporaries, balanced regions, and temporaries
-// written on every path before they are read.
+// inputs, resources and temporaries, balanced regions and loops, and
+// temporaries written on every path before they are read. A loop's body sees
+// what was written before it, as later iterations only add writes; only its
+// breaks leave it.
 void CheckProgram(const XArray<uint32_t> &words) {
     uint32_t digest[4];
     CKJitDxbcDigest(words.Begin(), (uint32_t)words.Size(), digest);
@@ -464,9 +473,10 @@ void CheckProgram(const XArray<uint32_t> &words) {
     for (int i = program.FirstCode(); i < program.Size(); ++i) {
         const Instruction &instruction = program[i];
         if (instruction.Opcode == kOpElse || instruction.Opcode == kOpEndIf) {
-            TestCheck(regions.Size() != 0 && !regions.Back().InElse == (instruction.Opcode == kOpElse),
+            TestCheck(regions.Size() != 0 && !regions.Back().IsLoop &&
+                          !regions.Back().InElse == (instruction.Opcode == kOpElse),
                       "regions are balanced");
-            if (regions.Size() == 0)
+            if (regions.Size() == 0 || regions.Back().IsLoop)
                 continue;
             RegionWrites &region = regions.Back();
             if (instruction.Opcode == kOpElse) {
@@ -479,6 +489,22 @@ void CheckProgram(const XArray<uint32_t> &words) {
                     written.Lanes[r] &= other.Lanes[r];
                 regions.PopBack();
             }
+            continue;
+        }
+        if (instruction.Opcode == kOpLoop) {
+            TestCheck(instruction.OperandCount == 0, "a loop has no operands");
+            const RegionWrites loop = {written, {}, false, true, false};
+            regions.PushBack(loop);
+            continue;
+        }
+        if (instruction.Opcode == kOpEndLoop) {
+            TestCheck(instruction.OperandCount == 0 && regions.Size() != 0 && regions.Back().IsLoop &&
+                          regions.Back().Breaks,
+                      "loops are balanced and break");
+            if (regions.Size() == 0 || !regions.Back().IsLoop)
+                continue;
+            written = regions.Back().Then;
+            regions.PopBack();
             continue;
         }
         const uint32_t first = DestinationCount(instruction.Opcode);
@@ -534,15 +560,29 @@ void CheckProgram(const XArray<uint32_t> &words) {
                 output |= dest.Selector;
             }
         }
-        if (instruction.Opcode == kOpIf) {
+        if (instruction.Opcode == kOpIf || instruction.Opcode == kOpBreakc) {
             TestCheck(instruction.OperandCount == 1 && (instruction.Operands[0].Components == 1 ||
                                                         instruction.Operands[0].Selection == kSelectOne),
-                      "a region tests one component");
-            const RegionWrites region = {written, {}, false};
+                      "a region or break tests one component");
+        }
+        if (instruction.Opcode == kOpIf) {
+            const RegionWrites region = {written, {}, false, false, false};
             regions.PushBack(region);
         }
+        if (instruction.Opcode == kOpBreakc) {
+            int loop = regions.Size() - 1;
+            while (loop >= 0 && !regions[loop].IsLoop)
+                --loop;
+            TestCheck(loop >= 0, "breaks are in loops");
+            if (loop < 0)
+                continue;
+            RegionWrites &exits = regions[loop];
+            for (uint32_t r = 0; r < 64; ++r)
+                exits.Then.Lanes[r] = exits.Breaks ? (uint8_t)(exits.Then.Lanes[r] & written.Lanes[r]) : written.Lanes[r];
+            exits.Breaks = true;
+        }
     }
-    TestCheck(regions.Size() == 0, "every region ends");
+    TestCheck(regions.Size() == 0, "every region and loop ends");
     TestCheck(output == 0xf, "every colour component is written");
 }
 
@@ -655,6 +695,41 @@ void BuildRegions(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
     b.EndIf({fallback, b.Int(3), b.Bool(false), diffuse}, results);
     color = b.Mul(b.Add(results[0], results[3]), b.IntToFloat(results[1]));
     discard = results[2];
+}
+
+// A loop nesting a region and another loop, with carried values of every
+// kind: a pair swapping each iteration, one whose next is from before the loop
+// and one the nested loop starts. The body reads a step computed before the
+// loop. A loop whose constant count exceeds its bound follows. The outer count
+// is uniform, so its body samples.
+void BuildLoops(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
+    const CKJitValue diffuse = b.Input(kColor0);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue params = b.Uniform(0);
+    const CKJitValue step = b.Mul(b.Swizzle(b.Uniform(1), "xy"), b.Swizzle(params, "zw"));
+    const CKJitValue decay = b.Component(params, 1);
+    const CKJitValue swapped = b.Swizzle(uv, "yx");
+    CKJitValue carried[5];
+    const CKJitValue index =
+        b.Loop(b.FloatToInt(b.Component(params, 0)), 8, {diffuse, b.Float(1.0f), uv, swapped, b.Bool(false)}, carried);
+    const CKJitValue offset = b.Add(carried[2], b.Mul(step, b.Splat(b.IntToFloat(index), 2)));
+    const CKJitValue texel = b.Sample(0, CKJIT_SAMPLER_2D, offset, b.Float(0.0f));
+    b.If(b.IntLess(index, b.Int(2)));
+    const CKJitValue near = b.Mul(texel, b.Splat(carried[1], 4));
+    b.Else({near});
+    const CKJitValue weighted = b.EndIf(texel);
+    CKJitValue taps;
+    const CKJitValue tap = b.Loop(b.FloatToInt(b.Mul(b.Component(texel, 3), b.Float(4.0f))), 4, {index}, &taps);
+    const CKJitValue counted = b.EndLoop(b.IntAdd(taps, tap));
+    const CKJitValue sum = b.Add(carried[0], b.Mul(weighted, b.Splat(b.IntToFloat(counted), 4)));
+    const CKJitValue faint = b.Or(carried[4], b.Less(b.Component(texel, 3), b.Float(0.25f)));
+    CKJitValue results[5];
+    b.EndLoop({sum, decay, carried[3], carried[2], faint}, results);
+    CKJitValue fade;
+    b.Loop(b.Int(6), 3, {results[1]}, &fade);
+    const CKJitValue faded = b.EndLoop(b.Mul(fade, decay));
+    color = b.Mul(b.Add(results[0], b.Construct({results[2], results[3]})), b.Splat(faded, 4));
+    discard = results[4];
 }
 
 void TestContainerLayout() {
@@ -1134,6 +1209,126 @@ void TestIfRegions() {
               "a colour PHI nothing else reads is moved into the output by each arm");
 }
 
+// Whether a source reads exactly the temporary components a destination
+// writes.
+bool ReadsWritten(const Operand &source, const Operand &dest) {
+    return source.Type == kOperandTemp && dest.Type == kOperandTemp && source.IndexCount >= 1 &&
+           dest.IndexCount >= 1 && source.Indices[0] == dest.Indices[0] && source.Lanes() == dest.Selector;
+}
+
+bool IsImmediate(const Operand &operand, uint32_t value) {
+    return operand.Type == kOperandImmediate32 && operand.ValueCount == 1 && operand.Values[0] == value;
+}
+
+// Whether a loop's body, up to the moves into its carried values, never
+// writes temporary components it reads before writing them: the counter, the
+// trips, the carried values and the values from before the loop survive every
+// iteration.
+bool KeepsLiveValues(const Program &program, int loop, int moves) {
+    uint8_t written[64] = {}, live[64] = {};
+    for (int i = loop + 1; i < moves; ++i) {
+        const Instruction &instruction = program[i];
+        const uint32_t first = DestinationCount(instruction.Opcode);
+        for (uint32_t k = first; k < instruction.OperandCount; ++k) {
+            const Operand &source = instruction.Operands[k];
+            if (source.Type == kOperandTemp && source.Indices[0] < 64)
+                live[source.Indices[0]] |= (uint8_t)(source.Lanes() & ~written[source.Indices[0]]);
+        }
+        if (first == 0 || instruction.OperandCount < first)
+            continue;
+        const Operand &dest = instruction.Operands[first - 1];
+        if (dest.Type != kOperandTemp || dest.Indices[0] >= 64)
+            continue;
+        if ((dest.Selector & live[dest.Indices[0]]) != 0)
+            return false;
+        written[dest.Indices[0]] |= (uint8_t)dest.Selector;
+    }
+    return true;
+}
+
+void TestLoops() {
+    CKJitBuilder b(4);
+    CKJitValue color, discard;
+    BuildLoops(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "loops compile");
+    Save("loops", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const int outer = program.Find(kOpLoop);
+    const int inner = program.Find(kOpLoop, outer + 1);
+    const int innerEnd = program.Find(kOpEndLoop);
+    const int outerEnd = program.Find(kOpEndLoop, innerEnd + 1);
+    const int fixed = program.Find(kOpLoop, outerEnd + 1);
+    const int fixedEnd = program.Find(kOpEndLoop, outerEnd + 1);
+    const bool nested = outer >= 7 && outer < inner && inner < innerEnd && innerEnd < outerEnd && outerEnd < fixed &&
+                        fixed < fixedEnd;
+    TestCheck(nested && program.Count(kOpLoop) == 3 && program.Count(kOpBreakc, kTestNonZero) == 3 &&
+                  program.Count(kOpEndLoop) == 3,
+              "loops nest as loop blocks, each breaking once");
+    if (!nested)
+        return;
+
+    // Before a loop: moves starting the carried values, the trips unless the
+    // count is constant, and the counter's start.
+    const int loops[3] = {outer, inner, fixed};
+    const int ends[3] = {outerEnd, innerEnd, fixedEnd};
+    const uint32_t trips[3] = {8, 4, 3};
+    Operand counters[3];
+    for (int k = 0; k < 3; ++k) {
+        const Instruction &start = program[loops[k] - 1];
+        const Instruction &test = program[loops[k] + 1];
+        const Instruction &exit = program[loops[k] + 2];
+        const Instruction &step = program[ends[k] - 1];
+        counters[k] = start.Operands[0];
+        TestCheck(start.Opcode == kOpMov && IsImmediate(start.Operands[1], 0) && test.Opcode == kOpIge &&
+                      ReadsWritten(test.Operands[1], counters[k]) && exit.Opcode == kOpBreakc &&
+                      ReadsWritten(exit.Operands[0], test.Operands[0]),
+                  "a loop starts its counter at zero and breaks once it reaches the trips");
+        TestCheck(step.Opcode == kOpIadd && step.Operands[0].Is(kOperandTemp, counters[k].Indices[0]) &&
+                      step.Operands[0].Selector == counters[k].Selector && ReadsWritten(step.Operands[1], counters[k]) &&
+                      IsImmediate(step.Operands[2], 1),
+                  "each iteration ends counting");
+        if (k == 2) {
+            TestCheck(IsImmediate(test.Operands[2], trips[k]),
+                      "a constant count takes the bound's place when that is lower");
+        } else {
+            const Instruction &bounded = program[loops[k] - 2];
+            TestCheck(bounded.Opcode == kOpImin && IsImmediate(bounded.Operands[2], trips[k]) &&
+                          ReadsWritten(test.Operands[2], bounded.Operands[0]),
+                      "a runtime count is bounded before the loop");
+        }
+    }
+
+    // The outer loop's carried values: moves before it start them, moves
+    // ending each iteration take the nexts in order, after a copy of the one
+    // the swap overwrites first.
+    const int copy = outerEnd - 7;
+    TestCheck(MovesAlike(program, outerEnd - 1, outer - 2, 5), "each iteration ends moving the nexts into place");
+    const Operand &first = program[outer - 5].Operands[0];
+    const Operand &second = program[outer - 4].Operands[0];
+    TestCheck(program[copy].Opcode == kOpMov && ReadsWritten(program[copy].Operands[1], first) &&
+                  ReadsWritten(program[outerEnd - 4].Operands[1], second) &&
+                  ReadsWritten(program[outerEnd - 3].Operands[1], program[copy].Operands[0]),
+              "a swapped pair moves through a copy");
+    TestCheck(program[copy - 1].Opcode != kOpMov, "only the value the swap overwrites is copied");
+    TestCheck(KeepsLiveValues(program, outer, outerEnd - 6) && KeepsLiveValues(program, inner, innerEnd - 2) &&
+                  KeepsLiveValues(program, fixed, fixedEnd - 2),
+              "a body never overwrites what later iterations read");
+
+    TestCheck(program[inner - 3].Opcode == kOpMov && ReadsWritten(program[inner - 3].Operands[1], counters[0]),
+              "the nested loop carries the index from the body around it");
+    const int sample = program.Find(kOpSample);
+    TestCheck(sample > outer && sample < inner, "the uniform loop's body samples");
+    TestCheck(program[fixed - 2].Opcode == kOpMov &&
+                  ReadsWritten(program[fixed - 2].Operands[1], program[outer - 6].Operands[0]),
+              "a RESULT reads its carried value's register after the loop");
+    const int kill = program.Find(kOpDiscard);
+    TestCheck(kill > fixedEnd && ReadsWritten(program[kill].Operands[0], program[outer - 3].Operands[0]),
+              "the discard tests a carried value after the loops");
+}
+
 void TestIntegerLowering() {
     CKJitBuilder b(4);
     const CKJitValue position = b.Input(kFragCoord);
@@ -1375,6 +1570,7 @@ int main(int argc, char **argv) {
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
     framework.Run("if regions", TestIfRegions);
+    framework.Run("loops", TestLoops);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("register allocation", TestRegisterAllocation);
     framework.Run("color in output", TestColorInOutput);

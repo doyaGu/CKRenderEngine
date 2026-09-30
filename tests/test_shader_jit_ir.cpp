@@ -858,6 +858,325 @@ void TestIfRegions() {
               "regions end and the outputs are after them");
 }
 
+int CountOps(const CKJitFragmentShader &shader, CKJitOp op) {
+    int count = 0;
+    for (int i = 0; i < shader.Nodes.Size(); ++i)
+        count += shader.Nodes[i].Op == op ? 1 : 0;
+    return count;
+}
+
+// The loop a carried value heads.
+CKJitValue LoopOf(const CKJitBuilder &b, CKJitValue carried) {
+    return CKJitValue{b.Node(carried).Operands[1]};
+}
+
+void TestLoops() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Input(kColor);
+    const CKJitValue tint = b.Uniform(1);
+    const CKJitValue scaled = b.Mul(color, tint);
+    const CKJitValue red = b.Component(tint, 0);
+    const CKJitValue taps = b.IntMin(b.FloatToInt(b.Mul(b.Component(color, 0), b.Float(8.0f))), b.Int(16));
+    CKJitValue carried[3];
+    const CKJitValue index = b.Loop(taps, 16, {scaled, red, red}, carried);
+    TestCheck(IsOp(b, index, CKJIT_OP_INDEX) && b.TypeOf(index) == CKJIT_TYPE_INT, "a loop's index is an INT");
+    TestCheck(IsOp(b, carried[0], CKJIT_OP_CARRY) && b.TypeOf(carried[0]) == CKJIT_TYPE_FLOAT4 &&
+                  IsOp(b, carried[1], CKJIT_OP_CARRY) && IsOp(b, carried[2], CKJIT_OP_CARRY) &&
+                  !Same(carried[1], carried[2]),
+              "carried values have their initials' types and are never shared");
+    TestCheck(b.Node(LoopOf(b, carried[0])).Imm[0] == 16, "a loop keeps its bound");
+    const CKJitValue lit = b.Mul(scaled, b.Uniform(2));
+    TestCheck(Same(b.Mul(b.Uniform(2), scaled), lit) && Same(b.Mul(tint, color), scaled),
+              "a body shares its values and those before the loop");
+    const CKJitValue weight = b.Mul(carried[1], b.Component(tint, 1));
+    const CKJitValue sum = b.Add(carried[0], b.Mul(lit, b.Splat(b.Mul(weight, b.IntToFloat(index)), 4)));
+    CKJitValue inner;
+    b.Loop(b.IntAdd(index, b.Int(1)), 4, {weight}, &inner);
+    const CKJitValue halved = b.EndLoop(b.Mul(inner, b.Float(0.5f)));
+    TestCheck(IsOp(b, halved, CKJIT_OP_RESULT) && !b.Failed(), "loops nest");
+    CKJitValue results[3];
+    b.EndLoop({sum, halved, b.Component(tint, 2)}, results);
+    TestCheck(IsOp(b, results[0], CKJIT_OP_RESULT) && b.TypeOf(results[0]) == CKJIT_TYPE_FLOAT4 &&
+                  IsOp(b, results[1], CKJIT_OP_RESULT) && IsOp(b, results[2], CKJIT_OP_RESULT),
+              "every carried value has its RESULT, of a next from the body or before the loop");
+    const CKJitValue after = b.Mul(scaled, b.Uniform(2));
+    TestCheck(after.IsValid() && !Same(after, lit), "a closed body's values are not shared");
+
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(b.Add(results[0], b.Splat(results[1], 4)), CKJitValue(), shader) && CKJitVerify(shader),
+              "loops verify");
+    TestCheck(CountOps(shader, CKJIT_OP_LOOP) == 2 && CountOps(shader, CKJIT_OP_RESULT) == 4,
+              "a kept loop keeps every carried value's RESULT");
+
+    CKJitBuilder folded(4);
+    const CKJitValue x = folded.Input(kColor);
+    CKJitValue kept;
+    TestCheck(Same(folded.Loop(folded.Int(0), 8, {x}, &kept), folded.Int(0)) && Same(kept, x),
+              "a constant count of at most one iteration carries the initials");
+    const CKJitValue skipped = folded.Mul(kept, folded.Uniform(0));
+    TestCheck(Same(folded.EndLoop(skipped), x), "a loop running no iteration keeps the initials");
+    TestCheck(Same(folded.Mul(x, folded.Uniform(0)), skipped), "a flattened body is built around the loop");
+    folded.Loop(folded.Int(5), 1, {x}, &kept);
+    const CKJitValue once = folded.Add(kept, folded.Uniform(1));
+    TestCheck(Same(folded.EndLoop(once), once), "a single iteration keeps the nexts, also when the bound cuts the count");
+    folded.Loop(folded.Int(-3), 8, {x}, &kept);
+    TestCheck(Same(folded.EndLoop(once), x), "a negative count runs no iteration");
+    CKJitFragmentShader flat;
+    TestCheck(folded.Finish(folded.Add(skipped, once), CKJitValue(), flat) && FindOp(flat, CKJIT_OP_LOOP) < 0,
+              "constant counts of at most one iteration leave no loop");
+
+    CKJitBuilder clamped(4);
+    const CKJitValue y = clamped.Input(kColor);
+    CKJitValue twice;
+    clamped.Loop(clamped.Int(3), 2, {y}, &twice);
+    const CKJitValue loop = LoopOf(clamped, twice);
+    TestCheck(IsOp(clamped, loop, CKJIT_OP_LOOP) && Same(CKJitValue{clamped.Node(loop).Operands[0]}, clamped.Int(2)),
+              "a constant count takes the bound's place when that is lower");
+    clamped.EndLoop(clamped.Add(twice, y));
+    CKJitValue runtime;
+    clamped.Loop(clamped.FloatToInt(clamped.Component(y, 0)), 1, {y}, &runtime);
+    TestCheck(IsOp(clamped, runtime, CKJIT_OP_CARRY), "a runtime count keeps its loop with a bound of one");
+    TestCheck(IsOp(clamped, clamped.EndLoop(clamped.Mul(runtime, y)), CKJIT_OP_RESULT) && !clamped.Failed(),
+              "loops follow one another");
+
+    CKJitBuilder counted(4);
+    CKJitValue value;
+    counted.Loop(counted.Float(2.0f), 4, {counted.Input(kColor)}, &value);
+    TestCheck(counted.Failed() && !value.IsValid(), "a count is an INT");
+    CKJitBuilder bounded(4);
+    bounded.Loop(bounded.Int(2), 0, {}, nullptr);
+    CKJitBuilder unbounded(4);
+    unbounded.Loop(unbounded.Int(2), 0x80000000u, {}, nullptr);
+    TestCheck(bounded.Failed() && unbounded.Failed(), "a bound is 1..2^31 - 1");
+    CKJitBuilder initial(4);
+    initial.Loop(initial.Int(2), 4, {CKJitValue()}, &value);
+    TestCheck(initial.Failed(), "initials are valid");
+
+    CKJitBuilder typed(4);
+    const CKJitValue z = typed.Input(kColor);
+    typed.Loop(typed.FloatToInt(typed.Component(z, 0)), 4, {z}, &value);
+    TestCheck(!typed.EndLoop(typed.Component(value, 0)).IsValid() && typed.Failed(),
+              "a next has its carried value's type");
+    CKJitBuilder paired(4);
+    const CKJitValue w = paired.Input(kColor);
+    CKJitValue pair[2];
+    paired.Loop(paired.FloatToInt(paired.Component(w, 0)), 4, {w, w}, pair);
+    TestCheck(!paired.EndLoop(pair[0]).IsValid() && paired.Failed(), "every carried value has a next");
+
+    CKJitBuilder scoped(4);
+    const CKJitValue v = scoped.Input(kColor);
+    scoped.Loop(scoped.FloatToInt(scoped.Component(v, 0)), 4, {v}, &value);
+    const CKJitValue squared = scoped.Mul(value, value);
+    scoped.EndLoop(squared);
+    TestCheck(!scoped.Add(squared, v).IsValid() && scoped.Failed(), "a body's values are not seen after it");
+
+    CKJitBuilder elsewise(4);
+    elsewise.Loop(elsewise.FloatToInt(elsewise.Component(elsewise.Input(kColor), 0)), 4, {}, nullptr);
+    elsewise.Else({});
+    CKJitBuilder endif(4);
+    endif.Loop(endif.FloatToInt(endif.Component(endif.Input(kColor), 0)), 4, {}, nullptr);
+    TestCheck(!endif.EndIf(endif.Float(0.0f)).IsValid() && endif.Failed() && elsewise.Failed(),
+              "a loop has no else and ends with an ENDLOOP");
+    CKJitBuilder crossed(4);
+    crossed.If(crossed.Less(crossed.Component(crossed.Input(kColor), 0), crossed.Float(0.5f)));
+    TestCheck(!crossed.EndLoop(crossed.Float(0.0f)).IsValid() && crossed.Failed(), "an ENDLOOP needs its loop");
+    CKJitBuilder open(4);
+    const CKJitValue u = open.Input(kColor);
+    open.Loop(open.FloatToInt(open.Component(u, 0)), 4, {}, nullptr);
+    CKJitFragmentShader unfinished;
+    TestCheck(!open.Finish(u, CKJitValue(), unfinished), "an open loop does not finish");
+
+    // Argument evaluation order is unspecified: create the nodes one by one.
+    CKJitBuilder listed(4);
+    const CKJitValue uv = listed.Input(kTexCoord);
+    const CKJitValue s = listed.Component(uv, 0);
+    const CKJitValue steps = listed.FloatToInt(s);
+    CKJitValue total;
+    const CKJitValue i = listed.Loop(steps, 8, {s}, &total);
+    const CKJitValue offset = listed.IntToFloat(i);
+    const CKJitValue next = listed.Add(total, offset);
+    const CKJitValue result = listed.EndLoop(next);
+    CKJitFragmentShader listing;
+    TestCheck(listed.Finish(listed.Splat(result, 4), CKJitValue(), listing) && CKJitVerify(listing),
+              "the loop finishes");
+    const char *expected = "%0 = INPUT float2 TEXCOORD4\n"
+                           "%1 = SWIZZLE float %0 .x\n"
+                           "%2 = FTOI int %1\n"
+                           "%3 = LOOP void %2 bound 8\n"
+                           "  %4 = INDEX int %3\n"
+                           "  %5 = CARRY float %1, %3\n"
+                           "  %6 = ITOF float %4\n"
+                           "  %7 = ADD float %5, %6\n"
+                           "%8 = ENDLOOP void %3\n"
+                           "%9 = RESULT float %5, %7, %8\n"
+                           "%10 = SWIZZLE float4 %9 .xxxx\n"
+                           "color %10\n";
+    TestCheck(std::strcmp(CKJitDump(listing).CStr(), expected) == 0, "the listing indents bodies under their loops");
+    if (listing.Nodes.Size() != 11)
+        return;
+
+    // Each corruption is one a backend would emit unstructured or undefined
+    // code for.
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[3].Operands[0] = 1; }),
+              "a count is an INT");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[3].Imm[0] = 0; }) &&
+                  !VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[3].Imm[0] = 0x80000000u; }),
+              "a bound is 1..2^31 - 1");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[4].Operands[0] = 2; }),
+              "an index directly follows its loop");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[5].Operands[1] = 2; }),
+              "a carried value is of the loop being checked");
+    TestCheck(!VerifiesAfter(listing,
+                             [&](CKJitFragmentShader &c) {
+                                 const CKJitNode carry = c.Nodes[5];
+                                 c.Nodes[5] = c.Nodes[6];
+                                 c.Nodes[6] = carry;
+                                 c.Nodes[7].Operands[0] = 5;
+                                 c.Nodes[7].Operands[1] = 6;
+                                 c.Nodes[9].Operands[0] = 6;
+                             }),
+              "carried values head their loop's body");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[5].Operands[0] = 4; }),
+              "an initial is from before its loop");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[10].Operands[0] = 7; }),
+              "a closed body's values are not read");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[8].Op = CKJIT_OP_ELSE; }) &&
+                  !VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[8].Op = CKJIT_OP_ENDIF; }),
+              "a loop's body ends with an ENDLOOP");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[9].Operands[2] = 3; }),
+              "a RESULT follows its loop's end");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[9].Operands[0] = 7; }),
+              "a RESULT binds its loop's carried values in order");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[9].Operands[1] = 8; }),
+              "a next is a value");
+    TestCheck(!VerifiesAfter(listing,
+                             [&](CKJitFragmentShader &c) {
+                                 c.Nodes[9] = c.Nodes[10];
+                                 c.Nodes[9].Operands[0] = 1;
+                                 c.Nodes.Resize(10);
+                                 c.Color.Id = 9;
+                             }),
+              "every carried value's RESULT directly follows its loop's end");
+    TestCheck(!VerifiesAfter(listing,
+                             [&](CKJitFragmentShader &c) {
+                                 const CKJitNode color = c.Nodes[10];
+                                 c.Nodes[10] = c.Nodes[9];
+                                 c.Nodes.PushBack(color);
+                                 c.Color.Id = 11;
+                             }),
+              "a loop has one RESULT for each carried value");
+    TestCheck(!VerifiesAfter(listing,
+                             [&](CKJitFragmentShader &c) {
+                                 c.Nodes[8] = c.Nodes[10];
+                                 c.Nodes[8].Operands[0] = 1;
+                                 c.Nodes.Resize(9);
+                                 c.Color.Id = 8;
+                             }),
+              "loops end and the outputs are after them");
+}
+
+// Whether a builder takes a quad operation of a texture coordinate where a
+// callable leaves control flow.
+template <typename Flow, typename Operation>
+bool TakesQuadOp(Flow flow, Operation operation) {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord);
+    flow(b);
+    return operation(b, uv).IsValid() && !b.Failed();
+}
+
+void TestUniformity() {
+    const auto uniformIf = [](CKJitBuilder &b) { b.If(b.Less(b.Component(b.Uniform(0), 0), b.Float(0.5f))); };
+    const auto varyingIf = [](CKJitBuilder &b) { b.If(b.Less(b.Component(b.Input(kColor), 0), b.Float(0.5f))); };
+    const auto nestedIf = [&](CKJitBuilder &b) {
+        varyingIf(b);
+        uniformIf(b);
+    };
+    const auto closedIf = [&](CKJitBuilder &b) {
+        varyingIf(b);
+        b.Else({});
+        b.EndIf({}, nullptr);
+    };
+    const auto uniformLoop = [](CKJitBuilder &b) {
+        b.Loop(b.FloatToInt(b.Component(b.Uniform(0), 1)), 4, {}, nullptr);
+    };
+    const auto varyingLoop = [](CKJitBuilder &b) {
+        b.Loop(b.FloatToInt(b.Component(b.Input(kColor), 1)), 4, {}, nullptr);
+    };
+    const auto indexIf = [](CKJitBuilder &b) {
+        const CKJitValue index = b.Loop(b.FloatToInt(b.Component(b.Uniform(0), 1)), 4, {}, nullptr);
+        b.If(b.IntLess(index, b.Int(2)));
+    };
+    const auto carriedIf = [](CKJitBuilder &b) {
+        CKJitValue carried;
+        b.Loop(b.Int(4), 4, {b.Float(1.0f)}, &carried);
+        b.If(b.Less(carried, b.Float(0.5f)));
+    };
+    const auto ddx = [](CKJitBuilder &b, CKJitValue uv) { return b.Ddx(uv); };
+    const auto ddy = [](CKJitBuilder &b, CKJitValue uv) { return b.Ddy(uv); };
+    const auto sample = [](CKJitBuilder &b, CKJitValue uv) { return b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f)); };
+    const auto lod = [](CKJitBuilder &b, CKJitValue uv) { return b.CalcLod(0, CKJIT_SAMPLER_2D, uv); };
+    const auto compare = [](CKJitBuilder &b, CKJitValue uv) { return b.SampleCmp(0, uv, b.Float(0.5f)); };
+    const auto level = [](CKJitBuilder &b, CKJitValue uv) {
+        return b.SampleLevel(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    };
+    const auto graded = [](CKJitBuilder &b, CKJitValue uv) { return b.SampleGrad(0, CKJIT_SAMPLER_2D, uv, uv, uv); };
+    const auto zero = [](CKJitBuilder &b, CKJitValue uv) { return b.SampleCmpLevelZero(0, uv, b.Float(0.5f)); };
+
+    TestCheck(TakesQuadOp(uniformIf, ddx) && TakesQuadOp(uniformLoop, sample) && TakesQuadOp(closedIf, lod) &&
+                  TakesQuadOp(indexIf, compare),
+              "quad operations run in uniform control flow");
+    TestCheck(!TakesQuadOp(varyingIf, ddx) && !TakesQuadOp(varyingIf, ddy) && !TakesQuadOp(varyingLoop, sample) &&
+                  !TakesQuadOp(varyingLoop, lod) && !TakesQuadOp(varyingIf, compare),
+              "quad operations do not run where control flow diverges");
+    TestCheck(!TakesQuadOp(nestedIf, ddx) && !TakesQuadOp(carriedIf, ddx),
+              "flow diverges within divergent flow and on carried values");
+    TestCheck(TakesQuadOp(varyingLoop, level) && TakesQuadOp(varyingIf, graded) && TakesQuadOp(varyingIf, zero),
+              "explicit LODs and gradients run anywhere");
+
+    CKJitBuilder hoisted(4);
+    const CKJitValue coordinate = hoisted.Input(kTexCoord);
+    const CKJitValue slope = hoisted.Ddx(coordinate);
+    varyingIf(hoisted);
+    TestCheck(Same(hoisted.Ddx(coordinate), slope) && !hoisted.Failed(),
+              "a derivative from before divergent flow is shared in it");
+    CKJitBuilder carried(4);
+    CKJitValue value;
+    carried.Loop(carried.Int(4), 4, {carried.Input(kTexCoord)}, &value);
+    TestCheck(carried.Ddx(value).IsValid() && !carried.Failed(),
+              "a uniform loop's body takes derivatives of its carried values");
+
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord);
+    const CKJitValue color = b.Input(kColor);
+    const CKJitValue varying = b.Less(b.Component(color, 0), b.Float(0.5f));
+    const CKJitValue steps = b.FloatToInt(b.Component(color, 1));
+    uniformIf(b);
+    const CKJitValue derived = b.Add(uv, b.Ddx(uv));
+    b.Else({derived});
+    const CKJitValue coordinates = b.EndIf(uv);
+    CKJitValue sum;
+    b.Loop(b.FloatToInt(b.Component(b.Uniform(0), 1)), 4, {b.IntToFloat(steps)}, &sum);
+    const CKJitValue sampled = b.Sample(0, CKJIT_SAMPLER_2D, coordinates, b.Float(0.0f));
+    const CKJitValue total = b.EndLoop(b.Add(sum, b.Component(sampled, 0)));
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(b.Construct({coordinates, b.Splat(total, 2)}), varying, shader) && CKJitVerify(shader),
+              "quad operations in uniform flow verify");
+    const int region = FindOp(shader, CKJIT_OP_IF);
+    const int loop = FindOp(shader, CKJIT_OP_LOOP);
+    const int converted = FindOp(shader, CKJIT_OP_ITOF);
+    TestCheck(region >= 0 && loop >= 0 && converted >= 0, "the program has the nodes to corrupt");
+    if (region < 0 || loop < 0 || converted < 0)
+        return;
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &c) { c.Nodes[region].Operands[0] = c.Discard.Id; }),
+              "derivatives do not run under a varying condition");
+    TestCheck(!VerifiesAfter(shader,
+                             [&](CKJitFragmentShader &c) {
+                                 c.Nodes[loop].Operands[0] = c.Nodes[converted].Operands[0];
+                             }),
+              "implicit-LOD samples do not run for a varying count");
+}
+
 } // namespace
 
 int main() {
@@ -879,5 +1198,7 @@ int main() {
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
     framework.Run("if regions", TestIfRegions);
+    framework.Run("loops", TestLoops);
+    framework.Run("uniformity", TestUniformity);
     return framework.ExitCode();
 }

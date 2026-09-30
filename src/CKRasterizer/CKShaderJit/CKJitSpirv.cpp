@@ -85,6 +85,7 @@ enum {
     SpvOpDPdx = 207,
     SpvOpDPdy = 208,
     SpvOpPhi = 245,
+    SpvOpLoopMerge = 246,
     SpvOpSelectionMerge = 247,
     SpvOpLabel = 248,
     SpvOpBranch = 249,
@@ -123,6 +124,7 @@ enum {
     SpvImageOperandsGradMask = 0x4,
     SpvFunctionControlNone = 0,
     SpvSelectionControlNone = 0,
+    SpvLoopControlNone = 0,
 
     GLSLstd450RoundEven = 2,
     GLSLstd450FAbs = 4,
@@ -150,6 +152,8 @@ public:
         Emit(opcode, operands.begin(), (uint32_t)operands.size());
     }
     const XArray<uint32_t> &Words() const { return m_Words; }
+    uint32_t Size() const { return (uint32_t)m_Words.Size(); }
+    void Patch(uint32_t position, uint32_t word) { m_Words[(int)position] = word; }
 
 private:
     XArray<uint32_t> m_Words;
@@ -173,10 +177,15 @@ public:
     void Emit(XArray<uint32_t> &words);
 
 private:
-    // The blocks a region branches to past its then arm.
+    // The blocks a region branches to past its then arm, or a loop past its
+    // body, and what the loop's back edge completes.
     struct Region {
-        uint32_t Else;
+        uint32_t Else; // or the loop's continue block
         uint32_t Merge;
+        uint32_t Header;
+        uint32_t Index; // the iteration, a phi of the header
+        uint32_t Next;  // the following one, computed by the continue block
+        int Patches;    // the first in m_Patches of the carried values' phis
     };
     // Types and constants are interned by their instruction, which also gives
     // SPIR-V the unique non-aggregate type declarations it requires.
@@ -230,8 +239,8 @@ private:
     uint32_t Image(const CKJitNode &node);
     uint32_t Query(uint32_t opcode, uint32_t type, std::initializer_list<uint32_t> operands);
     uint32_t Value(uint32_t node) const { return m_Values[(int)node]; }
-    uint32_t Translate(const CKJitNode &node);
-    uint32_t Control(const CKJitNode &node);
+    uint32_t Translate(uint32_t index);
+    uint32_t Control(uint32_t index);
     uint32_t Swizzle(const CKJitNode &node);
     uint32_t Select(const CKJitNode &node);
     uint32_t Sample(const CKJitNode &node);
@@ -249,6 +258,7 @@ private:
     XArray<uint32_t> m_Inputs;    // variable of every shader input
     XArray<uint32_t> m_Interface; // entry point interface: inputs and output
     XArray<Region> m_Regions;     // enclosing the node being translated, innermost last
+    XArray<uint32_t> m_Patches;   // in m_Body: where loop header phis take the nexts
     uint32_t m_SampledImages[CKJIT_MAX_SAMPLERS]; // loaded on first use
     uint32_t m_Images[CKJIT_MAX_SAMPLERS];        // taken from the sampled image on first use
     uint32_t m_Bound;
@@ -486,8 +496,14 @@ uint32_t SpirvEmitter::Sample(const CKJitNode &node) {
 
 // Regions are selection constructs: the header branches to the then arm or the
 // else block, both arms to the merge block, where PHIs take each result from
-// the block that ended its arm.
-uint32_t SpirvEmitter::Control(const CKJitNode &node) {
+// the block that ended its arm. Loops are loop constructs: phis in the header
+// take the index and each carried value from before the loop or from the
+// continue block, which the body branches to and which increments the index
+// and branches back. The header branches to the body while the index is below
+// the count and the bound, and otherwise to the merge block, which the header
+// dominates: the carried values' phis are the loop's RESULTs there.
+uint32_t SpirvEmitter::Control(uint32_t index) {
+    const CKJitNode &node = m_Shader.Nodes[(int)index];
     switch (node.Op) {
     case CKJIT_OP_IF: {
         const uint32_t then = NewId();
@@ -506,6 +522,55 @@ uint32_t SpirvEmitter::Control(const CKJitNode &node) {
         m_Regions.PopBack();
         return end;
     }
+    case CKJIT_OP_LOOP: {
+        const CKJitNode &count = m_Shader.Nodes[(int)node.Operands[0]];
+        const int32_t bound = (int32_t)node.Imm[0];
+        uint32_t trips;
+        if (count.Op == CKJIT_OP_CONSTANT)
+            trips = IntConstant((int32_t)count.Imm[0] < bound ? (int32_t)count.Imm[0] : bound);
+        else
+            trips = Glsl(GLSLstd450SMin, IntType(), {Value(node.Operands[0]), IntConstant(bound)});
+        const Region region = {NewId(), NewId(), NewId(), NewId(), NewId(), m_Patches.Size()};
+        m_Body.Emit(SpvOpBranch, {region.Header});
+        const uint32_t preheader = Enter(region.Header);
+        m_Body.Emit(SpvOpPhi, {IntType(), region.Index, IntConstant(0), preheader, region.Next, region.Else});
+        // The INDEX and CARRYs heading the body are the header's phis.
+        uint32_t next = index + 1;
+        if (next < (uint32_t)m_Shader.Nodes.Size() && m_Shader.Nodes[(int)next].Op == CKJIT_OP_INDEX)
+            m_Values[(int)next++] = region.Index;
+        for (; next < (uint32_t)m_Shader.Nodes.Size() && m_Shader.Nodes[(int)next].Op == CKJIT_OP_CARRY; ++next) {
+            const CKJitNode &carry = m_Shader.Nodes[(int)next];
+            m_Values[(int)next] =
+                Op(SpvOpPhi, TypeOf(carry.Type), {Value(carry.Operands[0]), preheader, 0, region.Else});
+            m_Patches.PushBack(m_Body.Size() - 2);
+        }
+        const uint32_t body = NewId();
+        const uint32_t test = Op(SpvOpSLessThan, BoolType(1), {region.Index, trips});
+        m_Body.Emit(SpvOpLoopMerge, {region.Merge, region.Else, SpvLoopControlNone});
+        m_Body.Emit(SpvOpBranchConditional, {test, body, region.Merge});
+        m_Regions.PushBack(region);
+        Enter(body);
+        return preheader;
+    }
+    case CKJIT_OP_INDEX:
+    case CKJIT_OP_CARRY: return Value(index);
+    case CKJIT_OP_ENDLOOP: {
+        const Region region = m_Regions.PopBack();
+        m_Body.Emit(SpvOpBranch, {region.Else});
+        const uint32_t end = Enter(region.Else);
+        m_Body.Emit(SpvOpIAdd, {IntType(), region.Next, region.Index, IntConstant(1)});
+        m_Body.Emit(SpvOpBranch, {region.Header});
+        Enter(region.Merge);
+        // The RESULTs directly after name the nexts, in the carried values'
+        // order.
+        for (int k = region.Patches; k < m_Patches.Size(); ++k) {
+            const CKJitNode &result = m_Shader.Nodes[(int)index + 1 + (k - region.Patches)];
+            m_Body.Patch(m_Patches[k], Value(result.Operands[1]));
+        }
+        m_Patches.Resize(region.Patches);
+        return end;
+    }
+    case CKJIT_OP_RESULT: return Value(node.Operands[0]);
     default: {
         const uint32_t endif = node.Operands[2];
         const uint32_t elseMarker = m_Shader.Nodes[(int)endif].Operands[0];
@@ -551,7 +616,8 @@ uint32_t SpirvEmitter::ShiftCount(uint32_t node) {
     return Op(SpvOpBitwiseAnd, TypeOf(count.Type), {Value(node), ConstantSplat(count.Type, 31)});
 }
 
-uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
+uint32_t SpirvEmitter::Translate(uint32_t index) {
+    const CKJitNode &node = m_Shader.Nodes[(int)index];
     const uint32_t type = TypeOf(node.Type);
     const uint32_t a = node.OperandCount > 0 ? Value(node.Operands[0]) : 0;
     const uint32_t b = node.OperandCount > 1 ? Value(node.Operands[1]) : 0;
@@ -616,7 +682,12 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
     case CKJIT_OP_IF:
     case CKJIT_OP_ELSE:
     case CKJIT_OP_ENDIF:
-    case CKJIT_OP_PHI: return Control(node);
+    case CKJIT_OP_PHI:
+    case CKJIT_OP_LOOP:
+    case CKJIT_OP_INDEX:
+    case CKJIT_OP_CARRY:
+    case CKJIT_OP_ENDLOOP:
+    case CKJIT_OP_RESULT: return Control(index);
     case CKJIT_OP_SAMPLE: return Sample(node);
     case CKJIT_OP_SAMPLE_LEVEL:
         return Op(SpvOpImageSampleExplicitLod, type, {SampledImage(node), a, SpvImageOperandsLodMask, b});
@@ -657,7 +728,7 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
     }
     m_Values.Resize(m_Shader.Nodes.Size());
     for (int i = 0; i < m_Shader.Nodes.Size(); ++i)
-        m_Values[i] = Translate(m_Shader.Nodes[i]);
+        m_Values[i] = Translate((uint32_t)i);
 
     // Every value is computed before the discard, so no implicit-LOD sample,
     // LOD query or derivative runs after a quad neighbour was killed.

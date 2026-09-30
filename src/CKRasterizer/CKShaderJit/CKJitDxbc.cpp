@@ -10,6 +10,7 @@ namespace {
 enum : uint32_t {
     DxbcOpAdd = 0,
     DxbcOpAnd = 1,
+    DxbcOpBreakc = 3,
     DxbcOpDiscard = 13,
     DxbcOpDiv = 14,
     DxbcOpDp2 = 15,
@@ -17,6 +18,7 @@ enum : uint32_t {
     DxbcOpDp4 = 17,
     DxbcOpElse = 18,
     DxbcOpEndIf = 21,
+    DxbcOpEndLoop = 22,
     DxbcOpEq = 24,
     DxbcOpExp = 25,
     DxbcOpFtoi = 27,
@@ -34,6 +36,7 @@ enum : uint32_t {
     DxbcOpItof = 43,
     DxbcOpLd = 45,
     DxbcOpLog = 47,
+    DxbcOpLoop = 48,
     DxbcOpLt = 49,
     DxbcOpMin = 51,
     DxbcOpMax = 52,
@@ -192,6 +195,14 @@ DxbcValue Immediate(uint32_t count, uint32_t bits) {
         value.Lanes[k] = k;
         value.Bits[k] = bits;
     }
+    return value;
+}
+
+// Component k of a value, alone.
+DxbcValue Component(DxbcValue value, uint32_t k) {
+    value.Lanes[0] = value.Lanes[k];
+    value.Bits[0] = value.Bits[k];
+    value.Count = 1;
     return value;
 }
 
@@ -411,9 +422,11 @@ private:
     DxbcValue View(const CKJitNode &node) const;
     DxbcValue Destination(uint32_t node);
     void Release(uint32_t node);
+    void ReleaseEnded(uint32_t marker);
     void Translate(uint32_t node);
     bool Control(uint32_t node);
     void Join(uint32_t marker, uint32_t arm);
+    bool Clobbered(uint32_t result) const;
 
     void Dest(const DxbcValue &dest);
     void Source(const DxbcValue &value, const DxbcReads &reads);
@@ -439,8 +452,8 @@ private:
     DxbcTemps m_Temps;
     XArray<DxbcValue> m_Values; // where the value of every node is
     XArray<uint32_t> m_Roots;   // the node whose temporary holds a value, or NoRoot
-    XArray<uint32_t> m_LastUse; // the last node reading a computed value (the node count for outputs), or
-                                // an ELSE's ENDIF
+    XArray<uint32_t> m_LastUse; // the last node reading a computed value (the node count for outputs, the
+                                // ENDLOOP for what every iteration reads), or an ELSE's ENDIF
     int m_InputByRegister[DxbcMaxInputRegisters]; // input index, or -1
     uint8_t m_InputReads[DxbcMaxInputRegisters];  // components read of every input register
     uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS];    // 0xff for an unused slot
@@ -472,7 +485,9 @@ bool DxbcEmitter::MapInputs() {
 
 // A computed value keeps its temporary components from its node to its last
 // reader; views (swizzles and modifiers) of it extend that span. An arm reads
-// a PHI's operand as it ends.
+// a PHI's operand as it ends. A loop, whose temporary holds its INDEX, reads
+// its count and initials as it starts; as it ends, it reads its temporary,
+// carried values and nexts, and every value from before it its body reads.
 void DxbcEmitter::Analyze() {
     const uint32_t count = (uint32_t)m_Shader.Nodes.Size();
     m_Roots.Resize((int)count);
@@ -489,6 +504,7 @@ void DxbcEmitter::Analyze() {
         case CKJIT_OP_SWIZZLE:
         case CKJIT_OP_NEG:
         case CKJIT_OP_ABS:
+        case CKJIT_OP_INDEX:
             m_Roots[(int)i] = m_Roots[(int)node.Operands[0]];
             continue;
         case CKJIT_OP_IF:
@@ -511,6 +527,36 @@ void DxbcEmitter::Analyze() {
                 if (root != NoRoot && m_LastUse[(int)root] < ends[arm])
                     m_LastUse[(int)root] = ends[arm];
             }
+            continue;
+        }
+        case CKJIT_OP_CARRY: {
+            m_Roots[(int)i] = i;
+            const uint32_t root = m_Roots[(int)node.Operands[0]];
+            if (root != NoRoot)
+                m_LastUse[(int)root] = node.Operands[1];
+            continue;
+        }
+        case CKJIT_OP_ENDLOOP: {
+            m_Roots[(int)i] = NoRoot;
+            const uint32_t loop = node.Operands[0];
+            for (uint32_t root = 0; root < i; ++root) {
+                const CKJitNode &value = m_Shader.Nodes[(int)root];
+                if (m_Roots[(int)root] != root)
+                    continue;
+                if (root < loop ? m_LastUse[(int)root] > loop
+                                : root == loop || (value.Op == CKJIT_OP_CARRY && value.Operands[1] == loop)) {
+                    m_LastUse[(int)root] = i;
+                }
+            }
+            continue;
+        }
+        case CKJIT_OP_RESULT: {
+            // The carried value, once the loop ends.
+            m_Roots[(int)i] = m_Roots[(int)node.Operands[0]];
+            const uint32_t root = m_Roots[(int)node.Operands[1]];
+            const uint32_t endloop = node.Operands[2];
+            if (root != NoRoot && m_LastUse[(int)root] < endloop)
+                m_LastUse[(int)root] = endloop;
             continue;
         }
         case CKJIT_OP_LOAD:
@@ -609,6 +655,15 @@ void DxbcEmitter::Release(uint32_t node) {
     const DxbcValue &value = m_Values[(int)node];
     if (value.File == DxbcOperandTemp)
         m_Temps.Release(value.Index, LaneMask(value));
+}
+
+// The values a loop marker reads last: at a LOOP its count and initials, at
+// an ENDLOOP what every iteration reads.
+void DxbcEmitter::ReleaseEnded(uint32_t marker) {
+    for (uint32_t root = 0; root < marker; ++root) {
+        if (m_Roots[(int)root] == root && m_LastUse[(int)root] == marker)
+            Release(root);
+    }
 }
 
 void DxbcEmitter::Dest(const DxbcValue &dest) {
@@ -839,7 +894,12 @@ void DxbcEmitter::Texture(const CKJitNode &node, const DxbcValue &dest) {
     m_Code.Close();
 }
 
-// Regions are if_nz, else and endif blocks.
+// Regions are if_nz, else and endif blocks. Loops are loop blocks that break
+// once a counter reaches the trips, the count or the bound when lower: the
+// loop's temporary holds the counter, the INDEX, and unless the count is
+// constant the trips. Moves before the loop start the carried values and
+// moves ending each iteration take the nexts, which the RESULTs directly
+// after the ENDLOOP name.
 bool DxbcEmitter::Control(uint32_t index) {
     const CKJitNode &node = m_Shader.Nodes[(int)index];
     switch (node.Op) {
@@ -864,9 +924,93 @@ bool DxbcEmitter::Control(uint32_t index) {
         if (m_LastUse[(int)index] == index)
             Release(index);
         return true;
+    case CKJIT_OP_LOOP: {
+        const DxbcValue &count = m_Values[(int)node.Operands[0]];
+        const bool constant = count.File == DxbcOperandImmediate32;
+        DxbcValue state;
+        std::memset(&state, 0, sizeof(state));
+        state.File = DxbcOperandTemp;
+        state.Count = constant ? 1 : 2;
+        state.Index = m_Temps.Allocate(state.Count, state.Lanes);
+        m_Values[(int)index] = state;
+        // The carried values are allocated while their initials are live, so
+        // no move overwrites another's source.
+        const uint32_t size = (uint32_t)m_Shader.Nodes.Size();
+        uint32_t header = index + 1;
+        if (header < size && m_Shader.Nodes[(int)header].Op == CKJIT_OP_INDEX)
+            m_Values[(int)header++] = Component(state, 0);
+        for (; header < size && m_Shader.Nodes[(int)header].Op == CKJIT_OP_CARRY; ++header) {
+            m_Values[(int)header] = Destination(header);
+            Unary(DxbcOpMov, m_Values[(int)header], m_Values[(int)m_Shader.Nodes[(int)header].Operands[0]]);
+        }
+        const DxbcValue counter = Component(state, 0);
+        DxbcValue trips = Immediate(1, node.Imm[0]);
+        if (!constant) {
+            trips = Component(state, 1);
+            Binary(DxbcOpImin, trips, count, Immediate(1, node.Imm[0]));
+        } else if ((int32_t)count.Bits[0] < (int32_t)node.Imm[0]) {
+            trips.Bits[0] = count.Bits[0];
+        }
+        Unary(DxbcOpMov, counter, Immediate(1, 0));
+        ReleaseEnded(index);
+
+        m_Code.Instruction(DxbcOpLoop, {});
+        DxbcValue test = counter;
+        test.Index = m_Temps.Allocate(1, test.Lanes);
+        Binary(DxbcOpIge, test, counter, trips);
+        m_Code.Open(DxbcOpBreakc | DxbcTestNonZero);
+        Source(test, Leading(1));
+        m_Code.Close();
+        m_Temps.Release(test.Index, LaneMask(test));
+        return true;
+    }
+    case CKJIT_OP_INDEX:
+    case CKJIT_OP_CARRY: // started by their LOOP
+        return true;
+    case CKJIT_OP_ENDLOOP: {
+        // The moves are parallel: a next reading a carried value moved before
+        // its own is copied first. Copies are allocated while every next and
+        // carried value is live.
+        const uint32_t size = (uint32_t)m_Shader.Nodes.Size();
+        uint32_t end = index + 1;
+        for (; end < size && m_Shader.Nodes[(int)end].Op == CKJIT_OP_RESULT; ++end) {
+            m_Values[(int)end] = m_Values[(int)m_Shader.Nodes[(int)end].Operands[1]];
+            if (Clobbered(end)) {
+                const DxbcValue copy = Destination(end);
+                Unary(DxbcOpMov, copy, m_Values[(int)end]);
+                m_Values[(int)end] = copy;
+            }
+        }
+        for (uint32_t result = index + 1; result < end; ++result) {
+            const CKJitNode &binding = m_Shader.Nodes[(int)result];
+            if (binding.Operands[1] != binding.Operands[0])
+                Unary(DxbcOpMov, m_Values[(int)binding.Operands[0]], m_Values[(int)result]);
+            if (Clobbered(result))
+                Release(result);
+        }
+        const DxbcValue counter = Component(m_Values[(int)node.Operands[0]], 0);
+        Binary(DxbcOpIadd, counter, counter, Immediate(1, 1));
+        m_Code.Instruction(DxbcOpEndLoop, {});
+        ReleaseEnded(index);
+        return true;
+    }
+    case CKJIT_OP_RESULT:
+        m_Values[(int)index] = m_Values[(int)node.Operands[0]];
+        return true;
     default:
         return false;
     }
+}
+
+// Whether a RESULT's next reads a carried value of its loop that the moves
+// ending an iteration overwrite first: one before its own carried value.
+bool DxbcEmitter::Clobbered(uint32_t result) const {
+    const CKJitNode &binding = m_Shader.Nodes[(int)result];
+    const uint32_t root = m_Roots[(int)binding.Operands[1]];
+    if (root == NoRoot || root >= binding.Operands[0])
+        return false;
+    const CKJitNode &value = m_Shader.Nodes[(int)root];
+    return value.Op == CKJIT_OP_CARRY && value.Operands[1] == m_Shader.Nodes[(int)binding.Operands[0]].Operands[1];
 }
 
 // Moves the results of the arm a marker ends into the PHIs after the ENDIF.

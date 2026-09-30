@@ -1,8 +1,10 @@
 // Shader IR operations: CKJIT_OP(NAME, operands, flags). A VARIADIC operation
 // takes from two up to that many operands.
 //
-// Every value is a pure function of its operands; structured regions (IF
-// below) only decide which of them a pixel computes. Operations are
+// Every value is a pure function of its operands; structured regions (IF and
+// LOOP below) only decide which of them a pixel computes, and how often.
+// QUAD operations read the pixel's quad neighbours, so they run only where
+// control flow is uniform (see CKJitIR.h). Operations are
 // component-wise over operands of one type unless noted, and comparisons
 // produce BOOLs of their operands' width. Keep this list in sync with the
 // operand and type rules in CKJitBuilder and with every backend.
@@ -38,11 +40,9 @@ CKJIT_OP(SQRT,       1, 0)
 CKJIT_OP(DOT,        2, CKJIT_OPFLAG_COMMUTATIVE)
 
 // Screen-space derivatives: the difference across the pixel quad along x or
-// y, at the precision of HLSL ddx and ddy. They need the whole quad running:
-// within an arm, only under a condition every pixel of the quad shares (as
-// SAMPLE, SAMPLE_CMP and CALC_LOD do).
-CKJIT_OP(DDX,        1, 0)
-CKJIT_OP(DDY,        1, 0)
+// y, at the precision of HLSL ddx and ddy.
+CKJIT_OP(DDX,        1, CKJIT_OPFLAG_QUAD)
+CKJIT_OP(DDY,        1, CKJIT_OPFLAG_QUAD)
 
 // Float comparisons. LT, LE and EQ are ordered (false when either operand is
 // NaN); NE is unordered, like HLSL and GLSL "!=".
@@ -95,6 +95,22 @@ CKJIT_OP(ELSE,       1, CKJIT_OPFLAG_MARKER)
 CKJIT_OP(ENDIF,      1, CKJIT_OPFLAG_MARKER)
 CKJIT_OP(PHI,        3, 0)
 
+// A bounded loop: LOOP(count) runs its body for each iteration below the INT
+// count and below Imm[0], its bound (1..2^31 - 1), and ENDLOOP(loop) ends the
+// body; the markers bracket it as they do an arm. An optional INDEX and then
+// the CARRYs directly after a LOOP head its body: INDEX(loop) is the INT
+// iteration, from 0, and CARRY(initial, loop) a value passed from one
+// iteration to the next, the initial from before the loop in the first. The
+// RESULTs directly after an ENDLOOP, one for each CARRY in order, bind them:
+// RESULT(carry, next, endloop) makes next, of the body or from before the
+// loop, the carry's value in the following iteration, and is the carry's
+// value once the loop ends (the initial when it runs no iteration).
+CKJIT_OP(LOOP,       1, CKJIT_OPFLAG_MARKER)
+CKJIT_OP(INDEX,      1, 0)
+CKJIT_OP(CARRY,      2, 0)
+CKJIT_OP(ENDLOOP,    1, CKJIT_OPFLAG_MARKER)
+CKJIT_OP(RESULT,     3, 0)
+
 // Texture access through sampler slot Imm[0] with dimension Imm[1]
 // (CKJitSamplerDim); a slot has one dimension. Coordinates are FLOAT2 for 2D
 // and 2D_COMPARE slots and FLOAT3 for cube directions and volume coordinates,
@@ -104,16 +120,16 @@ CKJIT_OP(PHI,        3, 0)
 // derivatives, SAMPLE_LEVEL(coordinate, lod) and SAMPLE_GRAD(coordinate, dx,
 // dy) take it explicitly; all three are FLOAT4. CALC_LOD(coordinate) is the
 // FLOAT LOD SAMPLE would compute, before clamping.
-CKJIT_OP(SAMPLE,       2, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(SAMPLE,       2, CKJIT_OPFLAG_TEXTURE | CKJIT_OPFLAG_QUAD)
 CKJIT_OP(SAMPLE_LEVEL, 2, CKJIT_OPFLAG_TEXTURE)
 CKJIT_OP(SAMPLE_GRAD,  3, CKJIT_OPFLAG_TEXTURE)
-CKJIT_OP(CALC_LOD,     1, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(CALC_LOD,     1, CKJIT_OPFLAG_TEXTURE | CKJIT_OPFLAG_QUAD)
 
 // Depth comparison, the only access that samples a 2D_COMPARE slot:
 // SAMPLE_CMP(coordinate, reference) is the FLOAT filtered result of comparing
 // the reference with the texels, at the LOD SAMPLE would take;
 // SAMPLE_CMP_LEVEL_ZERO(coordinate, reference) compares at the base mip.
-CKJIT_OP(SAMPLE_CMP,            2, CKJIT_OPFLAG_TEXTURE)
+CKJIT_OP(SAMPLE_CMP,            2, CKJIT_OPFLAG_TEXTURE | CKJIT_OPFLAG_QUAD)
 CKJIT_OP(SAMPLE_CMP_LEVEL_ZERO, 2, CKJIT_OPFLAG_TEXTURE)
 
 // Unfiltered access, apart from the sampler state. LOAD(texel) reads the

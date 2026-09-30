@@ -151,6 +151,16 @@ bool IsLeaf(CKJitOp op) {
     return op == CKJIT_OP_CONSTANT || op == CKJIT_OP_INPUT || op == CKJIT_OP_UNIFORM;
 }
 
+CKJitNode MakeNode(CKJitOp op, CKJitType type, std::initializer_list<uint32_t> operands) {
+    CKJitNode node;
+    std::memset(&node, 0, sizeof(node));
+    node.Op = op;
+    node.Type = type;
+    for (uint32_t operand : operands)
+        node.Operands[node.OperandCount++] = operand;
+    return node;
+}
+
 } // namespace
 
 int CKJitBuilder::NodeHash::operator()(const CKJitNode &node) const {
@@ -195,6 +205,9 @@ CKJitValue CKJitBuilder::Intern(const CKJitNode &source) {
     }
     if (const uint32_t *found = m_Lookup.FindPtr(node))
         return CKJitValue{*found};
+    // The quad neighbours run it too only where control flow is uniform.
+    if ((CKJitOpFlags(node.Op) & CKJIT_OPFLAG_QUAD) != 0 && Divergent())
+        return Fail();
     const CKJitValue value = Push(node, CurrentScope());
     m_Lookup.Insert(node, value.Id, TRUE);
     return value;
@@ -202,19 +215,20 @@ CKJitValue CKJitBuilder::Intern(const CKJitNode &source) {
 
 CKJitValue CKJitBuilder::Push(const CKJitNode &node, uint32_t scope) {
     const uint32_t id = (uint32_t)m_Nodes.Size();
+    // Carried values vary, as the verifier does not look ahead to their nexts.
+    uint8_t varying = node.Op == CKJIT_OP_INPUT || node.Op == CKJIT_OP_CARRY;
+    for (uint32_t operand = 0; operand < node.OperandCount; ++operand)
+        varying |= m_Varying[node.Operands[operand]];
     m_Nodes.PushBack(node);
     m_Scopes.PushBack(IsLeaf(node.Op) ? 0u : scope);
+    m_Varying.PushBack(varying);
     return CKJitValue{id};
 }
 
 // Markers are never shared: each bounds its own region.
-uint32_t CKJitBuilder::PushMarker(CKJitOp op, uint32_t operand, uint32_t scope) {
-    CKJitNode node;
-    std::memset(&node, 0, sizeof(node));
-    node.Op = op;
-    node.Type = CKJIT_TYPE_VOID;
-    node.OperandCount = 1;
-    node.Operands[0] = operand;
+uint32_t CKJitBuilder::PushMarker(CKJitOp op, uint32_t operand, uint32_t scope, uint32_t imm) {
+    CKJitNode node = MakeNode(op, CKJIT_TYPE_VOID, {operand});
+    node.Imm[0] = imm;
     return Push(node, scope).Id;
 }
 
@@ -900,8 +914,10 @@ void CKJitBuilder::If(CKJitValue condition) {
     region.Scope = CurrentScope();
     region.Parent = region.Scope;
     region.Yields = m_Yields.Size();
+    region.IsLoop = false;
     region.InElse = false;
     region.Taken = true;
+    region.Divergent = Divergent();
     if (!HasType(condition, CKJIT_TYPE_BOOL)) {
         Fail();
     } else if (IsConstant(condition)) {
@@ -909,12 +925,13 @@ void CKJitBuilder::If(CKJitValue condition) {
     } else {
         region.Marker = PushMarker(CKJIT_OP_IF, condition.Id, region.Parent);
         region.Scope = OpenScope();
+        region.Divergent = region.Divergent || m_Varying[condition.Id] != 0;
     }
     m_Regions.PushBack(region);
 }
 
 void CKJitBuilder::Else(std::initializer_list<CKJitValue> thenResults) {
-    if (m_Regions.Size() == 0 || m_Regions.Back().InElse) {
+    if (m_Regions.Size() == 0 || m_Regions.Back().IsLoop || m_Regions.Back().InElse) {
         Fail();
         return;
     }
@@ -933,7 +950,7 @@ void CKJitBuilder::EndIf(std::initializer_list<CKJitValue> elseResults, CKJitVal
     const uint32_t count = (uint32_t)elseResults.size();
     for (uint32_t i = 0; i < count; ++i)
         results[i] = CKJitValue();
-    if (m_Regions.Size() == 0) {
+    if (m_Regions.Size() == 0 || m_Regions.Back().IsLoop) {
         Fail();
         return;
     }
@@ -959,15 +976,7 @@ void CKJitBuilder::EndIf(std::initializer_list<CKJitValue> elseResults, CKJitVal
         for (uint32_t i = 0; i < count; ++i) {
             if (Valid(thens[i]) && Valid(elses[i]))
                 continue;
-            CKJitNode phi;
-            std::memset(&phi, 0, sizeof(phi));
-            phi.Op = CKJIT_OP_PHI;
-            phi.Type = TypeOf(thens[i]);
-            phi.OperandCount = 3;
-            phi.Operands[0] = thens[i].Id;
-            phi.Operands[1] = elses[i].Id;
-            phi.Operands[2] = endif;
-            results[i] = Intern(phi);
+            results[i] = Intern(MakeNode(CKJIT_OP_PHI, TypeOf(thens[i]), {thens[i].Id, elses[i].Id, endif}));
         }
         for (uint32_t i = 0; i < count; ++i) {
             if (!results[i].IsValid())
@@ -980,6 +989,98 @@ void CKJitBuilder::EndIf(std::initializer_list<CKJitValue> elseResults, CKJitVal
 CKJitValue CKJitBuilder::EndIf(CKJitValue elseResult) {
     CKJitValue result;
     EndIf({elseResult}, &result);
+    return result;
+}
+
+CKJitValue CKJitBuilder::Loop(CKJitValue count, uint32_t bound, std::initializer_list<CKJitValue> initials,
+                              CKJitValue *carried) {
+    Region region;
+    region.Condition = count;
+    region.Marker = CKJitValue::InvalidId;
+    region.Scope = CurrentScope();
+    region.Parent = region.Scope;
+    region.Yields = m_Yields.Size();
+    region.IsLoop = true;
+    region.InElse = false;
+    region.Taken = false;
+    region.Divergent = Divergent();
+    const uint32_t size = (uint32_t)initials.size();
+    const CKJitValue *initial = initials.begin();
+    bool typed = HasType(count, CKJIT_TYPE_INT) && bound != 0 && bound <= 0x7fffffffu;
+    for (uint32_t i = 0; i < size && typed; ++i)
+        typed = Valid(initial[i]);
+    // A constant count takes the bound's place when that is lower.
+    int32_t trips = 2;
+    if (typed && IsConstant(count)) {
+        trips = (int32_t)m_Nodes[count.Id].Imm[0];
+        if (trips > (int32_t)bound)
+            trips = (int32_t)bound;
+        count = Int(trips);
+    }
+
+    CKJitValue index;
+    if (!typed) {
+        Fail();
+    } else if (trips <= 1) {
+        region.Taken = trips == 1;
+        index = Int(0);
+    } else {
+        region.Marker = PushMarker(CKJIT_OP_LOOP, count.Id, region.Parent, bound);
+        region.Scope = OpenScope();
+        region.Divergent = region.Divergent || m_Varying[count.Id] != 0;
+        index = Push(MakeNode(CKJIT_OP_INDEX, CKJIT_TYPE_INT, {region.Marker}), region.Scope);
+    }
+    // Carried values are never shared: equal initials may take different
+    // nexts.
+    for (uint32_t i = 0; i < size; ++i) {
+        if (!typed)
+            carried[i] = CKJitValue();
+        else if (region.Marker == CKJitValue::InvalidId)
+            carried[i] = initial[i];
+        else
+            carried[i] = Push(MakeNode(CKJIT_OP_CARRY, TypeOf(initial[i]), {initial[i].Id, region.Marker}),
+                              region.Scope);
+        m_Yields.PushBack(carried[i]);
+    }
+    m_Regions.PushBack(region);
+    return index;
+}
+
+void CKJitBuilder::EndLoop(std::initializer_list<CKJitValue> nexts, CKJitValue *results) {
+    const uint32_t count = (uint32_t)nexts.size();
+    for (uint32_t i = 0; i < count; ++i)
+        results[i] = CKJitValue();
+    if (m_Regions.Size() == 0 || !m_Regions.Back().IsLoop) {
+        Fail();
+        return;
+    }
+    const Region region = m_Regions.PopBack();
+    const CKJitValue *carried = m_Yields.Begin() + region.Yields;
+    const CKJitValue *next = nexts.begin();
+    bool typed = (uint32_t)(m_Yields.Size() - region.Yields) == count;
+    for (uint32_t i = 0; i < count && typed; ++i)
+        typed = carried[i].IsValid() && Valid(next[i]) && TypeOf(carried[i]) == TypeOf(next[i]);
+    const bool flattened = region.Marker == CKJitValue::InvalidId;
+    if (!flattened)
+        CloseArm(region);
+
+    if (!typed) {
+        Fail();
+    } else if (flattened) {
+        for (uint32_t i = 0; i < count; ++i)
+            results[i] = region.Taken ? next[i] : carried[i];
+    } else {
+        // Each carried value's RESULT directly after the ENDLOOP, in order.
+        const uint32_t endloop = PushMarker(CKJIT_OP_ENDLOOP, region.Marker, region.Parent);
+        for (uint32_t i = 0; i < count; ++i)
+            results[i] = Intern(MakeNode(CKJIT_OP_RESULT, TypeOf(carried[i]), {carried[i].Id, next[i].Id, endloop}));
+    }
+    m_Yields.Resize(region.Yields);
+}
+
+CKJitValue CKJitBuilder::EndLoop(CKJitValue next) {
+    CKJitValue result;
+    EndLoop({next}, &result);
     return result;
 }
 
@@ -1069,6 +1170,15 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
             continue;
         for (uint32_t operand = 0; operand < m_Nodes[i].OperandCount; ++operand)
             live[m_Nodes[i].Operands[operand]] = 1;
+        // A loop kept binds every carried value to its RESULT.
+        if (m_Nodes[i].Op != CKJIT_OP_ENDLOOP)
+            continue;
+        for (int j = i + 1; j < count && m_Nodes[j].Op == CKJIT_OP_RESULT && m_Nodes[j].Operands[2] == (uint32_t)i;
+             ++j) {
+            live[j] = 1;
+            live[m_Nodes[j].Operands[0]] = 1;
+            live[m_Nodes[j].Operands[1]] = 1;
+        }
     }
 
     // Leaves first, so every arm sees them; the other nodes keep their

@@ -70,6 +70,7 @@ enum {
     kOpDPdx = 207,
     kOpDPdy = 208,
     kOpPhi = 245,
+    kOpLoopMerge = 246,
     kOpSelectionMerge = 247,
     kOpLabel = 248,
     kOpBranch = 249,
@@ -325,6 +326,41 @@ void BuildRegions(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
     b.EndIf({fallback, b.Int(3), b.Bool(false), diffuse}, results);
     color = b.Mul(b.Add(results[0], results[3]), b.IntToFloat(results[1]));
     discard = results[2];
+}
+
+// A loop nesting a region and another loop, with carried values of every
+// kind: a pair swapping each iteration, one whose next is from before the loop
+// and one the nested loop starts. The body reads a step computed before the
+// loop. A loop whose constant count exceeds its bound follows. The outer count
+// is uniform, so its body samples.
+void BuildLoops(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
+    const CKJitValue diffuse = b.Input(kColor0);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue params = b.Uniform(0);
+    const CKJitValue step = b.Mul(b.Swizzle(b.Uniform(1), "xy"), b.Swizzle(params, "zw"));
+    const CKJitValue decay = b.Component(params, 1);
+    const CKJitValue swapped = b.Swizzle(uv, "yx");
+    CKJitValue carried[5];
+    const CKJitValue index =
+        b.Loop(b.FloatToInt(b.Component(params, 0)), 8, {diffuse, b.Float(1.0f), uv, swapped, b.Bool(false)}, carried);
+    const CKJitValue offset = b.Add(carried[2], b.Mul(step, b.Splat(b.IntToFloat(index), 2)));
+    const CKJitValue texel = b.Sample(0, CKJIT_SAMPLER_2D, offset, b.Float(0.0f));
+    b.If(b.IntLess(index, b.Int(2)));
+    const CKJitValue near = b.Mul(texel, b.Splat(carried[1], 4));
+    b.Else({near});
+    const CKJitValue weighted = b.EndIf(texel);
+    CKJitValue taps;
+    const CKJitValue tap = b.Loop(b.FloatToInt(b.Mul(b.Component(texel, 3), b.Float(4.0f))), 4, {index}, &taps);
+    const CKJitValue counted = b.EndLoop(b.IntAdd(taps, tap));
+    const CKJitValue sum = b.Add(carried[0], b.Mul(weighted, b.Splat(b.IntToFloat(counted), 4)));
+    const CKJitValue faint = b.Or(carried[4], b.Less(b.Component(texel, 3), b.Float(0.25f)));
+    CKJitValue results[5];
+    b.EndLoop({sum, decay, carried[3], carried[2], faint}, results);
+    CKJitValue fade;
+    b.Loop(b.Int(6), 3, {results[1]}, &fade);
+    const CKJitValue faded = b.EndLoop(b.Mul(fade, decay));
+    color = b.Mul(b.Add(results[0], b.Construct({results[2], results[3]})), b.Splat(faded, 4));
+    discard = results[4];
 }
 
 // Whether the block a label starts ends branching to another.
@@ -719,6 +755,125 @@ void TestIfRegions() {
               "the discard tests its PHI after the regions");
 }
 
+// The index of the instruction of the function body whose result is id, or
+// -1.
+int Defines(const Module &module, uint32_t id) {
+    for (int i = module.Find(kOpLabel); i >= 0 && i < module.Size(); ++i) {
+        if (module[i].Opcode != kOpLabel && module[i].Count >= 2 && module[i].Operands[1] == id)
+            return i;
+    }
+    return -1;
+}
+
+// A loop construct: its header's phis, the index first, then the test the
+// loop merge follows.
+struct LoopConstruct {
+    int Label; // of the header
+    int Merge; // the loop merge
+    uint32_t Header;
+    uint32_t Continue;
+    uint32_t Exit;
+    int Phis;  // the first
+    int Count; // of phis
+};
+
+LoopConstruct FindLoop(const Module &module, int merge) {
+    LoopConstruct loop = {-1, merge, 0, module[merge].Operands[1], module[merge].Operands[0], -1, 0};
+    for (int i = merge; i >= 0 && loop.Label < 0; --i) {
+        if (module[i].Opcode == kOpLabel)
+            loop.Label = i;
+    }
+    if (loop.Label < 0)
+        return loop;
+    loop.Header = module[loop.Label].Operands[0];
+    loop.Phis = loop.Label + 1;
+    while (module[loop.Phis + loop.Count].Opcode == kOpPhi)
+        ++loop.Count;
+    return loop;
+}
+
+void TestLoops() {
+    CKJitBuilder b(4);
+    CKJitValue color, discard;
+    BuildLoops(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "loops compile");
+    Save("loops", words);
+
+    const Module module(words);
+    TestCheck(module.WellFormed(), "the module is well formed");
+    TestCheck(module.Count(kOpLoopMerge) == 3 && module.Count(kOpSelectionMerge) == 2,
+              "each loop is a loop construct and the region in one a selection");
+    LoopConstruct loops[3];
+    int count = 0;
+    for (int i = 0; i < module.Size(); ++i) {
+        if (module[i].Opcode == kOpLoopMerge && count < 3)
+            loops[count++] = FindLoop(module, i);
+    }
+    if (count != 3)
+        return;
+
+    const uint32_t intType = module.TypeId(kOpTypeInt, {kAny, 32, 1});
+    for (int k = 0; k < 3; ++k) {
+        const LoopConstruct &loop = loops[k];
+        TestCheck(loop.Count >= 2 && module[loop.Phis + loop.Count].Opcode == kOpSLessThan &&
+                      loop.Phis + loop.Count + 1 == loop.Merge,
+                  "a header holds its phis, then the test");
+        if (loop.Count < 2 || loop.Phis + loop.Count + 1 != loop.Merge)
+            continue;
+        const Instruction &index = module[loop.Phis];
+        const Instruction &test = module[loop.Merge - 1];
+        TestCheck(test.Operands[2] == index.Operands[1] &&
+                      module[loop.Merge + 1].Matches(kOpBranchConditional, {test.Operands[1], kAny, loop.Exit}),
+                  "the header enters the body while the index is below the trips, and exits otherwise");
+        for (int phi = loop.Phis; phi < loop.Phis + loop.Count; ++phi) {
+            const Instruction &value = module[phi];
+            TestCheck(value.Count == 6 && BranchesTo(module, value.Operands[3], loop.Header) &&
+                          value.Operands[5] == loop.Continue && Defines(module, value.Operands[4]) >= 0,
+                      "a header phi takes a value from before the loop and the next from the continue block");
+        }
+        const int start = module.Find(kOpLabel, {loop.Continue});
+        TestCheck(start > loop.Merge && module.IsIntConstant(index.Operands[2], 0) &&
+                      module[start + 1].Matches(kOpIAdd, {intType, index.Operands[4], index.Operands[1]}) &&
+                      module.IsIntConstant(module[start + 1].Operands[3], 1) &&
+                      BranchesTo(module, loop.Continue, loop.Header) &&
+                      module[start + 3].Matches(kOpLabel, {loop.Exit}),
+                  "the index counts from zero in the continue block, which branches back before the merge block");
+    }
+
+    const LoopConstruct &outer = loops[0];
+    const LoopConstruct &inner = loops[1];
+    const LoopConstruct &fixed = loops[2];
+    TestCheck(outer.Count == 6 && inner.Count == 2 && fixed.Count == 2, "every carried value is a header phi");
+    if (outer.Count != 6 || inner.Count != 2 || fixed.Count != 2)
+        return;
+    const int outerEnd = module.Find(kOpLabel, {outer.Continue});
+    TestCheck(inner.Label > outer.Merge && module.Find(kOpLabel, {inner.Exit}) < outerEnd,
+              "the nested loop is in the body");
+    TestCheck(module[inner.Phis + 1].Operands[2] == module[outer.Phis].Operands[1],
+              "the nested loop carries the index from the body around it");
+    TestCheck(module[outer.Phis + 3].Operands[4] == module[outer.Phis + 4].Operands[1] &&
+                  module[outer.Phis + 4].Operands[4] == module[outer.Phis + 3].Operands[1],
+              "a swapped pair takes each other's phi");
+    TestCheck(Defines(module, module[outer.Phis + 2].Operands[4]) < outer.Label,
+              "a next from before the loop is computed before it");
+
+    const int sample = module.Find(kOpImageSampleImplicitLod);
+    TestCheck(sample > outer.Merge && sample < inner.Label, "the uniform loop's body samples");
+    const int trips = module.Find(kOpExtInst, {intType, kAny, module.GlslImport(), kGlslSMin});
+    TestCheck(module.CountGlsl(kGlslSMin) == 2 && trips >= 0 && trips < outer.Label &&
+                  module[trips].Operands[1] == module[outer.Merge - 1].Operands[3] &&
+                  module.IsIntConstant(module[trips].Operands[5], 8),
+              "a runtime count is bounded before the loop");
+    TestCheck(module.IsIntConstant(module[fixed.Merge - 1].Operands[3], 3),
+              "a constant count takes the bound's place when that is lower");
+    TestCheck(module[fixed.Phis + 1].Operands[2] == module[outer.Phis + 2].Operands[1] && fixed.Label > outerEnd,
+              "a RESULT is its carried value's phi, which dominates the merge block");
+    const int kill = module.Find(kOpKill);
+    TestCheck(kill > fixed.Label && module.Count(kOpBranchConditional, {module[outer.Phis + 5].Operands[1]}) == 1,
+              "the discard tests a carried value after the loops");
+}
+
 void TestIntegerLowering() {
     CKJitBuilder b(4);
     const CKJitValue position = b.Input(kFragCoord);
@@ -842,6 +997,7 @@ int main(int argc, char **argv) {
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
     framework.Run("if regions", TestIfRegions);
+    framework.Run("loops", TestLoops);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("declarations are unique", TestDeclarationsAreUnique);
     framework.Run("constant outputs", TestConstantOutputs);

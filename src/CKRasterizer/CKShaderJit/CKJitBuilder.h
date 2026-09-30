@@ -15,7 +15,10 @@
 // A scalar operand is splatted against a vector operand of its kind.
 // Ill-typed operands never reach a backend: the operation returns an invalid
 // value, the builder reports Failed() and Finish() refuses to produce a shader.
-// So do values of an arm (see If) used after it ends.
+// So do values of an arm or a loop body (see If and Loop) used after it ends,
+// and QUAD operations (derivatives and samples taking their LOD from them)
+// where control flow may diverge: in the arms and bodies of conditions and
+// counts that depend on inputs or carried values (see CKJitIR.h).
 class CKJitBuilder {
 public:
     explicit CKJitBuilder(uint32_t uniformVec4Count);
@@ -118,12 +121,29 @@ public:
     // result pairs a then and an else value of one type, each from its arm or
     // from before the region, and is the then value where the condition holds.
     // A constant condition builds both arms around the region and keeps the
-    // taken arm's results. Derivatives and samples taking their LOD from them
-    // need a condition every pixel of the quad shares.
+    // taken arm's results.
     void If(CKJitValue condition);
     void Else(std::initializer_list<CKJitValue> thenResults);
     void EndIf(std::initializer_list<CKJitValue> elseResults, CKJitValue *results);
     CKJitValue EndIf(CKJitValue elseResult);
+
+    // Bounded loops, for work repeated a number of times each pixel decides:
+    //
+    //     CKJitValue index = b.Loop(count, bound, {initials...}, carried);
+    //     ... body ...
+    //     b.EndLoop({nexts...}, results);
+    //
+    // The body runs for the INT index 0, 1, ... below the INT count and the
+    // bound (1..2^31 - 1), so never for a count below one. Each carried value
+    // is its initial in the first iteration and its next, of one type, in the
+    // following ones; its result is its value once the loop ends. A next is
+    // of the body or from before the loop; the body's values are seen in it
+    // and the regions it encloses only. A constant count of at most one
+    // iteration builds the body around the loop.
+    CKJitValue Loop(CKJitValue count, uint32_t bound, std::initializer_list<CKJitValue> initials,
+                    CKJitValue *carried);
+    void EndLoop(std::initializer_list<CKJitValue> nexts, CKJitValue *results);
+    CKJitValue EndLoop(CKJitValue next);
 
     // Texture access through a sampler slot, with FLOAT2 coordinates for 2D
     // slots and FLOAT3 for cube and volume slots. A slot keeps the dimension
@@ -147,7 +167,7 @@ public:
     bool IsConstantBool(CKJitValue value, bool x) const;
 
     // Keeps the nodes reachable from the outputs. discard may be invalid
-    // (never discards). Fails on an earlier error, an open region or
+    // (never discards). Fails on an earlier error, an open region or loop, or
     // ill-typed outputs.
     bool Finish(CKJitValue color, CKJitValue discard, CKJitFragmentShader &out) const;
 
@@ -163,25 +183,29 @@ private:
         uint32_t Value;
         uint32_t Component;
     };
-    // A region being built. A constant or ill-typed condition flattens it:
-    // its arms are built in the scope around it.
+    // A region or loop being built. A constant or ill-typed condition, and a
+    // constant count of at most one iteration, flatten it: its arms or body
+    // are built in the scope around it.
     struct Region {
-        CKJitValue Condition;
-        uint32_t Marker; // the IF, then the ELSE; InvalidId when flattened
-        uint32_t Scope;  // of the arm being built
-        uint32_t Parent; // the scope around the region
-        int Yields;      // its then results in m_Yields
+        CKJitValue Condition; // or count
+        uint32_t Marker;      // the IF, then the ELSE, or the LOOP; InvalidId when flattened
+        uint32_t Scope;       // of the arm or body being built
+        uint32_t Parent;      // the scope around the region
+        int Yields;           // its then results, or a loop's carried values, in m_Yields
+        bool IsLoop;
         bool InElse;
-        bool Taken; // flattened: the arm the results come from
+        bool Taken;     // flattened: the arm the results come from, or whether the body runs
+        bool Divergent; // not every pixel of a quad may run the arm or body
     };
 
     CKJitValue Emit(const CKJitNode &node);
     CKJitValue Intern(const CKJitNode &node);
     CKJitValue Push(const CKJitNode &node, uint32_t scope);
-    uint32_t PushMarker(CKJitOp op, uint32_t operand, uint32_t scope);
+    uint32_t PushMarker(CKJitOp op, uint32_t operand, uint32_t scope, uint32_t imm = 0);
     uint32_t OpenScope();
     void CloseArm(const Region &region);
     uint32_t CurrentScope() const { return m_Regions.Size() != 0 ? m_Regions.Back().Scope : 0u; }
+    bool Divergent() const { return m_Regions.Size() != 0 && m_Regions.Back().Divergent; }
     CKJitValue Emit(CKJitOp op, CKJitType type, std::initializer_list<CKJitValue> operands,
                     std::initializer_list<uint32_t> imm = {});
     CKJitValue Constant(CKJitType type, const uint32_t *bits);
@@ -210,10 +234,11 @@ private:
     CKJitValue Fail();
 
     XArray<CKJitNode> m_Nodes;
-    XArray<uint32_t> m_Scopes;    // by node: the arm it was built in, the root (0) for leaves
+    XArray<uint32_t> m_Scopes;    // by node: the arm or body it was built in, the root (0) for leaves
+    XArray<uint8_t> m_Varying;    // by node: whether it may differ within a quad
     XArray<uint8_t> m_OpenScopes; // by scope: whether its values are seen
     XArray<Region> m_Regions;     // being built, innermost last
-    XArray<CKJitValue> m_Yields;  // their then results
+    XArray<CKJitValue> m_Yields;  // their then results and carried values
     XArray<CKJitInput> m_Inputs;
     XSHashTable<uint32_t, CKJitNode, NodeHash, NodeEqual> m_Lookup; // of the values seen
     uint32_t m_UniformVec4Count;
