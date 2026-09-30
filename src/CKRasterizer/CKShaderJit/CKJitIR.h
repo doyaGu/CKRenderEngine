@@ -6,10 +6,11 @@
 
 #include <cstdint>
 
-// Typed SSA dataflow IR of the runtime shader compiler. A program is a DAG of
-// pure nodes without control flow: runtime conditions are SELECTs and the only
-// side effects are the fragment outputs. CKJitBuilder creates the nodes
-// (hash-consed and folded); the SPIR-V and DXBC backends translate a finished
+// Typed SSA dataflow IR of the runtime shader compiler. A program is a list
+// of pure nodes in dependency order, which structured regions (IF, ELSE and
+// ENDIF markers with PHI results) divide into arms; the only side effects are
+// the fragment outputs. CKJitBuilder creates the nodes (hash-consed and
+// folded); the SPIR-V and DXBC backends translate a finished
 // CKJitFragmentShader.
 
 // A scalar kind and 1..4 components: the scalar type plus components - 1.
@@ -27,6 +28,7 @@ enum CKJitType : uint8_t {
     CKJIT_TYPE_FLOAT2,
     CKJIT_TYPE_FLOAT3,
     CKJIT_TYPE_FLOAT4,
+    CKJIT_TYPE_VOID, // region markers, which have no value
     CKJIT_TYPE_COUNT
 };
 
@@ -46,6 +48,7 @@ enum CKJitOpFlag {
     CKJIT_OPFLAG_COMMUTATIVE = 0x1,
     CKJIT_OPFLAG_VARIADIC = 0x2,
     CKJIT_OPFLAG_TEXTURE = 0x4, // reads sampler slot Imm[0] of dimension Imm[1]
+    CKJIT_OPFLAG_MARKER = 0x8,  // bounds a region's arms: VOID, never shared
 };
 
 enum CKJitOp : uint8_t {
@@ -113,7 +116,7 @@ struct CKJitNode {
 static_assert(sizeof(CKJitNode) == 36, "CKJitNode must not contain padding");
 
 // Finished program: nodes in dependency order (operands precede users), every
-// node reachable from an output.
+// node reachable from an output, the leaves ahead of every region.
 struct CKJitFragmentShader {
     XArray<CKJitInput> Inputs;
     XArray<CKJitNode> Nodes;
@@ -135,7 +138,8 @@ struct CKJitResourceLayout {
 // Checks what backends rely on without re-checking it: every operation has
 // its operand count, operands precede their users, input, uniform, swizzle
 // and sampler references are in range, a sampler slot has one dimension its
-// operations accept and the outputs have their types. Operand typing is
+// operations accept, regions nest with their PHIs after them, nodes read only
+// values their arm sees and the outputs have their types. Operand typing is
 // CKJitBuilder's contract.
 bool CKJitVerify(const CKJitFragmentShader &shader);
 

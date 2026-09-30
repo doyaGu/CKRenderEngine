@@ -20,11 +20,14 @@ enum {
     kOpDiscard = 13,
     kOpDiv = 14,
     kOpDp3 = 16,
+    kOpElse = 18,
+    kOpEndIf = 21,
     kOpEq = 24,
     kOpExp = 25,
     kOpFtoi = 27,
     kOpGe = 29,
     kOpIadd = 30,
+    kOpIf = 31,
     kOpIeq = 32,
     kOpIge = 33,
     kOpIlt = 34,
@@ -382,14 +385,26 @@ private:
 // How many leading operands are destinations: imul and udiv write two
 // results, the first of which the backend discards.
 uint32_t DestinationCount(uint32_t opcode) {
-    if (opcode == kOpDiscard || opcode == kOpRet)
+    if (opcode == kOpDiscard || opcode == kOpRet || opcode == kOpIf || opcode == kOpElse || opcode == kOpEndIf)
         return 0;
     return opcode == kOpImul || opcode == kOpUdiv ? 2 : 1;
 }
 
+// Temporary components written on every path to a point of the program.
+struct Written {
+    uint8_t Lanes[64];
+};
+
+// What was written before a region, and on its then arm.
+struct RegionWrites {
+    Written Before;
+    Written Then;
+    bool InElse;
+};
+
 // What the runtime and the driver rely on: the digest, the chunks, declared
-// inputs, resources and temporaries, and temporaries written before they are
-// read.
+// inputs, resources and temporaries, balanced regions, and temporaries
+// written on every path before they are read.
 void CheckProgram(const XArray<uint32_t> &words) {
     uint32_t digest[4];
     CKJitDxbcDigest(words.Begin(), (uint32_t)words.Size(), digest);
@@ -443,17 +458,36 @@ void CheckProgram(const XArray<uint32_t> &words) {
                   "an input declares the components its signature reads");
     }
 
-    uint8_t written[64] = {};
+    Written written = {};
+    XArray<RegionWrites> regions;
     uint32_t output = 0;
     for (int i = program.FirstCode(); i < program.Size(); ++i) {
         const Instruction &instruction = program[i];
+        if (instruction.Opcode == kOpElse || instruction.Opcode == kOpEndIf) {
+            TestCheck(regions.Size() != 0 && !regions.Back().InElse == (instruction.Opcode == kOpElse),
+                      "regions are balanced");
+            if (regions.Size() == 0)
+                continue;
+            RegionWrites &region = regions.Back();
+            if (instruction.Opcode == kOpElse) {
+                region.Then = written;
+                written = region.Before;
+                region.InElse = true;
+            } else {
+                const Written &other = region.InElse ? region.Then : region.Before;
+                for (uint32_t r = 0; r < 64; ++r)
+                    written.Lanes[r] &= other.Lanes[r];
+                regions.PopBack();
+            }
+            continue;
+        }
         const uint32_t first = DestinationCount(instruction.Opcode);
         for (uint32_t k = first; k < instruction.OperandCount; ++k) {
             const Operand &source = instruction.Operands[k];
             switch (source.Type) {
             case kOperandTemp:
                 TestCheck(source.Indices[0] < temps && source.Indices[0] < 64 &&
-                              (source.Lanes() & ~written[source.Indices[0] & 63]) == 0,
+                              (source.Lanes() & ~written.Lanes[source.Indices[0] & 63]) == 0,
                           "temporaries are written before they are read");
                 break;
             case kOperandInput: {
@@ -494,13 +528,21 @@ void CheckProgram(const XArray<uint32_t> &words) {
                       "destinations are written through a mask");
             if (dest.Type == kOperandTemp) {
                 TestCheck(dest.Indices[0] < temps, "temporaries are declared");
-                written[dest.Indices[0] & 63] |= (uint8_t)dest.Selector;
+                written.Lanes[dest.Indices[0] & 63] |= (uint8_t)dest.Selector;
             } else {
                 TestCheck(dest.Is(kOperandOutput, 0), "only temporaries and o0 are written");
                 output |= dest.Selector;
             }
         }
+        if (instruction.Opcode == kOpIf) {
+            TestCheck(instruction.OperandCount == 1 && (instruction.Operands[0].Components == 1 ||
+                                                        instruction.Operands[0].Selection == kSelectOne),
+                      "a region tests one component");
+            const RegionWrites region = {written, {}, false};
+            regions.PushBack(region);
+        }
     }
+    TestCheck(regions.Size() == 0, "every region ends");
     TestCheck(output == 0xf, "every colour component is written");
 }
 
@@ -588,6 +630,31 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
     color = b.Mul(b.Select(condition, graded, b.Add(rounded, texels)), alpha);
     discard = b.Less(b.Component(color, 3), b.Component(position, 2));
+}
+
+// Two regions, one in the other's then arm, with PHI results of every kind
+// and a select of values from before them. The outer condition is uniform, so
+// its then arm samples.
+void BuildRegions(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
+    const CKJitValue diffuse = b.Input(kColor0);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue params = b.Uniform(0);
+    const CKJitValue scale = b.Mul(diffuse, b.Uniform(1));
+    b.If(b.Less(b.Component(params, 0), b.Float(0.5f)));
+    const CKJitValue texel = b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue shaded = b.Mul(texel, scale);
+    b.If(b.Less(b.Component(shaded, 3), b.Component(params, 1)));
+    const CKJitValue dimmed = b.Mul(shaded, b.Component(params, 2));
+    b.Else({dimmed});
+    const CKJitValue inner = b.EndIf(shaded);
+    const CKJitValue count = b.FloatToInt(b.Component(inner, 0));
+    const CKJitValue faint = b.Less(b.Component(texel, 3), b.Float(0.25f));
+    b.Else({inner, count, faint, scale});
+    const CKJitValue fallback = b.Add(scale, b.Uniform(2));
+    CKJitValue results[4];
+    b.EndIf({fallback, b.Int(3), b.Bool(false), diffuse}, results);
+    color = b.Mul(b.Add(results[0], results[3]), b.IntToFloat(results[1]));
+    discard = results[2];
 }
 
 void TestContainerLayout() {
@@ -1003,6 +1070,70 @@ void TestDepthComparison() {
     TestCheck(compare >= 0 && program.Find(kOpDiscard) > compare, "the comparison runs before the discard");
 }
 
+// Whether the instructions before an arm's end move into the same registers
+// as those before another's.
+bool MovesAlike(const Program &program, int end, int other, int count) {
+    if (end < count || other < count)
+        return false;
+    for (int k = 1; k <= count; ++k) {
+        const Instruction &a = program[end - k];
+        const Instruction &b = program[other - k];
+        if (a.Opcode != kOpMov || b.Opcode != kOpMov || a.Operands[0].Type != b.Operands[0].Type ||
+            a.Operands[0].Indices[0] != b.Operands[0].Indices[0] || a.Operands[0].Selector != b.Operands[0].Selector)
+            return false;
+    }
+    return true;
+}
+
+void TestIfRegions() {
+    CKJitBuilder b(4);
+    CKJitValue color, discard;
+    BuildRegions(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "regions compile");
+    Save("if_regions", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const int outer = program.Find(kOpIf);
+    const int inner = program.Find(kOpIf, outer + 1);
+    const int innerElse = program.Find(kOpElse);
+    const int innerEnd = program.Find(kOpEndIf);
+    const int outerElse = program.Find(kOpElse, innerElse + 1);
+    const int outerEnd = program.Find(kOpEndIf, innerEnd + 1);
+    TestCheck(outer >= 0 && outer < inner && inner < innerElse && innerElse < innerEnd && innerEnd < outerElse &&
+                  outerElse < outerEnd && program.Count(kOpIf, kTestNonZero) == 2 && program.Count(kOpElse) == 2 &&
+                  program.Count(kOpEndIf) == 2,
+              "regions nest as if_nz, else and endif blocks");
+    if (outer < 0 || inner < 0 || innerElse < 0 || innerEnd < 0 || outerElse < 0 || outerEnd < 0)
+        return;
+    const int sample = program.Find(kOpSample);
+    TestCheck(sample > outer && sample < inner, "the then arm samples");
+    TestCheck(MovesAlike(program, innerElse, innerEnd, 1) && MovesAlike(program, outerElse, outerEnd, 3),
+              "each arm ends moving its results into the PHI registers");
+    const int kill = program.Find(kOpDiscard);
+    TestCheck(kill > outerEnd && program[kill].Operands[0].Is(kOperandTemp, program[outerEnd - 1].Operands[0].Indices[0]),
+              "the discard tests its PHI after the regions");
+    TestCheck(program.Count(kOpMovc) == 1 && program.Find(kOpMovc) > outerEnd,
+              "the result from before the region is selected after it");
+
+    CKJitBuilder direct(4);
+    const CKJitValue diffuse = direct.Input(kColor0);
+    direct.If(direct.Less(direct.Component(diffuse, 3), direct.Float(0.5f)));
+    const CKJitValue lit = direct.Mul(diffuse, direct.Uniform(1));
+    direct.Else({lit});
+    const CKJitValue shade = direct.EndIf(direct.Mul(diffuse, direct.Uniform(0)));
+    TestCheck(Compile(direct, shade, CKJitValue(), words), "a colour PHI compiles");
+    Save("phi_output", words);
+    const Container directContainer(words);
+    const Program directProgram(directContainer.Find("SHEX"));
+    const int directElse = directProgram.Find(kOpElse);
+    const int directEnd = directProgram.Find(kOpEndIf);
+    TestCheck(directElse > 0 && directEnd > 0 && directProgram[directElse - 1].Operands[0].Is(kOperandOutput, 0) &&
+                  MovesAlike(directProgram, directElse, directEnd, 1) && directProgram.Count(kOpMov) == 2,
+              "a colour PHI nothing else reads is moved into the output by each arm");
+}
+
 void TestIntegerLowering() {
     CKJitBuilder b(4);
     const CKJitValue position = b.Input(kFragCoord);
@@ -1243,6 +1374,7 @@ int main(int argc, char **argv) {
     framework.Run("lowering", TestLowering);
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
+    framework.Run("if regions", TestIfRegions);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("register allocation", TestRegisterAllocation);
     framework.Run("color in output", TestColorInOutput);

@@ -84,8 +84,10 @@ enum {
     SpvOpBitwiseAnd = 199,
     SpvOpDPdx = 207,
     SpvOpDPdy = 208,
+    SpvOpPhi = 245,
     SpvOpSelectionMerge = 247,
     SpvOpLabel = 248,
+    SpvOpBranch = 249,
     SpvOpBranchConditional = 250,
     SpvOpKill = 252,
     SpvOpReturn = 253,
@@ -171,6 +173,11 @@ public:
     void Emit(XArray<uint32_t> &words);
 
 private:
+    // The blocks a region branches to past its then arm.
+    struct Region {
+        uint32_t Else;
+        uint32_t Merge;
+    };
     // Types and constants are interned by their instruction, which also gives
     // SPIR-V the unique non-aggregate type declarations it requires.
     struct Declaration {
@@ -214,6 +221,7 @@ private:
         return Op(opcode, type, operands.begin(), (uint32_t)operands.size());
     }
     uint32_t Glsl(uint32_t instruction, uint32_t type, std::initializer_list<uint32_t> operands);
+    uint32_t Enter(uint32_t label);
 
     void DeclareInterface();
     uint32_t UniformBlock();
@@ -223,6 +231,7 @@ private:
     uint32_t Query(uint32_t opcode, uint32_t type, std::initializer_list<uint32_t> operands);
     uint32_t Value(uint32_t node) const { return m_Values[(int)node]; }
     uint32_t Translate(const CKJitNode &node);
+    uint32_t Control(const CKJitNode &node);
     uint32_t Swizzle(const CKJitNode &node);
     uint32_t Select(const CKJitNode &node);
     uint32_t Sample(const CKJitNode &node);
@@ -236,12 +245,14 @@ private:
     SpirvSection m_Globals; // types, constants and variables
     SpirvSection m_Body;
     XSHashTable<uint32_t, Declaration, DeclarationHash, DeclarationEqual> m_Declarations;
-    XArray<uint32_t> m_Values;    // SPIR-V id of every node
+    XArray<uint32_t> m_Values;    // SPIR-V id of every node; a marker's is the block it ends
     XArray<uint32_t> m_Inputs;    // variable of every shader input
     XArray<uint32_t> m_Interface; // entry point interface: inputs and output
+    XArray<Region> m_Regions;     // enclosing the node being translated, innermost last
     uint32_t m_SampledImages[CKJIT_MAX_SAMPLERS]; // loaded on first use
     uint32_t m_Images[CKJIT_MAX_SAMPLERS];        // taken from the sampled image on first use
     uint32_t m_Bound;
+    uint32_t m_Block; // label of the block being emitted
     uint32_t m_Main;
     uint32_t m_GlslImport;
     uint32_t m_Output;
@@ -262,7 +273,8 @@ int SpirvEmitter::DeclarationEqual::operator()(const Declaration &a, const Decla
 }
 
 SpirvEmitter::SpirvEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Output(0), m_UniformBlock(0), m_ImageQuery(false) {
+    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Block(0), m_Output(0), m_UniformBlock(0),
+      m_ImageQuery(false) {
     std::memset(m_SampledImages, 0, sizeof(m_SampledImages));
     std::memset(m_Images, 0, sizeof(m_Images));
     m_Main = NewId();
@@ -301,6 +313,7 @@ uint32_t SpirvEmitter::Variable(uint32_t storage, uint32_t type) {
 uint32_t SpirvEmitter::TypeOf(CKJitType type) {
     uint32_t scalar;
     switch (CKJitScalarOf(type)) {
+    case CKJIT_TYPE_VOID: return DeclareType(SpvOpTypeVoid, {});
     case CKJIT_TYPE_BOOL: scalar = DeclareType(SpvOpTypeBool, {}); break;
     case CKJIT_TYPE_INT: scalar = DeclareType(SpvOpTypeInt, {32, 1}); break;
     default: scalar = DeclareType(SpvOpTypeFloat, {32}); break;
@@ -352,6 +365,14 @@ uint32_t SpirvEmitter::Glsl(uint32_t instruction, uint32_t type, std::initialize
     return Op(SpvOpExtInst, type, words, count);
 }
 
+// Starts a block; returns the one it follows.
+uint32_t SpirvEmitter::Enter(uint32_t label) {
+    const uint32_t previous = m_Block;
+    m_Body.Emit(SpvOpLabel, {label});
+    m_Block = label;
+    return previous;
+}
+
 // Every declared input is part of the interface, read or not.
 void SpirvEmitter::DeclareInterface() {
     for (int i = 0; i < m_Shader.Inputs.Size(); ++i) {
@@ -394,8 +415,8 @@ uint32_t SpirvEmitter::ImageType(uint32_t dim) {
 }
 
 // The combined image sampler of a node's slot, declared and loaded when first
-// used. The body is one block until the discard, so the load dominates every
-// later use.
+// used. Emit uses every slot in the entry block, so the load dominates every
+// arm.
 uint32_t SpirvEmitter::SampledImage(const CKJitNode &node) {
     const uint32_t slot = node.Imm[0];
     if (m_SampledImages[slot] == 0) {
@@ -461,6 +482,37 @@ uint32_t SpirvEmitter::Sample(const CKJitNode &node) {
         return Op(SpvOpImageSampleImplicitLod, FloatType(4), {image, coordinate});
     return Op(SpvOpImageSampleImplicitLod, FloatType(4),
               {image, coordinate, SpvImageOperandsBiasMask, Value(node.Operands[1])});
+}
+
+// Regions are selection constructs: the header branches to the then arm or the
+// else block, both arms to the merge block, where PHIs take each result from
+// the block that ended its arm.
+uint32_t SpirvEmitter::Control(const CKJitNode &node) {
+    switch (node.Op) {
+    case CKJIT_OP_IF: {
+        const uint32_t then = NewId();
+        const Region region = {NewId(), NewId()};
+        m_Body.Emit(SpvOpSelectionMerge, {region.Merge, SpvSelectionControlNone});
+        m_Body.Emit(SpvOpBranchConditional, {Value(node.Operands[0]), then, region.Else});
+        m_Regions.PushBack(region);
+        return Enter(then);
+    }
+    case CKJIT_OP_ELSE:
+        m_Body.Emit(SpvOpBranch, {m_Regions.Back().Merge});
+        return Enter(m_Regions.Back().Else);
+    case CKJIT_OP_ENDIF: {
+        m_Body.Emit(SpvOpBranch, {m_Regions.Back().Merge});
+        const uint32_t end = Enter(m_Regions.Back().Merge);
+        m_Regions.PopBack();
+        return end;
+    }
+    default: {
+        const uint32_t endif = node.Operands[2];
+        const uint32_t elseMarker = m_Shader.Nodes[(int)endif].Operands[0];
+        return Op(SpvOpPhi, TypeOf(node.Type),
+                  {Value(node.Operands[0]), Value(elseMarker), Value(node.Operands[1]), Value(endif)});
+    }
+    }
 }
 
 // A fetch takes the texel and its mip apart.
@@ -561,6 +613,10 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
     case CKJIT_OP_ANY: return Op(SpvOpAny, type, {a});
     case CKJIT_OP_ALL: return Op(SpvOpAll, type, {a});
     case CKJIT_OP_SELECT: return Select(node);
+    case CKJIT_OP_IF:
+    case CKJIT_OP_ELSE:
+    case CKJIT_OP_ENDIF:
+    case CKJIT_OP_PHI: return Control(node);
     case CKJIT_OP_SAMPLE: return Sample(node);
     case CKJIT_OP_SAMPLE_LEVEL:
         return Op(SpvOpImageSampleExplicitLod, type, {SampledImage(node), a, SpvImageOperandsLodMask, b});
@@ -589,7 +645,16 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
 
     const uint32_t voidType = DeclareType(SpvOpTypeVoid, {});
     m_Body.Emit(SpvOpFunction, {voidType, m_Main, SpvFunctionControlNone, DeclareType(SpvOpTypeFunction, {voidType})});
-    m_Body.Emit(SpvOpLabel, {NewId()});
+    Enter(NewId());
+    for (int i = 0; i < m_Shader.Nodes.Size(); ++i) {
+        const CKJitNode &node = m_Shader.Nodes[i];
+        if ((CKJitOpFlags(node.Op) & CKJIT_OPFLAG_TEXTURE) == 0)
+            continue;
+        if (node.Op == CKJIT_OP_LOAD || node.Op == CKJIT_OP_SIZE || node.Op == CKJIT_OP_LEVELS)
+            Image(node);
+        else
+            SampledImage(node);
+    }
     m_Values.Resize(m_Shader.Nodes.Size());
     for (int i = 0; i < m_Shader.Nodes.Size(); ++i)
         m_Values[i] = Translate(m_Shader.Nodes[i]);
@@ -601,9 +666,9 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
         const uint32_t merge = NewId();
         m_Body.Emit(SpvOpSelectionMerge, {merge, SpvSelectionControlNone});
         m_Body.Emit(SpvOpBranchConditional, {Value(m_Shader.Discard.Id), kill, merge});
-        m_Body.Emit(SpvOpLabel, {kill});
+        Enter(kill);
         m_Body.Emit(SpvOpKill, {});
-        m_Body.Emit(SpvOpLabel, {merge});
+        Enter(merge);
     }
     m_Body.Emit(SpvOpStore, {m_Output, Value(m_Shader.Color.Id)});
     m_Body.Emit(SpvOpReturn, {});

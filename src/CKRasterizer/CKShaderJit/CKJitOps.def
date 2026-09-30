@@ -1,10 +1,11 @@
 // Shader IR operations: CKJIT_OP(NAME, operands, flags). A VARIADIC operation
 // takes from two up to that many operands.
 //
-// Every value is a pure function of its operands; the IR has no control flow.
-// Operations are component-wise over operands of one type unless noted, and
-// comparisons produce BOOLs of their operands' width. Keep this list in sync
-// with the operand and type rules in CKJitBuilder and with every backend.
+// Every value is a pure function of its operands; structured regions (IF
+// below) only decide which of them a pixel computes. Operations are
+// component-wise over operands of one type unless noted, and comparisons
+// produce BOOLs of their operands' width. Keep this list in sync with the
+// operand and type rules in CKJitBuilder and with every backend.
 
 // Leaves. CONSTANT holds the component bit patterns in Imm[0..3], INPUT the
 // shader input index in Imm[0], UNIFORM the float4 row in Imm[0].
@@ -37,8 +38,9 @@ CKJIT_OP(SQRT,       1, 0)
 CKJIT_OP(DOT,        2, CKJIT_OPFLAG_COMMUTATIVE)
 
 // Screen-space derivatives: the difference across the pixel quad along x or
-// y, at the precision of HLSL ddx and ddy. The IR has no control flow, so
-// they are taken with the whole quad running.
+// y, at the precision of HLSL ddx and ddy. They need the whole quad running:
+// within an arm, only under a condition every pixel of the quad shares (as
+// SAMPLE, SAMPLE_CMP and CALC_LOD do).
 CKJIT_OP(DDX,        1, 0)
 CKJIT_OP(DDY,        1, 0)
 
@@ -80,6 +82,18 @@ CKJIT_OP(ALL,        1, 0)
 // SELECT(condition, whenTrue, whenFalse): a BOOL condition picks whole arms,
 // one of the arms' width picks per component.
 CKJIT_OP(SELECT,     3, 0)
+
+// A structured region: IF(condition) runs the then arm where the BOOL holds,
+// ELSE(if) ends it and runs the else arm elsewhere, ENDIF(else) ends that.
+// The markers are VOID and bracket their arms in the node order; an arm's
+// nodes read only nodes of the arms enclosing them. The PHIs directly after
+// an ENDIF are the region's results: PHI(whenThen, whenElse, endif) is the
+// then value where the condition held and the else value elsewhere, each of
+// its arm or from before the region.
+CKJIT_OP(IF,         1, CKJIT_OPFLAG_MARKER)
+CKJIT_OP(ELSE,       1, CKJIT_OPFLAG_MARKER)
+CKJIT_OP(ENDIF,      1, CKJIT_OPFLAG_MARKER)
+CKJIT_OP(PHI,        3, 0)
 
 // Texture access through sampler slot Imm[0] with dimension Imm[1]
 // (CKJitSamplerDim); a slot has one dimension. Coordinates are FLOAT2 for 2D

@@ -15,11 +15,14 @@ enum : uint32_t {
     DxbcOpDp2 = 15,
     DxbcOpDp3 = 16,
     DxbcOpDp4 = 17,
+    DxbcOpElse = 18,
+    DxbcOpEndIf = 21,
     DxbcOpEq = 24,
     DxbcOpExp = 25,
     DxbcOpFtoi = 27,
     DxbcOpGe = 29,
     DxbcOpIadd = 30,
+    DxbcOpIf = 31,
     DxbcOpIeq = 32,
     DxbcOpIge = 33,
     DxbcOpIlt = 34,
@@ -409,6 +412,8 @@ private:
     DxbcValue Destination(uint32_t node);
     void Release(uint32_t node);
     void Translate(uint32_t node);
+    bool Control(uint32_t node);
+    void Join(uint32_t marker, uint32_t arm);
 
     void Dest(const DxbcValue &dest);
     void Source(const DxbcValue &value, const DxbcReads &reads);
@@ -434,7 +439,8 @@ private:
     DxbcTemps m_Temps;
     XArray<DxbcValue> m_Values; // where the value of every node is
     XArray<uint32_t> m_Roots;   // the node whose temporary holds a value, or NoRoot
-    XArray<uint32_t> m_LastUse; // the last node reading a computed value; the node count for outputs
+    XArray<uint32_t> m_LastUse; // the last node reading a computed value (the node count for outputs), or
+                                // an ELSE's ENDIF
     int m_InputByRegister[DxbcMaxInputRegisters]; // input index, or -1
     uint8_t m_InputReads[DxbcMaxInputRegisters];  // components read of every input register
     uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS];    // 0xff for an unused slot
@@ -465,7 +471,8 @@ bool DxbcEmitter::MapInputs() {
 }
 
 // A computed value keeps its temporary components from its node to its last
-// reader; views (swizzles and modifiers) of it extend that span.
+// reader; views (swizzles and modifiers) of it extend that span. An arm reads
+// a PHI's operand as it ends.
 void DxbcEmitter::Analyze() {
     const uint32_t count = (uint32_t)m_Shader.Nodes.Size();
     m_Roots.Resize((int)count);
@@ -484,6 +491,28 @@ void DxbcEmitter::Analyze() {
         case CKJIT_OP_ABS:
             m_Roots[(int)i] = m_Roots[(int)node.Operands[0]];
             continue;
+        case CKJIT_OP_IF:
+        case CKJIT_OP_ELSE:
+        case CKJIT_OP_ENDIF: {
+            m_Roots[(int)i] = NoRoot;
+            const uint32_t operand = node.Operands[0];
+            if (node.Op == CKJIT_OP_ENDIF)
+                m_LastUse[(int)operand] = i;
+            else if (node.Op == CKJIT_OP_IF && m_Roots[(int)operand] != NoRoot)
+                m_LastUse[(int)m_Roots[(int)operand]] = i;
+            continue;
+        }
+        case CKJIT_OP_PHI: {
+            m_Roots[(int)i] = i;
+            const uint32_t endif = node.Operands[2];
+            const uint32_t ends[2] = {m_Shader.Nodes[(int)endif].Operands[0], endif};
+            for (uint32_t arm = 0; arm < 2; ++arm) {
+                const uint32_t root = m_Roots[(int)node.Operands[arm]];
+                if (root != NoRoot && m_LastUse[(int)root] < ends[arm])
+                    m_LastUse[(int)root] = ends[arm];
+            }
+            continue;
+        }
         case CKJIT_OP_LOAD:
         case CKJIT_OP_SIZE:
         case CKJIT_OP_LEVELS: // the texture without its sampler
@@ -810,8 +839,60 @@ void DxbcEmitter::Texture(const CKJitNode &node, const DxbcValue &dest) {
     m_Code.Close();
 }
 
+// Regions are if_nz, else and endif blocks.
+bool DxbcEmitter::Control(uint32_t index) {
+    const CKJitNode &node = m_Shader.Nodes[(int)index];
+    switch (node.Op) {
+    case CKJIT_OP_IF: {
+        m_Code.Open(DxbcOpIf | DxbcTestNonZero);
+        Source(m_Values[(int)node.Operands[0]], Leading(1));
+        m_Code.Close();
+        const uint32_t root = m_Roots[(int)node.Operands[0]];
+        if (root != NoRoot && m_LastUse[(int)root] == index)
+            Release(root);
+        return true;
+    }
+    case CKJIT_OP_ELSE:
+        Join(index, 0);
+        m_Code.Instruction(DxbcOpElse, {});
+        return true;
+    case CKJIT_OP_ENDIF:
+        Join(index, 1);
+        m_Code.Instruction(DxbcOpEndIf, {});
+        return true;
+    case CKJIT_OP_PHI: // computed by the arms
+        if (m_LastUse[(int)index] == index)
+            Release(index);
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Moves the results of the arm a marker ends into the PHIs after the ENDIF.
+// Their registers are taken at the ELSE, while every then result and every
+// else result from before the region is live and before the else arm computes
+// the others, so no move overwrites another's source.
+void DxbcEmitter::Join(uint32_t marker, uint32_t arm) {
+    const uint32_t endif = arm == 0 ? m_LastUse[(int)marker] : marker;
+    const uint32_t count = (uint32_t)m_Shader.Nodes.Size();
+    uint32_t end = endif + 1;
+    for (; end < count && m_Shader.Nodes[(int)end].Op == CKJIT_OP_PHI; ++end) {
+        if (arm == 0)
+            m_Values[(int)end] = Destination(end);
+        Unary(DxbcOpMov, m_Values[(int)end], m_Values[(int)m_Shader.Nodes[(int)end].Operands[arm]]);
+    }
+    for (uint32_t phi = endif + 1; phi < end; ++phi) {
+        const uint32_t root = m_Roots[(int)m_Shader.Nodes[(int)phi].Operands[arm]];
+        if (root != NoRoot && m_LastUse[(int)root] == marker)
+            Release(root);
+    }
+}
+
 void DxbcEmitter::Translate(uint32_t index) {
     const CKJitNode &node = m_Shader.Nodes[(int)index];
+    if (Control(index))
+        return;
     if (m_Roots[(int)index] != index) {
         m_Values[(int)index] = View(node);
         return;

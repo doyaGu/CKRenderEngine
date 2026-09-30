@@ -15,6 +15,7 @@
 // A scalar operand is splatted against a vector operand of its kind.
 // Ill-typed operands never reach a backend: the operation returns an invalid
 // value, the builder reports Failed() and Finish() refuses to produce a shader.
+// So do values of an arm (see If) used after it ends.
 class CKJitBuilder {
 public:
     explicit CKJitBuilder(uint32_t uniformVec4Count);
@@ -105,6 +106,25 @@ public:
     // (scalar arms splat to its width).
     CKJitValue Select(CKJitValue condition, CKJitValue whenTrue, CKJitValue whenFalse);
 
+    // Structured conditionals, for work only some pixels need:
+    //
+    //     b.If(condition);             // a scalar BOOL
+    //     ... then arm ...
+    //     b.Else({thenResults...});
+    //     ... else arm ...
+    //     b.EndIf({elseResults...}, results);
+    //
+    // An arm's values are seen in it and the arms it encloses only. Each
+    // result pairs a then and an else value of one type, each from its arm or
+    // from before the region, and is the then value where the condition holds.
+    // A constant condition builds both arms around the region and keeps the
+    // taken arm's results. Derivatives and samples taking their LOD from them
+    // need a condition every pixel of the quad shares.
+    void If(CKJitValue condition);
+    void Else(std::initializer_list<CKJitValue> thenResults);
+    void EndIf(std::initializer_list<CKJitValue> elseResults, CKJitValue *results);
+    CKJitValue EndIf(CKJitValue elseResult);
+
     // Texture access through a sampler slot, with FLOAT2 coordinates for 2D
     // slots and FLOAT3 for cube and volume slots. A slot keeps the dimension
     // it is first used with; comparisons make it a 2D_COMPARE slot, which
@@ -127,7 +147,8 @@ public:
     bool IsConstantBool(CKJitValue value, bool x) const;
 
     // Keeps the nodes reachable from the outputs. discard may be invalid
-    // (never discards). Fails on an earlier error or ill-typed outputs.
+    // (never discards). Fails on an earlier error, an open region or
+    // ill-typed outputs.
     bool Finish(CKJitValue color, CKJitValue discard, CKJitFragmentShader &out) const;
 
 private:
@@ -142,8 +163,25 @@ private:
         uint32_t Value;
         uint32_t Component;
     };
+    // A region being built. A constant or ill-typed condition flattens it:
+    // its arms are built in the scope around it.
+    struct Region {
+        CKJitValue Condition;
+        uint32_t Marker; // the IF, then the ELSE; InvalidId when flattened
+        uint32_t Scope;  // of the arm being built
+        uint32_t Parent; // the scope around the region
+        int Yields;      // its then results in m_Yields
+        bool InElse;
+        bool Taken; // flattened: the arm the results come from
+    };
 
     CKJitValue Emit(const CKJitNode &node);
+    CKJitValue Intern(const CKJitNode &node);
+    CKJitValue Push(const CKJitNode &node, uint32_t scope);
+    uint32_t PushMarker(CKJitOp op, uint32_t operand, uint32_t scope);
+    uint32_t OpenScope();
+    void CloseArm(const Region &region);
+    uint32_t CurrentScope() const { return m_Regions.Size() != 0 ? m_Regions.Back().Scope : 0u; }
     CKJitValue Emit(CKJitOp op, CKJitType type, std::initializer_list<CKJitValue> operands,
                     std::initializer_list<uint32_t> imm = {});
     CKJitValue Constant(CKJitType type, const uint32_t *bits);
@@ -162,15 +200,22 @@ private:
                        std::initializer_list<CKJitValue> operands);
     bool Operands(CKJitType kind, CKJitValue &a, CKJitValue &b);
     bool Unify(CKJitValue &a, CKJitValue &b);
-    bool Valid(CKJitValue value) const { return value.Id < (uint32_t)m_Nodes.Size(); }
+    // A value of this builder the arm being built sees.
+    bool Valid(CKJitValue value) const {
+        return value.Id < (uint32_t)m_Nodes.Size() && m_OpenScopes[m_Scopes[value.Id]] != 0;
+    }
     bool HasType(CKJitValue value, CKJitType type) const { return Valid(value) && TypeOf(value) == type; }
     bool IsOp(CKJitValue value, CKJitOp op) const { return m_Nodes[value.Id].Op == op; }
     ComponentRef Source(CKJitValue value, uint32_t component) const;
     CKJitValue Fail();
 
     XArray<CKJitNode> m_Nodes;
+    XArray<uint32_t> m_Scopes;    // by node: the arm it was built in, the root (0) for leaves
+    XArray<uint8_t> m_OpenScopes; // by scope: whether its values are seen
+    XArray<Region> m_Regions;     // being built, innermost last
+    XArray<CKJitValue> m_Yields;  // their then results
     XArray<CKJitInput> m_Inputs;
-    XSHashTable<uint32_t, CKJitNode, NodeHash, NodeEqual> m_Lookup;
+    XSHashTable<uint32_t, CKJitNode, NodeHash, NodeEqual> m_Lookup; // of the values seen
     uint32_t m_UniformVec4Count;
     uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS]; // 0xff until a slot is used
     bool m_Failed;

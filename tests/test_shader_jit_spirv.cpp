@@ -69,8 +69,10 @@ enum {
     kOpBitwiseAnd = 199,
     kOpDPdx = 207,
     kOpDPdy = 208,
+    kOpPhi = 245,
     kOpSelectionMerge = 247,
     kOpLabel = 248,
+    kOpBranch = 249,
     kOpBranchConditional = 250,
     kOpKill = 252,
     kOpReturn = 253,
@@ -298,6 +300,41 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
     color = b.Mul(b.Select(condition, graded, b.Add(rounded, texels)), alpha);
     discard = b.Less(b.Component(color, 3), b.Component(position, 2));
+}
+
+// Two regions, one in the other's then arm, with PHI results of every kind
+// and a select of values from before them. The outer condition is uniform, so
+// its then arm samples.
+void BuildRegions(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard) {
+    const CKJitValue diffuse = b.Input(kColor0);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue params = b.Uniform(0);
+    const CKJitValue scale = b.Mul(diffuse, b.Uniform(1));
+    b.If(b.Less(b.Component(params, 0), b.Float(0.5f)));
+    const CKJitValue texel = b.Sample(0, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue shaded = b.Mul(texel, scale);
+    b.If(b.Less(b.Component(shaded, 3), b.Component(params, 1)));
+    const CKJitValue dimmed = b.Mul(shaded, b.Component(params, 2));
+    b.Else({dimmed});
+    const CKJitValue inner = b.EndIf(shaded);
+    const CKJitValue count = b.FloatToInt(b.Component(inner, 0));
+    const CKJitValue faint = b.Less(b.Component(texel, 3), b.Float(0.25f));
+    b.Else({inner, count, faint, scale});
+    const CKJitValue fallback = b.Add(scale, b.Uniform(2));
+    CKJitValue results[4];
+    b.EndIf({fallback, b.Int(3), b.Bool(false), diffuse}, results);
+    color = b.Mul(b.Add(results[0], results[3]), b.IntToFloat(results[1]));
+    discard = results[2];
+}
+
+// Whether the block a label starts ends branching to another.
+bool BranchesTo(const Module &module, uint32_t block, uint32_t target) {
+    int end = module.Find(kOpLabel, {block});
+    if (end < 0)
+        return false;
+    while (end + 1 < module.Size() && module[end + 1].Opcode != kOpLabel)
+        ++end;
+    return module[end].Matches(kOpBranch, {target});
 }
 
 void TestModuleLayout() {
@@ -629,6 +666,59 @@ void TestDepthComparison() {
     TestCheck(implicit >= 0 && implicit < module.Find(kOpBranchConditional), "the comparison runs before the discard");
 }
 
+void TestIfRegions() {
+    CKJitBuilder b(4);
+    CKJitValue color, discard;
+    BuildRegions(b, color, discard);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, color, discard, words), "regions compile");
+    Save("if_regions", words);
+
+    const Module module(words);
+    TestCheck(module.WellFormed(), "the module is well formed");
+    TestCheck(module.Count(kOpSelectionMerge) == 3 && module.Count(kOpBranchConditional) == 3 &&
+                  module.Count(kOpBranch) == 4,
+              "each region is a selection whose arms branch to its merge block");
+
+    // Each PHI heads its merge block, taking each value from a block that
+    // branches there: an arm ending after a nested region ends in its merge.
+    int phis[4] = {-1, -1, -1, -1};
+    uint32_t blocks[4] = {};
+    int count = 0;
+    uint32_t block = 0;
+    for (int i = 0; i < module.Size(); ++i) {
+        if (module[i].Opcode == kOpLabel)
+            block = module[i].Operands[0];
+        if (module[i].Opcode != kOpPhi)
+            continue;
+        if (count < 4) {
+            phis[count] = i;
+            blocks[count] = block;
+        }
+        ++count;
+        TestCheck(module[i].Count == 6 && BranchesTo(module, module[i].Operands[3], block) &&
+                      BranchesTo(module, module[i].Operands[5], block),
+                  "a PHI takes each value from a block branching to its own");
+    }
+    TestCheck(count == 4, "every result an arm computes is a PHI");
+    if (count != 4)
+        return;
+    TestCheck(blocks[0] != blocks[1] && blocks[1] == blocks[2] && blocks[2] == blocks[3],
+              "a region's PHIs share its merge block");
+    TestCheck(module[phis[1]].Operands[3] == blocks[0], "an arm ending in a nested region ends in its merge block");
+    TestCheck(module.Count(kOpSelect) == 1 && module.Find(kOpSelect) > phis[3],
+              "the result from before the region is selected after it");
+
+    const uint32_t sampledImage = module.TypeId(kOpTypeSampledImage, {});
+    const int sample = module.Find(kOpImageSampleImplicitLod);
+    TestCheck(module.Find(kOpLoad, {sampledImage}) < module.Find(kOpSelectionMerge) &&
+                  sample > module.Find(kOpBranchConditional) && sample < phis[0],
+              "the arm samples through a sampler loaded in the entry block");
+    const int kill = module.Find(kOpKill);
+    TestCheck(kill > phis[3] && module.Count(kOpBranchConditional, {module[phis[3]].Operands[1]}) == 1,
+              "the discard tests its PHI after the regions");
+}
+
 void TestIntegerLowering() {
     CKJitBuilder b(4);
     const CKJitValue position = b.Input(kFragCoord);
@@ -751,6 +841,7 @@ int main(int argc, char **argv) {
     framework.Run("lowering", TestLowering);
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
+    framework.Run("if regions", TestIfRegions);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("declarations are unique", TestDeclarationsAreUnique);
     framework.Run("constant outputs", TestConstantOutputs);

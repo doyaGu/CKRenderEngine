@@ -21,7 +21,8 @@ static_assert(sizeof(kOps) / sizeof(kOps[0]) == CKJIT_OP_COUNT, "op table out of
 
 const char *TypeName(CKJitType type) {
     static const char *const kNames[] = {
-        "bool", "bool2", "bool3", "bool4", "int", "int2", "int3", "int4", "float", "float2", "float3", "float4",
+        "bool", "bool2", "bool3", "bool4", "int", "int2", "int3", "int4",
+        "float", "float2", "float3", "float4", "void",
     };
     static_assert(sizeof(kNames) / sizeof(kNames[0]) == CKJIT_TYPE_COUNT, "type names out of sync");
     return type < CKJIT_TYPE_COUNT ? kNames[type] : "?";
@@ -54,6 +55,94 @@ void AppendConstant(XString &out, const CKJitNode &node) {
     }
     out << ")";
 }
+
+// Structural checks of the regions, in node order. A node's scope is the IF
+// or ELSE marker that opened its arm, or Root.
+class RegionChecker {
+public:
+    static const uint32_t Root = 0xffffffffu;
+
+    explicit RegionChecker(const CKJitFragmentShader &shader) : m_Nodes(shader.Nodes) {
+        m_Scopes.Resize(m_Nodes.Size());
+        m_Open.Resize(m_Nodes.Size());
+        m_Open.Memset(0);
+    }
+
+    bool Check(uint32_t i) {
+        const CKJitNode &node = m_Nodes[(int)i];
+        const bool marker = (kOps[node.Op].Flags & CKJIT_OPFLAG_MARKER) != 0;
+        if (marker != (node.Type == CKJIT_TYPE_VOID))
+            return false;
+        m_Scopes[(int)i] = Current();
+        switch (node.Op) {
+        case CKJIT_OP_IF:
+            if (!Visible(node.Operands[0]) || m_Nodes[(int)node.Operands[0]].Type != CKJIT_TYPE_BOOL)
+                return false;
+            m_Regions.PushBack(Region{i, Root});
+            m_Open[(int)i] = 1;
+            return true;
+        case CKJIT_OP_ELSE:
+            if (m_Regions.Size() == 0 || m_Regions.Back().If != node.Operands[0] || m_Regions.Back().Else != Root)
+                return false;
+            m_Open[(int)node.Operands[0]] = 0;
+            m_Open[(int)i] = 1;
+            m_Regions.Back().Else = i;
+            m_Scopes[(int)i] = m_Scopes[(int)node.Operands[0]];
+            return true;
+        case CKJIT_OP_ENDIF:
+            if (m_Regions.Size() == 0 || m_Regions.Back().Else != node.Operands[0])
+                return false;
+            m_Open[(int)node.Operands[0]] = 0;
+            m_Regions.PopBack();
+            m_Scopes[(int)i] = Current();
+            return true;
+        case CKJIT_OP_PHI: {
+            // Directly after its ENDIF, each operand from its arm or seen here.
+            const uint32_t endif = node.Operands[2];
+            const CKJitNode &previous = m_Nodes[(int)i - 1];
+            if (m_Nodes[(int)endif].Op != CKJIT_OP_ENDIF ||
+                (i - 1 != endif && (previous.Op != CKJIT_OP_PHI || previous.Operands[2] != endif))) {
+                return false;
+            }
+            const uint32_t elseMarker = m_Nodes[(int)endif].Operands[0];
+            const uint32_t ifMarker = m_Nodes[(int)elseMarker].Operands[0];
+            return FromArm(node.Operands[0], ifMarker) && FromArm(node.Operands[1], elseMarker);
+        }
+        default:
+            for (uint32_t operand = 0; operand < node.OperandCount; ++operand) {
+                if (!Visible(node.Operands[operand]))
+                    return false;
+            }
+            return true;
+        }
+    }
+
+    bool Closed() const { return m_Regions.Size() == 0; }
+    bool AtRoot(CKJitValue value) const { return m_Scopes[(int)value.Id] == Root; }
+
+private:
+    struct Region {
+        uint32_t If;
+        uint32_t Else; // Root in the then arm
+    };
+
+    uint32_t Current() const {
+        if (m_Regions.Size() == 0)
+            return Root;
+        return m_Regions.Back().Else != Root ? m_Regions.Back().Else : m_Regions.Back().If;
+    }
+    bool IsMarker(uint32_t id) const { return (kOps[m_Nodes[(int)id].Op].Flags & CKJIT_OPFLAG_MARKER) != 0; }
+    bool Visible(uint32_t id) const {
+        const uint32_t scope = m_Scopes[(int)id];
+        return !IsMarker(id) && (scope == Root || m_Open[(int)scope]);
+    }
+    bool FromArm(uint32_t id, uint32_t arm) const { return Visible(id) || (!IsMarker(id) && m_Scopes[(int)id] == arm); }
+
+    const XArray<CKJitNode> &m_Nodes;
+    XArray<uint32_t> m_Scopes;
+    XArray<uint8_t> m_Open; // by marker: its arm is being checked
+    XArray<Region> m_Regions;
+};
 
 } // namespace
 
@@ -91,6 +180,7 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
 
     uint8_t dims[CKJIT_MAX_SAMPLERS];
     std::memset(dims, 0xff, sizeof(dims));
+    RegionChecker regions(shader);
     const uint32_t count = (uint32_t)shader.Nodes.Size();
     for (uint32_t i = 0; i < count; ++i) {
         const CKJitNode &node = shader.Nodes[(int)i];
@@ -106,6 +196,8 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
             if (node.Operands[operand] >= i)
                 return false;
         }
+        if (!regions.Check(i))
+            return false;
         if ((kOps[node.Op].Flags & CKJIT_OPFLAG_TEXTURE) != 0) {
             const uint32_t slot = node.Imm[0];
             const uint32_t dim = node.Imm[1];
@@ -142,17 +234,29 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
         }
     }
 
-    if (!shader.Color.IsValid() || shader.Color.Id >= count || shader.Node(shader.Color).Type != CKJIT_TYPE_FLOAT4)
+    if (!regions.Closed() || !shader.Color.IsValid() || shader.Color.Id >= count ||
+        shader.Node(shader.Color).Type != CKJIT_TYPE_FLOAT4 || !regions.AtRoot(shader.Color)) {
         return false;
-    return !shader.Discard.IsValid() ||
-           (shader.Discard.Id < count && shader.Node(shader.Discard).Type == CKJIT_TYPE_BOOL);
+    }
+    return !shader.Discard.IsValid() || (shader.Discard.Id < count &&
+                                         shader.Node(shader.Discard).Type == CKJIT_TYPE_BOOL &&
+                                         regions.AtRoot(shader.Discard));
 }
 
 XString CKJitDump(const CKJitFragmentShader &shader) {
     static const char kComponents[] = "xyzw";
     XString out;
+    uint32_t depth = 0; // of the arms around the node
     for (int i = 0; i < shader.Nodes.Size(); ++i) {
         const CKJitNode &node = shader.Nodes[i];
+        // Arms are indented under their markers.
+        if (node.Op == CKJIT_OP_ENDIF && depth != 0)
+            --depth;
+        const uint32_t indent = node.Op == CKJIT_OP_ELSE && depth != 0 ? depth - 1 : depth;
+        for (uint32_t level = 0; level < indent; ++level)
+            out << "  ";
+        if (node.Op == CKJIT_OP_IF)
+            ++depth;
         Append(out, "%%%d = %s %s", i, CKJitOpName(node.Op), TypeName(node.Type));
         for (uint32_t operand = 0; operand < node.OperandCount; ++operand)
             Append(out, "%s %%%u", operand == 0 ? "" : ",", node.Operands[operand]);

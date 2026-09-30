@@ -529,11 +529,11 @@ void TestDump() {
     TestCheck(b.Finish(color, discard, shader), "the program finishes");
     const char *expected = "%0 = INPUT float4 TEXCOORD1\n"
                            "%1 = UNIFORM float4 c2\n"
-                           "%2 = MUL float4 %0, %1\n"
-                           "%3 = SWIZZLE float %2 .w\n"
-                           "%4 = CONSTANT float (0.5)\n"
-                           "%5 = LT bool %3, %4\n"
-                           "color %2\n"
+                           "%2 = CONSTANT float (0.5)\n"
+                           "%3 = MUL float4 %0, %1\n"
+                           "%4 = SWIZZLE float %3 .w\n"
+                           "%5 = LT bool %4, %2\n"
+                           "color %3\n"
                            "discard %5\n";
     const XString dump = CKJitDump(shader);
     TestCheck(std::strcmp(dump.CStr(), expected) == 0, "the listing names every node");
@@ -695,6 +695,169 @@ void TestDepthComparison() {
     TestCheck(std::strcmp(CKJitDump(listing).CStr(), expected) == 0, "the listing names comparisons");
 }
 
+void TestIfRegions() {
+    CKJitBuilder b(4);
+    const CKJitValue color = b.Input(kColor);
+    const CKJitValue tint = b.Uniform(1);
+    const CKJitValue scaled = b.Mul(color, tint);
+    const CKJitValue alpha = b.Component(color, 3);
+    b.If(b.Less(alpha, b.Float(0.5f)));
+    const CKJitValue lit = b.Mul(scaled, b.Uniform(2));
+    TestCheck(Same(b.Mul(b.Uniform(2), scaled), lit) && Same(b.Mul(tint, color), scaled),
+              "an arm shares its values and those before the region");
+    b.Else({lit, scaled, lit});
+    const CKJitValue unlit = b.Mul(scaled, b.Uniform(2));
+    TestCheck(unlit.IsValid() && !Same(unlit, lit), "an arm does not share the values of the one before it");
+    CKJitValue results[3];
+    b.EndIf({unlit, color, unlit}, results);
+    TestCheck(IsOp(b, results[0], CKJIT_OP_PHI) && b.TypeOf(results[0]) == CKJIT_TYPE_FLOAT4,
+              "a result an arm computes is a PHI");
+    TestCheck(IsOp(b, results[1], CKJIT_OP_SELECT), "a result from before the region is a select");
+    TestCheck(Same(results[2], results[0]), "equal results share their PHI");
+    const CKJitValue after = b.Mul(scaled, b.Uniform(2));
+    TestCheck(after.IsValid() && !Same(after, lit) && !Same(after, unlit), "a closed arm's values are not shared");
+
+    b.If(b.Less(b.Component(results[0], 0), alpha));
+    const CKJitValue outer = b.Add(results[0], tint);
+    b.If(b.Less(b.Component(outer, 1), alpha));
+    const CKJitValue inner = b.Sub(outer, color);
+    b.Else({inner});
+    const CKJitValue nested = b.EndIf(outer);
+    TestCheck(IsOp(b, nested, CKJIT_OP_PHI), "an enclosed region sees its enclosing arm");
+    b.Else({nested});
+    const CKJitValue shade = b.EndIf(results[1]);
+    TestCheck(IsOp(b, shade, CKJIT_OP_PHI) && !b.Failed(), "regions nest");
+
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(shade, b.Less(b.Component(shade, 3), alpha), shader) && CKJitVerify(shader), "regions verify");
+    const int region = FindOp(shader, CKJIT_OP_IF);
+    bool leavesFirst = region > 0;
+    for (int i = region; i < shader.Nodes.Size() && leavesFirst; ++i) {
+        const CKJitOp op = shader.Nodes[i].Op;
+        leavesFirst = op != CKJIT_OP_CONSTANT && op != CKJIT_OP_INPUT && op != CKJIT_OP_UNIFORM;
+    }
+    TestCheck(leavesFirst, "the leaves precede every region");
+
+    CKJitBuilder folded(4);
+    const CKJitValue x = folded.Input(kColor);
+    folded.If(folded.Bool(true));
+    const CKJitValue taken = folded.Mul(x, folded.Uniform(0));
+    folded.Else({taken});
+    const CKJitValue skipped = folded.Add(x, folded.Uniform(0));
+    TestCheck(Same(folded.EndIf(skipped), taken), "a true condition keeps the then results");
+    TestCheck(Same(folded.Mul(x, folded.Uniform(0)), taken), "a constant condition's arms are built around it");
+    folded.If(folded.Less(folded.Float(1.0f), folded.Float(0.0f)));
+    folded.Else({taken});
+    TestCheck(Same(folded.EndIf(skipped), skipped), "a folded false condition keeps the else results");
+    CKJitFragmentShader flat;
+    TestCheck(folded.Finish(folded.Add(taken, skipped), CKJitValue(), flat) && FindOp(flat, CKJIT_OP_IF) < 0 &&
+                  FindOp(flat, CKJIT_OP_PHI) < 0,
+              "constant conditions leave no region");
+
+    CKJitBuilder scoped(4);
+    const CKJitValue y = scoped.Input(kColor);
+    scoped.If(scoped.Less(scoped.Component(y, 0), scoped.Float(0.5f)));
+    const CKJitValue squared = scoped.Mul(y, y);
+    scoped.Else({squared});
+    TestCheck(!scoped.Add(squared, y).IsValid() && scoped.Failed(), "an arm's values are not seen after it");
+
+    CKJitBuilder condition(4);
+    condition.If(condition.Component(condition.Input(kColor), 0));
+    TestCheck(condition.Failed(), "conditions are booleans");
+
+    CKJitBuilder typed(4);
+    const CKJitValue z = typed.Input(kColor);
+    typed.If(typed.Less(typed.Component(z, 0), typed.Float(0.5f)));
+    typed.Else({typed.Mul(z, z)});
+    TestCheck(!typed.EndIf(typed.Component(z, 1)).IsValid() && typed.Failed(), "paired results share a type");
+
+    CKJitBuilder counted(4);
+    const CKJitValue w = counted.Input(kColor);
+    counted.If(counted.Less(counted.Component(w, 0), counted.Float(0.5f)));
+    counted.Else({counted.Mul(w, w), w});
+    TestCheck(!counted.EndIf(w).IsValid() && counted.Failed(), "every then result has an else one");
+
+    CKJitBuilder open(4);
+    const CKJitValue v = open.Input(kColor);
+    open.If(open.Less(open.Component(v, 0), open.Float(0.5f)));
+    CKJitFragmentShader unfinished;
+    TestCheck(!open.Finish(v, CKJitValue(), unfinished), "an open region does not finish");
+    TestCheck(!open.EndIf(v).IsValid() && open.Failed(), "a region ends after its else arm");
+
+    CKJitBuilder stray(4);
+    stray.Else({});
+    TestCheck(stray.Failed(), "an else needs its region");
+    CKJitBuilder strayEnd(4);
+    TestCheck(!strayEnd.EndIf(strayEnd.Float(0.0f)).IsValid() && strayEnd.Failed(), "an end needs its region");
+
+    // Argument evaluation order is unspecified: create the nodes one by one.
+    CKJitBuilder listed(4);
+    const CKJitValue uv = listed.Input(kTexCoord);
+    const CKJitValue u = listed.Component(uv, 0);
+    const CKJitValue threshold = listed.Float(0.5f);
+    listed.If(listed.Less(u, threshold));
+    const CKJitValue square = listed.Mul(u, u);
+    listed.Else({square});
+    const CKJitValue root = listed.Sqrt(u);
+    const CKJitValue magnitude = listed.EndIf(root);
+    CKJitFragmentShader listing;
+    TestCheck(listed.Finish(listed.Splat(magnitude, 4), CKJitValue(), listing) && CKJitVerify(listing),
+              "the region finishes");
+    const char *expected = "%0 = INPUT float2 TEXCOORD4\n"
+                           "%1 = CONSTANT float (0.5)\n"
+                           "%2 = SWIZZLE float %0 .x\n"
+                           "%3 = LT bool %2, %1\n"
+                           "%4 = IF void %3\n"
+                           "  %5 = MUL float %2, %2\n"
+                           "%6 = ELSE void %4\n"
+                           "  %7 = SQRT float %2\n"
+                           "%8 = ENDIF void %6\n"
+                           "%9 = PHI float %5, %7, %8\n"
+                           "%10 = SWIZZLE float4 %9 .xxxx\n"
+                           "color %10\n";
+    TestCheck(std::strcmp(CKJitDump(listing).CStr(), expected) == 0, "the listing indents arms under their markers");
+    if (listing.Nodes.Size() != 11)
+        return;
+
+    // Each corruption is one a backend would emit unstructured or undefined
+    // code for.
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[10].Operands[0] = 5; }),
+              "a closed arm's values are not read");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[7].Operands[0] = 5; }),
+              "an arm does not read the one before it");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[10].Operands[0] = 8; }),
+              "markers are not values");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[4].Operands[0] = 2; }),
+              "a condition is a boolean");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[4].Type = CKJIT_TYPE_BOOL; }),
+              "markers are void");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[5].Type = CKJIT_TYPE_VOID; }),
+              "values are not void");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[6].Operands[0] = 3; }),
+              "an else follows its region's then arm");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[8].Operands[0] = 4; }),
+              "an end follows its region's else arm");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[9].Operands[2] = 6; }),
+              "a PHI follows its region's end");
+    TestCheck(!VerifiesAfter(listing,
+                             [&](CKJitFragmentShader &s) {
+                                 s.Nodes[9].Operands[0] = 7;
+                                 s.Nodes[9].Operands[1] = 5;
+                             }),
+              "a PHI takes each result from its arm");
+    TestCheck(!VerifiesAfter(listing,
+                             [&](CKJitFragmentShader &s) {
+                                 s.Nodes.Resize(8);
+                                 s.Nodes[7].Op = CKJIT_OP_SWIZZLE;
+                                 s.Nodes[7].Type = CKJIT_TYPE_FLOAT4;
+                                 s.Nodes[7].Operands[0] = 0;
+                                 s.Nodes[7].Imm[2] = 0;
+                                 s.Nodes[7].Imm[3] = 1;
+                                 s.Color.Id = 7;
+                             }),
+              "regions end and the outputs are after them");
+}
+
 } // namespace
 
 int main() {
@@ -715,5 +878,6 @@ int main() {
     framework.Run("dump", TestDump);
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
+    framework.Run("if regions", TestIfRegions);
     return framework.ExitCode();
 }
