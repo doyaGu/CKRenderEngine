@@ -144,7 +144,7 @@ int SwizzleIndex(char c) {
 }
 
 CKJitType CoordinateType(CKJitSamplerDim dim) {
-    return dim == CKJIT_SAMPLER_2D ? CKJIT_TYPE_FLOAT2 : CKJIT_TYPE_FLOAT3;
+    return dim == CKJIT_SAMPLER_CUBE || dim == CKJIT_SAMPLER_3D ? CKJIT_TYPE_FLOAT3 : CKJIT_TYPE_FLOAT2;
 }
 
 } // namespace
@@ -855,7 +855,7 @@ CKJitValue CKJitBuilder::Select(CKJitValue condition, CKJitValue whenTrue, CKJit
 CKJitValue CKJitBuilder::Texture(CKJitOp op, CKJitType type, uint32_t slot, CKJitSamplerDim dim,
                                  std::initializer_list<CKJitValue> operands) {
     // One slot is one resource declaration.
-    if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_3D ||
+    if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_2D_COMPARE || !CKJitTextureAccepts(op, dim) ||
         (m_SamplerDims[slot] != 0xff && m_SamplerDims[slot] != dim)) {
         return Fail();
     }
@@ -889,8 +889,21 @@ CKJitValue CKJitBuilder::CalcLod(uint32_t slot, CKJitSamplerDim dim, CKJitValue 
     return Texture(CKJIT_OP_CALC_LOD, CKJIT_TYPE_FLOAT, slot, dim, {coordinate});
 }
 
+CKJitValue CKJitBuilder::SampleCmp(uint32_t slot, CKJitValue coordinate, CKJitValue reference) {
+    if (!HasType(coordinate, CKJIT_TYPE_FLOAT2) || !HasType(reference, CKJIT_TYPE_FLOAT))
+        return Fail();
+    return Texture(CKJIT_OP_SAMPLE_CMP, CKJIT_TYPE_FLOAT, slot, CKJIT_SAMPLER_2D_COMPARE, {coordinate, reference});
+}
+
+CKJitValue CKJitBuilder::SampleCmpLevelZero(uint32_t slot, CKJitValue coordinate, CKJitValue reference) {
+    if (!HasType(coordinate, CKJIT_TYPE_FLOAT2) || !HasType(reference, CKJIT_TYPE_FLOAT))
+        return Fail();
+    return Texture(CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO, CKJIT_TYPE_FLOAT, slot, CKJIT_SAMPLER_2D_COMPARE,
+                   {coordinate, reference});
+}
+
 CKJitValue CKJitBuilder::Load(uint32_t slot, CKJitSamplerDim dim, CKJitValue texel) {
-    if (dim == CKJIT_SAMPLER_CUBE || !HasType(texel, dim == CKJIT_SAMPLER_3D ? CKJIT_TYPE_INT4 : CKJIT_TYPE_INT3))
+    if (!HasType(texel, dim == CKJIT_SAMPLER_3D ? CKJIT_TYPE_INT4 : CKJIT_TYPE_INT3))
         return Fail();
     return Texture(CKJIT_OP_LOAD, CKJIT_TYPE_FLOAT4, slot, dim, {texel});
 }

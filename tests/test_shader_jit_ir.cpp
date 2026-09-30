@@ -440,6 +440,14 @@ bool VerifiesAfter(const CKJitFragmentShader &shader, Corrupt corrupt) {
     return CKJitVerify(copy);
 }
 
+// Gives every texture operation of a slot another dimension.
+void Redimension(CKJitFragmentShader &shader, uint32_t slot, CKJitSamplerDim dim) {
+    for (int i = 0; i < shader.Nodes.Size(); ++i) {
+        if ((CKJitOpFlags(shader.Nodes[i].Op) & CKJIT_OPFLAG_TEXTURE) != 0 && shader.Nodes[i].Imm[0] == slot)
+            shader.Nodes[i].Imm[1] = dim;
+    }
+}
+
 void TestVerify() {
     CKJitBuilder b(4);
     const CKJitValue uv = b.Input(kTexCoord);
@@ -489,7 +497,7 @@ void TestVerify() {
               "swizzles keep their operand's kind");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[0] = CKJIT_MAX_SAMPLERS; }),
               "sampler slots are bounded");
-    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[1] = 3; }),
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[sampled].Imm[1] = 4; }),
               "sampler dimensions are known");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Color = s.Discard; }), "the colour is a float4");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Discard = s.Color; }), "the discard is boolean");
@@ -574,7 +582,7 @@ void TestTextureAccess() {
               "derivatives have the coordinate's type");
     TestCheck(!bad.CalcLod(0, CKJIT_SAMPLER_3D, badUv).IsValid(), "volume LODs take three coordinates");
     TestCheck(!bad.TextureLevels(CKJIT_MAX_SAMPLERS, CKJIT_SAMPLER_2D).IsValid(), "slots are bounded");
-    TestCheck(!bad.TextureLevels(0, (CKJitSamplerDim)3).IsValid(), "dimensions are known");
+    TestCheck(!bad.TextureLevels(0, (CKJitSamplerDim)4).IsValid(), "dimensions are known");
     TestCheck(bad.Failed(), "ill-typed texture access fails the builder");
 
     CKJitBuilder dims(4);
@@ -587,16 +595,10 @@ void TestTextureAccess() {
     const CKJitValue sizes = b.IntToFloat(b.Construct({size, b.Component(extent, 2), levels}));
     TestCheck(b.Finish(b.Add(b.Mul(sampled, sizes), lod), CKJitValue(), shader) && CKJitVerify(shader),
               "texture access verifies");
-    const auto redimension = [](CKJitFragmentShader &s, uint32_t slot, CKJitSamplerDim dim) {
-        for (int i = 0; i < s.Nodes.Size(); ++i) {
-            if ((CKJitOpFlags(s.Nodes[i].Op) & CKJIT_OPFLAG_TEXTURE) != 0 && s.Nodes[i].Imm[0] == slot)
-                s.Nodes[i].Imm[1] = dim;
-        }
-    };
-    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { redimension(s, 2, CKJIT_SAMPLER_CUBE); }),
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 2, CKJIT_SAMPLER_CUBE); }),
               "no cube is loaded from");
-    TestCheck(VerifiesAfter(shader, [&](CKJitFragmentShader &s) { redimension(s, 1, CKJIT_SAMPLER_3D); }),
-              "other operations take any dimension");
+    TestCheck(VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 1, CKJIT_SAMPLER_3D); }),
+              "other operations take any colour dimension");
     TestCheck(!VerifiesAfter(shader,
                              [&](CKJitFragmentShader &s) {
                                  s.Nodes[FindOp(s, CKJIT_OP_LEVELS)].Imm[0] = CKJIT_MAX_SAMPLERS;
@@ -618,6 +620,81 @@ void TestTextureAccess() {
     TestCheck(std::strcmp(CKJitDump(listing).CStr(), expected) == 0, "the listing names texture slots");
 }
 
+void TestDepthComparison() {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord);
+    const CKJitValue reference = b.Component(b.Input(kColor), 2);
+    const CKJitValue filtered = b.SampleCmp(5, uv, reference);
+    const CKJitValue base = b.SampleCmpLevelZero(5, b.Swizzle(uv, "yx"), b.Float(0.5f));
+    const CKJitValue depth = b.Load(5, CKJIT_SAMPLER_2D_COMPARE, b.Construct({b.FloatToInt(uv), b.Int(0)}));
+    const CKJitValue size = b.TextureSize(5, CKJIT_SAMPLER_2D_COMPARE, b.Int(0));
+    const CKJitValue levels = b.TextureLevels(5, CKJIT_SAMPLER_2D_COMPARE);
+    const CKJitValue sampled = b.Sample(1, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    TestCheck(IsOp(b, filtered, CKJIT_OP_SAMPLE_CMP) && b.TypeOf(filtered) == CKJIT_TYPE_FLOAT &&
+                  IsOp(b, base, CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO) && b.TypeOf(base) == CKJIT_TYPE_FLOAT,
+              "comparisons are floats");
+    TestCheck(b.Node(filtered).Imm[0] == 5 && b.Node(filtered).Imm[1] == CKJIT_SAMPLER_2D_COMPARE &&
+                  b.Node(base).Imm[1] == CKJIT_SAMPLER_2D_COMPARE,
+              "comparisons make their slot a 2D_COMPARE slot");
+    TestCheck(b.TypeOf(depth) == CKJIT_TYPE_FLOAT4 && b.TypeOf(size) == CKJIT_TYPE_INT2 &&
+                  b.TypeOf(levels) == CKJIT_TYPE_INT,
+              "a compared slot is loaded from and queried as a 2D slot");
+    TestCheck(Same(b.SampleCmp(5, uv, reference), filtered) && !Same(b.SampleCmpLevelZero(5, uv, reference), filtered),
+              "equal comparisons are shared, the two kinds are not");
+    TestCheck(!b.Failed(), "depth comparison is well typed");
+
+    CKJitBuilder bad(4);
+    const CKJitValue badUv = bad.Input(kTexCoord);
+    const CKJitValue color = bad.Input(kColor);
+    const CKJitValue depthRef = bad.Component(color, 0);
+    TestCheck(!bad.SampleCmp(0, bad.Swizzle(color, "xyz"), depthRef).IsValid(), "comparison coordinates are float2");
+    TestCheck(!bad.SampleCmpLevelZero(0, badUv, bad.Swizzle(color, "xy")).IsValid(), "references are floats");
+    TestCheck(!bad.SampleCmp(0, badUv, bad.Int(0)).IsValid(), "integer references are rejected");
+    TestCheck(!bad.Sample(0, CKJIT_SAMPLER_2D_COMPARE, badUv, bad.Float(0.0f)).IsValid() &&
+                  !bad.SampleLevel(0, CKJIT_SAMPLER_2D_COMPARE, badUv, bad.Float(0.0f)).IsValid() &&
+                  !bad.SampleGrad(0, CKJIT_SAMPLER_2D_COMPARE, badUv, badUv, badUv).IsValid() &&
+                  !bad.CalcLod(0, CKJIT_SAMPLER_2D_COMPARE, badUv).IsValid(),
+              "only comparisons sample a 2D_COMPARE slot");
+    TestCheck(bad.Failed(), "ill-typed comparisons fail the builder");
+
+    CKJitBuilder slots(4);
+    const CKJitValue slotUv = slots.Input(kTexCoord);
+    const CKJitValue colour = slots.Sample(0, CKJIT_SAMPLER_2D, slotUv, slots.Float(0.0f));
+    const CKJitValue shadow = slots.SampleCmp(1, slotUv, slots.Float(0.5f));
+    TestCheck(colour.IsValid() && shadow.IsValid() && !slots.SampleCmp(0, slotUv, slots.Float(0.5f)).IsValid() &&
+                  !slots.TextureSize(1, CKJIT_SAMPLER_2D, slots.Int(0)).IsValid(),
+              "a colour slot is not compared, a compared slot not read as a colour one");
+
+    CKJitFragmentShader shader;
+    const CKJitValue shade = b.Construct({filtered, base, b.IntToFloat(b.IntAdd(b.Component(size, 0), levels))});
+    TestCheck(b.Finish(b.Mul(b.Add(sampled, depth), b.Construct({shade, b.Float(1.0f)})),
+                       b.Less(filtered, b.Float(0.5f)), shader) &&
+                  CKJitVerify(shader),
+              "depth comparison verifies");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 5, CKJIT_SAMPLER_2D); }),
+              "comparisons read only 2D_COMPARE slots");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 1, CKJIT_SAMPLER_2D_COMPARE); }),
+              "samples do not read 2D_COMPARE slots");
+    TestCheck(!VerifiesAfter(shader,
+                             [&](CKJitFragmentShader &s) {
+                                 s.Nodes[FindOp(s, CKJIT_OP_LOAD)].Imm[1] = CKJIT_SAMPLER_2D;
+                             }),
+              "a compared slot is loaded from as a 2D_COMPARE slot");
+
+    CKJitBuilder listed(4);
+    const CKJitValue coordinate = listed.Input(kTexCoord);
+    const CKJitValue threshold = listed.Float(0.25f);
+    const CKJitValue lit = listed.SampleCmpLevelZero(5, coordinate, threshold);
+    CKJitFragmentShader listing;
+    TestCheck(listed.Finish(listed.Splat(lit, 4), CKJitValue(), listing), "the comparison finishes");
+    const char *expected = "%0 = INPUT float2 TEXCOORD4\n"
+                           "%1 = CONSTANT float (0.25)\n"
+                           "%2 = SAMPLE_CMP_LEVEL_ZERO float %0, %1 slot 5 dim 3\n"
+                           "%3 = SWIZZLE float4 %2 .xxxx\n"
+                           "color %3\n";
+    TestCheck(std::strcmp(CKJitDump(listing).CStr(), expected) == 0, "the listing names comparisons");
+}
+
 } // namespace
 
 int main() {
@@ -637,5 +714,6 @@ int main() {
     framework.Run("verify", TestVerify);
     framework.Run("dump", TestDump);
     framework.Run("texture access", TestTextureAccess);
+    framework.Run("depth comparison", TestDepthComparison);
     return framework.ExitCode();
 }

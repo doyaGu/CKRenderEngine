@@ -46,6 +46,8 @@ enum {
     SpvOpCompositeExtract = 81,
     SpvOpImageSampleImplicitLod = 87,
     SpvOpImageSampleExplicitLod = 88,
+    SpvOpImageSampleDrefImplicitLod = 89,
+    SpvOpImageSampleDrefExplicitLod = 90,
     SpvOpImageFetch = 95,
     SpvOpImage = 100,
     SpvOpImageQuerySizeLod = 103,
@@ -386,8 +388,9 @@ uint32_t SpirvEmitter::UniformBlock() {
 }
 
 uint32_t SpirvEmitter::ImageType(uint32_t dim) {
-    static const uint32_t kDims[] = {SpvDim2D, SpvDimCube, SpvDim3D};
-    return DeclareType(SpvOpTypeImage, {FloatType(1), kDims[dim], 0, 0, 0, 1, SpvImageFormatUnknown});
+    static const uint32_t kDims[] = {SpvDim2D, SpvDimCube, SpvDim3D, SpvDim2D};
+    const uint32_t depth = dim == CKJIT_SAMPLER_2D_COMPARE ? 1 : 0;
+    return DeclareType(SpvOpTypeImage, {FloatType(1), kDims[dim], depth, 0, 0, 1, SpvImageFormatUnknown});
 }
 
 // The combined image sampler of a node's slot, declared and loaded when first
@@ -569,6 +572,10 @@ uint32_t SpirvEmitter::Translate(const CKJitNode &node) {
         const uint32_t lods = Query(SpvOpImageQueryLod, FloatType(2), {SampledImage(node), a});
         return Op(SpvOpCompositeExtract, type, {lods, 1});
     }
+    case CKJIT_OP_SAMPLE_CMP: return Op(SpvOpImageSampleDrefImplicitLod, type, {SampledImage(node), a, b});
+    case CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO:
+        return Op(SpvOpImageSampleDrefExplicitLod, type,
+                  {SampledImage(node), a, b, SpvImageOperandsLodMask, FloatSplat(0.0f, CKJIT_TYPE_FLOAT)});
     case CKJIT_OP_LOAD: return Load(node, a);
     case CKJIT_OP_SIZE: return Query(SpvOpImageQuerySizeLod, type, {Image(node), a});
     case CKJIT_OP_LEVELS: return Query(SpvOpImageQueryLevels, type, {Image(node)});

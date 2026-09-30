@@ -107,11 +107,14 @@ public:
 
     // Texture access through a sampler slot, with FLOAT2 coordinates for 2D
     // slots and FLOAT3 for cube and volume slots. A slot keeps the dimension
-    // it is first used with.
+    // it is first used with; comparisons make it a 2D_COMPARE slot, which
+    // loads and size queries also read.
     CKJitValue Sample(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lodBias);
     CKJitValue SampleLevel(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue lod);
     CKJitValue SampleGrad(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate, CKJitValue dx, CKJitValue dy);
     CKJitValue CalcLod(uint32_t slot, CKJitSamplerDim dim, CKJitValue coordinate);
+    CKJitValue SampleCmp(uint32_t slot, CKJitValue coordinate, CKJitValue reference);
+    CKJitValue SampleCmpLevelZero(uint32_t slot, CKJitValue coordinate, CKJitValue reference);
     CKJitValue Load(uint32_t slot, CKJitSamplerDim dim, CKJitValue texel); // the mip last, as HLSL Load
     CKJitValue TextureSize(uint32_t slot, CKJitSamplerDim dim, CKJitValue mip);
     CKJitValue TextureLevels(uint32_t slot, CKJitSamplerDim dim);

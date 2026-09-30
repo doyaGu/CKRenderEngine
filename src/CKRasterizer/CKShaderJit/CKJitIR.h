@@ -63,7 +63,13 @@ enum CKJitSamplerDim : uint8_t {
     CKJIT_SAMPLER_2D,
     CKJIT_SAMPLER_CUBE,
     CKJIT_SAMPLER_3D,
+    CKJIT_SAMPLER_2D_COMPARE, // a 2D depth texture read through a comparison sampler
 };
+
+// Whether a texture operation reads slots of the dimension: comparisons read
+// only 2D_COMPARE slots, which the other samples and LOD queries do not, loads
+// read all but cubes and size queries read any.
+bool CKJitTextureAccepts(CKJitOp op, CKJitSamplerDim dim);
 
 static const uint32_t CKJIT_MAX_SAMPLERS = 16;
 
@@ -128,8 +134,8 @@ struct CKJitResourceLayout {
 
 // Checks what backends rely on without re-checking it: every operation has
 // its operand count, operands precede their users, input, uniform, swizzle
-// and sampler references are in range, a sampler slot has one dimension, no
-// cube is loaded from and the outputs have their types. Operand typing is
+// and sampler references are in range, a sampler slot has one dimension its
+// operations accept and the outputs have their types. Operand typing is
 // CKJitBuilder's contract.
 bool CKJitVerify(const CKJitFragmentShader &shader);
 

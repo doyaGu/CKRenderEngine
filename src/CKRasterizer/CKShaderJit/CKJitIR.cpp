@@ -69,6 +69,17 @@ uint32_t CKJitOpFlags(CKJitOp op) {
     return op < CKJIT_OP_COUNT ? kOps[op].Flags : 0u;
 }
 
+bool CKJitTextureAccepts(CKJitOp op, CKJitSamplerDim dim) {
+    switch (op) {
+    case CKJIT_OP_SAMPLE_CMP:
+    case CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO: return dim == CKJIT_SAMPLER_2D_COMPARE;
+    case CKJIT_OP_LOAD: return dim != CKJIT_SAMPLER_CUBE;
+    case CKJIT_OP_SIZE:
+    case CKJIT_OP_LEVELS: return true;
+    default: return dim != CKJIT_SAMPLER_2D_COMPARE;
+    }
+}
+
 bool CKJitVerify(const CKJitFragmentShader &shader) {
     for (int i = 0; i < shader.Inputs.Size(); ++i) {
         const CKJitInput &input = shader.Inputs[i];
@@ -98,8 +109,9 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
         if ((kOps[node.Op].Flags & CKJIT_OPFLAG_TEXTURE) != 0) {
             const uint32_t slot = node.Imm[0];
             const uint32_t dim = node.Imm[1];
-            if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_3D || (dims[slot] != 0xff && dims[slot] != dim) ||
-                (node.Op == CKJIT_OP_LOAD && dim == CKJIT_SAMPLER_CUBE)) {
+            if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_2D_COMPARE ||
+                (dims[slot] != 0xff && dims[slot] != dim) ||
+                !CKJitTextureAccepts((CKJitOp)node.Op, (CKJitSamplerDim)dim)) {
                 return false;
             }
             dims[slot] = (uint8_t)dim;

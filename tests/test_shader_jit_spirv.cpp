@@ -27,6 +27,7 @@ enum {
     kOpTypeFunction = 33,
     kOpTypeVector = 23,
     kOpTypeImage = 25,
+    kOpTypeSampledImage = 27,
     kOpTypeArray = 28,
     kOpConstantTrue = 41,
     kOpConstant = 43,
@@ -42,6 +43,8 @@ enum {
     kOpCompositeExtract = 81,
     kOpImageSampleImplicitLod = 87,
     kOpImageSampleExplicitLod = 88,
+    kOpImageSampleDrefImplicitLod = 89,
+    kOpImageSampleDrefExplicitLod = 90,
     kOpImageFetch = 95,
     kOpImage = 100,
     kOpImageQuerySizeLod = 103,
@@ -251,6 +254,8 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue lodSample = b.SampleLevel(9, CKJIT_SAMPLER_CUBE, direction, b.CalcLod(0, CKJIT_SAMPLER_2D, uv));
     const CKJitValue gradSample =
         b.SampleGrad(13, CKJIT_SAMPLER_3D, direction, b.Swizzle(tint, "xyz"), b.Neg(b.Swizzle(params, "xyz")));
+    const CKJitValue shadow = b.Mul(b.SampleCmp(5, uv, b.Component(params, 1)),
+                                    b.SampleCmpLevelZero(5, b.Swizzle(direction, "xy"), b.Component(tint, 0)));
 
     CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
     value = b.Add(value, b.Mul(lodSample, gradSample));
@@ -288,7 +293,7 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
 
     const CKJitValue flags = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
     const CKJitValue condition = b.Or(flags, b.And(b.And(inside, moved), low));
-    const CKJitValue alpha = b.Select(condition, shade, spot);
+    const CKJitValue alpha = b.Select(condition, shade, b.Mul(spot, shadow));
     const CKJitValue ramp = b.Construct({b.IntToFloat(offset), b.Swizzle(rounded, "zw")});
     const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
     color = b.Mul(b.Select(condition, graded, b.Add(rounded, texels)), alpha);
@@ -438,7 +443,8 @@ void TestLowering() {
     TestCheck(unbiased == 1 && biased == 2, "a zero bias is omitted, others are Bias operands");
     TestCheck(module.Count(kOpImageSampleExplicitLod) == 2 && module.Count(kOpImageQueryLod) == 1 &&
                   module.Count(kOpImageFetch) == 2 && module.Count(kOpImageQuerySizeLod) == 2 &&
-                  module.Count(kOpImageQueryLevels) == 1,
+                  module.Count(kOpImageQueryLevels) == 1 && module.Count(kOpImageSampleDrefImplicitLod) == 1 &&
+                  module.Count(kOpImageSampleDrefExplicitLod) == 1,
               "texture operations map to single instructions");
 
     const uint32_t boolType = module.TypeId(kOpTypeBool, {});
@@ -472,7 +478,8 @@ void TestLowering() {
     }
     TestCheck(shifts == 3 && masked == 3, "shift counts use their low five bits");
 
-    // The discard branches around a kill after every sample and LOD query.
+    // The discard branches around a kill after every sample, comparison and
+    // LOD query.
     const int branch = module.Find(kOpBranchConditional);
     TestCheck(module.Count(kOpSelectionMerge) == 1 && branch > 0 &&
                   module[branch - 1].Opcode == kOpSelectionMerge,
@@ -485,11 +492,11 @@ void TestLowering() {
     int lastQuad = -1;
     for (int i = 0; i < module.Size(); ++i) {
         const uint32_t opcode = module[i].Opcode;
-        if (opcode == kOpImageSampleImplicitLod || opcode == kOpImageQueryLod || opcode == kOpDPdx ||
-            opcode == kOpDPdy)
+        if (opcode == kOpImageSampleImplicitLod || opcode == kOpImageSampleDrefImplicitLod ||
+            opcode == kOpImageQueryLod || opcode == kOpDPdx || opcode == kOpDPdy)
             lastQuad = i;
     }
-    TestCheck(lastQuad < branch, "every sample, LOD query and derivative runs before the discard");
+    TestCheck(lastQuad < branch, "every sample, comparison, LOD query and derivative runs before the discard");
 }
 
 void TestTextureAccess() {
@@ -567,6 +574,59 @@ void TestTextureAccess() {
     TestCheck(Compile(plain, plain.Add(loaded, sampled), CKJitValue(), unqueried), "fetches and explicit samples compile");
     Save("unqueried_access", unqueried);
     TestCheck(Module(unqueried).Count(kOpCapability) == 1, "fetches and explicit samples need no query capability");
+}
+
+void TestDepthComparison() {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue color = b.Input(kColor0);
+    const CKJitValue position = b.Input(kFragCoord);
+
+    // Slot 2 is compared, loaded from and queried, 3 only compared at the base
+    // mip and 1 is a colour texture.
+    const CKJitValue filtered = b.SampleCmp(2, uv, b.Component(position, 2));
+    const CKJitValue base = b.SampleCmpLevelZero(3, b.Swizzle(uv, "yx"), b.Component(color, 3));
+    const CKJitValue texel = b.Construct({b.FloatToInt(b.Swizzle(position, "xy")), b.Int(0)});
+    const CKJitValue depth = b.Load(2, CKJIT_SAMPLER_2D_COMPARE, texel);
+    const CKJitValue size = b.IntToFloat(b.TextureSize(2, CKJIT_SAMPLER_2D_COMPARE, b.Int(0)));
+    const CKJitValue sampled = b.Sample(1, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue shade = b.Mul(b.Construct({filtered, base, size}), b.Mul(depth, sampled));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, shade, b.Less(filtered, b.Float(0.5f)), words), "depth comparisons compile");
+    Save("depth_comparison", words);
+
+    const Module module(words);
+    TestCheck(module.WellFormed(), "the module is well formed");
+    const uint32_t floatType = module.TypeId(kOpTypeFloat, {});
+    const uint32_t depthImage = module.TypeId(kOpTypeImage, {kAny, floatType, kDim2D, 1, 0, 0, 1, 0});
+    const uint32_t depthSampler = module.TypeId(kOpTypeSampledImage, {kAny, depthImage});
+    TestCheck(depthImage != 0 && module.Count(kOpTypeImage, {kAny, kAny, kDim2D, 1}) == 1 &&
+                  module.Count(kOpTypeImage, {kAny, kAny, kDim2D, 0}) == 1,
+              "compared slots are depth images, colour slots are not");
+    TestCheck(depthSampler != 0 && module.Count(kOpLoad, {depthSampler}) == 2, "both compared slots are depth images");
+
+    const int implicit = module.Find(kOpImageSampleDrefImplicitLod);
+    TestCheck(implicit >= 0 && module[implicit].Count == 5 && module[implicit].Operands[0] == floatType &&
+                  module.Count(kOpCompositeExtract, {floatType, module[implicit].Operands[4], kAny, 2}) == 1,
+              "a comparison is a scalar Dref sample of the reference");
+    const int explicitLod = module.Find(kOpImageSampleDrefExplicitLod);
+    TestCheck(explicitLod >= 0 && module[explicitLod].Count == 7 && module[explicitLod].Operands[0] == floatType &&
+                  module.Count(kOpCompositeExtract, {floatType, module[explicitLod].Operands[4], kAny, 3}) == 1 &&
+                  module[explicitLod].Operands[5] == kImageOperandsLod &&
+                  module.Count(kOpConstant, {floatType, module[explicitLod].Operands[6], 0}) == 1,
+              "a base-mip comparison has a zero Lod operand");
+    TestCheck(implicit >= 0 && explicitLod >= 0 && module[implicit].Operands[2] != module[explicitLod].Operands[2] &&
+                  module.Count(kOpLoad, {depthSampler, module[implicit].Operands[2]}) == 1 &&
+                  module.Count(kOpLoad, {depthSampler, module[explicitLod].Operands[2]}) == 1,
+              "a comparison samples its slot's depth image");
+
+    const int fetch = module.Find(kOpImageFetch);
+    TestCheck(fetch >= 0 && module[fetch].Operands[0] == module.TypeId(kOpTypeVector, {kAny, floatType, 4}) &&
+                  module.Count(kOpImage, {depthImage, module[fetch].Operands[2]}) == 1,
+              "a compared slot is loaded from as a float4 through its depth image");
+    TestCheck(module.Count(kOpImageQuerySizeLod, {kAny, kAny, module[fetch].Operands[2]}) == 1,
+              "a compared slot's size is queried through the same image");
+    TestCheck(implicit >= 0 && implicit < module.Find(kOpBranchConditional), "the comparison runs before the discard");
 }
 
 void TestIntegerLowering() {
@@ -690,6 +750,7 @@ int main(int argc, char **argv) {
     framework.Run("resources", TestResources);
     framework.Run("lowering", TestLowering);
     framework.Run("texture access", TestTextureAccess);
+    framework.Run("depth comparison", TestDepthComparison);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("declarations are unique", TestDeclarationsAreUnique);
     framework.Run("constant outputs", TestConstantOutputs);

@@ -51,6 +51,8 @@ enum {
     kOpRoundNi = 65,
     kOpRoundPi = 66,
     kOpSample = 69,
+    kOpSampleC = 70,
+    kOpSampleCLz = 71,
     kOpSampleL = 72,
     kOpSampleD = 73,
     kOpSampleB = 74,
@@ -91,6 +93,7 @@ enum {
     kResourceTexture3D = 5,
     kResourceTextureCube = 6,
     kResinfoUint = 2 << 11,
+    kSamplerComparison = 1,
     kSaturate = 1 << 13,
     kTestNonZero = 1 << 18,
 };
@@ -541,6 +544,8 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     const CKJitValue lodSample = b.SampleLevel(9, CKJIT_SAMPLER_CUBE, direction, b.CalcLod(0, CKJIT_SAMPLER_2D, uv));
     const CKJitValue gradSample =
         b.SampleGrad(13, CKJIT_SAMPLER_3D, direction, b.Swizzle(tint, "xyz"), b.Neg(b.Swizzle(params, "xyz")));
+    const CKJitValue shadow = b.Mul(b.SampleCmp(5, uv, b.Component(params, 1)),
+                                    b.SampleCmpLevelZero(5, b.Swizzle(direction, "xy"), b.Component(tint, 0)));
 
     CKJitValue value = b.Add(b.Mul(base, tint), b.Sub(cube, volume));
     value = b.Add(value, b.Mul(lodSample, gradSample));
@@ -578,7 +583,7 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
 
     const CKJitValue flags = b.Or(b.And(picked, b.Not(bit)), b.IntEqual(mask, b.Int(3)));
     const CKJitValue condition = b.Or(flags, b.And(b.And(inside, moved), low));
-    const CKJitValue alpha = b.Select(condition, shade, spot);
+    const CKJitValue alpha = b.Select(condition, shade, b.Mul(spot, shadow));
     const CKJitValue ramp = b.Construct({b.IntToFloat(offset), b.Swizzle(rounded, "zw")});
     const CKJitValue graded = b.Select(b.Less(assembled, diffuse), assembled, ramp);
     color = b.Mul(b.Select(condition, graded, b.Add(rounded, texels)), alpha);
@@ -775,7 +780,8 @@ void TestLowering() {
     TestCheck(program.Count(kOpSample) == 1 && program.Count(kOpSampleB) == 2,
               "a zero bias is omitted, others are sample_b");
     TestCheck(program.Count(kOpSampleL) == 1 && program.Count(kOpSampleD) == 1 && program.Count(kOpLod) == 1 &&
-                  program.Count(kOpLd) == 2 && program.Count(kOpResinfo, kResinfoUint) == 3,
+                  program.Count(kOpLd) == 2 && program.Count(kOpResinfo, kResinfoUint) == 3 &&
+                  program.Count(kOpSampleC) == 1 && program.Count(kOpSampleCLz) == 1,
               "texture operations map to single instructions");
     TestCheck(program.Count(kOpMovc) == 5, "every select is one movc");
     TestCheck(program.Count(kOpLt) == 3 && program.Count(kOpEq) == 1 && program.Count(kOpNe) == 1 &&
@@ -815,9 +821,10 @@ void TestLowering() {
 
     const int kill = program.Find(kOpDiscard);
     TestCheck(program.Count(kOpDiscard, kTestNonZero) == 1 && kill > program.FindLast(kOpSampleB) &&
-                  kill > program.FindLast(kOpSample) && kill > program.FindLast(kOpLod) &&
-                  kill > program.FindLast(kOpDerivRtxCoarse) && kill > program.FindLast(kOpDerivRtyCoarse),
-              "the discard follows every sample, LOD query and derivative");
+                  kill > program.FindLast(kOpSample) && kill > program.FindLast(kOpSampleC) &&
+                  kill > program.FindLast(kOpLod) && kill > program.FindLast(kOpDerivRtxCoarse) &&
+                  kill > program.FindLast(kOpDerivRtyCoarse),
+              "the discard follows every sample, comparison, LOD query and derivative");
     TestCheck(kill >= 0 && program[kill].Operands[0].Type == kOperandTemp && program[kill - 1].Opcode == kOpLt,
               "the discard tests the discard condition");
     TestCheck(kill >= 0 && kill + 3 == program.Size() && program[kill + 1].Opcode == kOpMov &&
@@ -937,6 +944,63 @@ void TestTextureAccess() {
                   program[gradSample].Operands[5].Is(kOperandTemp, program[dy].Operands[0].Indices[0]),
               "a graded sample takes both derivatives");
     TestCheck(query >= 0 && program.Find(kOpDiscard) > query, "the LOD query runs before the discard");
+}
+
+void TestDepthComparison() {
+    CKJitBuilder b(4);
+    const CKJitValue uv = b.Input(kTexCoord0);
+    const CKJitValue color = b.Input(kColor0);
+    const CKJitValue position = b.Input(kFragCoord);
+
+    // Slot 2 is compared, loaded from and queried, 3 only compared at the base
+    // mip and 1 is a colour texture.
+    const CKJitValue filtered = b.SampleCmp(2, uv, b.Component(position, 2));
+    const CKJitValue base = b.SampleCmpLevelZero(3, b.Swizzle(uv, "yx"), b.Component(color, 3));
+    const CKJitValue texel = b.Construct({b.FloatToInt(b.Swizzle(position, "xy")), b.Int(0)});
+    const CKJitValue depth = b.Load(2, CKJIT_SAMPLER_2D_COMPARE, texel);
+    const CKJitValue size = b.IntToFloat(b.TextureSize(2, CKJIT_SAMPLER_2D_COMPARE, b.Int(0)));
+    const CKJitValue sampled = b.Sample(1, CKJIT_SAMPLER_2D, uv, b.Float(0.0f));
+    const CKJitValue shade = b.Mul(b.Construct({filtered, base, size}), b.Mul(depth, sampled));
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, shade, b.Less(filtered, b.Float(0.5f)), words), "depth comparisons compile");
+    Save("depth_comparison", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const uint32_t slots[] = {1, 2, 3};
+    const uint32_t modes[] = {0, kSamplerComparison, kSamplerComparison};
+    TestCheck(program.Count(kOpDclSampler) == 3 && program.Count(kOpDclResource) == 3,
+              "every slot declares its texture and sampler");
+    for (uint32_t i = 0; i < 3; ++i) {
+        const int sampler = program.Find(kOpDclSampler) + (int)i;
+        const int texture = program.Find(kOpDclResource) + (int)i;
+        TestCheck(program[sampler].Opcode == kOpDclSampler && program[sampler].Tokens[2] == slots[i] &&
+                      program[sampler].Controls >> 11 == modes[i],
+                  "compared slots declare comparison samplers");
+        TestCheck(program[texture].Opcode == kOpDclResource && program[texture].Controls >> 11 == kResourceTexture2D &&
+                      program[texture].Tokens[2] == slots[i],
+                  "compared slots are 2D textures");
+    }
+
+    const int compare = program.Find(kOpSampleC);
+    TestCheck(compare >= 0 && program[compare].OperandCount == 5 && RoutesResult(program[compare], 0) &&
+                  program[compare].Operands[2].Selector == 0 && program[compare].Operands[2].Indices[1] == 2 &&
+                  program[compare].Operands[3].Type == kOperandSampler &&
+                  program[compare].Operands[3].Indices[1] == 2,
+              "a comparison reads its slot and replicates the result, as fxc writes it");
+    TestCheck(compare >= 0 && program[compare].Operands[4].Is(kOperandInput, 0) &&
+                  program[compare].Operands[4].Lanes() == 0x4,
+              "the reference follows the sampler");
+    const int level = program.Find(kOpSampleCLz);
+    TestCheck(level >= 0 && program[level].OperandCount == 5 && RoutesResult(program[level], 0) &&
+                  program[level].Operands[2].Indices[1] == 3 && program[level].Operands[4].Is(kOperandInput, 1) &&
+                  program[level].Operands[4].Lanes() == 0x8,
+              "a base-mip comparison takes no LOD operand");
+    const int load = program.Find(kOpLd);
+    TestCheck(load >= 0 && program[load].OperandCount == 3 && program[load].Operands[2].Indices[1] == 2,
+              "a compared slot is loaded from without its sampler");
+    TestCheck(program.Count(kOpResinfo, kResinfoUint) == 1, "a compared slot's size is queried");
+    TestCheck(compare >= 0 && program.Find(kOpDiscard) > compare, "the comparison runs before the discard");
 }
 
 void TestIntegerLowering() {
@@ -1178,6 +1242,7 @@ int main(int argc, char **argv) {
     framework.Run("resources", TestResources);
     framework.Run("lowering", TestLowering);
     framework.Run("texture access", TestTextureAccess);
+    framework.Run("depth comparison", TestDepthComparison);
     framework.Run("integer lowering", TestIntegerLowering);
     framework.Run("register allocation", TestRegisterAllocation);
     framework.Run("color in output", TestColorInOutput);

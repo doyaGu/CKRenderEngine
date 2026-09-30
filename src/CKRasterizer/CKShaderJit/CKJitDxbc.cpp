@@ -46,6 +46,8 @@ enum : uint32_t {
     DxbcOpRoundNi = 65,
     DxbcOpRoundPi = 66,
     DxbcOpSample = 69,
+    DxbcOpSampleC = 70,
+    DxbcOpSampleCLz = 71,
     DxbcOpSampleL = 72,
     DxbcOpSampleD = 73,
     DxbcOpSampleB = 74,
@@ -69,6 +71,7 @@ enum : uint32_t {
     DxbcSaturate = 1u << 13,
     DxbcTestNonZero = 1u << 18,
     DxbcResinfoUint = 2u << 11,
+    DxbcSamplerComparison = 1u << 11,
     DxbcInterpolationConstant = 1u << 11,
     DxbcInterpolationLinear = 2u << 11,
     DxbcInterpolationLinearNoPerspective = 4u << 11,
@@ -734,9 +737,10 @@ DxbcValue DxbcEmitter::Unmodified(const DxbcValue &value, DxbcScratch &scratch) 
 }
 
 // A slot's texture; its swizzle routes result component first + k to the
-// destination's component k.
+// destination's component k. A scalar result is replicated, as fxc writes it
+// for comparisons.
 void DxbcEmitter::Resource(uint32_t slot, const DxbcValue &dest, uint32_t first) {
-    uint32_t swizzle = DxbcSwizzleIdentity;
+    uint32_t swizzle = dest.Count == 1 ? first * 0x55 : DxbcSwizzleIdentity;
     for (uint32_t k = 0; k < dest.Count; ++k) {
         const uint32_t shift = 2 * dest.Lanes[k];
         swizzle = (swizzle & ~(3u << shift)) | (first + k) << shift;
@@ -752,8 +756,9 @@ void DxbcEmitter::Sampler(uint32_t slot) {
     m_Code.Token(slot);
 }
 
-// dest, address, texture[, sampler][, extra operands]: the bias, the LOD or
-// the two derivatives. Loads and size queries leave the sampler out.
+// dest, address, texture[, sampler][, extra operands]: the bias, the LOD,
+// the two derivatives or the reference. Loads and size queries leave the
+// sampler out.
 void DxbcEmitter::Texture(const CKJitNode &node, const DxbcValue &dest) {
     DxbcScratch scratch(m_Temps, dest);
     DxbcValue operands[3] = {};
@@ -776,6 +781,8 @@ void DxbcEmitter::Texture(const CKJitNode &node, const DxbcValue &dest) {
     case CKJIT_OP_SAMPLE_LEVEL: opcode = DxbcOpSampleL; extra = 1; break;
     case CKJIT_OP_SAMPLE_GRAD: opcode = DxbcOpSampleD; extra = 2; break;
     case CKJIT_OP_CALC_LOD: opcode = DxbcOpLod; first = 1; break; // x is clamped, y is not
+    case CKJIT_OP_SAMPLE_CMP: opcode = DxbcOpSampleC; extra = 1; break;
+    case CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO: opcode = DxbcOpSampleCLz; extra = 1; break;
     case CKJIT_OP_LOAD:
         // The mip is the address's w, after the texel.
         opcode = DxbcOpLd;
@@ -872,6 +879,8 @@ void DxbcEmitter::Translate(uint32_t index) {
     case CKJIT_OP_SAMPLE_LEVEL:
     case CKJIT_OP_SAMPLE_GRAD:
     case CKJIT_OP_CALC_LOD:
+    case CKJIT_OP_SAMPLE_CMP:
+    case CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO:
     case CKJIT_OP_LOAD:
     case CKJIT_OP_SIZE:
     case CKJIT_OP_LEVELS: Texture(node, dest); break;
@@ -897,11 +906,13 @@ void DxbcEmitter::Declare(DxbcStream &out) const {
     }
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
         if ((m_SampledSlots >> slot & 1u) != 0) {
-            out.Instruction(DxbcOpDclSampler,
+            const uint32_t mode = m_SamplerDims[slot] == CKJIT_SAMPLER_2D_COMPARE ? DxbcSamplerComparison : 0u;
+            out.Instruction(DxbcOpDclSampler | mode,
                             {DxbcOperandSampler | range, m_SamplerIds[slot], slot, slot, m_Layout.SamplerSpace});
         }
     }
-    static const uint32_t kDimensions[] = {DxbcResourceTexture2D, DxbcResourceTextureCube, DxbcResourceTexture3D};
+    static const uint32_t kDimensions[] = {DxbcResourceTexture2D, DxbcResourceTextureCube, DxbcResourceTexture3D,
+                                           DxbcResourceTexture2D};
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
         if (m_SamplerDims[slot] != 0xff) {
             out.Instruction(DxbcOpDclResource | kDimensions[m_SamplerDims[slot]],
