@@ -532,9 +532,9 @@ struct Reference {
         return index < r.Count2D ? SampleSlot(index, CKJIT_SAMPLER_2D, coord, lodBias) : Splat(0);
     }
 
-    // native_sampling.hlsli, which the shader-sampling shaders sample 2D
-    // textures with. The address of a texel along an axis, and whether it is
-    // outside a border-addressed texture.
+    // native_sampling.hlsli, which the shader-sampling shaders sample 2D and
+    // volume textures with. The address of a texel along an axis, and whether
+    // it is outside a border-addressed texture.
     static int Address(int i, int extent, int mode, bool &outside) {
         if (mode == 4)
             outside = outside || i < 0 || i >= extent;
@@ -708,6 +708,179 @@ struct Reference {
         return Splat(wide && compareFunc != 0 ? CompareDepth(color.x, coord.z, compareFunc) : color.x);
     }
 
+    Float4 SampleLevel3D(int slot, const float uvw[3], float lod) const {
+        float texel[4];
+        TexelHash(CKJIT_OP_SAMPLE_LEVEL, (uint32_t)slot, CKJIT_SAMPLER_3D).Add(uvw, 3).Add(&lod, 1).Color(texel);
+        return {texel[0], texel[1], texel[2], texel[3]};
+    }
+
+    Float4 Tap3D(int slot, const int p[3], int mip, const int extent[3]) const {
+        const int modes = (int)Uniform(ROW_SAMPLER_INFO + slot).x;
+        bool outside = false;
+        const int texel[4] = {Address(p[0], extent[0], modes & 15, outside),
+                              Address(p[1], extent[1], (modes >> 4) & 15, outside),
+                              Address(p[2], extent[2], (modes >> 8) & 15, outside), mip};
+        if (outside)
+            return Uniform(ROW_BORDER_COLOR + slot);
+        float color[4];
+        TexelHash(CKJIT_OP_LOAD, (uint32_t)slot, CKJIT_SAMPLER_3D).Add(texel, 4).Color(color);
+        return {color[0], color[1], color[2], color[3]};
+    }
+
+    Float4 Level3D(int slot, const float uvw[3], int mip, bool filtered) const {
+        const Texture &texture = F.Textures[slot];
+        int extent[3];
+        float scaled[3];
+        for (int axis = 0; axis < 3; ++axis) {
+            extent[axis] = MipExtent(texture, (uint32_t)axis, mip);
+            scaled[axis] = uvw[axis] * (float)extent[axis];
+        }
+        if (!filtered) {
+            const int p[3] = {Truncate(std::floor(scaled[0])), Truncate(std::floor(scaled[1])),
+                              Truncate(std::floor(scaled[2]))};
+            return Tap3D(slot, p, mip, extent);
+        }
+        int base[3];
+        float weight[3];
+        for (int axis = 0; axis < 3; ++axis) {
+            const float corner = scaled[axis] - 0.5f;
+            const float below = std::floor(corner);
+            base[axis] = Truncate(below);
+            weight[axis] = corner - below;
+        }
+        Float4 value = Splat(0.0f);
+        for (int z = 0; z < 2; ++z) {
+            for (int y = 0; y < 2; ++y) {
+                for (int x = 0; x < 2; ++x) {
+                    const int p[3] = {x ? Next(base[0]) : base[0], y ? Next(base[1]) : base[1],
+                                      z ? Next(base[2]) : base[2]};
+                    const Float4 tap = Tap3D(slot, p, mip, extent) * Splat(x ? weight[0] : 1.0f - weight[0]) *
+                                       Splat(y ? weight[1] : 1.0f - weight[1]) *
+                                       Splat(z ? weight[2] : 1.0f - weight[2]);
+                    value = value + tap;
+                }
+            }
+        }
+        return value;
+    }
+
+    // The weight of the texels a border-addressed axis filters that are
+    // inside the mip.
+    static float BorderAxisCoverage(float uv, int extent, int mode, bool filtered) {
+        if (mode != 4)
+            return 1.0f;
+        if (!filtered)
+            return uv >= 0.0f && uv < 1.0f ? 1.0f : 0.0f;
+        const float coord = uv * (float)extent - 0.5f;
+        const float below = std::floor(coord);
+        const int base = Truncate(below);
+        const float fraction = coord - below;
+        return (base >= 0 && base < extent ? 1.0f - fraction : 0.0f) +
+               (Next(base) >= 0 && Next(base) < extent ? fraction : 0.0f);
+    }
+
+    Float4 BorderLevel3D(int slot, const float uvw[3], int mip, bool filtered) const {
+        const Texture &texture = F.Textures[slot];
+        const int modes = (int)Uniform(ROW_SAMPLER_INFO + slot).x;
+        const float coverage = BorderAxisCoverage(uvw[0], MipExtent(texture, 0, mip), modes & 15, filtered) *
+                               BorderAxisCoverage(uvw[1], MipExtent(texture, 1, mip), (modes >> 4) & 15, filtered) *
+                               BorderAxisCoverage(uvw[2], MipExtent(texture, 2, mip), (modes >> 8) & 15, filtered);
+        return Lerp(Uniform(ROW_BORDER_COLOR + slot), SampleLevel3D(slot, uvw, (float)mip), coverage);
+    }
+
+    // ckSample3DAtLod, whose levels filter as the level given asks, and
+    // ckSample3DBorderLod, whose levels blend the border colour in and filter
+    // as the level picked asks.
+    Float4 Mips3D(int slot, const float uvw[3], float lod, bool blendBorder) const {
+        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
+        const int levels = F.Textures[slot].Levels;
+        const int mipFilter = (int)info.w & 15;
+        bool filtered = (lod > 0.0f ? info.y : info.z) != 1.0f;
+        lod = mipFilter == 0 ? 0.0f : std::fmin(std::fmax(lod, 0.0f), (float)(levels - 1));
+        if (blendBorder)
+            filtered = (lod > 0.0f ? info.y : info.z) != 1.0f;
+        const auto level = [&](int mip) {
+            return blendBorder ? BorderLevel3D(slot, uvw, mip, filtered) : Level3D(slot, uvw, mip, filtered);
+        };
+        if (mipFilter != 2 && mipFilter != 7)
+            return level(Truncate(std::floor(lod + 0.5f)));
+        const float below = std::floor(lod);
+        const int lower = Truncate(below);
+        const int upper = lower + 1 < levels - 1 ? lower + 1 : levels - 1;
+        return Lerp(level(lower), level(upper), lod - below);
+    }
+
+    bool Border3D(int slot) const {
+        const int modes = (int)Uniform(ROW_SAMPLER_INFO + slot).x;
+        return (modes & 15) == 4 || ((modes >> 4) & 15) == 4 || ((modes >> 8) & 15) == 4;
+    }
+
+    static float Length(const float v[3], const float size[3]) {
+        const float x = v[0] * size[0];
+        const float y = v[1] * size[1];
+        const float z = v[2] * size[2];
+        const float xx = x * x;
+        const float yy = y * y;
+        const float zz = z * z;
+        return std::sqrt(xx + yy + zz);
+    }
+
+    // ckffNative3DAniso: taps along the longer gradient across its footprint.
+    Float4 Anisotropic3D(int slot, const float uvw[3], const float dx[3], const float dy[3], float lodBias,
+                         float minMip, float maxAnisotropy) const {
+        const Texture &texture = F.Textures[slot];
+        const float size[3] = {(float)MipExtent(texture, 0, 0), (float)MipExtent(texture, 1, 0),
+                               (float)MipExtent(texture, 2, 0)};
+        const float footprintX = Length(dx, size);
+        const float footprintY = Length(dy, size);
+        const float major = std::fmax(footprintX, footprintY);
+        const float minor = std::fmin(footprintX, footprintY);
+        const float count = major <= 1.0f ? 1.0f
+                                          : std::fmin(maxAnisotropy,
+                                                      std::fmax(1.0f, std::ceil(major / std::fmax(minor, 0.0001f))));
+        const float lod = std::fmax(std::log2(std::fmax(std::fmax(major / count, minor), 0.000001f)) + lodBias, minMip);
+        const float *step = footprintX >= footprintY ? dx : dy;
+        const bool border = Border3D(slot);
+        Float4 color = Splat(0.0f);
+        for (int tap = 0; tap < Truncate(count); ++tap) {
+            const float offset = ((float)tap + 0.5f) / count - 0.5f;
+            const float at[3] = {uvw[0] + step[0] * offset, uvw[1] + step[1] * offset, uvw[2] + step[2] * offset};
+            color = color + (border ? Mips3D(slot, at, lod, true) : SampleLevel3D(slot, at, lod));
+        }
+        return color / count;
+    }
+
+    // The shader-sampling shaders' volume textures (ff_sampler_common.sc):
+    // mirror-once folds the coordinate, and anisotropic samplers average taps
+    // along the longer explicit gradient of the unfolded one. The others
+    // sample at the level of the unfolded coordinate, no lower than the
+    // minimum mip level.
+    Float4 ShaderSample3D(int stage, const Float4 &coord, int slot, int flags, float lodBias) const {
+        const int state = (int)BumpEnv(stage * 2 + 1).w;
+        const float minMip = (float)(state & 31);
+        const float maxAnisotropy = (float)((state >> 5) & 31);
+        const int mirror = (flags >> 9) & 7;
+        const float uvw[3] = {(mirror & 1) != 0 ? Clamp(std::fabs(coord.x), 0.0f, 1.0f) : coord.x,
+                              (mirror & 2) != 0 ? Clamp(std::fabs(coord.y), 0.0f, 1.0f) : coord.y,
+                              (mirror & 4) != 0 ? Clamp(std::fabs(coord.z), 0.0f, 1.0f) : coord.z};
+        if ((state & 0x20000) != 0) {
+            const bool explicitGradient = (state & 0x8000) != 0;
+            const float dx[3] = {explicitGradient ? Derivative(coord.x, 0) : 0.0f,
+                                 explicitGradient ? Derivative(coord.y, 0) : 0.0f,
+                                 explicitGradient ? Derivative(coord.z, 0) : 0.0f};
+            const float dy[3] = {explicitGradient ? Derivative(coord.x, 1) : 0.0f,
+                                 explicitGradient ? Derivative(coord.y, 1) : 0.0f,
+                                 explicitGradient ? Derivative(coord.z, 1) : 0.0f};
+            return Anisotropic3D(slot, uvw, dx, dy, lodBias, minMip, maxAnisotropy);
+        }
+        const bool border = Border3D(slot);
+        if (mirror == 0 && minMip <= 0.0f && !border)
+            return SampleSlot(slot, CKJIT_SAMPLER_3D, {uvw[0], uvw[1], uvw[2], 0.0f}, lodBias);
+        const float original[3] = {coord.x, coord.y, coord.z};
+        const float lod = std::fmax(CalcLod(F.Textures[slot], original, 3) + lodBias, minMip);
+        return border ? Mips3D(slot, uvw, lod, false) : SampleLevel3D(slot, uvw, lod);
+    }
+
     Float4 SampleTexture(int stage, const Float4 &coord, int samplerType, int samplerOrdinal, bool hasTexture,
                          int flags, int compareFunc) const {
         if (!hasTexture)
@@ -717,11 +890,8 @@ struct Reference {
             return ShaderSample2D(stage, coord, samplerType == 2, samplerOrdinal, flags, compareFunc, lodBias);
         if (ShaderSampling && samplerType == 3 &&
             (CKDWORD)samplerOrdinal < CKFFSamplerTypeSlotCount(CKFF_SAMPLER_VOLUME, Layout)) {
-            // Until shader sampling emulates volume textures, their draws
-            // sample them as the native shaders do.
-            const int state = (int)BumpEnv(stage * 2 + 1).w;
-            TestCheck(((flags >> 9) & 7) == 0 && (state & (31 | 7 << 10 | 0x20000)) == 0,
-                      "shader-sampling draws do not fold, border or clamp volume textures yet");
+            const int slot = (int)CKFFSamplerSlot(CKFF_SAMPLER_VOLUME, (CKDWORD)samplerOrdinal, Layout);
+            return ShaderSample3D(stage, coord, slot, flags, lodBias);
         }
         if (samplerType == 1 || samplerType == 3)
             return Sample(samplerType, stage, samplerOrdinal, coord, lodBias);
@@ -1168,17 +1338,12 @@ struct DrawSamplers {
 void RandomSamplers(Random &random, CKFFSamplerLayout layout, DrawSamplers &samplers) {
     const CKDWORD volumeBase = CKFFSamplerTypeSlotBase(CKFF_SAMPLER_VOLUME, layout);
     for (CKDWORD slot = 0; slot < CKFF_SAMPLER_SLOT_COUNT; ++slot) {
-        // Not emulated yet: volume textures shader sampling folds, borders or
-        // clamps to a mip.
         const bool volume = slot >= volumeBase;
         int modes[3];
-        for (int &mode : modes) {
+        for (int &mode : modes)
             mode = 1 + (int)random.Below(5);
-            if (volume && mode == 4)
-                mode = 5;
-        }
         const int mipFilter = (int)random.Below(8);
-        const int anisotropy = (int)random.Below(volume || random.OneIn(3) ? 2 : 32);
+        const int anisotropy = (int)random.Below(random.OneIn(3) ? 2 : 32);
         float *info = samplers.Info[slot];
         info[0] = (float)(modes[0] | modes[1] << 4 | modes[2] << 8);
         info[1] = random.OneIn(3) ? 7.0f : (float)(1 + random.Below(7)); // minification filter
@@ -1187,7 +1352,7 @@ void RandomSamplers(Random &random, CKFFSamplerLayout layout, DrawSamplers &samp
         for (float &channel : samplers.Border[slot])
             channel = (float)random.Below(256) / 255.0f;
 
-        const int minMip = volume || random.OneIn(2) ? 0 : (int)random.Below(32);
+        const int minMip = random.OneIn(2) ? 0 : (int)random.Below(32);
         const bool manualAnisotropy = anisotropy >= 2;
         const bool explicitGradient = manualAnisotropy || random.OneIn(2);
         const int borderAxes = (modes[0] == 4 ? 1 : 0) | (modes[1] == 4 ? 2 : 0) | (volume && modes[2] == 4 ? 4 : 0);
@@ -1222,9 +1387,7 @@ void ApplySamplers(const CKFFFragmentProgram &program, CKFFSamplerLayout layout,
     for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
         const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
         const CKDWORD slot = StageSlot(program, stage, layout);
-        float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
-        if (type == CKFF_SAMPLER_VOLUME) // not emulated yet: mirror-once volume textures
-            coord[1] = (float)((int)coord[1] & ~(7 << 9));
+        const float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
         fragment.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][3] = coord[2] > 0.5f ? (float)samplers.State[slot] : 0.0f;
     }
 }

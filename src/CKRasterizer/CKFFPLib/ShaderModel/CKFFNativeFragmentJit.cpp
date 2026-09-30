@@ -298,13 +298,17 @@ struct Color {
 
 enum Channel { CHANNEL_RGB, CHANNEL_ALPHA };
 
-// A 2D texture the shader filters itself: its slot, its sampler's metadata
-// and the stage's sampler state.
+// A 2D or volume texture the shader filters itself: its slot, its sampler's
+// metadata and the stage's sampler state.
 struct ShaderSampler {
     uint32_t Slot;
+    CKJitSamplerDim Dim;
+    // Whether volume levels blend the filtered sample of the level with the
+    // border colour by the texels' coverage, instead of filtering texels.
+    bool BlendsBorder;
     CKJitValue Border;        // FLOAT4
     CKJitValue Info;          // FLOAT4: address modes, min, mag and mip filters
-    CKJitValue Modes;         // INT2: the U and V address modes
+    CKJitValue Modes;         // INT2 or INT3: an address mode an axis
     CKJitValue MipFilter;     // INT
     CKJitValue Levels;        // INT
     CKJitValue MinMip;        // FLOAT: the lowest mip level sampled
@@ -350,12 +354,24 @@ private:
     CKJitValue SampleCoordinate(CKDWORD stage, uint32_t components);
     CKJitValue SampleTexture(CKDWORD stage);
     CKJitValue ShaderSample2D(CKDWORD stage, uint32_t slot, CKJitValue coordinate, CKJitValue lodBias);
+    CKJitValue ShaderSample3D(CKDWORD stage, uint32_t slot, CKJitValue coordinate, CKJitValue lodBias);
+    ShaderSampler Sampler(CKDWORD stage, uint32_t slot, CKJitSamplerDim dim);
     CKJitValue MirrorOnce(CKJitValue coordinate, CKDWORD sampling);
     CKJitValue Filter2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue dx, CKJitValue dy,
                         CKJitValue implicitLod, CKJitValue lodBias);
-    CKJitValue Mips2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue lod, CKJitValue filtered);
+    CKJitValue Anisotropic3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue dx, CKJitValue dy,
+                             CKJitValue lodBias, bool border);
+    CKJitValue Filtered(const ShaderSampler &sampler, CKJitValue lod);
+    CKJitValue Mips(const ShaderSampler &sampler, CKJitValue uv, CKJitValue lod, CKJitValue filtered);
+    CKJitValue Level(const ShaderSampler &sampler, CKJitValue uv, CKJitValue mip, CKJitValue filtered) {
+        if (sampler.Dim == CKJIT_SAMPLER_2D)
+            return Level2D(sampler, uv, mip, filtered);
+        return sampler.BlendsBorder ? BorderLevel3D(sampler, uv, mip, filtered) : Level3D(sampler, uv, mip, filtered);
+    }
     CKJitValue Level2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue mip, CKJitValue filtered);
-    CKJitValue Texel2D(const ShaderSampler &sampler, CKJitValue texel, CKJitValue outside, CKJitValue mip);
+    CKJitValue Level3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue mip, CKJitValue filtered);
+    CKJitValue BorderLevel3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue mip, CKJitValue filtered);
+    CKJitValue Texel(const ShaderSampler &sampler, CKJitValue texel, CKJitValue outside, CKJitValue mip);
     void Address(CKJitValue texel, CKJitValue extent, CKJitValue mode, CKJitValue &index, CKJitValue &outside);
     CKJitValue CompareDepth(CKJitValue depth, CKJitValue reference, CKDWORD func);
     Color Argument(CKDWORD packedArg, const Color &texture, const Color &current, const Color &stageConstant);
@@ -558,13 +574,16 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
     const CKJitValue lodBias = Switch(CKFF_NATIVE_FRAGMENT_LOD_BIAS, stage)
         ? m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 2)
         : m_B.Float(0.0f);
-    if (dim != CKJIT_SAMPLER_2D || !Switch(CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING)) {
+    if (dim == CKJIT_SAMPLER_CUBE || !Switch(CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING)) {
         const CKJitValue color = m_B.Sample(slot, dim, SampleCoordinate(stage, dim == CKJIT_SAMPLER_2D ? 2 : 3), lodBias);
         return type == CKFF_SAMPLER_DEPTH ? m_B.Swizzle(color, "xxxx") : color;
     }
 
-    // The shader-sampling shaders sample 2D and depth textures themselves;
-    // the wide 2D layout compares the depths sampled with the coordinate's z.
+    // The shader-sampling shaders sample 2D, depth and volume textures
+    // themselves; the wide 2D layout compares the depths sampled with the
+    // coordinate's z.
+    if (dim == CKJIT_SAMPLER_3D)
+        return ShaderSample3D(stage, slot, SampleCoordinate(stage, 3), lodBias);
     const CKJitValue coordinate = SampleCoordinate(stage, type == CKFF_SAMPLER_DEPTH ? 3 : 2);
     const CKJitValue color = ShaderSample2D(stage, slot, m_B.Swizzle(coordinate, "xy"), lodBias);
     if (type != CKFF_SAMPLER_DEPTH)
@@ -606,21 +625,65 @@ CKJitValue NativeFragmentCompiler::ShaderSample2D(CKDWORD stage, uint32_t slot, 
         dy = m_B.Ddy(uv);
     }
 
+    return Filter2D(Sampler(stage, slot, CKJIT_SAMPLER_2D), uv, dx, dy, implicitLod, lodBias);
+}
+
+// Samples a volume texture as native_sampling.hlsli and ff_sampler_common.sc:
+// mirror-once folds the coordinate, and an anisotropic sampler averages taps
+// along the longer explicit gradient of the unfolded one. The others sample
+// at the level of the unfolded coordinate, no lower than the minimum mip
+// level, border addressing filtering texels loaded by the shader.
+CKJitValue NativeFragmentCompiler::ShaderSample3D(CKDWORD stage, uint32_t slot, CKJitValue coordinate,
+                                                  CKJitValue lodBias) {
+    const CKDWORD sampling = Sampling(m_Switches, stage);
+    const CKJitValue uvw = MirrorOnce(coordinate, sampling);
+    const bool border = (sampling & CKFF_NATIVE_FRAGMENT_BORDER) != 0;
+    if ((sampling & CKFF_NATIVE_FRAGMENT_ANISOTROPY) != 0) {
+        // Derivatives are taken ahead of the taps, which not every pixel of a
+        // quad may run.
+        CKJitValue dx = m_B.Float3(0.0f, 0.0f, 0.0f);
+        CKJitValue dy = dx;
+        if ((sampling & CKFF_NATIVE_FRAGMENT_GRADIENT) != 0) {
+            dx = m_B.Ddx(coordinate);
+            dy = m_B.Ddy(coordinate);
+        }
+        ShaderSampler sampler = Sampler(stage, slot, CKJIT_SAMPLER_3D);
+        sampler.BlendsBorder = true;
+        return Anisotropic3D(sampler, uvw, dx, dy, lodBias, border);
+    }
+    if ((sampling & (CKFF_NATIVE_FRAGMENT_MIRROR_U | CKFF_NATIVE_FRAGMENT_MIRROR_V | CKFF_NATIVE_FRAGMENT_MIRROR_W |
+                     CKFF_NATIVE_FRAGMENT_BORDER | CKFF_NATIVE_FRAGMENT_MIN_MIP)) == 0) {
+        return m_B.Sample(slot, CKJIT_SAMPLER_3D, uvw, lodBias);
+    }
+    const ShaderSampler sampler = Sampler(stage, slot, CKJIT_SAMPLER_3D);
+    const CKJitValue lod = m_B.Max(m_B.Add(m_B.CalcLod(slot, CKJIT_SAMPLER_3D, coordinate), lodBias), sampler.MinMip);
+    if (!border)
+        return m_B.SampleLevel(slot, CKJIT_SAMPLER_3D, uvw, lod);
+    return Mips(sampler, uvw, lod, Filtered(sampler, lod));
+}
+
+// The metadata of the sampler of a slot and the sampler state of a stage
+// sampling it.
+ShaderSampler NativeFragmentCompiler::Sampler(CKDWORD stage, uint32_t slot, CKJitSamplerDim dim) {
     const CKJitValue state = m_B.FloatToInt(m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 3));
     const CKJitValue info = m_B.Uniform(m_Rows.SamplerInfo + slot);
     const CKJitValue modes = m_B.FloatToInt(m_B.Component(info, 0));
     ShaderSampler sampler;
     sampler.Slot = slot;
+    sampler.Dim = dim;
+    sampler.BlendsBorder = false;
     sampler.Border = m_B.Uniform(m_Rows.BorderColor + slot);
     sampler.Info = info;
-    sampler.Modes = m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15)});
+    sampler.Modes = dim == CKJIT_SAMPLER_3D
+        ? m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15), Bits(modes, 8, 15)})
+        : m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15)});
     sampler.MipFilter = Bits(m_B.FloatToInt(m_B.Component(info, 3)), 0, 15);
-    sampler.Levels = m_B.TextureLevels(slot, CKJIT_SAMPLER_2D);
+    sampler.Levels = m_B.TextureLevels(slot, dim);
     sampler.MinMip =
         m_B.IntToFloat(Bits(state, CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT, CKFF_SAMPLER_SHADER_MIN_MIP_MASK));
     sampler.MaxAnisotropy =
         m_B.IntToFloat(Bits(state, CKFF_SAMPLER_SHADER_ANISOTROPY_SHIFT, CKFF_SAMPLER_SHADER_ANISOTROPY_MASK));
-    return Filter2D(sampler, uv, dx, dy, implicitLod, lodBias);
+    return sampler;
 }
 
 // Mirror-once folds the axes it applies to into [0, 1], where clamping to the
@@ -683,18 +746,59 @@ CKJitValue NativeFragmentCompiler::Filter2D(const ShaderSampler &sampler, CKJitV
     CKJitValue sum;
     const CKJitValue tap = m_B.Loop(taps, CKFF_SAMPLER_SHADER_ANISOTROPY_MASK, {m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f)}, &sum);
     const CKJitValue offset = m_B.Mul(m_B.Sub(m_B.IntToFloat(tap), center), step);
-    const CKJitValue color = Mips2D(sampler, m_B.Add(uv, offset), tapLod, filtered);
+    const CKJitValue color = Mips(sampler, m_B.Add(uv, offset), tapLod, filtered);
     return m_B.Div(m_B.EndLoop(m_B.Add(sum, color)), tapCount);
+}
+
+// The volume filter of ff_sampler_common.sc: taps along the longer gradient
+// across its footprint, as many as its ratio to the shorter one up to the
+// maximum anisotropy, at the level of the longer one's share or the shorter
+// one, with the LOD bias, no lower than the minimum mip level. A border
+// addressed texture blends the border colour into every level it samples.
+CKJitValue NativeFragmentCompiler::Anisotropic3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue dx,
+                                                 CKJitValue dy, CKJitValue lodBias, bool border) {
+    const CKJitValue size = m_B.IntToFloat(m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_3D, m_B.Int(0)));
+    const CKJitValue footprintX = m_B.Length(m_B.Mul(dx, size));
+    const CKJitValue footprintY = m_B.Length(m_B.Mul(dy, size));
+    const CKJitValue major = m_B.Max(footprintX, footprintY);
+    const CKJitValue minor = m_B.Min(footprintX, footprintY);
+    const CKJitValue ratio = m_B.Max(m_B.Float(1.0f), m_B.Ceil(m_B.Div(major, m_B.Max(minor, m_B.Float(0.0001f)))));
+    const CKJitValue taps = m_B.Select(m_B.LessEqual(major, m_B.Float(1.0f)), m_B.Float(1.0f),
+                                       m_B.Min(sampler.MaxAnisotropy, ratio));
+    const CKJitValue share = m_B.Max(m_B.Div(major, taps), minor);
+    const CKJitValue lod =
+        m_B.Max(m_B.Add(m_B.Log2(m_B.Max(share, m_B.Float(0.000001f))), lodBias), sampler.MinMip);
+    const CKJitValue step = m_B.Select(m_B.GreaterEqual(footprintX, footprintY), dx, dy);
+
+    CKJitValue sum;
+    const CKJitValue tap =
+        m_B.Loop(m_B.FloatToInt(taps), CKFF_SAMPLER_SHADER_ANISOTROPY_MASK, {m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f)}, &sum);
+    const CKJitValue offset = m_B.Sub(m_B.Div(m_B.Add(m_B.IntToFloat(tap), m_B.Float(0.5f)), taps), m_B.Float(0.5f));
+    const CKJitValue at = m_B.Add(uvw, m_B.Mul(step, offset));
+    const CKJitValue color =
+        border ? Mips(sampler, at, lod, CKJitValue()) : m_B.SampleLevel(sampler.Slot, CKJIT_SAMPLER_3D, at, lod);
+    return m_B.Div(m_B.EndLoop(m_B.Add(sum, color)), taps);
+}
+
+// Whether the filter of a level, the minification filter above the base mip
+// and the magnification one at it, blends texels.
+CKJitValue NativeFragmentCompiler::Filtered(const ShaderSampler &sampler, CKJitValue lod) {
+    const CKJitValue filter = m_B.Select(m_B.Greater(lod, m_B.Float(0.0f)), m_B.Component(sampler.Info, 1),
+                                         m_B.Component(sampler.Info, 2));
+    return m_B.NotEqual(filter, m_B.Float((float)VXTEXTUREFILTER_NEAREST));
 }
 
 // The texel of the mip the mip filter picks for a level, or the blend of the
 // two around it for linear and anisotropic mip filters; without a mip filter,
-// of the base mip.
-CKJitValue NativeFragmentCompiler::Mips2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue lod,
-                                          CKJitValue filtered) {
+// of the base mip. Without a filtering given, the filter of the level picked
+// decides it.
+CKJitValue NativeFragmentCompiler::Mips(const ShaderSampler &sampler, CKJitValue uv, CKJitValue lod,
+                                        CKJitValue filtered) {
     const CKJitValue top = m_B.IntSub(sampler.Levels, m_B.Int(1));
     const CKJitValue level = m_B.Select(m_B.IntEqual(sampler.MipFilter, m_B.Int(0)), m_B.Float(0.0f),
                                         m_B.Min(m_B.Max(lod, m_B.Float(0.0f)), m_B.IntToFloat(top)));
+    if (!filtered.IsValid())
+        filtered = Filtered(sampler, level);
     const CKJitValue linear = m_B.Or(m_B.IntEqual(sampler.MipFilter, m_B.Int(VXTEXTUREFILTER_LINEAR)),
                                      m_B.IntEqual(sampler.MipFilter, m_B.Int(VXTEXTUREFILTER_ANISOTROPIC)));
     const CKJitValue below = m_B.Floor(level);
@@ -708,7 +812,7 @@ CKJitValue NativeFragmentCompiler::Mips2D(const ShaderSampler &sampler, CKJitVal
     const CKJitValue index = m_B.Loop(m_B.Select(linear, m_B.Int(2), m_B.Int(1)), 2, {zero, zero}, texels);
     const CKJitValue first = m_B.IntEqual(index, m_B.Int(0));
     const CKJitValue texel =
-        Level2D(sampler, uv, m_B.Select(linear, m_B.Select(first, lower, upper), nearest), filtered);
+        Level(sampler, uv, m_B.Select(linear, m_B.Select(first, lower, upper), nearest), filtered);
     m_B.EndLoop({m_B.Select(first, texel, texels[0]), texel}, texels);
     return m_B.Select(linear, m_B.Lerp(texels[0], texels[1], m_B.Sub(level, below)), texels[0]);
 }
@@ -729,7 +833,7 @@ CKJitValue NativeFragmentCompiler::Level2D(const ShaderSampler &sampler, CKJitVa
     Address(m_B.Construct({texel, m_B.IntAdd(texel, m_B.Int(1))}), m_B.Construct({extent, extent}),
             m_B.Construct({sampler.Modes, sampler.Modes}), index, outside);
     const auto tap = [&](const char *axes) {
-        return Texel2D(sampler, m_B.Swizzle(index, axes), m_B.Any(m_B.Swizzle(outside, axes)), mip);
+        return Texel(sampler, m_B.Swizzle(index, axes), m_B.Any(m_B.Swizzle(outside, axes)), mip);
     };
     const CKJitValue t00 = tap("xy");
     const CKJitValue t10 = tap("zy");
@@ -740,13 +844,78 @@ CKJitValue NativeFragmentCompiler::Level2D(const ShaderSampler &sampler, CKJitVa
     const CKJitValue bilinear = m_B.Lerp(m_B.Lerp(t00, t10, wx), m_B.Lerp(t01, t11, wx), m_B.Component(weight, 1));
     m_B.Else({bilinear});
     Address(m_B.FloatToInt(m_B.Floor(scaled)), extent, sampler.Modes, index, outside);
-    return m_B.EndIf(Texel2D(sampler, index, m_B.Any(outside), mip));
+    return m_B.EndIf(Texel(sampler, index, m_B.Any(outside), mip));
+}
+
+// The texel of a volume mip at a coordinate, or the trilinear blend of the
+// eight around it.
+CKJitValue NativeFragmentCompiler::Level3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue mip,
+                                           CKJitValue filtered) {
+    const CKJitValue extent = m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_3D, mip);
+    const CKJitValue scaled = m_B.Mul(uvw, m_B.IntToFloat(extent));
+    CKJitValue index, outside;
+    m_B.If(filtered);
+    // The texels from the one below the coordinate on every axis, x first.
+    const CKJitValue corner = m_B.Sub(scaled, m_B.Float(0.5f));
+    const CKJitValue base = m_B.Floor(corner);
+    const CKJitValue weight = m_B.Sub(corner, base);
+    const CKJitValue texel = m_B.FloatToInt(base);
+    CKJitValue lowIndex, lowOutside, highIndex, highOutside;
+    Address(texel, extent, sampler.Modes, lowIndex, lowOutside);
+    Address(m_B.IntAdd(texel, m_B.Int(1)), extent, sampler.Modes, highIndex, highOutside);
+    CKJitValue trilinear;
+    for (uint32_t corners = 0; corners < 8; ++corners) {
+        CKJitValue axes[3], out, product;
+        for (uint32_t axis = 0; axis < 3; ++axis) {
+            const bool high = ((corners >> axis) & 1) != 0;
+            axes[axis] = m_B.Component(high ? highIndex : lowIndex, axis);
+            const CKJitValue beyond = m_B.Component(high ? highOutside : lowOutside, axis);
+            out = axis == 0 ? beyond : m_B.Or(out, beyond);
+        }
+        product = Texel(sampler, m_B.Construct({axes[0], axes[1], axes[2]}), out, mip);
+        for (uint32_t axis = 0; axis < 3; ++axis) {
+            const CKJitValue fraction = m_B.Component(weight, axis);
+            product = m_B.Mul(product, ((corners >> axis) & 1) != 0 ? fraction : m_B.Sub(m_B.Float(1.0f), fraction));
+        }
+        trilinear = corners == 0 ? product : m_B.Add(trilinear, product);
+    }
+    m_B.Else({trilinear});
+    Address(m_B.FloatToInt(m_B.Floor(scaled)), extent, sampler.Modes, index, outside);
+    return m_B.EndIf(Texel(sampler, index, m_B.Any(outside), mip));
+}
+
+// The filtered sample of a volume mip, blended with the border colour by the
+// coverage of the texels filtered: along a border-addressed axis, the weight
+// of those inside the mip.
+CKJitValue NativeFragmentCompiler::BorderLevel3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue mip,
+                                                 CKJitValue filtered) {
+    const CKJitValue extent = m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_3D, mip);
+    const CKJitValue zero = m_B.Float3(0.0f, 0.0f, 0.0f);
+    const CKJitValue one = m_B.Float3(1.0f, 1.0f, 1.0f);
+    const CKJitValue corner = m_B.Sub(m_B.Mul(uvw, m_B.IntToFloat(extent)), m_B.Float(0.5f));
+    const CKJitValue base = m_B.Floor(corner);
+    const CKJitValue fraction = m_B.Sub(corner, base);
+    const CKJitValue low = m_B.FloatToInt(base);
+    const CKJitValue high = m_B.IntAdd(low, m_B.Int(1));
+    const auto inside = [&](CKJitValue texel) {
+        return m_B.And(m_B.IntGreaterEqual(texel, m_B.Int(0)), m_B.IntLess(texel, extent));
+    };
+    const CKJitValue blended = m_B.Add(m_B.Select(inside(low), m_B.Sub(one, fraction), zero),
+                                       m_B.Select(inside(high), fraction, zero));
+    const CKJitValue unfiltered = m_B.Select(m_B.And(m_B.GreaterEqual(uvw, zero), m_B.Less(uvw, one)), one, zero);
+    const CKJitValue axes =
+        m_B.Select(m_B.IntEqual(sampler.Modes, m_B.Int(VXTEXTURE_ADDRESSBORDER)),
+                   m_B.Select(filtered, blended, unfiltered), one);
+    const CKJitValue coverage =
+        m_B.Mul(m_B.Mul(m_B.Component(axes, 0), m_B.Component(axes, 1)), m_B.Component(axes, 2));
+    const CKJitValue sample = m_B.SampleLevel(sampler.Slot, CKJIT_SAMPLER_3D, uvw, m_B.IntToFloat(mip));
+    return m_B.Lerp(sampler.Border, sample, coverage);
 }
 
 // A texel of a mip, or the border colour outside a border-addressed axis.
-CKJitValue NativeFragmentCompiler::Texel2D(const ShaderSampler &sampler, CKJitValue texel, CKJitValue outside,
-                                           CKJitValue mip) {
-    const CKJitValue loaded = m_B.Load(sampler.Slot, CKJIT_SAMPLER_2D, m_B.Construct({texel, mip}));
+CKJitValue NativeFragmentCompiler::Texel(const ShaderSampler &sampler, CKJitValue texel, CKJitValue outside,
+                                         CKJitValue mip) {
+    const CKJitValue loaded = m_B.Load(sampler.Slot, sampler.Dim, m_B.Construct({texel, mip}));
     return m_B.Select(outside, sampler.Border, loaded);
 }
 
@@ -1095,18 +1264,13 @@ bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamp
     UniformRows rows;
     if ((unsigned)layout >= CKFF_SAMPLER_LAYOUT_COUNT || !ResolveUniformRows(layout, rows))
         return false;
-    // Not emulated yet: volume textures, and depth comparisons outside the
-    // wide 2D layout.
+    // Not emulated yet: depth comparisons outside the wide 2D layout.
     CKFFNativeFragmentKey canonical = key;
     CKFFCanonicalizeNativeFragmentKey(canonical, layout);
-    if ((canonical.Switches[0] & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0) {
+    if ((canonical.Switches[0] & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0 && layout != CKFF_SAMPLER_LAYOUT_WIDE_2D) {
         for (CKDWORD stage = 0; stage < kStageCount; ++stage) {
-            const CKDWORD type = canonical.Program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
-            if ((type == CKFF_SAMPLER_VOLUME && Sampling(canonical.Switches, stage) != 0) ||
-                (layout != CKFF_SAMPLER_LAYOUT_WIDE_2D &&
-                 canonical.Program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) != 0)) {
+            if (canonical.Program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) != 0)
                 return false;
-            }
         }
     }
     NativeFragmentCompiler compiler(key, layout, rows);
