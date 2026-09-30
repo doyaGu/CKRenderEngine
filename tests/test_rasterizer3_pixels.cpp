@@ -963,11 +963,25 @@ void CheckMatchingSamples(const char *mode, const Samples &samples, const Sample
     }
 }
 
+void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCounts &counts,
+                      const CKSdlGpuRasterizerContext::FFJitCounts &expected)
+{
+    TestCheckf(counts.Queued == expected.Queued && counts.Ready == expected.Ready &&
+                   counts.Rejected == expected.Rejected && counts.Programs == expected.Programs &&
+                   counts.Pipelines == expected.Pipelines,
+               "%s: queued=%u ready=%u rejected=%u programs=%u pipelines=%u, "
+               "expected %u %u %u %u %u", what,
+               (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
+               (unsigned)counts.Programs, (unsigned)counts.Pipelines,
+               (unsigned)expected.Queued, (unsigned)expected.Ready, (unsigned)expected.Rejected,
+               (unsigned)expected.Programs, (unsigned)expected.Pipelines);
+}
+
 // The fragment programs of the artifacts are compiled in the background
-// while their draws use the precompiled shaders. The first run of
-// the cases queued them; each further run completes the work the one before
-// queued (the shaders, then their pipelines), so the last run draws with the
-// compiled programs. They must reproduce the precompiled pixels.
+// while their draws use the precompiled shaders. The first run of the cases
+// queued them with the pipelines of its draws, so the next run draws with
+// the compiled programs and creates nothing. They must reproduce the
+// precompiled pixels.
 void CheckCompiledFragmentPrograms(Backend &b, const Samples &precompiled)
 {
     const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
@@ -977,14 +991,15 @@ void CheckCompiledFragmentPrograms(Backend &b, const Samples &precompiled)
     }
     CKSdlGpuRasterizerContext *backend =
         static_cast<CKSdlGpuRasterizerContext *>(b.Context);
-    Samples samples;
-    for (int run = 0; run < 2; ++run) {
-        TestCheck(backend->FinishBackgroundWorkForTests(30000),
-                  "background compilation finishes");
-        RunPixelCases(b.Context, "compiled", samples);
-    }
+    TestCheck(backend->FinishBackgroundWorkForTests(30000),
+              "background compilation finishes");
     const CKSdlGpuRasterizerContext::FFJitCounts counts =
         backend->CountFFJitProgramsForTests();
+    Samples samples;
+    RunPixelCases(b.Context, "compiled", samples);
+    TestCheck(backend->FinishBackgroundWorkForTests(30000),
+              "background compilation finishes");
+    CheckFFJitCounts("compiled run", backend->CountFFJitProgramsForTests(), counts);
     TestCheckf(counts.Ready != 0 && counts.Programs != 0 && counts.Pipelines != 0 &&
                    counts.Queued == 0 && counts.Rejected == 0,
                "compiled fragment programs: queued=%u ready=%u rejected=%u programs=%u pipelines=%u",
@@ -1076,16 +1091,15 @@ void CheckCompiledProgramDepthInvariance(Backend &b)
         return counts.Queued + counts.Ready + counts.Rejected;
     };
     SetDiffuseState(ctx);
+    const CKDWORD pipelines = backend->CountFFJitProgramsForTests().Pipelines;
     int red = 0, green = 0;
-    // New programs of 3 and 4 stages draw precompiled and are queued.
+    // New programs of 3 and 4 stages draw precompiled and are queued with
+    // their pipelines.
     DrawEqualDepthPass(ctx, 3, 4, red, green);
     const int covered = green;
     TestCheckf(red == 0 && covered > 1000,
                "precompiled EQUAL pass: red=%d green=%d", red, green);
     TestCheck(backend->FinishBackgroundWorkForTests(30000), "background compilation finishes");
-    const CKDWORD pipelines = backend->CountFFJitProgramsForTests().Pipelines;
-    DrawEqualDepthPass(ctx, 3, 4, red, green);
-    TestCheck(backend->FinishBackgroundWorkForTests(30000), "background pipelines finish");
     TestCheckf(backend->CountFFJitProgramsForTests().Pipelines == pipelines + 2,
                "both compiled programs have their pipeline");
     const CKDWORD compiled = entries();
@@ -1105,20 +1119,6 @@ void CheckCompiledProgramDepthInvariance(Backend &b)
            covered);
 }
 
-void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCounts &counts,
-                      const CKSdlGpuRasterizerContext::FFJitCounts &expected)
-{
-    TestCheckf(counts.Queued == expected.Queued && counts.Ready == expected.Ready &&
-                   counts.Rejected == expected.Rejected && counts.Programs == expected.Programs &&
-                   counts.Pipelines == expected.Pipelines,
-               "%s: queued=%u ready=%u rejected=%u programs=%u pipelines=%u, "
-               "expected %u %u %u %u %u", what,
-               (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
-               (unsigned)counts.Programs, (unsigned)counts.Pipelines,
-               (unsigned)expected.Queued, (unsigned)expected.Ready, (unsigned)expected.Rejected,
-               (unsigned)expected.Programs, (unsigned)expected.Pipelines);
-}
-
 // Runs a check until its draws use compiled fragment programs, as
 // CheckCompiledFragmentPrograms runs the cases: the last run creates nothing.
 // Every run checks its own pixels, which the compiled programs reproduce.
@@ -1134,7 +1134,7 @@ void CheckCompiled(Backend &b, const char *name, void (*check)(Backend &))
         static_cast<CKSdlGpuRasterizerContext *>(b.Context);
     const CKSdlGpuRasterizerContext::FFJitCounts before = backend->CountFFJitProgramsForTests();
     CKSdlGpuRasterizerContext::FFJitCounts counts = before;
-    for (int run = 0; run < 3; ++run) {
+    for (int run = 0; run < 2; ++run) {
         if (run != 0) {
             TestCheck(backend->FinishBackgroundWorkForTests(30000),
                       "background compilation finishes");

@@ -71,9 +71,10 @@ class CKSdlGpuRasterizerContext::FFJitJob : public CKSdlGpuJob {
 public:
     FFJitJob(CKSdlGpuRasterizerContext &context, const FFJitKey &key,
              const CKFFNativeFragmentKey &fragment, CKFFSamplerLayout layout)
-        : Context(context), Key(key), Fragment(fragment), Layout(layout),
-          Device(context.Device), Format(context.m_FFJitFormat),
-          Shader(std::make_shared<CKSdlGpuShader>()) {
+        : Shader(std::make_shared<CKSdlGpuShader>()), Context(context), Key(key),
+          Fragment(fragment), Layout(layout), Device(context.Device),
+          Format(context.m_FFJitFormat) {
+        Shader->Job = this;
         // The compiled shader declares the resources of its artifact.
         CKShaderDesc &desc = Shader->Desc;
         Described = CKSdlGpuFFFragmentShader(context.ShaderFormat, FFJitArtifact(key), desc) != FALSE;
@@ -83,6 +84,7 @@ public:
         desc.Code = nullptr;
         desc.CodeSize = 0;
     }
+    ~FFJitJob() override { Shader->Job = nullptr; }
 
     void Run() override {
         CKRE_PROFILE_SCOPE("CKRE.SDL.FFJitCompile");
@@ -111,6 +113,9 @@ public:
         Context.CompleteFFJitProgram(Key, Shader);
     }
 
+    // Programs take the shader before it is created.
+    std::shared_ptr<CKSdlGpuShader> Shader;
+
 private:
     CKSdlGpuRasterizerContext &Context;
     FFJitKey Key;
@@ -118,7 +123,6 @@ private:
     CKFFSamplerLayout Layout;
     SDL_GPUDevice *Device;
     SDL_GPUShaderFormat Format;
-    std::shared_ptr<CKSdlGpuShader> Shader;
     bool Described = false;
 };
 
@@ -169,11 +173,9 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
         if (!found) {
             if (loaded == kFFJitLoadedProgramLimit)
                 continue;
-            FFJitJob *job = new FFJitJob(*this, key, fragment, layout);
-            if (!SubmitJob(job, CKSDLGPU_JOB_IDLE))
-                return;
             index = AddFFJitProgram(key, kFFJitLoadedRank | loaded++);
-            m_FFJitPrograms[index].IdleJob = job;
+            if (!SubmitFFJitProgram(m_FFJitPrograms[index], fragment, layout, CKSDLGPU_JOB_IDLE))
+                return;
         }
         m_FFJitPrograms[index].Prewarm.PushBack(record);
     }
@@ -214,6 +216,26 @@ int CKSdlGpuRasterizerContext::AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank
     return index;
 }
 
+bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
+    FFJitProgram &Entry,
+    const CKFFNativeFragmentKey &Fragment,
+    CKFFSamplerLayout Layout,
+    CKSdlGpuJobPriority Priority)
+{
+    FFJitJob *job = new FFJitJob(*this, Entry.Key, Fragment, Layout);
+    const std::shared_ptr<CKSdlGpuShader> shader = job->Shader;
+    if (SubmitJob(job, Priority))
+        Entry.PixelShader = ShaderObjects.Add(shader);
+    if (!Entry.PixelShader) {
+        Entry.State = FFJitProgram::REJECTED;
+        return false;
+    }
+    // The worker owns the job; an idle one is kept only to promote it.
+    if (Priority == CKSDLGPU_JOB_IDLE)
+        Entry.IdleJob = job;
+    return true;
+}
+
 int CKSdlGpuRasterizerContext::AddFFJitDrawKey(
     const FFJitKey &DrawKey,
     CKFFNativeFragmentKey Fragment,
@@ -229,8 +251,7 @@ int CKSdlGpuRasterizerContext::AddFFJitDrawKey(
         // Never compile while drawing. A program the worker cannot take
         // keeps its precompiled shader.
         index = AddFFJitProgram(key, ++m_FFJitUses);
-        if (!SubmitJob(new FFJitJob(*this, key, Fragment, Layout)))
-            m_FFJitPrograms[index].State = FFJitProgram::REJECTED;
+        SubmitFFJitProgram(m_FFJitPrograms[index], Fragment, Layout, CKSDLGPU_JOB_NORMAL);
         CKRE_PROFILE_VALUE("CKRE.SDL.FFJitCompiles", 1);
     }
     m_FFJitDrawKeys.Insert(DrawKey, index, FALSE);
@@ -258,13 +279,12 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
     FFJitProgram &entry = m_FFJitPrograms[index];
     if (entry.Rank & kFFJitLoadedRank)
         entry.Rank = ++m_FFJitUses;
-    if (entry.State != FFJitProgram::READY) {
-        // A draw now waits for a program loaded at idle priority.
-        if (entry.IdleJob) {
-            Worker.Promote(entry.IdleJob);
-            entry.IdleJob = nullptr;
-        }
+    if (entry.State == FFJitProgram::REJECTED)
         return Precompiled;
+    // A draw now waits for a program loaded at idle priority.
+    if (entry.IdleJob) {
+        Worker.Promote(entry.IdleJob);
+        entry.IdleJob = nullptr;
     }
     const CKDWORD program = BindFFJitProgram(entry, Variant, Precompiled);
     return program ? program : Precompiled;
@@ -329,20 +349,21 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
 void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
     const FFJitKey &Key, const std::shared_ptr<CKSdlGpuShader> &Shader)
 {
-    // Drop results for entries cleared meanwhile. An entry queued again for
-    // the same key takes the first result, which is the same code.
+    // Drop results for entries cleared or rejected meanwhile. An entry
+    // queued again for the same key has a shader of its own.
     const int *index = m_FFJitKeys.FindPtr(Key);
-    if (!index || m_FFJitPrograms[*index].State != FFJitProgram::QUEUED)
+    if (!index)
         return;
     FFJitProgram &entry = m_FFJitPrograms[*index];
+    if (entry.State != FFJitProgram::QUEUED || ShaderObjects.Borrow(entry.PixelShader) != Shader)
+        return;
     entry.IdleJob = nullptr;
-    // The worker has logged why a shader is missing.
-    entry.State = FFJitProgram::REJECTED;
-    if (!Shader->Shader || !Ready())
+    // The worker has logged why a shader is missing. Its programs never
+    // create pipelines, and its draws are then drawn precompiled.
+    if (!Shader->Shader) {
+        entry.State = FFJitProgram::REJECTED;
         return;
-    entry.PixelShader = ShaderObjects.Add(Shader);
-    if (!entry.PixelShader)
-        return;
+    }
     entry.State = FFJitProgram::READY;
     PrewarmFFJitProgram(entry);
 }

@@ -237,13 +237,14 @@ void CKSdlGpuRasterizerContext::Collect()
     }
 }
 
-bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority priority)
+bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
+                                          const CKSdlGpuJob *after)
 {
     if (!Worker.Running() && !Worker.Start("CKSdlGpuWorker")) {
         delete job;
         return false;
     }
-    return Worker.Submit(job, priority);
+    return Worker.Submit(job, priority, after);
 }
 
 void CKSdlGpuRasterizerContext::CollectJobs()

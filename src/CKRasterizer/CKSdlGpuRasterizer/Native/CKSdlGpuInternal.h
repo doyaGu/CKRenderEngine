@@ -147,9 +147,13 @@ struct CKSdlGpuLayout {
     XArray<CKVertexElementDesc> Elements;
     unsigned Stride = 0;
 };
+class CKSdlGpuJob;
 struct CKSdlGpuShader {
     std::shared_ptr<SDL_GPUShader> Shader;
     CKShaderDesc Desc;
+    // The worker job creating Shader, which the pipelines of the shader wait
+    // for, until the job is deleted. Used on the owner's thread only.
+    const CKSdlGpuJob *Job = nullptr;
 };
 struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     std::shared_ptr<CKSdlGpuShader> Vertex, Fragment;

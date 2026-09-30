@@ -104,6 +104,8 @@ public:
     }
 
     void Run() override {
+        // The worker could not create the shader, whose program is not drawn.
+        if (!Desc.Fragment->Shader) return;
         const SDL_GPUGraphicsPipelineCreateInfo info = Desc.CreateInfo();
         Result = SDL_CreateGPUGraphicsPipeline(Device, &info);
         // The program keeps drawing with its fallback, so this is not fatal.
@@ -269,8 +271,9 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
     program.Pipelines.Insert(key, std::shared_ptr<SDL_GPUGraphicsPipeline>(), FALSE);
     auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key);
     DescribePipeline(program, draw, color, depth, samples, job->Desc);
-    // The worker owns the job; an idle one is kept only to promote it.
-    if (SubmitJob(job, priority) && priority == CKSDLGPU_JOB_IDLE)
+    // The worker owns the job; an idle one is kept only to promote it. The
+    // pipeline of a shader the worker is creating waits for it.
+    if (SubmitJob(job, priority, program.Fragment->Job) && priority == CKSDLGPU_JOB_IDLE)
         program.IdlePipelines.Insert(key, job, TRUE);
     CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
 }

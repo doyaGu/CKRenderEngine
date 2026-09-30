@@ -271,9 +271,11 @@ private:
     std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc);
     void PruneProgramCaches();
     void Collect();
-    // Takes ownership; the worker starts with its first job.
+    // Takes ownership; the worker starts with its first job. A job
+    // submitted after another runs once that one has run.
     bool SubmitJob(CKSdlGpuJob *Job,
-                   CKSdlGpuJobPriority Priority = CKSDLGPU_JOB_NORMAL);
+                   CKSdlGpuJobPriority Priority = CKSDLGPU_JOB_NORMAL,
+                   const CKSdlGpuJob *After = nullptr);
     // Completes finished jobs. Call only at a frame boundary.
     void CollectJobs();
 
@@ -357,9 +359,11 @@ private:
     // A draw names the key of its fragment program and of the draw state the
     // shader of its artifact branches on. The draws of keys that compile
     // alike share one entry, whose shader the worker compiles and creates
-    // once; they use the precompiled program until the result is collected.
-    // The manifest of the device queues the programs and pipelines of
-    // earlier runs at idle priority before any draw asks for them.
+    // once. They bind the entry's programs at once and draw with the
+    // precompiled pipelines until the worker has created the programs' own,
+    // right after the shader. The manifest of the device queues the
+    // programs and pipelines of earlier runs at idle priority before any
+    // draw asks for them.
     class FFJitJob;
     // The lanes and switches of a CKFFNativeFragmentKey, then the sampler
     // layout.
@@ -379,6 +383,7 @@ private:
         // Canonical.
         FFJitKey Key;
         Status State = QUEUED;
+        // Registered when the entry is queued, before the worker creates it.
         CKDWORD PixelShader = 0;
         // A program of the shader for the draws of each precompiled program
         // they replace, whose interface and pipelines it takes.
@@ -410,6 +415,10 @@ private:
     int AddFFJitDrawKey(const FFJitKey &DrawKey, CKFFNativeFragmentKey Fragment,
                         CKFFSamplerLayout Layout);
     int AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank);
+    // Queues the compilation of a new entry and registers its shader. False
+    // when the entry is rejected.
+    bool SubmitFFJitProgram(FFJitProgram &Entry, const CKFFNativeFragmentKey &Fragment,
+                            CKFFSamplerLayout Layout, CKSdlGpuJobPriority Priority);
     // The program of an entry for the draws of a precompiled program,
     // created on first use. When it cannot be, the entry is rejected.
     CKDWORD BindFFJitProgram(FFJitProgram &Entry, CKFFProgramVariant Variant,
