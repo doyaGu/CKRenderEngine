@@ -90,14 +90,88 @@ bool StageSwitch(const CKDWORD *switches, CKFFNativeFragmentSwitch first, CKDWOR
     return (switches[0] & (CKDWORD)first << stage) != 0;
 }
 
+// The byte of a stage in the switch words from the first one.
+CKDWORD StageByte(const CKDWORD *switches, CKDWORD first, CKDWORD stage) {
+    return switches[first + stage / 4] >> (stage % 4 * 8) & 0xFFu;
+}
+
+void SetStageByte(CKDWORD *switches, CKDWORD first, CKDWORD stage, CKDWORD value) {
+    CKDWORD &word = switches[first + stage / 4];
+    const CKDWORD shift = stage % 4 * 8;
+    word = (word & ~(0xFFu << shift)) | (value & 0xFFu) << shift;
+}
+
 CKDWORD BlendPair(const CKDWORD *switches, CKDWORD stage) {
-    return switches[1 + stage / 4] >> (stage % 4 * 8) & 0xFFu;
+    return StageByte(switches, 1, stage);
 }
 
 void SetBlendPair(CKDWORD *switches, CKDWORD stage, CKDWORD pair) {
-    CKDWORD &word = switches[1 + stage / 4];
-    const CKDWORD shift = stage % 4 * 8;
-    word = (word & ~(0xFFu << shift)) | (pair & 0xFFu) << shift;
+    SetStageByte(switches, 1, stage, pair);
+}
+
+CKDWORD Sampling(const CKDWORD *switches, CKDWORD stage) {
+    return StageByte(switches, 3, stage);
+}
+
+void SetSampling(CKDWORD *switches, CKDWORD stage, CKDWORD sampling) {
+    SetStageByte(switches, 3, stage, sampling);
+}
+
+// The sampling flags of a stage's sampler state word and texture flags.
+CKDWORD DrawSampling(CKDWORD state, CKDWORD textureFlags) {
+    CKDWORD sampling = 0;
+    if ((textureFlags & CKFF_TTF_MIRRORONCE_U) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_MIRROR_U;
+    if ((textureFlags & CKFF_TTF_MIRRORONCE_V) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_MIRROR_V;
+    if ((textureFlags & CKFF_TTF_MIRRORONCE_W) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_MIRROR_W;
+    if ((state >> CKFF_SAMPLER_SHADER_BORDER_AXIS_SHIFT & CKFF_SAMPLER_SHADER_BORDER_AXIS_MASK) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_BORDER;
+    if ((state & CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_GRADIENT;
+    if ((state & CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_ANISOTROPY;
+    if ((state >> CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT & CKFF_SAMPLER_SHADER_MIN_MIP_MASK) != 0)
+        sampling |= CKFF_NATIVE_FRAGMENT_MIN_MIP;
+    return sampling;
+}
+
+// The depth comparison of a stage as the shader-sampling shaders evaluate
+// its functions 1 to 8. The wide 2D layout compares sampled depths, passing
+// them through for an unknown function as for none; the other layouts compare
+// every texel, passing an unknown function's depths through, as function 9.
+CKDWORD CanonicalCompareFunc(CKDWORD func, CKFFSamplerLayout layout) {
+    if (func <= 8)
+        return func;
+    return layout == CKFF_SAMPLER_LAYOUT_WIDE_2D ? 0 : 9;
+}
+
+// The sampling flags a shader-sampling shader tests for a stage that samples.
+// Mirror-once applies to the axes of the sampler type, and never to cubes,
+// which sample in hardware. A texture addressed by the shader tests border
+// addressing, except an undeclared depth texture, whose texels are all the
+// border. A 2D texture otherwise tests only explicit gradients, and a volume
+// without anisotropy its minimum mip level only where that alone keeps it
+// from hardware sampling.
+CKDWORD CanonicalSampling(CKDWORD sampling, CKDWORD type, bool compared, bool declared) {
+    const CKDWORD mirror2D = CKFF_NATIVE_FRAGMENT_MIRROR_U | CKFF_NATIVE_FRAGMENT_MIRROR_V;
+    const CKDWORD mirror3D = mirror2D | CKFF_NATIVE_FRAGMENT_MIRROR_W;
+    switch (type) {
+    case CKFF_SAMPLER_CUBE:
+        return 0;
+    case CKFF_SAMPLER_VOLUME:
+        if ((sampling & CKFF_NATIVE_FRAGMENT_ANISOTROPY) != 0)
+            return sampling & (mirror3D | CKFF_NATIVE_FRAGMENT_BORDER | CKFF_NATIVE_FRAGMENT_GRADIENT |
+                               CKFF_NATIVE_FRAGMENT_ANISOTROPY);
+        if ((sampling & (mirror3D | CKFF_NATIVE_FRAGMENT_BORDER)) != 0)
+            return sampling & (mirror3D | CKFF_NATIVE_FRAGMENT_BORDER);
+        return sampling & CKFF_NATIVE_FRAGMENT_MIN_MIP;
+    default:
+        if (compared)
+            return sampling & (declared ? mirror2D | CKFF_NATIVE_FRAGMENT_BORDER : mirror2D);
+        return sampling & (mirror2D | CKFF_NATIVE_FRAGMENT_BORDER | CKFF_NATIVE_FRAGMENT_GRADIENT);
+    }
 }
 
 // A STAGEBLEND factor as the shaders evaluate it: the BOTH* modes as their
@@ -578,10 +652,13 @@ bool CKFFNativeFragmentKey::operator==(const CKFFNativeFragmentKey &other) const
     return Program == other.Program && std::memcmp(Switches, other.Switches, sizeof(Switches)) == 0;
 }
 
-CKFFNativeFragmentKey CKFFNativeFragmentDrawKey(const CKFFFragmentProgram &program, const CKFFConstantSet &constants) {
+CKFFNativeFragmentKey CKFFNativeFragmentDrawKey(const CKFFFragmentProgram &program, const CKFFConstantSet &constants,
+                                                bool shaderSampling) {
     CKFFNativeFragmentKey key;
     key.Program = program;
     CKDWORD &switches = key.Switches[0];
+    if (shaderSampling)
+        switches |= CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING;
     if (ConstantFloat(constants, CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_MATERIAL_POWER, 2) > 0.5f)
         switches |= CKFF_NATIVE_FRAGMENT_AFFINE;
     if (ConstantFloat(constants, CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_MATERIAL_POWER, 3) > 2.5f)
@@ -591,10 +668,15 @@ CKFFNativeFragmentKey CKFFNativeFragmentDrawKey(const CKFFFragmentProgram &progr
         const CKDWORD luminance = stage * BUMP_ENV_ROWS_PER_STAGE + BUMP_ENV_LUMINANCE;
         if (ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 2) > 0.5f)
             switches |= (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << stage;
-        if ((FloatToInt(ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 1)) & CKFF_TTF_BUMP_UNORM) != 0)
+        const CKDWORD textureFlags = (CKDWORD)FloatToInt(ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 1));
+        if ((textureFlags & CKFF_TTF_BUMP_UNORM) != 0)
             switches |= (CKDWORD)CKFF_NATIVE_FRAGMENT_BUMP_UNORM << stage;
         if (ConstantFloat(constants, CKRST_BLOCK_BUMP_ENV, luminance, 2) != 0.0f)
             switches |= (CKDWORD)CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage;
+        if (shaderSampling) {
+            const float state = ConstantFloat(constants, CKRST_BLOCK_BUMP_ENV, luminance, 3);
+            SetSampling(key.Switches, stage, DrawSampling((CKDWORD)FloatToInt(state), textureFlags));
+        }
         const float pair = ConstantFloat(constants, CKRST_BLOCK_STAGE_PARAMS, coord, 3) + 0.5f;
         SetBlendPair(key.Switches, stage, (CKDWORD)FloatToInt(pair));
     }
@@ -603,6 +685,7 @@ CKFFNativeFragmentKey CKFFNativeFragmentDrawKey(const CKFFFragmentProgram &progr
 
 void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLayout layout) {
     const CKFFNativeFragmentKey raw = key;
+    const bool shaderSampling = (raw.Switches[0] & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0;
     const CKFFFragmentProgram &from = raw.Program;
     CKFFFragmentProgram &to = key.Program;
     to = CKFFFragmentProgram();
@@ -673,6 +756,7 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
     // is read. A texture no value depends on is dropped.
     bool samples[kStageCount + 1] = {};
     bool anySamples = false;
+    bool emulates = false;
     for (CKDWORD stage = count; stage-- > 0;) {
         const bool bump = colorOps[stage] == CKRST_TOP_BUMPENVMAP || colorOps[stage] == CKRST_TOP_BUMPENVMAPLUMINANCE;
         if ((bump && samples[stage + 1]) ||
@@ -680,11 +764,19 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
             readsTexture[stage] = true;
         }
         const bool textured = readsTexture[stage] && StageSwitch(raw.Switches, CKFF_NATIVE_FRAGMENT_TEXTURE, stage);
-        samples[stage] = textured && SamplerDeclared(from, stage, layout);
+        // Outside the wide 2D layout, a shader-sampling shader compares an
+        // undeclared depth texture's border.
+        const CKDWORD type = from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+        const CKDWORD compareFunc =
+            shaderSampling && type == CKFF_SAMPLER_DEPTH
+                ? CanonicalCompareFunc(from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC), layout)
+                : 0;
+        const bool compared = compareFunc != 0 && layout != CKFF_SAMPLER_LAYOUT_WIDE_2D;
+        const bool declared = SamplerDeclared(from, stage, layout);
+        samples[stage] = textured && (declared || compared);
         anySamples = anySamples || samples[stage];
 
         if (textured) {
-            const CKDWORD type = from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
             key.Switches[0] |= (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << stage;
             to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, type);
             if (!StageIndexed(type, layout))
@@ -694,6 +786,12 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
             to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED,
                         from.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED));
             key.Switches[0] |= raw.Switches[0] & (CKDWORD)CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage;
+            if (shaderSampling) {
+                const CKDWORD sampling = CanonicalSampling(Sampling(raw.Switches, stage), type, compared, declared);
+                to.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, compareFunc);
+                SetSampling(key.Switches, stage, sampling);
+                emulates = emulates || compareFunc != 0 || sampling != 0;
+            }
         }
         if (bump && samples[stage + 1])
             key.Switches[0] |= raw.Switches[0] & (CKDWORD)CKFF_NATIVE_FRAGMENT_BUMP_UNORM << stage;
@@ -703,6 +801,10 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
     if (anySamples)
         key.Switches[0] |= raw.Switches[0] & CKFF_NATIVE_FRAGMENT_AFFINE;
     key.Switches[0] |= raw.Switches[0] & CKFF_NATIVE_FRAGMENT_LINE;
+    // A shader-sampling key that emulates nothing compiles to the native
+    // shader.
+    if (emulates)
+        key.Switches[0] |= CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING;
 
     // The fragment state; the vertex fog mode and range fog are the vertex
     // shaders', and a test without a comparison passes every fragment.
@@ -724,6 +826,8 @@ bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamp
                                       CKJitFragmentShader &out) {
     UniformRows rows;
     if ((unsigned)layout >= CKFF_SAMPLER_LAYOUT_COUNT || !ResolveUniformRows(layout, rows))
+        return false;
+    if ((key.Switches[0] & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0)
         return false;
     NativeFragmentCompiler compiler(key, layout, rows);
     return compiler.Compile(out);

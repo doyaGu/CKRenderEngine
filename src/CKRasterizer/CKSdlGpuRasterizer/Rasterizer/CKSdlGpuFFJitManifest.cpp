@@ -14,14 +14,20 @@
 namespace {
 const CKDWORD kMagic = 0x4A464B43u; // "CKFJ"
 // Revision of the file layout and of the record fields.
-const CKDWORD kVersion = 2;
+const CKDWORD kVersion = 3;
 const CKDWORD kRecordDwords = sizeof(CKSdlGpuFFJitRecord) / sizeof(CKDWORD);
 static_assert(sizeof(CKSdlGpuFFJitRecord) == kRecordDwords * sizeof(CKDWORD),
               "manifest records are plain DWORDs");
 // The switches of switch word 0, of every stage for the per-stage ones.
 const CKDWORD kSwitchMask = CKFF_NATIVE_FRAGMENT_AFFINE | CKFF_NATIVE_FRAGMENT_LINE |
+    CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING |
     0xffu * (CKFF_NATIVE_FRAGMENT_TEXTURE | CKFF_NATIVE_FRAGMENT_BUMP_UNORM |
              CKFF_NATIVE_FRAGMENT_LOD_BIAS);
+// The sampling flags of switch words 3 and 4, of every stage.
+const CKDWORD kSamplingMask = 0x01010101u *
+    (CKFF_NATIVE_FRAGMENT_MIRROR_U | CKFF_NATIVE_FRAGMENT_MIRROR_V | CKFF_NATIVE_FRAGMENT_MIRROR_W |
+     CKFF_NATIVE_FRAGMENT_BORDER | CKFF_NATIVE_FRAGMENT_GRADIENT | CKFF_NATIVE_FRAGMENT_ANISOTROPY |
+     CKFF_NATIVE_FRAGMENT_MIN_MIP);
 
 struct Header {
     CKDWORD Magic;
@@ -55,6 +61,8 @@ bool ValidRecord(const CKSdlGpuFFJitRecord &record)
             return false;
     }
     return (record.Switches[0] & ~kSwitchMask) == 0 &&
+           (record.Switches[3] & ~kSamplingMask) == 0 &&
+           (record.Switches[4] & ~kSamplingMask) == 0 &&
            record.SamplerLayout < CKFF_SAMPLER_LAYOUT_COUNT &&
            record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
            record.DepthClipEnabled <= 1;

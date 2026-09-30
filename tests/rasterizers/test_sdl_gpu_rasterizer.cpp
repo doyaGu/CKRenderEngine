@@ -312,8 +312,10 @@ int main()
             CKDWORD *values = reinterpret_cast<CKDWORD *>(&result);
             for (size_t i = 0; i < sizeof(result) / sizeof(CKDWORD); ++i)
                 values[i] = (seed * 2654435761u + CKDWORD(i) * 40503u) & CKFFFragmentProgram::LaneMask;
-            // Switch word 0 has no bits 2 to 7.
-            result.Switches[0] &= ~0xfcu;
+            // Switch word 0 has no bits 3 to 7, and the sampling bytes no bit 7.
+            result.Switches[0] &= ~0xf8u;
+            result.Switches[3] &= 0x7f7f7f7fu;
+            result.Switches[4] &= 0x7f7f7f7fu;
             result.SamplerLayout = seed % CKFF_SAMPLER_LAYOUT_COUNT;
             result.Variant = seed % CKFF_PROGRAM_VARIANT_COUNT;
             result.DepthClipEnabled = seed & 1;
@@ -364,7 +366,11 @@ int main()
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         rejected = !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) && decoded.Size() == 0;
         malformed = records;
-        malformed[1].Switches[0] |= CKFF_NATIVE_FRAGMENT_LINE << 1;
+        malformed[1].Switches[0] |= CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING << 1;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
+        malformed = records;
+        malformed[1].Switches[4] |= 0x80u << 16;
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
         malformed = records;
