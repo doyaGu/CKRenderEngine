@@ -315,6 +315,35 @@ struct ShaderSampler {
     CKJitValue MaxAnisotropy; // FLOAT
 };
 
+// The taps a 2D filter averages (PlanTaps2D): a single one at the coordinate,
+// or those an anisotropic filter spreads along the longer gradient.
+struct FilterTaps {
+    CKJitValue Count;    // INT
+    CKJitValue Total;    // FLOAT: the count
+    CKJitValue Step;     // FLOAT2: from a tap to the next
+    CKJitValue Center;   // FLOAT: the index of the middle of the taps
+    CKJitValue Lod;      // FLOAT: of every tap
+    CKJitValue Filtered; // BOOL: whether the taps filter texels
+};
+
+// The mips a mip filter blends for a level (PlanMips).
+struct MipBlend {
+    CKJitValue Level;   // FLOAT: clamped to the mips
+    CKJitValue Linear;  // BOOL: whether the two around the level blend
+    CKJitValue Count;   // INT: the mips blended
+    CKJitValue Lower;   // INT
+    CKJitValue Upper;   // INT
+    CKJitValue Nearest; // INT
+    CKJitValue Weight;  // FLOAT: the upper mip's
+};
+
+// The four texels a bilinear filter blends (PlanBilinear).
+struct BilinearTexels {
+    CKJitValue Index;   // INT4: columns x and x + 1 in x and z, rows y and y + 1 in y and w
+    CKJitValue Outside; // BOOL4: the same
+    CKJitValue Weight;  // FLOAT2: of column x + 1 and row y + 1
+};
+
 class NativeFragmentCompiler {
 public:
     NativeFragmentCompiler(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout, const UniformRows &rows)
@@ -357,6 +386,14 @@ private:
     CKJitValue ShaderSample3D(CKDWORD stage, uint32_t slot, CKJitValue coordinate, CKJitValue lodBias);
     ShaderSampler Sampler(CKDWORD stage, uint32_t slot, CKJitSamplerDim dim);
     CKJitValue MirrorOnce(CKJitValue coordinate, CKDWORD sampling);
+    FilterTaps PlanTaps2D(CKJitValue info, CKJitValue size, CKJitValue dx, CKJitValue dy, CKJitValue implicitLod,
+                          CKJitValue lodBias, CKJitValue minMip, CKJitValue maxAnisotropy);
+    MipBlend PlanMips(CKJitValue levels, CKJitValue mipFilter, CKJitValue lod);
+    // The mip of an iteration over those a mip filter blends.
+    CKJitValue MipAt(const MipBlend &mips, CKJitValue first) {
+        return m_B.Select(mips.Linear, m_B.Select(first, mips.Lower, mips.Upper), mips.Nearest);
+    }
+    BilinearTexels PlanBilinear(CKJitValue scaled, CKJitValue extent, CKJitValue modes);
     CKJitValue Filter2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue dx, CKJitValue dy,
                         CKJitValue implicitLod, CKJitValue lodBias);
     CKJitValue Anisotropic3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue dx, CKJitValue dy,
@@ -709,45 +746,52 @@ CKJitValue NativeFragmentCompiler::MirrorOnce(CKJitValue coordinate, CKDWORD sam
     return components == 2 ? m_B.Construct({axes[0], axes[1]}) : m_B.Construct({axes[0], axes[1], axes[2]});
 }
 
-// Filters texels at the level of the gradients, or of the implicit ones with
-// the LOD bias, no lower than the minimum mip level. An anisotropic filter
-// minifying averages taps along the longer gradient at the level of the
-// shorter, as many as fit, up to the maximum anisotropy; the others take a
-// single tap at the coordinate.
-CKJitValue NativeFragmentCompiler::Filter2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue dx, CKJitValue dy,
-                                            CKJitValue implicitLod, CKJitValue lodBias) {
-    const CKJitValue size = m_B.IntToFloat(m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_2D, m_B.Int(0)));
+// Plans the taps of a 2D filter at the level of the gradients, or of the
+// implicit ones, with the LOD bias, no lower than the minimum mip level. An
+// anisotropic filter minifying averages taps along the longer gradient at the
+// level of the shorter, as many as fit, up to the maximum anisotropy; the
+// others take a single tap at the coordinate.
+FilterTaps NativeFragmentCompiler::PlanTaps2D(CKJitValue info, CKJitValue size, CKJitValue dx, CKJitValue dy,
+                                              CKJitValue implicitLod, CKJitValue lodBias, CKJitValue minMip,
+                                              CKJitValue maxAnisotropy) {
     const CKJitValue lengthX = m_B.Length(m_B.Mul(dx, size));
     const CKJitValue lengthY = m_B.Length(m_B.Mul(dy, size));
     const CKJitValue major = m_B.Max(lengthX, lengthY);
-    // Explicit gradients carry the LOD bias.
-    const CKJitValue tapBias = implicitLod.IsValid() ? lodBias : m_B.Float(0.0f);
-    const CKJitValue lod = implicitLod.IsValid()
-        ? m_B.Max(m_B.Add(implicitLod, lodBias), sampler.MinMip)
-        : m_B.Max(m_B.Log2(m_B.Max(major, m_B.Float(0.000001f))), sampler.MinMip);
+    const CKJitValue level = implicitLod.IsValid() ? implicitLod : m_B.Log2(m_B.Max(major, m_B.Float(0.000001f)));
+    const CKJitValue lod = m_B.Max(m_B.Add(level, lodBias), minMip);
 
     const CKJitValue minifies = m_B.Greater(lod, m_B.Float(0.0f));
-    const CKJitValue filter =
-        m_B.FloatToInt(m_B.Select(minifies, m_B.Component(sampler.Info, 1), m_B.Component(sampler.Info, 2)));
+    const CKJitValue filter = m_B.FloatToInt(m_B.Select(minifies, m_B.Component(info, 1), m_B.Component(info, 2)));
     const CKJitValue anisotropic = m_B.And(m_B.IntEqual(filter, m_B.Int(VXTEXTUREFILTER_ANISOTROPIC)), minifies);
-    const CKJitValue tapLimit = m_B.Max(sampler.MaxAnisotropy, m_B.Float(1.0f));
+    const CKJitValue tapLimit = m_B.Max(maxAnisotropy, m_B.Float(1.0f));
     const CKJitValue minor = m_B.Max(m_B.Min(lengthX, lengthY), m_B.Div(major, tapLimit));
     const CKJitValue ratio = m_B.Ceil(m_B.Div(major, m_B.Max(minor, m_B.Float(1.0f))));
-    const CKJitValue taps =
+    FilterTaps taps;
+    taps.Count =
         m_B.Select(anisotropic, m_B.FloatToInt(m_B.Min(m_B.Max(ratio, m_B.Float(1.0f)), tapLimit)), m_B.Int(1));
-    const CKJitValue tapCount = m_B.IntToFloat(taps);
+    taps.Total = m_B.IntToFloat(taps.Count);
     const CKJitValue longer = m_B.Select(m_B.Greater(lengthX, lengthY), dx, dy);
-    const CKJitValue step = m_B.Select(anisotropic, m_B.Div(longer, tapCount), m_B.Float2(0.0f, 0.0f));
-    const CKJitValue tapLod = m_B.Select(
-        anisotropic, m_B.Max(m_B.Add(m_B.Log2(m_B.Max(minor, m_B.Float(1.0f))), tapBias), sampler.MinMip), lod);
-    const CKJitValue filtered = m_B.IntNotEqual(filter, m_B.Int(VXTEXTUREFILTER_NEAREST));
-    const CKJitValue center = m_B.Mul(m_B.IntToFloat(m_B.IntSub(taps, m_B.Int(1))), m_B.Float(0.5f));
+    taps.Step = m_B.Select(anisotropic, m_B.Div(longer, taps.Total), m_B.Float2(0.0f, 0.0f));
+    taps.Lod = m_B.Select(anisotropic,
+                          m_B.Max(m_B.Add(m_B.Log2(m_B.Max(minor, m_B.Float(1.0f))), lodBias), minMip), lod);
+    taps.Filtered = m_B.IntNotEqual(filter, m_B.Int(VXTEXTUREFILTER_NEAREST));
+    taps.Center = m_B.Mul(m_B.IntToFloat(m_B.IntSub(taps.Count, m_B.Int(1))), m_B.Float(0.5f));
+    return taps;
+}
 
+// Averages the taps of a 2D filter; explicit gradients carry the LOD bias.
+CKJitValue NativeFragmentCompiler::Filter2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue dx, CKJitValue dy,
+                                            CKJitValue implicitLod, CKJitValue lodBias) {
+    const CKJitValue size = m_B.IntToFloat(m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_2D, m_B.Int(0)));
+    const FilterTaps taps =
+        PlanTaps2D(sampler.Info, size, dx, dy, implicitLod, implicitLod.IsValid() ? lodBias : m_B.Float(0.0f),
+                   sampler.MinMip, sampler.MaxAnisotropy);
     CKJitValue sum;
-    const CKJitValue tap = m_B.Loop(taps, CKFF_SAMPLER_SHADER_ANISOTROPY_MASK, {m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f)}, &sum);
-    const CKJitValue offset = m_B.Mul(m_B.Sub(m_B.IntToFloat(tap), center), step);
-    const CKJitValue color = Mips(sampler, m_B.Add(uv, offset), tapLod, filtered);
-    return m_B.Div(m_B.EndLoop(m_B.Add(sum, color)), tapCount);
+    const CKJitValue tap =
+        m_B.Loop(taps.Count, CKFF_SAMPLER_SHADER_ANISOTROPY_MASK, {m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f)}, &sum);
+    const CKJitValue offset = m_B.Mul(m_B.Sub(m_B.IntToFloat(tap), taps.Center), taps.Step);
+    const CKJitValue color = Mips(sampler, m_B.Add(uv, offset), taps.Lod, taps.Filtered);
+    return m_B.Div(m_B.EndLoop(m_B.Add(sum, color)), taps.Total);
 }
 
 // The volume filter of ff_sampler_common.sc: taps along the longer gradient
@@ -788,33 +832,54 @@ CKJitValue NativeFragmentCompiler::Filtered(const ShaderSampler &sampler, CKJitV
     return m_B.NotEqual(filter, m_B.Float((float)VXTEXTUREFILTER_NEAREST));
 }
 
-// The texel of the mip the mip filter picks for a level, or the blend of the
-// two around it for linear and anisotropic mip filters; without a mip filter,
-// of the base mip. Without a filtering given, the filter of the level picked
-// decides it.
+// The mip the mip filter picks for a level, or the two around it for linear
+// and anisotropic mip filters; without a mip filter, the base mip.
+MipBlend NativeFragmentCompiler::PlanMips(CKJitValue levels, CKJitValue mipFilter, CKJitValue lod) {
+    const CKJitValue top = m_B.IntSub(levels, m_B.Int(1));
+    MipBlend mips;
+    mips.Level = m_B.Select(m_B.IntEqual(mipFilter, m_B.Int(0)), m_B.Float(0.0f),
+                            m_B.Min(m_B.Max(lod, m_B.Float(0.0f)), m_B.IntToFloat(top)));
+    mips.Linear = m_B.Or(m_B.IntEqual(mipFilter, m_B.Int(VXTEXTUREFILTER_LINEAR)),
+                         m_B.IntEqual(mipFilter, m_B.Int(VXTEXTUREFILTER_ANISOTROPIC)));
+    mips.Count = m_B.Select(mips.Linear, m_B.Int(2), m_B.Int(1));
+    const CKJitValue below = m_B.Floor(mips.Level);
+    mips.Lower = m_B.FloatToInt(below);
+    mips.Upper = m_B.IntMin(m_B.IntAdd(mips.Lower, m_B.Int(1)), top);
+    mips.Nearest = m_B.FloatToInt(m_B.Floor(m_B.Add(mips.Level, m_B.Float(0.5f))));
+    mips.Weight = m_B.Sub(mips.Level, below);
+    return mips;
+}
+
+// The texel of the mips the mip filter blends for a level. Without a
+// filtering given, the filter of the level decides it.
 CKJitValue NativeFragmentCompiler::Mips(const ShaderSampler &sampler, CKJitValue uv, CKJitValue lod,
                                         CKJitValue filtered) {
-    const CKJitValue top = m_B.IntSub(sampler.Levels, m_B.Int(1));
-    const CKJitValue level = m_B.Select(m_B.IntEqual(sampler.MipFilter, m_B.Int(0)), m_B.Float(0.0f),
-                                        m_B.Min(m_B.Max(lod, m_B.Float(0.0f)), m_B.IntToFloat(top)));
+    const MipBlend mips = PlanMips(sampler.Levels, sampler.MipFilter, lod);
     if (!filtered.IsValid())
-        filtered = Filtered(sampler, level);
-    const CKJitValue linear = m_B.Or(m_B.IntEqual(sampler.MipFilter, m_B.Int(VXTEXTUREFILTER_LINEAR)),
-                                     m_B.IntEqual(sampler.MipFilter, m_B.Int(VXTEXTUREFILTER_ANISOTROPIC)));
-    const CKJitValue below = m_B.Floor(level);
-    const CKJitValue lower = m_B.FloatToInt(below);
-    const CKJitValue upper = m_B.IntMin(m_B.IntAdd(lower, m_B.Int(1)), top);
-    const CKJitValue nearest = m_B.FloatToInt(m_B.Floor(m_B.Add(level, m_B.Float(0.5f))));
+        filtered = Filtered(sampler, mips.Level);
 
     // One iteration a mip; the first keeps the lower or only one.
     const CKJitValue zero = m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f);
     CKJitValue texels[2];
-    const CKJitValue index = m_B.Loop(m_B.Select(linear, m_B.Int(2), m_B.Int(1)), 2, {zero, zero}, texels);
+    const CKJitValue index = m_B.Loop(mips.Count, 2, {zero, zero}, texels);
     const CKJitValue first = m_B.IntEqual(index, m_B.Int(0));
-    const CKJitValue texel =
-        Level(sampler, uv, m_B.Select(linear, m_B.Select(first, lower, upper), nearest), filtered);
+    const CKJitValue texel = Level(sampler, uv, MipAt(mips, first), filtered);
     m_B.EndLoop({m_B.Select(first, texel, texels[0]), texel}, texels);
-    return m_B.Select(linear, m_B.Lerp(texels[0], texels[1], m_B.Sub(level, below)), texels[0]);
+    return m_B.Select(mips.Linear, m_B.Lerp(texels[0], texels[1], mips.Weight), texels[0]);
+}
+
+// The texels a bilinear filter blends at a coordinate scaled to a mip: columns
+// x and x + 1 and rows y and y + 1 from the texel below and left of it,
+// addressed together.
+BilinearTexels NativeFragmentCompiler::PlanBilinear(CKJitValue scaled, CKJitValue extent, CKJitValue modes) {
+    const CKJitValue corner = m_B.Sub(scaled, m_B.Float(0.5f));
+    const CKJitValue base = m_B.Floor(corner);
+    const CKJitValue texel = m_B.FloatToInt(base);
+    BilinearTexels texels;
+    Address(m_B.Construct({texel, m_B.IntAdd(texel, m_B.Int(1))}), m_B.Construct({extent, extent}),
+            m_B.Construct({modes, modes}), texels.Index, texels.Outside);
+    texels.Weight = m_B.Sub(corner, base);
+    return texels;
 }
 
 // The texel of a mip at a coordinate, or the bilinear blend of the four
@@ -823,26 +888,20 @@ CKJitValue NativeFragmentCompiler::Level2D(const ShaderSampler &sampler, CKJitVa
                                            CKJitValue filtered) {
     const CKJitValue extent = m_B.TextureSize(sampler.Slot, CKJIT_SAMPLER_2D, mip);
     const CKJitValue scaled = m_B.Mul(uv, m_B.IntToFloat(extent));
-    CKJitValue index, outside;
     m_B.If(filtered);
-    // Columns x and x + 1 and rows y and y + 1 from the texel below and left
-    // of the coordinate, addressed together.
-    const CKJitValue corner = m_B.Sub(scaled, m_B.Float(0.5f));
-    const CKJitValue base = m_B.Floor(corner);
-    const CKJitValue texel = m_B.FloatToInt(base);
-    Address(m_B.Construct({texel, m_B.IntAdd(texel, m_B.Int(1))}), m_B.Construct({extent, extent}),
-            m_B.Construct({sampler.Modes, sampler.Modes}), index, outside);
+    const BilinearTexels texels = PlanBilinear(scaled, extent, sampler.Modes);
     const auto tap = [&](const char *axes) {
-        return Texel(sampler, m_B.Swizzle(index, axes), m_B.Any(m_B.Swizzle(outside, axes)), mip);
+        return Texel(sampler, m_B.Swizzle(texels.Index, axes), m_B.Any(m_B.Swizzle(texels.Outside, axes)), mip);
     };
     const CKJitValue t00 = tap("xy");
     const CKJitValue t10 = tap("zy");
     const CKJitValue t01 = tap("xw");
     const CKJitValue t11 = tap("zw");
-    const CKJitValue weight = m_B.Sub(corner, base);
-    const CKJitValue wx = m_B.Component(weight, 0);
-    const CKJitValue bilinear = m_B.Lerp(m_B.Lerp(t00, t10, wx), m_B.Lerp(t01, t11, wx), m_B.Component(weight, 1));
+    const CKJitValue wx = m_B.Component(texels.Weight, 0);
+    const CKJitValue bilinear =
+        m_B.Lerp(m_B.Lerp(t00, t10, wx), m_B.Lerp(t01, t11, wx), m_B.Component(texels.Weight, 1));
     m_B.Else({bilinear});
+    CKJitValue index, outside;
     Address(m_B.FloatToInt(m_B.Floor(scaled)), extent, sampler.Modes, index, outside);
     return m_B.EndIf(Texel(sampler, index, m_B.Any(outside), mip));
 }
