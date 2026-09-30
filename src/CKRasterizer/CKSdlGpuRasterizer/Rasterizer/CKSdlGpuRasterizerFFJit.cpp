@@ -66,24 +66,49 @@ bool PrewarmablePipeline(SDL_GPUDevice *device, const CKSdlGpuFFJitRecord &recor
 }
 }
 
-// Compiles one fragment program on the worker.
+// Compiles one fragment program and creates its shader on the worker.
 class CKSdlGpuRasterizerContext::FFJitJob : public CKSdlGpuJob {
 public:
     FFJitJob(CKSdlGpuRasterizerContext &context, const FFJitKey &key,
-             const CKFFNativeFragmentKey &fragment, CKFFSamplerLayout layout,
-             SDL_GPUShaderFormat format)
-        : Context(context), Key(key), Fragment(fragment), Layout(layout), Format(format) {}
+             const CKFFNativeFragmentKey &fragment, CKFFSamplerLayout layout)
+        : Context(context), Key(key), Fragment(fragment), Layout(layout),
+          Device(context.Device), Format(context.m_FFJitFormat),
+          Shader(std::make_shared<CKSdlGpuShader>()) {
+        // The compiled shader declares the resources of its artifact.
+        CKShaderDesc &desc = Shader->Desc;
+        Described = CKSdlGpuFFFragmentShader(context.ShaderFormat, FFJitArtifact(key), desc) != FALSE;
+        const bool dxbc = Format == SDL_GPU_SHADERFORMAT_DXBC;
+        desc.Format = dxbc ? CKRST_SHADER_FORMAT_DXBC : CKRST_SHADER_FORMAT_SPIRV;
+        desc.Profile = dxbc ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
+        desc.Code = nullptr;
+        desc.CodeSize = 0;
+    }
 
     void Run() override {
         CKRE_PROFILE_SCOPE("CKRE.SDL.FFJitCompile");
-        CKJitFragmentShader shader;
-        Compiled = CKFFCompileNativeFragmentProgram(Fragment, Layout, shader) &&
-            (Format == SDL_GPU_SHADERFORMAT_DXBC
-                 ? CKJitEmitDxbc(shader, kFFJitResources, Code)
-                 : CKJitEmitSpirv(shader, kFFJitResources, Code));
+        if (!Described)
+            return;
+        CKJitFragmentShader program;
+        XArray<uint32_t> code;
+        if (!CKFFCompileNativeFragmentProgram(Fragment, Layout, program) ||
+            !(Format == SDL_GPU_SHADERFORMAT_DXBC
+                  ? CKJitEmitDxbc(program, kFFJitResources, code)
+                  : CKJitEmitSpirv(program, kFFJitResources, code))) {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER,
+                         "FF fragment program compilation failed; drawing it precompiled");
+            return;
+        }
+        SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(Shader->Desc, Format);
+        info.code = reinterpret_cast<const Uint8 *>(code.Begin());
+        info.code_size = code.Size() * sizeof(uint32_t);
+        Shader->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
+        if (!Shader->Shader)
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER,
+                         "SDL_gpu CreateGPUShader failed: %s; drawing the FF fragment program precompiled",
+                         SDL_GetError());
     }
     void Complete() override {
-        Context.CompleteFFJitProgram(Key, Compiled ? &Code : nullptr);
+        Context.CompleteFFJitProgram(Key, Shader);
     }
 
 private:
@@ -91,9 +116,10 @@ private:
     FFJitKey Key;
     CKFFNativeFragmentKey Fragment;
     CKFFSamplerLayout Layout;
+    SDL_GPUDevice *Device;
     SDL_GPUShaderFormat Format;
-    XArray<uint32_t> Code;
-    bool Compiled = false;
+    std::shared_ptr<CKSdlGpuShader> Shader;
+    bool Described = false;
 };
 
 void CKSdlGpuRasterizerContext::InitFFJit()
@@ -143,7 +169,7 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
         if (!found) {
             if (loaded == kFFJitLoadedProgramLimit)
                 continue;
-            FFJitJob *job = new FFJitJob(*this, key, fragment, layout, m_FFJitFormat);
+            FFJitJob *job = new FFJitJob(*this, key, fragment, layout);
             if (!SubmitJob(job, CKSDLGPU_JOB_IDLE))
                 return;
             index = AddFFJitProgram(key, kFFJitLoadedRank | loaded++);
@@ -203,7 +229,7 @@ int CKSdlGpuRasterizerContext::AddFFJitDrawKey(
         // Never compile while drawing. A program the worker cannot take
         // keeps its precompiled shader.
         index = AddFFJitProgram(key, ++m_FFJitUses);
-        if (!SubmitJob(new FFJitJob(*this, key, Fragment, Layout, m_FFJitFormat)))
+        if (!SubmitJob(new FFJitJob(*this, key, Fragment, Layout)))
             m_FFJitPrograms[index].State = FFJitProgram::REJECTED;
         CKRE_PROFILE_VALUE("CKRE.SDL.FFJitCompiles", 1);
     }
@@ -301,7 +327,7 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
 }
 
 void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
-    const FFJitKey &Key, const XArray<uint32_t> *Code)
+    const FFJitKey &Key, const std::shared_ptr<CKSdlGpuShader> &Shader)
 {
     // Drop results for entries cleared meanwhile. An entry queued again for
     // the same key takes the first result, which is the same code.
@@ -310,22 +336,12 @@ void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
         return;
     FFJitProgram &entry = m_FFJitPrograms[*index];
     entry.IdleJob = nullptr;
+    // The worker has logged why a shader is missing.
     entry.State = FFJitProgram::REJECTED;
-    if (!Code) {
-        SDL_LogError(SDL_LOG_CATEGORY_RENDER,
-                     "FF fragment program compilation failed; drawing it precompiled");
+    if (!Shader->Shader || !Ready())
         return;
-    }
-    // The compiled shader declares the resources of its artifact.
-    CKShaderDesc desc;
-    if (!CKSdlGpuFFFragmentShader(ShaderFormat, FFJitArtifact(Key), desc))
-        return;
-    const bool dxbc = m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC;
-    desc.Format = dxbc ? CKRST_SHADER_FORMAT_DXBC : CKRST_SHADER_FORMAT_SPIRV;
-    desc.Profile = dxbc ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
-    desc.Code = reinterpret_cast<const CKBYTE *>(Code->Begin());
-    desc.CodeSize = (CKDWORD)(Code->Size() * sizeof(uint32_t));
-    if (CreateShader(&desc, &entry.PixelShader) != CK_OK)
+    entry.PixelShader = ShaderObjects.Add(Shader);
+    if (!entry.PixelShader)
         return;
     entry.State = FFJitProgram::READY;
     PrewarmFFJitProgram(entry);

@@ -748,6 +748,16 @@ SDL_GPUShaderFormat CKSdlGpuRasterizerContext::NativeShaderFormat(
     return SDL_GPU_SHADERFORMAT_INVALID;
 }
 
+SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKShaderDesc &desc, SDL_GPUShaderFormat format)
+{
+    SDL_GPUShaderCreateInfo info = {};
+    info.code = desc.Code; info.code_size = desc.CodeSize; info.entrypoint = desc.EntryPoint;
+    info.format = format;
+    info.stage = desc.Stage == CKRST_SHADER_VERTEX ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+    info.num_samplers = desc.SamplerCount; info.num_uniform_buffers = desc.UniformBufferCount;
+    return info;
+}
+
 CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWORD *out)
 {
     if (out) *out = 0;
@@ -758,11 +768,7 @@ CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWOR
         format == SDL_GPU_SHADERFORMAT_INVALID ||
         desc->SamplerCount > 16 || desc->UniformBufferCount > 4 || desc->StorageBufferCount || desc->StorageTextureCount ||
         (desc->Stage != CKRST_SHADER_VERTEX && desc->Stage != CKRST_SHADER_PIXEL)) return CKERR_INVALIDPARAMETER;
-    SDL_GPUShaderCreateInfo info = {};
-    info.code = desc->Code; info.code_size = desc->CodeSize; info.entrypoint = desc->EntryPoint;
-    info.format = format;
-    info.stage = desc->Stage == CKRST_SHADER_VERTEX ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-    info.num_samplers = desc->SamplerCount; info.num_uniform_buffers = desc->UniformBufferCount;
+    const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*desc, format);
     auto shader = std::make_shared<CKSdlGpuShader>();
     shader->Desc = *desc;
     shader->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);

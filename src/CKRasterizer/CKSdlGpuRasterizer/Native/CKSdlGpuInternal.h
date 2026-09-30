@@ -461,6 +461,8 @@ SDL_GPUSampleCount CKSdlGpuSampleCount(unsigned samples);
 SDL_GPUVertexElementFormat CKSdlGpuVertexFormat(const CKVertexElementDesc &element);
 SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format);
 unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip);
+// The create info of a valid shader description in its SDL format.
+SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKShaderDesc &desc, SDL_GPUShaderFormat format);
 
 template<class T>
 struct CKSdlGpuResourceDeleter {

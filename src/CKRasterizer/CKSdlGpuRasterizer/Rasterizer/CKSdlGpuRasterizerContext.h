@@ -356,10 +356,10 @@ private:
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
     // A draw names the key of its fragment program and of the draw state the
     // shader of its artifact branches on. The draws of keys that compile
-    // alike share one entry, compiled once on the worker; they use the
-    // precompiled program until the result is collected. The manifest of the
-    // device queues the programs and pipelines of earlier runs at idle
-    // priority before any draw asks for them.
+    // alike share one entry, whose shader the worker compiles and creates
+    // once; they use the precompiled program until the result is collected.
+    // The manifest of the device queues the programs and pipelines of
+    // earlier runs at idle priority before any draw asks for them.
     class FFJitJob;
     // The lanes and switches of a CKFFNativeFragmentKey, then the sampler
     // layout.
@@ -417,8 +417,10 @@ private:
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
                                CKFFProgramVariant Variant,
                                CKDWORD Precompiled);
-    // Code is null when compilation failed.
-    void CompleteFFJitProgram(const FFJitKey &Key, const XArray<uint32_t> *Code);
+    // The shader holds no SDL shader when the worker could not compile or
+    // create it.
+    void CompleteFFJitProgram(const FFJitKey &Key,
+                              const std::shared_ptr<CKSdlGpuShader> &Shader);
     void ClearFFJitPrograms();
 
     // Readback helpers
