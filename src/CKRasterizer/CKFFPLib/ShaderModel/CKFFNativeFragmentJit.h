@@ -14,7 +14,9 @@
 // fs_ff_stage_cube and fs_ff_stage_volume emulate the sampler state the
 // hardware samplers lack (mirror-once, border addressing, minimum mip levels,
 // explicit gradients, anisotropy and depth comparison) from the sampler
-// metadata of the program interface.
+// metadata of the program interface. The wide 2D layout's comparison shaders
+// fs_ff_stage_compare1 to 8 sample the depth textures their stages compare
+// through comparison samplers in their first 2D slots.
 //
 // A key is what becomes constant: the fragment program, and switches for the
 // draw state the shaders branch on (texture presence, bump encodings, LOD
@@ -26,16 +28,20 @@
 
 enum {
     CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT = 5,
+    CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT = 4,
 };
 
-// Switch word 0. The per-stage switches are shifted left by the stage. Words
-// 1 and 2 hold the STAGEBLEND factor pair of stage s, source factor in the
-// high nibble, in byte s % 4 of word 1 + s / 4. Words 3 and 4 hold the
-// CKFFNativeFragmentSampling flags of stage s in byte s % 4 of word 3 + s / 4.
+// Switch word 0. The per-stage switches are shifted left by the stage, and
+// COMPARISONS counts the comparison samplers of a shader-sampling shader of
+// the wide 2D layout. Words 1 and 2 hold the STAGEBLEND factor pair of stage
+// s, source factor in the high nibble, in byte s % 4 of word 1 + s / 4. Words
+// 3 and 4 hold the CKFFNativeFragmentSampling flags of stage s in byte s % 4
+// of word 3 + s / 4.
 enum CKFFNativeFragmentSwitch {
     CKFF_NATIVE_FRAGMENT_AFFINE = 1u << 0,           // affine texture coordinates
     CKFF_NATIVE_FRAGMENT_LINE = 1u << 1,             // antialiased line coverage
     CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING = 1u << 2,  // the shader-sampling counterpart
+    CKFF_NATIVE_FRAGMENT_COMPARISONS = 15u << 4,     // the comparison samplers, a count
     CKFF_NATIVE_FRAGMENT_TEXTURE = 1u << 8,          // the stage has a texture
     CKFF_NATIVE_FRAGMENT_BUMP_UNORM = 1u << 16,      // the stage's bump texels are unsigned
     CKFF_NATIVE_FRAGMENT_LOD_BIAS = 1u << 24,        // the stage's LOD bias is not zero
@@ -65,16 +71,20 @@ struct CKFFNativeFragmentKey {
 // The key of a draw: its fragment program, and the switches its
 // CKRST_BLOCK_DRAW_PARAMS, BUMP_ENV and STAGE_PARAMS constants select, as the
 // shaders test them. Constants past a block's end read as zero. A draw of a
-// shader-sampling shader passes shaderSampling.
+// shader-sampling shader passes shaderSampling, and one of a comparison
+// shader, which samples in the shader too, the count of its comparison
+// samplers.
 CKFFNativeFragmentKey CKFFNativeFragmentDrawKey(const CKFFFragmentProgram &program, const CKFFConstantSet &constants,
-                                                bool shaderSampling);
+                                                bool shaderSampling, CKDWORD comparisons);
 
 // Clears what the shader of a layout never reads from a key, so that keys
 // compiling to the same shader are equal: stages past the first disabled one,
 // operations and arguments that compute nothing, textures and switches no
 // value depends on, and state the fragment shaders do not use. A
 // shader-sampling key that emulates nothing becomes the native key, which
-// compiles to the same shader. Canonical keys are left unchanged.
+// compiles to the same shader, unless it reads 2D or depth textures, whose
+// slots and sampling its comparison samplers decide. Canonical keys are left
+// unchanged.
 void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLayout layout);
 
 // Compiles what the shader of the layout evaluates for the draws of a key,
@@ -83,8 +93,9 @@ void CKFFCanonicalizeNativeFragmentKey(CKFFNativeFragmentKey &key, CKFFSamplerLa
 // register, the fragment uniform block of the native program interface, and
 // the layout's sampler slots.
 //
-// Returns false for a layout without native shaders, or if the IR builder
-// rejects the program, which is a front end bug.
+// Returns false for a layout without native shaders, for the depth
+// comparisons of the comparison shaders, which it does not compile yet, or if
+// the IR builder rejects the program, which is a front end bug.
 bool CKFFCompileNativeFragmentProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
                                       CKJitFragmentShader &out);
 

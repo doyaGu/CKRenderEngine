@@ -486,6 +486,7 @@ struct Reference {
     const Fragment &F;
     CKFFSamplerLayout Layout;
     bool ShaderSampling = false;
+    int Comparisons = 0; // of the wide 2D layout's comparison shader fs_ff_stage_compareN
 
     Float4 Varying(int reg) const {
         const float *v = F.Registers[reg];
@@ -586,16 +587,37 @@ struct Reference {
         return Lerp(top, bottom, cy - by);
     }
 
-    Float4 Mips2D(int slot, float u, float v, float lod, bool filtered) const {
+    // ckCompareVariantBorderLevel2D: a hardware sample of a mip, at the centre
+    // of the texel unless filtered, blended with the border colour by the
+    // coverage of the texels.
+    Float4 BorderLevel2D(int slot, float u, float v, int mip, bool filtered) const {
+        const Texture &texture = F.Textures[slot];
+        const int modes = (int)Uniform(ROW_SAMPLER_INFO + slot).x;
+        const int width = MipExtent(texture, 0, mip);
+        const int height = MipExtent(texture, 1, mip);
+        const float coverage = BorderAxisCoverage(u, width, modes & 15, filtered) *
+                               BorderAxisCoverage(v, height, (modes >> 4) & 15, filtered);
+        const float at[2] = {filtered ? u : (std::floor(u * (float)width) + 0.5f) / (float)width,
+                             filtered ? v : (std::floor(v * (float)height) + 0.5f) / (float)height};
+        const float lod = (float)mip;
+        float texel[4];
+        TexelHash(CKJIT_OP_SAMPLE_LEVEL, (uint32_t)slot, CKJIT_SAMPLER_2D).Add(at, 2).Add(&lod, 1).Color(texel);
+        return Lerp(Uniform(ROW_BORDER_COLOR + slot), {texel[0], texel[1], texel[2], texel[3]}, coverage);
+    }
+
+    Float4 Mips2D(int slot, float u, float v, float lod, bool filtered, bool blendBorder) const {
         const int levels = F.Textures[slot].Levels;
         const int mipFilter = (int)Uniform(ROW_SAMPLER_INFO + slot).w & 15;
         lod = mipFilter == 0 ? 0.0f : std::fmin(std::fmax(lod, 0.0f), (float)(levels - 1));
+        const auto level = [&](int mip) {
+            return blendBorder ? BorderLevel2D(slot, u, v, mip, filtered) : Level2D(slot, u, v, mip, filtered);
+        };
         if (mipFilter != 2 && mipFilter != 7)
-            return Level2D(slot, u, v, Truncate(std::floor(lod + 0.5f)), filtered);
+            return level(Truncate(std::floor(lod + 0.5f)));
         const float below = std::floor(lod);
         const int lower = Truncate(below);
         const int upper = lower + 1 < levels - 1 ? lower + 1 : levels - 1;
-        return Lerp(Level2D(slot, u, v, lower, filtered), Level2D(slot, u, v, upper, filtered), lod - below);
+        return Lerp(level(lower), level(upper), lod - below);
     }
 
     static float Length(float x, float y) {
@@ -607,7 +629,7 @@ struct Reference {
     // Anisotropic filtering: taps along the longer derivative, each at the
     // LOD of the shorter.
     Float4 Anisotropic2D(int slot, float u, float v, const float dx[2], const float dy[2], float tapBias,
-                         float minMip, float maxAnisotropy) const {
+                         float minMip, float maxAnisotropy, bool blendBorder) const {
         const Texture &texture = F.Textures[slot];
         const float width = (float)MipExtent(texture, 0, 0);
         const float height = (float)MipExtent(texture, 1, 0);
@@ -623,7 +645,7 @@ struct Reference {
         Float4 result = Splat(0.0f);
         for (int i = 0; i < taps; ++i) {
             const float offset = (float)i - (float)(taps - 1) * 0.5f;
-            result = result + Mips2D(slot, u + offset * step[0], v + offset * step[1], tapLod, true);
+            result = result + Mips2D(slot, u + offset * step[0], v + offset * step[1], tapLod, true, blendBorder);
         }
         return result / (float)taps;
     }
@@ -643,9 +665,25 @@ struct Reference {
         if (filter == 7 && lod > 0.0f) {
             const float dx[2] = {Derivative(u, 0), Derivative(v, 0)};
             const float dy[2] = {Derivative(u, 1), Derivative(v, 1)};
-            return Anisotropic2D(slot, u, v, dx, dy, lodBias, minMip, maxAnisotropy);
+            return Anisotropic2D(slot, u, v, dx, dy, lodBias, minMip, maxAnisotropy, false);
         }
-        return Mips2D(slot, u, v, lod, filter != 1);
+        return Mips2D(slot, u, v, lod, filter != 1, false);
+    }
+
+    // Filters at the level of gradients, with a LOD bias they do not carry.
+    Float4 Filter2D(int slot, float u, float v, const float dx[2], const float dy[2], float bias, float minMip,
+                    float maxAnisotropy, bool blendBorder) const {
+        const Texture &texture = F.Textures[slot];
+        const float width = (float)MipExtent(texture, 0, 0);
+        const float height = (float)MipExtent(texture, 1, 0);
+        const float lx = Length(dx[0] * width, dx[1] * height);
+        const float ly = Length(dy[0] * width, dy[1] * height);
+        const float lod = std::fmax(std::log2(std::fmax(std::fmax(lx, ly), 0.000001f)) + bias, minMip);
+        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
+        const int filter = Truncate(lod > 0.0f ? info.y : info.z);
+        if (filter == 7 && lod > 0.0f)
+            return Anisotropic2D(slot, u, v, dx, dy, bias, minMip, maxAnisotropy, blendBorder);
+        return Mips2D(slot, u, v, lod, filter != 1, blendBorder);
     }
 
     Float4 Sample2DGrad(int slot, float u, float v, const float dx[2], const float dy[2], float minMip,
@@ -653,20 +691,11 @@ struct Reference {
         if (!Border2D(slot)) {
             const float uv[2] = {u, v};
             float texel[4];
-            TexelHash(CKJIT_OP_SAMPLE_GRAD, (uint32_t)slot, CKJIT_SAMPLER_2D).Add(uv, 2).Add(dx, 2).Add(dy, 2).Color(texel);
+            TexelHash(CKJIT_OP_SAMPLE_GRAD, (uint32_t)slot, CKJIT_SAMPLER_2D)
+                .Add(uv, 2).Add(dx, 2).Add(dy, 2).Color(texel);
             return {texel[0], texel[1], texel[2], texel[3]};
         }
-        const Texture &texture = F.Textures[slot];
-        const float width = (float)MipExtent(texture, 0, 0);
-        const float height = (float)MipExtent(texture, 1, 0);
-        const float lx = Length(dx[0] * width, dx[1] * height);
-        const float ly = Length(dy[0] * width, dy[1] * height);
-        const float lod = std::fmax(std::log2(std::fmax(std::fmax(lx, ly), 0.000001f)), minMip);
-        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
-        const int filter = Truncate(lod > 0.0f ? info.y : info.z);
-        if (filter == 7 && lod > 0.0f)
-            return Anisotropic2D(slot, u, v, dx, dy, 0.0f, minMip, maxAnisotropy);
-        return Mips2D(slot, u, v, lod, filter != 1);
+        return Filter2D(slot, u, v, dx, dy, 0.0f, minMip, maxAnisotropy, false);
     }
 
     static float CompareDepth(float depth, float reference, int func) {
@@ -786,7 +815,10 @@ struct Reference {
     // The shader-sampling shaders' 2D and depth textures: mirror-once folds
     // the coordinate, and explicit gradients are of the unfolded one. The
     // layouts without stage-indexed textures compare the texels of depth
-    // textures, even undeclared ones.
+    // textures, even undeclared ones. The comparison shaders' textures past
+    // their comparison samplers are ckCompareVariantSample2D*, whose
+    // border-addressed levels blend the border colour into hardware samples,
+    // at the level of the folded coordinate's derivatives with the LOD bias.
     Float4 ShaderSample2D(int stage, const Float4 &coord, bool depth, int ordinal, int flags, int compareFunc,
                           float lodBias) const {
         const bool wide = Layout == CKFF_SAMPLER_LAYOUT_WIDE_2D;
@@ -800,16 +832,25 @@ struct Reference {
         }
         if (!wide && ordinal >= 4)
             return Splat(0.0f);
-        const int slot = wide ? stage : ordinal;
+        const bool compareVariant = wide && Comparisons != 0;
+        if (compareVariant && (ordinal < Comparisons || ordinal >= 8))
+            return Splat(0.0f);
+        const int slot = wide && !compareVariant ? stage : ordinal;
         const int state = (int)BumpEnv(stage * 2 + 1).w;
         const float minMip = (float)(state & 31);
         const float maxAnisotropy = (float)((state >> 5) & 31);
+        const bool blendBorder = compareVariant && Border2D(slot);
         Float4 color;
         if ((state & 0x8000) != 0) {
             const float scale = std::exp2(lodBias);
             const float dx[2] = {Derivative(coord.x, 0) * scale, Derivative(coord.y, 0) * scale};
             const float dy[2] = {Derivative(coord.x, 1) * scale, Derivative(coord.y, 1) * scale};
-            color = Sample2DGrad(slot, u, v, dx, dy, minMip, maxAnisotropy);
+            color = blendBorder ? Filter2D(slot, u, v, dx, dy, 0.0f, minMip, maxAnisotropy, true)
+                                : Sample2DGrad(slot, u, v, dx, dy, minMip, maxAnisotropy);
+        } else if (blendBorder) {
+            const float dx[2] = {Derivative(u, 0), Derivative(v, 0)};
+            const float dy[2] = {Derivative(u, 1), Derivative(v, 1)};
+            color = Filter2D(slot, u, v, dx, dy, lodBias, minMip, maxAnisotropy, true);
         } else {
             color = Sample2DBias(slot, u, v, lodBias, minMip, maxAnisotropy);
         }
@@ -1479,24 +1520,33 @@ void RandomSamplers(Random &random, CKFFSamplerLayout layout, DrawSamplers &samp
 }
 
 // The sampler slot of a stage's texture. Nothing samples a texture the
-// layout does not declare, whose stage may have any sampler's state.
-CKDWORD StageSlot(const CKFFFragmentProgram &program, CKDWORD stage, CKFFSamplerLayout layout) {
+// layout does not declare, whose stage may have any sampler's state. The
+// comparison samplers of a comparison shader hold the first 2D textures, the
+// depth textures it compares.
+CKDWORD StageSlot(const CKFFFragmentProgram &program, CKDWORD stage, CKFFSamplerLayout layout,
+                  CKDWORD comparisons = 0) {
     const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
-    const bool stageIndexed =
-        (type == CKFF_SAMPLER_2D || type == CKFF_SAMPLER_DEPTH) && layout == CKFF_SAMPLER_LAYOUT_WIDE_2D;
+    const bool texture2D = type == CKFF_SAMPLER_2D || type == CKFF_SAMPLER_DEPTH;
+    const bool stageIndexed = texture2D && layout == CKFF_SAMPLER_LAYOUT_WIDE_2D && comparisons == 0;
     const CKDWORD index = stageIndexed ? stage : program.GetSamplerOrdinal(stage);
-    return index < CKFFSamplerTypeSlotCount(type, layout) ? CKFFSamplerSlot(type, index, layout) : stage;
+    bool declared = index < CKFFSamplerTypeSlotCount(type, layout);
+    if (comparisons != 0 && texture2D) {
+        const bool compared = type == CKFF_SAMPLER_DEPTH &&
+                              program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC) != 0;
+        declared = declared && (compared ? index < comparisons : index >= comparisons);
+    }
+    return declared ? CKFFSamplerSlot(type, index, layout) : stage;
 }
 
 // Gives a fragment a draw's samplers: its stages' state words are those of
 // the samplers they sample, if they are textured.
 void ApplySamplers(const CKFFFragmentProgram &program, CKFFSamplerLayout layout, const DrawSamplers &samplers,
-                   Fragment &fragment) {
+                   Fragment &fragment, CKDWORD comparisons = 0) {
     std::memcpy(fragment.Uniforms[ROW_BORDER_COLOR], samplers.Border, sizeof(samplers.Border));
     std::memcpy(fragment.Uniforms[ROW_SAMPLER_INFO], samplers.Info, sizeof(samplers.Info));
     for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
         const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
-        const CKDWORD slot = StageSlot(program, stage, layout);
+        const CKDWORD slot = StageSlot(program, stage, layout, comparisons);
         const float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
         fragment.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][3] = coord[2] > 0.5f ? (float)samplers.State[slot] : 0.0f;
     }
@@ -1504,15 +1554,17 @@ void ApplySamplers(const CKFFFragmentProgram &program, CKFFSamplerLayout layout,
 
 // Gives the depth stages of a fragment their border's depth as the reference
 // depth, which comparisons of border texels then meet exactly unless the
-// coordinate is projected or affine. Outside the wide 2D layout, the border
-// is the one of the stage's ordinal, even if the layout does not declare it.
+// coordinate is projected or affine. Outside the wide 2D layout's shaders
+// with stage-indexed textures, the border is the one of the stage's ordinal,
+// even if the layout does not declare it.
 void MeetBorderDepths(const CKFFFragmentProgram &program, CKFFSamplerLayout layout, const DrawSamplers &samplers,
-                      Fragment &fragment) {
+                      Fragment &fragment, CKDWORD comparisons = 0) {
     for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
         if (program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) != CKFF_SAMPLER_DEPTH)
             continue;
-        const CKDWORD slot = layout == CKFF_SAMPLER_LAYOUT_WIDE_2D ? StageSlot(program, stage, layout)
-                                                                   : program.GetSamplerOrdinal(stage);
+        const CKDWORD slot = layout == CKFF_SAMPLER_LAYOUT_WIDE_2D && comparisons == 0
+                                 ? StageSlot(program, stage, layout)
+                                 : program.GetSamplerOrdinal(stage);
         fragment.Registers[REG_TEXCOORD0 + stage][2] = samplers.Border[slot][0];
     }
 }
@@ -1541,12 +1593,12 @@ void ShareDrawState(const Fragment &from, Fragment &to, Random &random) {
 
 // The key of a fragment's draw, from the constant blocks the runtime passes.
 CKFFNativeFragmentKey DrawKey(const CKFFFragmentProgram &program, const Fragment &fragment,
-                              bool shaderSampling = false) {
+                              bool shaderSampling = false, CKDWORD comparisons = 0) {
     CKFFConstantSet constants;
     constants.Set(CKRST_BLOCK_DRAW_PARAMS, fragment.Uniforms[ROW_DRAW_PARAMS], (ROW_BUMP_ENV - ROW_DRAW_PARAMS) * 16);
     constants.Set(CKRST_BLOCK_BUMP_ENV, fragment.Uniforms[ROW_BUMP_ENV], (ROW_STAGE_PARAMS - ROW_BUMP_ENV) * 16);
     constants.Set(CKRST_BLOCK_STAGE_PARAMS, fragment.Uniforms[ROW_STAGE_PARAMS], (ROW_PROGRAM - ROW_STAGE_PARAMS) * 16);
-    return CKFFNativeFragmentDrawKey(program, constants, shaderSampling);
+    return CKFFNativeFragmentDrawKey(program, constants, shaderSampling, comparisons);
 }
 
 CKFFNativeFragmentKey Canonical(CKFFNativeFragmentKey key, CKFFSamplerLayout layout) {
@@ -1622,8 +1674,25 @@ void ScrambleSampling(CKFFNativeFragmentKey &key, CKDWORD stage, CKFFSamplerLayo
     }
 
     const CKDWORD func = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC);
+    const CKDWORD comparisons = layout == CKFF_SAMPLER_LAYOUT_WIDE_2D
+        ? (key.Switches[0] & CKFF_NATIVE_FRAGMENT_COMPARISONS) >> CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT
+        : 0;
+    const bool gradient = (sampling & CKFF_NATIVE_FRAGMENT_GRADIENT) != 0;
     if (type != CKFF_SAMPLER_DEPTH) {
         Scramble(program, stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, random);
+    } else if (comparisons != 0) {
+        // The comparison shaders compare in hardware with the sampler's
+        // function without explicit gradients, and compare every texel with
+        // them, passing depths through for every unknown function.
+        if (func != 0) {
+            if (!gradient && random.OneIn(2))
+                program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, 1 + random.Below(15));
+            else if (func > 8 && random.OneIn(2))
+                program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, 9 + random.Below(7));
+            ignored |= CKFF_NATIVE_FRAGMENT_BORDER;
+            if (!gradient)
+                Scramble(key.Switches[0], CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage, random);
+        }
     } else if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
         // Unknown functions pass sampled depths through, like none.
         if ((func == 0 || func > 8) && random.OneIn(2))
@@ -1637,6 +1706,23 @@ void ScrambleSampling(CKFFNativeFragmentKey &key, CKDWORD stage, CKFFSamplerLayo
         ignored |= CKFF_NATIVE_FRAGMENT_GRADIENT;
         if (program.GetSamplerOrdinal(stage) >= CKFFSamplerTypeSlotCount(CKFF_SAMPLER_DEPTH, layout))
             ignored |= CKFF_NATIVE_FRAGMENT_BORDER;
+    }
+    // A comparison shader's 2D or depth texture it does not declare samples
+    // nothing, like one of any other ordinal it does not declare; explicit
+    // gradients would compare the texels of a depth texture.
+    if (comparisons != 0 && (type == CKFF_SAMPLER_2D || type == CKFF_SAMPLER_DEPTH)) {
+        const CKDWORD ordinal = program.GetSamplerOrdinal(stage);
+        const bool compared = type == CKFF_SAMPLER_DEPTH && func != 0;
+        const bool samples = compared ? gradient || ordinal < comparisons : ordinal >= comparisons;
+        if (!samples) {
+            ignored = compared ? 0xFFu & ~(CKDWORD)CKFF_NATIVE_FRAGMENT_GRADIENT : 0xFFu;
+            Scramble(program, stage, CKFF_FRAGMENT_PROGRAM_STAGE_PROJECTED, random);
+            Scramble(key.Switches[0], CKFF_NATIVE_FRAGMENT_LOD_BIAS << stage, random);
+            if (random.OneIn(2)) {
+                program.SetSamplerOrdinal(stage, compared ? comparisons + random.Below(8 - comparisons)
+                                                          : random.Below(comparisons));
+            }
+        }
     }
     Scramble(word, ignored << shift, random);
 }
@@ -1857,8 +1943,10 @@ void SetSelectArg1(CKFFFragmentProgram &program, CKDWORD stage, CKDWORD arg) {
 }
 
 // Compiles the keys of draws of a program, and their canonical keys, and
-// checks that they compute what the layout's shader-sampling shader does.
-void MatchShaderSampling(Random &random, CKFFSamplerLayout layout, const CKFFFragmentProgram &program) {
+// checks that they compute what the layout's shader-sampling shader does, or
+// its comparison shader with the comparison samplers given.
+void MatchShaderSampling(Random &random, CKFFSamplerLayout layout, const CKFFFragmentProgram &program,
+                         CKDWORD comparisons = 0) {
     const int kDraws = 2;
     const int kFragments = 3;
     for (int d = 0; d < kDraws; ++d) {
@@ -1869,13 +1957,15 @@ void MatchShaderSampling(Random &random, CKFFSamplerLayout layout, const CKFFFra
             RandomFragment(random, fragments[f]);
             if (f != 0)
                 ShareDrawState(fragments[0], fragments[f], random);
-            ApplySamplers(program, layout, samplers, fragments[f]);
+            ApplySamplers(program, layout, samplers, fragments[f], comparisons);
             if (random.OneIn(2))
-                MeetBorderDepths(program, layout, samplers, fragments[f]);
+                MeetBorderDepths(program, layout, samplers, fragments[f], comparisons);
         }
-        const CKFFNativeFragmentKey key = DrawKey(program, fragments[0], true);
-        for (int f = 1; f < kFragments; ++f)
-            TestCheck(DrawKey(program, fragments[f], true) == key, "draws sharing the state keys read share keys");
+        const CKFFNativeFragmentKey key = DrawKey(program, fragments[0], true, comparisons);
+        for (int f = 1; f < kFragments; ++f) {
+            TestCheck(DrawKey(program, fragments[f], true, comparisons) == key,
+                      "draws sharing the state keys read share keys");
+        }
 
         const CKFFNativeFragmentKey keys[] = {key, Canonical(key, layout)};
         TestCheck(Canonical(keys[1], layout) == keys[1], "canonical keys are left unchanged");
@@ -1884,7 +1974,8 @@ void MatchShaderSampling(Random &random, CKFFSamplerLayout layout, const CKFFFra
             TestCheck(Compile(compiled, layout, shader), "every key compiles");
             TestCheck(ReadsOnlyOpenUniforms(shader), "shaders never read the state their key decides");
             for (const Fragment &fragment : fragments) {
-                const Outcome expected = Reference{fragment, layout, true}.Evaluate(program.Lanes());
+                const Outcome expected =
+                    Reference{fragment, layout, true, (int)comparisons}.Evaluate(program.Lanes());
                 const Outcome actual = Execute(shader, fragment);
                 if (!SameOutcome(expected, actual)) {
                     Report(layout, compiled, shader, expected, actual);
@@ -1901,6 +1992,23 @@ void TestMatchesShaderSampling() {
     for (CKFFSamplerLayout layout : kLayouts) {
         for (int p = 0; p < kPrograms; ++p)
             MatchShaderSampling(random, layout, RandomProgram(random, p % 4 == 0));
+    }
+}
+
+// The wide 2D layout's comparison shaders sample the 2D and depth textures
+// past their comparison samplers, and none before.
+void TestMatchesComparisonShaders() {
+    const int kPrograms = 250;
+    Random random(0x2c6d1e93a5ull);
+    for (CKDWORD comparisons = 1; comparisons <= 8; ++comparisons) {
+        for (int p = 0; p < kPrograms; ++p) {
+            CKFFFragmentProgram program = RandomProgram(random, p % 4 == 0);
+            for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
+                if (program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH)
+                    program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, 0);
+            }
+            MatchShaderSampling(random, CKFF_SAMPLER_LAYOUT_WIDE_2D, program, comparisons);
+        }
     }
 }
 
@@ -1964,6 +2072,40 @@ void TestComparesDepths() {
     }
 }
 
+// A comparison shader's draw key holds its comparison samplers, which its
+// canonical key keeps only in the wide 2D layout, if it reads 2D or depth
+// textures, whose slots and sampling they decide. It is otherwise the key of
+// the shader-sampling shader.
+void CheckComparisonKey(const CKFFFragmentProgram &program, const Fragment &fragment, CKFFSamplerLayout layout,
+                        CKDWORD comparisons, const CKFFNativeFragmentKey &key,
+                        const CKFFNativeFragmentKey &canonical) {
+    TestCheck((key.Switches[0] & CKFF_NATIVE_FRAGMENT_COMPARISONS) ==
+                  comparisons << CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT,
+              "draw keys hold the comparison samplers");
+    TestCheck(DrawKey(program, fragment, false, comparisons) == key, "comparison shaders sample in the shader");
+    bool reads2D = false;
+    for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
+        const CKDWORD type = canonical.Program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
+        reads2D = reads2D || ((canonical.Switches[0] & (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << stage) != 0 &&
+                              (type == CKFF_SAMPLER_2D || type == CKFF_SAMPLER_DEPTH));
+    }
+    const bool kept = layout == CKFF_SAMPLER_LAYOUT_WIDE_2D && reads2D;
+    TestCheck((canonical.Switches[0] & CKFF_NATIVE_FRAGMENT_COMPARISONS) ==
+                  (kept ? comparisons << CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT : 0u),
+              "canonical keys keep the comparison samplers of the wide 2D layout's 2D textures");
+    if (!kept) {
+        TestCheck(canonical == Canonical(DrawKey(program, fragment, true), layout),
+                  "comparison samplers without 2D textures are the shader-sampling shader's");
+        return;
+    }
+    TestCheck((canonical.Switches[0] & CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING) != 0,
+              "comparison shaders are shader-sampling shaders");
+    if (comparisons == 8) {
+        TestCheck(Canonical(DrawKey(program, fragment, true, 15), layout) == canonical,
+                  "comparison shaders have a comparison sampler per 2D texture at most");
+    }
+}
+
 void TestCanonicalKeys() {
     const int kKeys = 1000;
     const int kScrambles = 4;
@@ -1989,14 +2131,20 @@ void TestCanonicalKeys() {
             }
 
             const CKFFNativeFragmentKey native = Canonical(DrawKey(program, fragment), layout);
-            for (int sampled = 0; sampled < 2; ++sampled) {
-                const CKFFNativeFragmentKey key = DrawKey(program, fragment, sampled != 0);
+            // Native, shader-sampling and comparison shader keys.
+            for (int sampled = 0; sampled < 3; ++sampled) {
+                const CKDWORD comparisons = sampled == 2 ? 1 + random.Below(8) : 0;
+                const CKFFNativeFragmentKey key = DrawKey(program, fragment, sampled != 0, comparisons);
                 const CKFFNativeFragmentKey canonical = Canonical(key, layout);
                 TestCheck(Canonical(canonical, layout) == canonical, "canonical keys are left unchanged");
                 for (int s = 0; s < kScrambles; ++s) {
                     CKFFNativeFragmentKey scrambled = key;
                     Scramble(scrambled, layout, random);
                     TestCheck(Canonical(scrambled, layout) == canonical, "canonical keys hold only what shaders read");
+                }
+                if (comparisons != 0) {
+                    CheckComparisonKey(program, fragment, layout, comparisons, key, canonical);
+                    continue;
                 }
 
                 // A shader-sampling key keeps what the native key does, and
@@ -2119,6 +2267,7 @@ void TestSpecialization() {
         CKDWORD Ordinal;
         int Slot; // -1: the layout declares no such texture
         CKJitSamplerDim Dim;
+        CKDWORD Comparisons = 0; // of the comparison shader, which samples in the shader
     };
     const Case cases[] = {
         {CKFF_SAMPLER_LAYOUT_WIDE_2D, 5, CKFF_SAMPLER_2D, 0, 5, CKJIT_SAMPLER_2D},
@@ -2126,6 +2275,11 @@ void TestSpecialization() {
         {CKFF_SAMPLER_LAYOUT_WIDE_2D, 0, CKFF_SAMPLER_CUBE, 3, 11, CKJIT_SAMPLER_CUBE},
         {CKFF_SAMPLER_LAYOUT_WIDE_2D, 0, CKFF_SAMPLER_CUBE, 4, -1, CKJIT_SAMPLER_CUBE},
         {CKFF_SAMPLER_LAYOUT_WIDE_2D, 2, CKFF_SAMPLER_VOLUME, 1, 13, CKJIT_SAMPLER_3D},
+        {CKFF_SAMPLER_LAYOUT_WIDE_2D, 5, CKFF_SAMPLER_2D, 4, 4, CKJIT_SAMPLER_2D, 3},
+        {CKFF_SAMPLER_LAYOUT_WIDE_2D, 5, CKFF_SAMPLER_2D, 2, -1, CKJIT_SAMPLER_2D, 3},
+        {CKFF_SAMPLER_LAYOUT_WIDE_2D, 1, CKFF_SAMPLER_DEPTH, 7, 7, CKJIT_SAMPLER_2D, 7},
+        {CKFF_SAMPLER_LAYOUT_WIDE_2D, 6, CKFF_SAMPLER_DEPTH, 0, -1, CKJIT_SAMPLER_2D, 8},
+        {CKFF_SAMPLER_LAYOUT_WIDE_2D, 0, CKFF_SAMPLER_CUBE, 3, 11, CKJIT_SAMPLER_CUBE, 8},
         {CKFF_SAMPLER_LAYOUT_WIDE_CUBE, 5, CKFF_SAMPLER_2D, 3, 3, CKJIT_SAMPLER_2D},
         {CKFF_SAMPLER_LAYOUT_WIDE_CUBE, 5, CKFF_SAMPLER_2D, 4, -1, CKJIT_SAMPLER_2D},
         {CKFF_SAMPLER_LAYOUT_WIDE_CUBE, 1, CKFF_SAMPLER_CUBE, 7, 11, CKJIT_SAMPLER_CUBE},
@@ -2149,6 +2303,10 @@ void TestSpecialization() {
             key.Switches[0] = variant == 0 ? 0u : (CKDWORD)CKFF_NATIVE_FRAGMENT_TEXTURE << c.Stage;
             if (variant == 2)
                 key.Switches[0] |= (CKDWORD)CKFF_NATIVE_FRAGMENT_LOD_BIAS << c.Stage;
+            if (c.Comparisons != 0) {
+                key.Switches[0] |= c.Comparisons << CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT |
+                                   CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING;
+            }
             TestCheck(Compile(key, c.Layout, shader), "the texture program compiles");
             const bool sampled = variant != 0 && c.Slot >= 0;
 
@@ -2168,6 +2326,26 @@ void TestSpecialization() {
             TestCheck(samples == (sampled ? 1 : 0), "a stage samples once, or not at all without a texture");
         }
     }
+
+    // The shader-sampling shader takes the level of a bordered 2D texture
+    // without explicit gradients from the hardware, and the comparison shaders
+    // from the folded coordinate's derivatives, which the hardware's levels
+    // of anisotropic samplers are not.
+    CKFFNativeFragmentKey bordered;
+    SetSelectArg1(bordered.Program, 0, CKRST_TA_TEXTURE);
+    bordered.Program.SetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_2D);
+    bordered.Program.SetSamplerOrdinal(0, 3);
+    bordered.Switches[3] = CKFF_NATIVE_FRAGMENT_BORDER;
+    for (CKDWORD comparisons = 0; comparisons <= 3; comparisons += 3) {
+        bordered.Switches[0] = CKFF_NATIVE_FRAGMENT_TEXTURE | comparisons << CKFF_NATIVE_FRAGMENT_COMPARISON_SHIFT |
+                               CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING;
+        TestCheck(Compile(bordered, CKFF_SAMPLER_LAYOUT_WIDE_2D, shader), "the bordered program compiles");
+        bool hardwareLevel = false;
+        for (int n = 0; n < shader.Nodes.Size(); ++n)
+            hardwareLevel = hardwareLevel || shader.Nodes[n].Op == CKJIT_OP_CALC_LOD;
+        TestCheck(hardwareLevel == (comparisons == 0),
+                  "only the shader-sampling shader takes levels from the hardware");
+    }
 }
 
 void Save(const char *name, int index, const char *extension, const XArray<uint32_t> &words) {
@@ -2186,20 +2364,31 @@ void TestEmission() {
     const int kPrograms = 400;
     const int kSaved = 12;
     Random random(0x2f6b3c1d5eull);
+    const char *const suffixes[] = {"", "_sampling", "_compare"};
     for (CKFFSamplerLayout layout : kLayouts) {
-        for (bool shaderSampling : {false, true}) {
+        // The native, shader-sampling and, of the wide 2D layout, comparison
+        // shaders.
+        const int variants = layout == CKFF_SAMPLER_LAYOUT_WIDE_2D ? 3 : 2;
+        for (int variant = 0; variant < variants; ++variant) {
+            const bool shaderSampling = variant != 0;
             char name[64];
-            std::snprintf(name, sizeof(name), "%s%s", kShaderNames[layout], shaderSampling ? "_sampling" : "");
+            std::snprintf(name, sizeof(name), "%s%s", kShaderNames[layout], suffixes[variant]);
             for (int p = 0; p < kPrograms; ++p) {
                 CKFFFragmentProgram program = RandomProgram(random, p % 2 == 0);
+                const CKDWORD comparisons = variant == 2 ? 1 + random.Below(8) : 0;
+                for (CKDWORD stage = 0; comparisons != 0 && stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
+                    if (program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE) == CKFF_SAMPLER_DEPTH)
+                        program.SetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC, 0);
+                }
                 Fragment fragment;
                 RandomFragment(random, fragment);
                 if (shaderSampling) {
                     DrawSamplers samplers;
                     RandomSamplers(random, layout, samplers);
-                    ApplySamplers(program, layout, samplers, fragment);
+                    ApplySamplers(program, layout, samplers, fragment, comparisons);
                 }
-                const CKFFNativeFragmentKey key = Canonical(DrawKey(program, fragment, shaderSampling), layout);
+                const CKFFNativeFragmentKey key =
+                    Canonical(DrawKey(program, fragment, shaderSampling, comparisons), layout);
                 CKJitFragmentShader shader;
                 TestCheck(Compile(key, layout, shader), "every key compiles");
                 XArray<uint32_t> spirv;
@@ -2232,6 +2421,7 @@ int main(int argc, char **argv) {
     framework.Run("specialization", TestSpecialization);
     framework.Run("matches the uber shaders", TestMatchesUberShaders);
     framework.Run("matches the shader-sampling shaders", TestMatchesShaderSampling);
+    framework.Run("matches the comparison shaders", TestMatchesComparisonShaders);
     framework.Run("compares depths as the shader-sampling shaders do", TestComparesDepths);
     framework.Run("canonical keys", TestCanonicalKeys);
     framework.Run("emission", TestEmission);

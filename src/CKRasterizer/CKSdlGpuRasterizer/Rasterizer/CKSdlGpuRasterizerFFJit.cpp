@@ -211,7 +211,7 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
         return Precompiled;
     // A draw computes its key, canonicalizing it only when it is new.
     const CKFFNativeFragmentKey fragment =
-        CKFFNativeFragmentDrawKey(FragmentProgram, *Constants, false);
+        CKFFNativeFragmentDrawKey(FragmentProgram, *Constants, false, 0);
     const FFJitKey drawKey = MakeFFJitKey(fragment, Layout);
     const int *found = m_FFJitDrawKeys.FindPtr(drawKey);
     const int index = found ? *found : AddFFJitDrawKey(drawKey, fragment, Layout);
