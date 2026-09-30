@@ -247,13 +247,14 @@ bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority 
     return Worker.Submit(job, priority, after);
 }
 
-void CKSdlGpuRasterizerContext::CollectJobs()
+void CKSdlGpuRasterizerContext::CollectJobs(Uint64 budgetNs)
 {
-    XArray<CKSdlGpuJob *> finished;
-    Worker.Collect(finished);
-    for (int i = 0; i < finished.Size(); ++i) {
-        finished[i]->Complete();
-        delete finished[i];
+    const Uint64 start = SDL_GetTicksNS();
+    while (CKSdlGpuJob *job = Worker.Collect()) {
+        job->Complete();
+        delete job;
+        if (SDL_GetTicksNS() - start >= budgetNs)
+            break;
     }
 }
 
@@ -284,7 +285,7 @@ CKBOOL CKSdlGpuRasterizerContext::FinishBackgroundWorkForTests(Sint32 timeoutMs)
         const Uint64 now = SDL_GetTicks();
         if (!Worker.WaitIdle(Sint32(now < deadline ? deadline - now : 0)))
             return FALSE;
-        CollectJobs();
+        CollectJobs(SDL_MAX_UINT64);
         // A compiled program queues the pipelines it prewarms.
         if (Worker.Pending() == 0)
             return TRUE;
@@ -299,6 +300,28 @@ CKBOOL CKSdlGpuRasterizerContext::CompleteEmptySubmissionsForTests()
     Submissions.Back().SubmitId = 8;
     Collect();
     return Submissions.Size() == 0 && CompletedSubmitId == 8;
+}
+
+CKBOOL CKSdlGpuRasterizerContext::CollectJobsWithinBudgetForTests()
+{
+    struct Job : CKSdlGpuJob {
+        explicit Job(int &completed) : Completed(completed) {}
+        void Run() override {}
+        void Complete() override { ++Completed; }
+        int &Completed;
+    };
+    int completed = 0;
+    for (int i = 0; i < 3; ++i) {
+        if (!SubmitJob(new Job(completed)))
+            return FALSE;
+    }
+    if (!Worker.WaitIdle(5000))
+        return FALSE;
+    // A spent budget still completes one job per call.
+    CollectJobs(0);
+    const bool one = completed == 1;
+    CollectJobs(SDL_MAX_UINT64);
+    return one && completed == 3;
 }
 
 void CKSdlGpuRasterizerContext::Shutdown()

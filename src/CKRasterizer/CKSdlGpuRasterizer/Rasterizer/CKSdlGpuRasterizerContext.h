@@ -184,9 +184,11 @@ public:
     CKERROR AcquireSwapchainForTests();
     void CollectForTests();
     CKBOOL CompleteEmptySubmissionsForTests();
+    // Runs background jobs and completes them with a spent budget.
+    CKBOOL CollectJobsWithinBudgetForTests();
     // Waits for background compilation, then completes it as a frame
-    // boundary would, until completing it queues no more. Call between
-    // frames.
+    // boundary would without a budget, until completing it queues no more.
+    // Call between frames.
     CKBOOL FinishBackgroundWorkForTests(Sint32 TimeoutMs);
     struct FFJitCounts {
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
@@ -276,8 +278,10 @@ private:
     bool SubmitJob(CKSdlGpuJob *Job,
                    CKSdlGpuJobPriority Priority = CKSDLGPU_JOB_NORMAL,
                    const CKSdlGpuJob *After = nullptr);
-    // Completes finished jobs. Call only at a frame boundary.
-    void CollectJobs();
+    // Completes finished jobs in the order they ran, until BudgetNs of the
+    // calling thread's time is spent; the next call completes the rest.
+    // Call only at a frame boundary.
+    void CollectJobs(Uint64 BudgetNs);
 
     // Snapshot of the current target at RequestReadback, completed by an
     // owned backend ticket and delivered at a frame boundary.

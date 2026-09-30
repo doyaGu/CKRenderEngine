@@ -3,6 +3,10 @@
 
 namespace {
 
+// The time the render thread spends completing background jobs at a frame
+// boundary. A burst of results is spread over the frames after it.
+const Uint64 kFrameJobBudgetNs = 500000;
+
 struct CKSdlGpuByteRange {
     const CKBYTE *Data = nullptr;
     size_t Size = 0;
@@ -1275,7 +1279,7 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     if (number) *number = Submission;
     Collect();
     // No pass is open, so completed jobs may change what later draws use.
-    CollectJobs();
+    CollectJobs(kFrameJobBudgetNs);
     CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", Submissions.Size());
     if (Submissions.Size() > 3) {
         CKRE_PROFILE_SCOPE("CKRE.SDL.WaitInflight");

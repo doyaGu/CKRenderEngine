@@ -244,6 +244,10 @@ int main()
             return result;
         };
         CKSdlGpuWorker worker;
+        auto collect = [&worker](XArray<CKSdlGpuJob *> &finished) {
+            while (CKSdlGpuJob *each = worker.Collect()) finished.PushBack(each);
+        };
+        check(!worker.Collect(), "a stopped worker has no finished jobs");
         check(!worker.Submit(job()) && deleted == 1 && worker.Pending() == 0,
               "a stopped worker deletes submitted jobs");
         check(worker.Start("CKSdlGpuWorkerTest") && worker.Running(), "worker starts");
@@ -254,7 +258,7 @@ int main()
         }
         check(worker.WaitIdle(5000) && worker.Pending() == 0, "worker drains its queue");
         XArray<CKSdlGpuJob *> finished;
-        worker.Collect(finished);
+        collect(finished);
         check(finished.Size() == 3 && finished[0] == jobs[0] && finished[1] == jobs[1] &&
               finished[2] == jobs[2] && jobs[0]->Order == 0 && jobs[1]->Order == 1 &&
               jobs[2]->Order == 2 && deleted == 1,
@@ -279,7 +283,7 @@ int main()
               "only a queued idle job is promoted");
         SDL_SignalSemaphore(gate);
         check(worker.WaitIdle(5000) && worker.Pending() == 0, "worker drains both priorities");
-        worker.Collect(finished);
+        collect(finished);
         check(finished.Size() == 6 && blocker->Order == 3 && normal[0]->Order == 4 &&
               normal[1]->Order == 5 && idle[2]->Order == 6 && idle[0]->Order == 7 &&
               idle[1]->Order == 8,
@@ -296,7 +300,7 @@ int main()
         check(worker.Pending() == 4 && !worker.WaitIdle(10), "waiting jobs are pending work");
         SDL_SignalSemaphore(gate);
         check(worker.WaitIdle(5000) && worker.Pending() == 0, "worker drains waiting jobs");
-        worker.Collect(finished);
+        collect(finished);
         check(finished.Size() == 4 && first->Order < next->Order && next->Order < last->Order &&
               last->Order < queued->Order,
               "a job runs once the one it waits for has run, before the jobs queued");
@@ -304,7 +308,7 @@ int main()
         check(worker.Submit(after, CKSDLGPU_JOB_NORMAL, first) && worker.WaitIdle(5000) &&
               worker.Pending() == 0 && after->Order > last->Order,
               "a job submitted after one that has run is queued");
-        worker.Collect(finished);
+        collect(finished);
         for (int i = 0; i < finished.Size(); ++i) delete finished[i];
         finished.Clear();
         Job *gated = job(started, gate), *idleFirst = job(), *compile = job(), *pipeline = job();
@@ -317,7 +321,7 @@ int main()
               "a waiting job is promoted with the job it waits for");
         SDL_SignalSemaphore(gate);
         check(worker.WaitIdle(5000), "worker drains promoted waiting jobs");
-        worker.Collect(finished);
+        collect(finished);
         check(finished.Size() == 4 && compile->Order < pipeline->Order &&
               pipeline->Order < idleFirst->Order,
               "promoted waiting jobs run before queued idle jobs");
@@ -329,7 +333,7 @@ int main()
         worker.Submit(job());
         worker.Submit(job(), CKSDLGPU_JOB_NORMAL, idleLast);
         check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
-        worker.Collect(finished);
+        collect(finished);
         check(finished.Size() == 0 && worker.Pending() == 4 && !worker.WaitIdle(10),
               "collection does not wait for a running job");
         SDL_SignalSemaphore(gate);
@@ -473,6 +477,8 @@ int main()
         CKSdlGpuRasterizerContext context;
         check(context.CompleteEmptySubmissionsForTests(),
               "empty submissions complete in order");
+        check(context.CollectJobsWithinBudgetForTests(),
+              "a frame completes the finished jobs its budget allows, at least one");
     }
     {
         CKSdlGpuBuffer buffer;

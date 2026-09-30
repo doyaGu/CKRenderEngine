@@ -58,8 +58,9 @@ public:
     // with it the jobs it waits for. False when neither waits at idle
     // priority; the job is only compared, so it may have been deleted.
     bool Promote(const CKSdlGpuJob *job);
-    // Moves the jobs that have run to the caller, who then owns them.
-    void Collect(XArray<CKSdlGpuJob *> &finished);
+    // Moves the first job to have run of those not yet collected to the
+    // caller, who then owns it. Null when there is none.
+    CKSdlGpuJob *Collect();
     // Jobs of either priority queued, waiting or running.
     int Pending() const;
     // Blocks until no job of either priority is queued, waiting or running,

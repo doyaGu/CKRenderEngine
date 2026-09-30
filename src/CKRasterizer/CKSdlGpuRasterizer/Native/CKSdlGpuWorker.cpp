@@ -88,13 +88,17 @@ bool CKSdlGpuWorker::Promote(const CKSdlGpuJob *job)
     return promoted;
 }
 
-void CKSdlGpuWorker::Collect(XArray<CKSdlGpuJob *> &finished)
+CKSdlGpuJob *CKSdlGpuWorker::Collect()
 {
-    if (!Thread) return;
+    if (!Thread) return nullptr;
+    CKSdlGpuJob *job = nullptr;
     SDL_LockMutex(Lock);
-    for (int i = 0; i < Finished.Size(); ++i) finished.PushBack(Finished[i]);
-    Finished.Clear();
+    if (Finished.Size() != 0) {
+        job = Finished.Front();
+        Finished.PopFront();
+    }
     SDL_UnlockMutex(Lock);
+    return job;
 }
 
 int CKSdlGpuWorker::Pending() const
