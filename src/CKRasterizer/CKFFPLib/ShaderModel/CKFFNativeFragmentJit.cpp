@@ -351,6 +351,7 @@ struct ShaderSampler {
 // is a single texel of the border depth.
 struct DepthComparison {
     uint32_t Slot;
+    CKJitSamplerDim Dim; // 2D_COMPARE for the comparison samplers
     bool Declared;
     CKJitValue Border;    // FLOAT: the border depth
     CKJitValue Modes;     // INT2: an address mode an axis
@@ -463,7 +464,7 @@ private:
     CKJitValue CompareLevel(const DepthComparison &comparison, CKJitValue uv, CKJitValue mip, CKJitValue filtered);
     CKJitValue CompareTap(const DepthComparison &comparison, CKJitValue texel, CKJitValue outside, CKJitValue mip);
     CKJitValue CompareExtent(const DepthComparison &comparison, CKJitValue mip) {
-        return comparison.Declared ? m_B.TextureSize(comparison.Slot, CKJIT_SAMPLER_2D, mip) : m_B.Splat(m_B.Int(1), 2);
+        return comparison.Declared ? m_B.TextureSize(comparison.Slot, comparison.Dim, mip) : m_B.Splat(m_B.Int(1), 2);
     }
     CKJitValue CompareDepth(CKJitValue depth, CKJitValue reference, CKDWORD func);
     Color Argument(CKDWORD packedArg, const Color &texture, const Color &current, const Color &stageConstant);
@@ -481,7 +482,6 @@ private:
     CKFFSamplerLayout m_Layout;
     CKDWORD m_Comparisons;
     UniformRows m_Rows;
-    bool m_Unsupported = false;
 
     CKJitValue m_FragCoord;
     CKJitValue m_Varyings[VARYING_COUNT];
@@ -553,8 +553,6 @@ bool NativeFragmentCompiler::Compile(CKJitFragmentShader &out) {
     if (edgeCoverage.IsValid())
         m_Current.A = m_B.Mul(m_Current.A, edgeCoverage);
 
-    if (m_Unsupported)
-        return false;
     return m_B.Finish(m_B.Saturate(Join(m_Current)), discard, out);
 }
 
@@ -660,21 +658,28 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
         return m_B.Float4(0.0f, 0.0f, 0.0f, 1.0f);
     const CKDWORD type = StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
     const bool shaderSampling = Switch(CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING);
+    const CKDWORD sampling = Sampling(m_Switches, stage);
     const CKDWORD func = shaderSampling && type == CKFF_SAMPLER_DEPTH
         ? CanonicalCompareFunc(StageField(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_COMPARE_FUNC), m_Layout,
-                               m_Comparisons, Sampling(m_Switches, stage))
+                               m_Comparisons, sampling)
         : 0;
     const CKJitValue lodBias = Switch(CKFF_NATIVE_FRAGMENT_LOD_BIAS, stage)
         ? m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 2)
         : m_B.Float(0.0f);
-    // The comparisons of the comparison shaders are not compiled yet.
-    if (func != 0 && m_Comparisons != 0) {
-        m_Unsupported = true;
-        return m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f);
+    // Without explicit gradients, the comparison shaders compare in hardware,
+    // with the sampler's function, the depths their comparison samplers hold.
+    if (func != 0 && m_Comparisons != 0 && (sampling & CKFF_NATIVE_FRAGMENT_GRADIENT) == 0) {
+        if (!SamplerDeclared(m_Program, stage, m_Layout, m_Comparisons))
+            return m_B.Float4(0.0f, 0.0f, 0.0f, 0.0f);
+        const CKJitValue coordinate = SampleCoordinate(stage, 3);
+        const CKJitValue uv = MirrorOnce(m_B.Swizzle(coordinate, "xy"), sampling);
+        const uint32_t slot = CKFFSamplerSlot(CKFF_SAMPLER_DEPTH, m_Program.GetSamplerOrdinal(stage), m_Layout);
+        return m_B.Splat(m_B.SampleCmp(slot, uv, m_B.Component(coordinate, 2)), 4);
     }
-    // The layouts without stage-indexed textures compare the texels of depth
-    // textures, and the border depth of those they do not declare.
-    if (func != 0 && m_Layout != CKFF_SAMPLER_LAYOUT_WIDE_2D)
+    // The layouts without stage-indexed textures, and the comparison shaders
+    // with explicit gradients, compare the texels of depth textures, and the
+    // border depth of those they do not declare.
+    if (func != 0 && !StageIndexed(type, m_Layout, m_Comparisons))
         return m_B.Splat(CompareSample2D(stage, SampleCoordinate(stage, 3), lodBias, func), 4);
     // An index past the textures the layout declares samples nothing.
     if (!SamplerDeclared(m_Program, stage, m_Layout, m_Comparisons))
@@ -1103,10 +1108,11 @@ CKJitValue NativeFragmentCompiler::CompareSample2D(CKDWORD stage, CKJitValue coo
     DepthComparison comparison;
     comparison.Declared = SamplerDeclared(m_Program, stage, m_Layout, m_Comparisons);
     comparison.Slot = comparison.Declared ? CKFFSamplerSlot(CKFF_SAMPLER_DEPTH, ordinal, m_Layout) : 0;
+    comparison.Dim = m_Comparisons != 0 ? CKJIT_SAMPLER_2D_COMPARE : CKJIT_SAMPLER_2D;
     comparison.Border = m_B.Component(m_B.Uniform(m_Rows.BorderColor + ordinal), 0);
     comparison.Modes = m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15)});
     comparison.MipFilter = Bits(packed, 0, 15);
-    comparison.Levels = comparison.Declared ? m_B.TextureLevels(comparison.Slot, CKJIT_SAMPLER_2D) : m_B.Int(1);
+    comparison.Levels = comparison.Declared ? m_B.TextureLevels(comparison.Slot, comparison.Dim) : m_B.Int(1);
     comparison.Reference = m_B.Component(coordinate, 2);
     comparison.Func = func;
 
@@ -1170,7 +1176,7 @@ CKJitValue NativeFragmentCompiler::CompareTap(const DepthComparison &comparison,
                                               CKJitValue outside, CKJitValue mip) {
     CKJitValue depth = comparison.Border;
     if (comparison.Declared) {
-        const CKJitValue loaded = m_B.Load(comparison.Slot, CKJIT_SAMPLER_2D, m_B.Construct({texel, mip}));
+        const CKJitValue loaded = m_B.Load(comparison.Slot, comparison.Dim, m_B.Construct({texel, mip}));
         depth = m_B.Select(outside, comparison.Border, m_B.Component(loaded, 0));
     }
     return CompareDepth(depth, comparison.Reference, comparison.Func);
