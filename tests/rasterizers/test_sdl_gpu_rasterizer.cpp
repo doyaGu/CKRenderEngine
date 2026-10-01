@@ -139,7 +139,7 @@ int main()
               "shared bytes still bind independently to both shader stages");
         bindings.Invalidate();
         check(bindings.NeedsPush(layout.Buffers[0], other[0], batch.Data),
-              "pipeline or pass invalidation requires a fresh push");
+              "pass invalidation requires a fresh push");
         batch.Clear();
         layout.Data.Resize(48);
         memset(layout.Data.Begin(), 4, 48);

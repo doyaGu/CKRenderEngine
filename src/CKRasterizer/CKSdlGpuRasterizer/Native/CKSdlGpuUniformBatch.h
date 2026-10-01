@@ -79,8 +79,9 @@ private:
     uint64_t Serial = 1;
 };
 
-// Native bindings belong to one render pass. Pipeline changes invalidate this
-// view, while repeated draws with the same pipeline can reuse pushed bytes.
+// Native bindings belong to one render pass. SDL applies pushed uniform data
+// to every later draw in the command buffer, across pipeline binds, so a draw
+// whose slot would receive the bytes it already holds skips the push.
 class CKSdlGpuUniformBindings {
 public:
     bool NeedsPush(const CKFFProgramLayout::Buffer &buffer, unsigned offset,

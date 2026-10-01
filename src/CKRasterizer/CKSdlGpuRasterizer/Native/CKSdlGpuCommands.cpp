@@ -946,7 +946,6 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             boundPipeline = pipeline;
             boundBindings = UINT32_MAX;
-            boundUniforms.Invalidate();
             CKRE_PROFILE_VALUE("CKRE.Batch.PipelineBinds", 1);
         }
         SDL_Rect scissor = passRect;
