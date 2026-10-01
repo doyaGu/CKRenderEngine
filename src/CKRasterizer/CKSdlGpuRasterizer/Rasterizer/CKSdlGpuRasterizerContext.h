@@ -584,6 +584,8 @@ private:
     XClassArray<CKSdlGpuDraw> Draws;
     CKSdlGpuDrawResourceBatch DrawResources;
     CKSdlGpuBinding SamplerBindings[CKFF_TEXTURE_SLOT_COUNT];
+    // Draw-scoped owners of padded depth copies; see CKSdlGpuOwnerScratch.
+    std::shared_ptr<CKSdlGpuTexture> DepthPadOwners[CKFF_TEXTURE_SLOT_COUNT];
     CKSdlGpuUniformBatch Uniforms;
     CKSdlGpuBindingBatch Bindings;
     CKSdlGpuTransientStorage TransientVertices;

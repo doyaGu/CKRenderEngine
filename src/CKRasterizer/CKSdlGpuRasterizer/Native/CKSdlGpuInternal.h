@@ -197,6 +197,40 @@ struct CKSdlGpuBinding {
     std::shared_ptr<SDL_GPUSampler> NativeSampler;
 };
 
+// Sampler descriptors are plain dwords. Draw compares several per binding, so
+// fold the words inline instead of calling memcmp for each one.
+inline bool CKSdlGpuSameSampler(const CKSamplerDesc &a, const CKSamplerDesc &b) {
+    static_assert(sizeof(CKSamplerDesc) == 12 * sizeof(CKDWORD),
+                  "CKSamplerDesc must stay a packed dword record");
+    CKDWORD wa[12], wb[12];
+    std::memcpy(wa, &a, sizeof(wa));
+    std::memcpy(wb, &b, sizeof(wb));
+    CKDWORD diff = 0;
+    for (int i = 0; i < 12; ++i) diff |= wa[i] ^ wb[i];
+    return diff == 0;
+}
+
+// Lends per-slot owners to one draw and releases the borrowed ones on every
+// return path. Ordinary draws borrow none, so they construct no owners.
+class CKSdlGpuOwnerScratch {
+public:
+    explicit CKSdlGpuOwnerScratch(std::shared_ptr<CKSdlGpuTexture> *owners)
+        : m_Owners(owners) {}
+    CKSdlGpuOwnerScratch(const CKSdlGpuOwnerScratch &) = delete;
+    CKSdlGpuOwnerScratch &operator=(const CKSdlGpuOwnerScratch &) = delete;
+    ~CKSdlGpuOwnerScratch() {
+        for (unsigned slot = 0; m_Used != 0; ++slot, m_Used >>= 1)
+            if (m_Used & 1u) m_Owners[slot].reset();
+    }
+    std::shared_ptr<CKSdlGpuTexture> &Borrow(unsigned slot) {
+        m_Used |= 1u << slot;
+        return m_Owners[slot];
+    }
+private:
+    std::shared_ptr<CKSdlGpuTexture> *m_Owners;
+    CKDWORD m_Used = 0;
+};
+
 // Drops every retained reference but keeps the list storage for reuse.
 template<class T> inline void CKSdlGpuReleaseAll(XClassArray<std::shared_ptr<T>> &resources) {
     for (auto &resource : resources) resource.reset();

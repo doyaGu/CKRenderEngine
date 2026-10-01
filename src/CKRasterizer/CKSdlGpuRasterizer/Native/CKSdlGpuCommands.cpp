@@ -470,7 +470,7 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     uniforms.Update(constantValues);
     CKSdlGpuBindingBatch::Inputs bindingInputs;
     bindingInputs.Hash = draw.Program->Identity;
-    std::shared_ptr<CKSdlGpuTexture> paddedOwners[CKFF_TEXTURE_SLOT_COUNT];
+    CKSdlGpuOwnerScratch paddedOwners(DepthPadOwners);
     bool depthPadStages[CKFF_MAX_TEXTURE_STAGES] = {};
     float depthPadTransforms[CKFF_MAX_TEXTURE_STAGES][4];
     bool hasDepthPad = false;
@@ -500,12 +500,13 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
              binding.Sampler.AddressV == CKRST_ADDRESS_BORDER)) {
             float transform[4];
+            std::shared_ptr<CKSdlGpuTexture> &padded = paddedOwners.Borrow(slot);
             const CKERROR padError = PrepareDepthPad(
-                sourceTexture, binding.Sampler, paddedOwners[slot], transform);
+                sourceTexture, binding.Sampler, padded, transform);
             if (padError != CK_OK)
                 return padError;
-            textureOwner = &paddedOwners[slot];
-            texture = paddedOwners[slot].get();
+            textureOwner = &padded;
+            texture = padded.get();
             if (binding.FixedStage >= CKFF_MAX_TEXTURE_STAGES)
                 return CKERR_INVALIDPARAMETER;
             depthPadStages[binding.FixedStage] = true;
@@ -529,7 +530,7 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             hardwareSampler.MaxAnisotropy = 1;
             hardwareSampler.ShaderAnisotropy = 0;
         }
-        if (std::memcmp(&cached.Sampler, &hardwareSampler, sizeof(hardwareSampler)) != 0) {
+        if (!CKSdlGpuSameSampler(cached.Sampler, hardwareSampler)) {
             cached.Sampler = hardwareSampler;
             cached.NativeSampler.reset();
         }
@@ -547,8 +548,7 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         if (metadata == UINT32_MAX) continue;
         const CKDWORD metadataBit = 1u << slot;
         if ((draw.Program->SamplerMetadataValidMask & metadataBit) != 0 &&
-            std::memcmp(&draw.Program->SamplerMetadata[slot], &binding.Sampler,
-                        sizeof(binding.Sampler)) == 0)
+            CKSdlGpuSameSampler(draw.Program->SamplerMetadata[slot], binding.Sampler))
             continue;
         draw.Program->SamplerMetadata[slot] = binding.Sampler;
         draw.Program->SamplerMetadataValidMask |= metadataBit;
