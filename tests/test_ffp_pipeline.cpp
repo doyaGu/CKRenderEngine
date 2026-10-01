@@ -89,11 +89,11 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
             CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
         pixel.Stage = CKRST_SHADER_PIXEL;
         vertex.UniformBufferCount = 3;
-        pixel.UniformBufferCount = 1;
+        pixel.UniformBufferCount = 2;
         pixel.SamplerCount = 16;
         TestCheck(CKFFValidateProgram(program, vertex, pixel) == CK_OK,
                   "FFP native declarations satisfy generic backend validation");
-        TestCheck(program.UniformBuffers.Size() == 4 &&
+        TestCheck(program.UniformBuffers.Size() == 5 &&
                       program.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
                       program.UniformBuffers[0].Slot == 0 && program.UniformBuffers[0].Size == 512 &&
                       program.UniformBuffers[1].Stage == CKRST_SHADER_VERTEX &&
@@ -101,18 +101,29 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                       program.UniformBuffers[2].Stage == CKRST_SHADER_VERTEX &&
                       program.UniformBuffers[2].Slot == 2 && program.UniformBuffers[2].Size == 2048 &&
                       program.UniformBuffers[3].Stage == CKRST_SHADER_PIXEL &&
-                      program.UniformBuffers[3].Slot == 0 && program.UniformBuffers[3].Size == 1424,
+                      program.UniformBuffers[3].Slot == 0 && program.UniformBuffers[3].Size == 320 &&
+                      program.UniformBuffers[4].Stage == CKRST_SHADER_PIXEL &&
+                      program.UniformBuffers[4].Slot == 1 && program.UniformBuffers[4].Size == 1104,
                   "native 3D declarations isolate per-draw matrices and draw parameters");
+        TestCheck(program.UniformBuffers[1].SharedData != UINT32_MAX &&
+                      program.UniformBuffers[3].SharedData == program.UniformBuffers[1].SharedData &&
+                      program.UniformBuffers[0].SharedData == UINT32_MAX &&
+                      program.UniformBuffers[2].SharedData == UINT32_MAX &&
+                      program.UniformBuffers[4].SharedData == UINT32_MAX,
+                  "both stages' draw parameter buffers share one snapshot");
         TestCheck(program.Uniforms.Size() == 13 &&
                       program.Uniforms[9].Slot == CKRST_BLOCK_DRAW_PARAMS &&
                       program.Uniforms[9].BufferSlot == 0 && program.Uniforms[9].Offset == 0 &&
+                      program.Uniforms[10].Slot == CKRST_BLOCK_BUMP_ENV &&
+                      program.Uniforms[10].BufferSlot == 1 && program.Uniforms[10].Offset == 0 &&
                       program.Samplers.Size() == 16,
                   "native packing follows the stage layout schema");
         TestCheck(program.Samplers[0].Dimension == CKFF_TEXTURE_2D &&
                       program.Samplers[8].Dimension == CKFF_TEXTURE_CUBE &&
                       program.Samplers[12].Dimension == CKFF_TEXTURE_3D &&
-                      program.Samplers[15].BorderColorOffset == 912 + 15 * 16 &&
-                      program.Samplers[15].SamplerStateOffset == 1168 + 15 * 16,
+                      program.Samplers[15].MetadataBufferSlot == 1 &&
+                      program.Samplers[15].BorderColorOffset == 592 + 15 * 16 &&
+                      program.Samplers[15].SamplerStateOffset == 848 + 15 * 16,
                   "sampler dimensions and border metadata are declared explicitly");
         TestCheck(program.VertexInputs.Size() == 16 && program.VertexInputs[6].Integer &&
                       program.VertexInputs[6].DefaultValue[3] == 0 &&
@@ -127,16 +138,19 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
             1, 2, format, FALSE, TRUE);
         vertex.UniformBufferCount = 2;
         TestCheck(CKFFValidateProgram(positionT, vertex, pixel) == CK_OK &&
-                      positionT.UniformBuffers.Size() == 3 &&
+                      positionT.UniformBuffers.Size() == 4 &&
                       positionT.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
                       positionT.UniformBuffers[0].Slot == 0 &&
                       positionT.UniformBuffers[0].Size == 320 &&
                       positionT.UniformBuffers[1].Slot == 1 &&
-                      positionT.UniformBuffers[1].Size == 2048,
+                      positionT.UniformBuffers[1].Size == 2048 &&
+                      positionT.UniformBuffers[2].SharedData == positionT.UniformBuffers[0].SharedData &&
+                      positionT.UniformBuffers[0].SharedData != UINT32_MAX,
                   "POSITIONT omits the unused matrix buffer and compacts native slots");
 
         const CKFFProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);
         vertex.UniformBufferCount = 0;
+        pixel.UniformBufferCount = 1;
         pixel.SamplerCount = 1;
         TestCheck(CKFFValidateProgram(present, vertex, pixel) == CK_OK &&
                       present.UniformBuffers.Size() == 1 &&

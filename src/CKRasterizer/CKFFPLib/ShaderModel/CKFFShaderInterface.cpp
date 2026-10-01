@@ -73,6 +73,53 @@ void AppendUniformBinding(CKFFProgramDesc &program,
     program.Uniforms.PushBack(uniform);
 }
 
+// Whether a pixel buffer holds exactly the blocks of a vertex buffer, at the
+// same offsets.
+bool SameBlocks(const CKFFProgramDesc &program, const CKFFUniformBufferBinding &vertex,
+                const CKFFUniformBufferBinding &pixel)
+{
+    if (vertex.Size != pixel.Size)
+        return false;
+    int blocks = 0;
+    for (int i = 0; i < program.Uniforms.Size(); ++i) {
+        const CKFFUniformBinding &uniform = program.Uniforms[i];
+        if (uniform.Stage == CKRST_SHADER_PIXEL && uniform.BufferSlot == pixel.Slot)
+            --blocks;
+        if (uniform.Stage != CKRST_SHADER_VERTEX || uniform.BufferSlot != vertex.Slot)
+            continue;
+        ++blocks;
+        bool matched = false;
+        for (int j = 0; j < program.Uniforms.Size() && !matched; ++j) {
+            const CKFFUniformBinding &other = program.Uniforms[j];
+            matched = other.Stage == CKRST_SHADER_PIXEL && other.BufferSlot == pixel.Slot &&
+                      other.Slot == uniform.Slot && other.Type == uniform.Type &&
+                      other.Count == uniform.Count && other.Offset == uniform.Offset;
+        }
+        if (!matched)
+            return false;
+    }
+    // Every vertex block is matched and the pixel buffer holds no other.
+    return blocks == 0;
+}
+
+// A pixel buffer that is the image of a vertex buffer shares its data: a draw
+// snapshots the bytes once for both stages.
+void ShareStageBuffers(CKFFProgramDesc &program)
+{
+    for (int p = 0; p < program.UniformBuffers.Size(); ++p) {
+        CKFFUniformBufferBinding &pixel = program.UniformBuffers[p];
+        if (pixel.Stage != CKRST_SHADER_PIXEL)
+            continue;
+        for (int v = 0; v < program.UniformBuffers.Size(); ++v) {
+            CKFFUniformBufferBinding &vertex = program.UniformBuffers[v];
+            if (vertex.Stage == CKRST_SHADER_VERTEX && SameBlocks(program, vertex, pixel)) {
+                vertex.SharedData = pixel.SharedData = (CKDWORD)v;
+                break;
+            }
+        }
+    }
+}
+
 } // namespace
 
 const CKFFConstantBlockDesc &CKFFConstantBlockInfo(CKFFConstantBlock block)
@@ -174,6 +221,9 @@ CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelSha
                                          stage, 0, offset);
         }
     }
+
+    if (packed && !present)
+        ShareStageBuffers(result);
 
     const CKDWORD samplerCount = present ? 1u : CKFF_SAMPLER_SLOT_COUNT;
     result.Samplers.Reserve((int)samplerCount);

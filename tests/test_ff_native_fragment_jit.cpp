@@ -2425,7 +2425,8 @@ void TestSpecialization() {
             for (int n = 0; n < shader.Nodes.Size(); ++n) {
                 const CKJitNode &node = shader.Nodes[n];
                 if (node.Op == CKJIT_OP_UNIFORM) {
-                    TestCheck(sampled && variant == 2 && node.Imm[0] == ROW_BUMP_ENV + c.Stage * 2 + 1,
+                    TestCheck(sampled && variant == 2 &&
+                                  Natives().Row(node.Imm[1], node.Imm[0]) == ROW_BUMP_ENV + c.Stage * 2 + 1,
                               "a texture stage reads only its LOD bias, and only if it has one");
                 }
                 if (node.Op != CKJIT_OP_SAMPLE)

@@ -1,7 +1,8 @@
 // Ordered native buffer members. Consumed by C++ and the offline compiler.
 // Per-draw matrices and draw parameters are isolated so changing world
 // transforms or material state does not copy and push the complete
-// vertex-stage constant payload.
+// constant payload of a stage. The fragment draw parameters are a buffer of
+// their own, sharing the vertex stage's snapshot.
 CKFF_NATIVE_BLOCK(VERTEX, 0, MATRICES)
 CKFF_NATIVE_BLOCK(VERTEX, 1, DRAW_PARAMS)
 CKFF_NATIVE_BLOCK(VERTEX, 2, VERTEX_BLEND_MATRICES)
@@ -12,9 +13,9 @@ CKFF_NATIVE_BLOCK(VERTEX, 2, STAGE_PARAMS)
 CKFF_NATIVE_BLOCK(VERTEX, 2, CLIP_PLANES)
 CKFF_NATIVE_BLOCK(VERTEX, 2, CLIP_PARAMS)
 CKFF_NATIVE_BLOCK(FRAGMENT, 0, DRAW_PARAMS)
-CKFF_NATIVE_BLOCK(FRAGMENT, 0, BUMP_ENV)
-CKFF_NATIVE_BLOCK(FRAGMENT, 0, STAGE_PARAMS)
-CKFF_NATIVE_BLOCK(FRAGMENT, 0, FRAGMENT_PROGRAM)
-CKFF_NATIVE_METADATA(FRAGMENT, 0, 16)
+CKFF_NATIVE_BLOCK(FRAGMENT, 1, BUMP_ENV)
+CKFF_NATIVE_BLOCK(FRAGMENT, 1, STAGE_PARAMS)
+CKFF_NATIVE_BLOCK(FRAGMENT, 1, FRAGMENT_PROGRAM)
+CKFF_NATIVE_METADATA(FRAGMENT, 1, 16)
 CKFF_NATIVE_BLOCK(PRESENT, 0, PRESENT_PARAMS)
 CKFF_NATIVE_METADATA(PRESENT, 0, 1)
