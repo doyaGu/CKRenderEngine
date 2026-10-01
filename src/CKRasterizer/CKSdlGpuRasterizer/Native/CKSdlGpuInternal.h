@@ -158,6 +158,10 @@ class CKSdlGpuJob;
 struct CKSdlGpuShader {
     std::shared_ptr<SDL_GPUShader> Shader;
     CKShaderDesc Desc;
+    // The sampler slots Shader binds: those of Desc, but a compiled FF
+    // fragment program binds only the slots up to the highest it reads. Set
+    // before Shader is created.
+    CKDWORD SamplerCount = 0;
     // The worker job creating Shader, which the pipelines of the shader wait
     // for, until the job is deleted. Used on the owner's thread only.
     const CKSdlGpuJob *Job = nullptr;
@@ -535,8 +539,8 @@ SDL_GPUSampleCount CKSdlGpuSampleCount(unsigned samples);
 SDL_GPUVertexElementFormat CKSdlGpuVertexFormat(const CKVertexElementDesc &element);
 SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format);
 unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip);
-// The create info of a valid shader description in its SDL format.
-SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKShaderDesc &desc, SDL_GPUShaderFormat format);
+// The create info of a validly described shader in its SDL format.
+SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKSdlGpuShader &shader, SDL_GPUShaderFormat format);
 
 template<class T>
 struct CKSdlGpuResourceDeleter {

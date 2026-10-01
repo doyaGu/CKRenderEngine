@@ -196,6 +196,8 @@ public:
         CKDWORD Shaders = 0;
         // The pipelines of precompiled programs.
         CKDWORD Precompiled = 0;
+        // The sampler slots the ready shaders bind.
+        CKDWORD Samplers = 0;
     };
     FFJitCounts CountFFJitProgramsForTests() const;
 private:
@@ -268,9 +270,12 @@ private:
                                 unsigned SourceMip, unsigned SourceLayer,
                                 unsigned Width, unsigned Height,
                                 SDL_GPUTexture **Snapshot);
+    // The pipeline of a draw, and the program it is of: the draw's, or its
+    // fallback until the worker has created the draw program's own.
     SDL_GPUGraphicsPipeline *Pipeline(
         const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
-        SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples);
+        SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples,
+        const CKSdlGpuProgram **Owner = nullptr);
     // Queues the worker's creation of the pipeline of a program for a draw,
     // unless the program has or awaits it already. The programs are the
     // specialized ones, and the precompiled ones the manifest prewarms.

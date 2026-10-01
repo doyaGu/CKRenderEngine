@@ -124,7 +124,8 @@ public:
                          "FF fragment program compilation failed; drawing it precompiled");
             return;
         }
-        SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(Shader->Desc, Format);
+        Shader->SamplerCount = program.SamplerCount;
+        SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*Shader, Format);
         info.code = reinterpret_cast<const Uint8 *>(code.Begin());
         info.code_size = code.Size() * sizeof(uint32_t);
         Shader->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
@@ -616,12 +617,16 @@ CKSdlGpuRasterizerContext::CountFFJitProgramsForTests() const
     FFJitCounts counts;
     for (int i = 0; i < m_FFJitPrograms.Size(); ++i) {
         const FFJitProgram &entry = m_FFJitPrograms[i];
-        if (entry.State == FFJitProgram::QUEUED)
+        if (entry.State == FFJitProgram::QUEUED) {
             ++counts.Queued;
-        else if (entry.State == FFJitProgram::READY)
+        } else if (entry.State == FFJitProgram::READY) {
             ++counts.Ready;
-        else
+            const std::shared_ptr<CKSdlGpuShader> &shader = ShaderObjects.Borrow(entry.PixelShader);
+            if (shader)
+                counts.Samplers += shader->SamplerCount;
+        } else {
             ++counts.Rejected;
+        }
         for (int b = 0; b < entry.Programs.Size(); ++b) {
             const std::shared_ptr<CKSdlGpuProgram> &program =
                 Programs.Borrow(entry.Programs[b].Program);

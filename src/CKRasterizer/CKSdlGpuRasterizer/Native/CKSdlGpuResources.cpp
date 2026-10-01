@@ -749,13 +749,14 @@ SDL_GPUShaderFormat CKSdlGpuRasterizerContext::NativeShaderFormat(
     return SDL_GPU_SHADERFORMAT_INVALID;
 }
 
-SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKShaderDesc &desc, SDL_GPUShaderFormat format)
+SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKSdlGpuShader &shader, SDL_GPUShaderFormat format)
 {
+    const CKShaderDesc &desc = shader.Desc;
     SDL_GPUShaderCreateInfo info = {};
     info.code = desc.Code; info.code_size = desc.CodeSize; info.entrypoint = desc.EntryPoint;
     info.format = format;
     info.stage = desc.Stage == CKRST_SHADER_VERTEX ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-    info.num_samplers = desc.SamplerCount; info.num_uniform_buffers = desc.UniformBufferCount;
+    info.num_samplers = shader.SamplerCount; info.num_uniform_buffers = desc.UniformBufferCount;
     return info;
 }
 
@@ -779,7 +780,7 @@ void CKSdlGpuRasterizerContext::ShaderJob::Run()
 {
     for (int i = 0; i < Shaders.Size(); ++i) {
         CKSdlGpuShader &shader = *Shaders[i].Shader;
-        const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(shader.Desc, Shaders[i].Format);
+        const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(shader, Shaders[i].Format);
         shader.Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
         if (shader.Shader) {
             ++Created;
@@ -816,10 +817,11 @@ CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWOR
         (desc->Stage != CKRST_SHADER_VERTEX && desc->Stage != CKRST_SHADER_PIXEL)) return CKERR_INVALIDPARAMETER;
     auto shader = std::make_shared<CKSdlGpuShader>();
     shader->Desc = *desc;
+    shader->SamplerCount = desc->SamplerCount;
     if (job) {
         job->Add(shader, format);
     } else {
-        const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*desc, format);
+        const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*shader, format);
         shader->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
         if (!shader->Shader) return Fail("CreateGPUShader");
     }

@@ -936,6 +936,7 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         SDL_EndGPURenderPass(pass); return Error;
     }
     SDL_GPUGraphicsPipeline *boundPipeline = nullptr;
+    CKDWORD vertexSamplers = 0, fragmentSamplers = 0;
     unsigned boundBindings = UINT32_MAX;
     CKSdlGpuUniformBindings boundUniforms;
     SDL_Rect boundScissor = passRect;
@@ -949,11 +950,15 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
     bool indexBufferBound = false;
     Bindings.MarkReferenced();
     for (auto &draw : Draws) {
-        auto pipeline = Pipeline(draw, colorFormat, depthFormat, samples);
+        const CKSdlGpuProgram *owner = nullptr;
+        auto pipeline = Pipeline(draw, colorFormat, depthFormat, samples, &owner);
         if (!pipeline) { SDL_EndGPURenderPass(pass); return Error; }
         if (boundPipeline != pipeline) {
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             boundPipeline = pipeline;
+            // The draw binds the sampler slots of the shaders of the pipeline.
+            vertexSamplers = owner->Vertex->SamplerCount;
+            fragmentSamplers = owner->Fragment->SamplerCount;
             boundBindings = UINT32_MAX;
             CKRE_PROFILE_VALUE("CKRE.Batch.PipelineBinds", 1);
         }
@@ -992,10 +997,10 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         }
         if (boundBindings != draw.Bindings) {
             const auto &bindings = Bindings[draw.Bindings];
-            if (draw.Program->Vertex->Desc.SamplerCount)
-                SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex, draw.Program->Vertex->Desc.SamplerCount);
-            if (draw.Program->Fragment->Desc.SamplerCount)
-                SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment, draw.Program->Fragment->Desc.SamplerCount);
+            if (vertexSamplers)
+                SDL_BindGPUVertexSamplers(pass, 0, bindings.Vertex, vertexSamplers);
+            if (fragmentSamplers)
+                SDL_BindGPUFragmentSamplers(pass, 0, bindings.Fragment, fragmentSamplers);
             boundBindings = draw.Bindings;
         }
         for (int i = 0; i < draw.Program->UniformLayout.Buffers.Size(); ++i) {

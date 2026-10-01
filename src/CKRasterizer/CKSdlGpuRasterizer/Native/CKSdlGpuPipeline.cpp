@@ -220,7 +220,8 @@ static void DescribePipeline(const CKSdlGpuProgram &program, const CKSdlGpuDraw 
 }
 
 SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw &draw,
-    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
+    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples,
+    const CKSdlGpuProgram **owner)
 {
     const CKSdlGpuPipelineKey key = PipelineKey(draw, color, depth, samples);
     CKSdlGpuProgram *program = draw.Program;
@@ -228,7 +229,10 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         // Never create a specialized pipeline while drawing: queue it once and
         // use the fallback's pipeline until the worker's result is collected.
         CKSdlGpuPipelineEntry *found = program->Pipelines.FindPtr(key);
-        if (found && found->Pipeline) return found->Pipeline.get();
+        if (found && found->Pipeline) {
+            if (owner) *owner = program;
+            return found->Pipeline.get();
+        }
         if (!found) {
             QueuePipeline(draw, color, depth, samples, CKSDLGPU_JOB_NORMAL);
         } else {
@@ -247,6 +251,7 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         if (!found) return nullptr;
     }
     found->Drawn = true;
+    if (owner) *owner = program;
     return found->Pipeline.get();
 }
 

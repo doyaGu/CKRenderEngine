@@ -1007,9 +1007,13 @@ void CheckCompiledFragmentPrograms(Backend &b, const Samples &precompiled)
                "compiled fragment programs: queued=%u ready=%u rejected=%u programs=%u pipelines=%u",
                (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
                (unsigned)counts.Programs, (unsigned)counts.Pipelines);
+    TestCheckf(counts.Samplers < counts.Ready * CKFF_SAMPLER_SLOT_COUNT,
+               "compiled fragment programs bind only the sampler slots they read: %u of %u",
+               (unsigned)counts.Samplers, (unsigned)(counts.Ready * CKFF_SAMPLER_SLOT_COUNT));
     CheckMatchingSamples("compiled", samples, precompiled);
-    printf("  compiled fragment programs: %u shaders, %u programs and %u pipelines match the precompiled pixels\n",
-           (unsigned)counts.Ready, (unsigned)counts.Programs, (unsigned)counts.Pipelines);
+    printf("  compiled fragment programs: %u shaders, %u programs and %u pipelines match the precompiled pixels, binding %u sampler slots\n",
+           (unsigned)counts.Ready, (unsigned)counts.Programs, (unsigned)counts.Pipelines,
+           (unsigned)counts.Samplers);
 }
 
 // Passes the vertex colour through `stages` texture stages. Every count is a
