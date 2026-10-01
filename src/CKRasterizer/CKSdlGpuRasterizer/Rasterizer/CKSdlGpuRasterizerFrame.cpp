@@ -585,6 +585,7 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
     CKDrawCommand nativeDraw;
     nativeDraw.Pipeline = draw.Pipeline;
     nativeDraw.Textures = &drawTextures.NativeBindings;
+    nativeDraw.TextureSlots = drawTextures.NativeSlotMask;
     nativeDraw.Constants = draw.Constants;
     nativeDraw.Marker = draw.Marker;
     nativeDraw.Program = program;

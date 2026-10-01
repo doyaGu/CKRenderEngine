@@ -180,6 +180,9 @@ struct CKTransientIndexData {
 struct CKDrawCommand {
     CKFFPipelineState Pipeline;
     const CKFFTextureBindings *Textures = nullptr;
+    // The slots of Textures that may hold other than CKFFTextureSlot(). A
+    // backend need not read the others.
+    CKDWORD TextureSlots = 0xFFFFFFFFu;
     const CKFFConstantSet *Constants = nullptr;
     const char *Marker = nullptr;
     CKDWORD Program;
