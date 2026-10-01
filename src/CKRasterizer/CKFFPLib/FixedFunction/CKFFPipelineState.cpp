@@ -249,46 +249,74 @@ static void ClearExplicitTextureCombineState(CKDWORD *stageState,
         *stateSetMask &= ~TextureCombineStateMask();
 }
 
-static CKBOOL ResetTextureStageValues(CKFFStateStore &state, int stage,
-                                      CKBOOL markDefaultsSet) {
-    CKDWORD values[CKFF_MAX_TEXTURE_STAGE_STATES] = {};
-    CKDWORD queryValues[CKFF_MAX_TEXTURE_STAGE_STATES] = {};
-    uint64_t setMask = 0;
-    uint64_t queryMask = 0;
+// The state a stage is reset to, built once per stage and reset flavour:
+// plain resets restore the D3D8 query defaults, while bulk material resets
+// mark every non-combine state as explicitly set to its zero value.
+struct CKFFTextureStageReset {
+    CKDWORD Values[CKFF_MAX_TEXTURE_STAGE_STATES];
+    CKDWORD QueryValues[CKFF_MAX_TEXTURE_STAGE_STATES];
+    uint64_t SetMask;
+    uint64_t QueryMask;
+};
 
-    values[CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
-    if (markDefaultsSet) {
+struct CKFFTextureStageResets {
+    CKFFTextureStageReset Stages[2][CKFF_MAX_TEXTURE_STAGES];
+    VxMatrix Identity;
+
+    CKFFTextureStageResets() {
         static_assert(CKRST_TSS_MAXSTATE < 64,
                       "stage states must fit the presence masks");
-        queryMask = ((1ull << CKRST_TSS_MAXSTATE) - 1) &
-                    ~((1ull << CKRST_TSS_OP) - 1);
-        setMask = queryMask & ~TextureCombineStateMask() &
-                  ~(1ull << CKRST_TSS_STAGEBLEND);
-        queryValues[CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
-    } else {
-        values[CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_NONE;
-        for (CKDWORD item = CKRST_TSS_OP;
-             item < CKFF_MAX_TEXTURE_STAGE_STATES; ++item) {
-            queryValues[item] = CKRSTDefaultTextureStageStateValue(
-                stage, (CKRST_TEXTURESTAGESTATETYPE)item);
+        memset(Stages, 0, sizeof(Stages));
+        Identity.SetIdentity();
+        const uint64_t queryMask = ((1ull << CKRST_TSS_MAXSTATE) - 1) &
+                                   ~((1ull << CKRST_TSS_OP) - 1);
+        for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
+            CKFFTextureStageReset &plain = Stages[0][stage];
+            plain.Values[CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
+            plain.Values[CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_NONE;
+            for (CKDWORD item = CKRST_TSS_OP;
+                 item < CKFF_MAX_TEXTURE_STAGE_STATES; ++item) {
+                plain.QueryValues[item] = CKRSTDefaultTextureStageStateValue(
+                    stage, (CKRST_TEXTURESTAGESTATETYPE)item);
+            }
+
+            CKFFTextureStageReset &marked = Stages[1][stage];
+            marked.Values[CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
+            marked.QueryValues[CKRST_TSS_TEXCOORDINDEX] = (CKDWORD)stage;
+            marked.QueryMask = queryMask;
+            marked.SetMask = queryMask & ~TextureCombineStateMask() &
+                             ~(1ull << CKRST_TSS_STAGEBLEND);
         }
     }
+};
 
-    VxMatrix identity;
-    identity.SetIdentity();
+static const CKFFTextureStageResets s_TextureStageResets;
+
+static CKBOOL ResetTextureStageValues(CKFFStateStore &state, int stage,
+                                      CKBOOL markDefaultsSet) {
+    const CKFFTextureStageReset &reset =
+        s_TextureStageResets.Stages[markDefaultsSet ? 1 : 0][stage];
+    const VxMatrix &identity = s_TextureStageResets.Identity;
     const CKBOOL drawChanged =
         state.TextureHandles[stage] != 0 ||
         state.TextureFlags[stage] != 0 ||
-        state.StageStateSetMasks[stage] != setMask ||
-        memcmp(state.StageStates[stage], values, sizeof(values)) != 0 ||
+        state.StageStateSetMasks[stage] != reset.SetMask ||
+        memcmp(state.StageStates[stage], reset.Values, sizeof(reset.Values)) != 0 ||
         state.TexMatrix[stage] != identity;
+    // Materials reset their unused stages every time they become current;
+    // a stage already in its reset state needs no rewrite.
+    if (!drawChanged &&
+        state.StageStateQueryMasks[stage] == reset.QueryMask &&
+        memcmp(state.StageQueryStates[stage], reset.QueryValues,
+               sizeof(reset.QueryValues)) == 0)
+        return FALSE;
 
     state.TextureHandles[stage] = 0;
     state.TextureFlags[stage] = 0;
-    memcpy(state.StageStates[stage], values, sizeof(values));
-    memcpy(state.StageQueryStates[stage], queryValues, sizeof(queryValues));
-    state.StageStateSetMasks[stage] = setMask;
-    state.StageStateQueryMasks[stage] = queryMask;
+    memcpy(state.StageStates[stage], reset.Values, sizeof(reset.Values));
+    memcpy(state.StageQueryStates[stage], reset.QueryValues, sizeof(reset.QueryValues));
+    state.StageStateSetMasks[stage] = reset.SetMask;
+    state.StageStateQueryMasks[stage] = reset.QueryMask;
     state.TexMatrix[stage] = identity;
     return drawChanged;
 }
