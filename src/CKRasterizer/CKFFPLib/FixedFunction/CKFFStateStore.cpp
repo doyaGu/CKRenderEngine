@@ -91,6 +91,7 @@ void CKFFStateStore::Reset()
     memset(StageQueryStates, 0, sizeof(StageQueryStates));
     memset(StageStateSetMasks, 0, sizeof(StageStateSetMasks));
     memset(StageStateQueryMasks, 0, sizeof(StageStateQueryMasks));
+    memset(ResetStageMasks, 0, sizeof(ResetStageMasks));
     memset(UserClipPlanes, 0, sizeof(UserClipPlanes));
 
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {

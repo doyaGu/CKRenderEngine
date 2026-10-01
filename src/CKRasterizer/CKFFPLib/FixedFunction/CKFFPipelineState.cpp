@@ -294,8 +294,16 @@ static const CKFFTextureStageResets s_TextureStageResets;
 
 static CKBOOL ResetTextureStageValues(CKFFStateStore &state, int stage,
                                       CKBOOL markDefaultsSet) {
-    const CKFFTextureStageReset &reset =
-        s_TextureStageResets.Stages[markDefaultsSet ? 1 : 0][stage];
+    const int flavour = markDefaultsSet ? 1 : 0;
+    const CKDWORD stageBit = 1u << stage;
+    // Materials reset their unused stages every time they become current;
+    // a stage untouched since the same reset needs neither compare nor write.
+    if ((state.ResetStageMasks[flavour] & stageBit) != 0)
+        return FALSE;
+    state.ResetStageMasks[flavour] |= stageBit;
+    state.ResetStageMasks[flavour ^ 1] &= ~stageBit;
+
+    const CKFFTextureStageReset &reset = s_TextureStageResets.Stages[flavour][stage];
     const VxMatrix &identity = s_TextureStageResets.Identity;
     const CKBOOL drawChanged =
         state.TextureHandles[stage] != 0 ||
@@ -303,8 +311,6 @@ static CKBOOL ResetTextureStageValues(CKFFStateStore &state, int stage,
         state.StageStateSetMasks[stage] != reset.SetMask ||
         memcmp(state.StageStates[stage], reset.Values, sizeof(reset.Values)) != 0 ||
         state.TexMatrix[stage] != identity;
-    // Materials reset their unused stages every time they become current;
-    // a stage already in its reset state needs no rewrite.
     if (!drawChanged &&
         state.StageStateQueryMasks[stage] == reset.QueryMask &&
         memcmp(state.StageQueryStates[stage], reset.QueryValues,
@@ -383,6 +389,7 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
 
+    m_State.MarkStageWritten(stage);
     m_State.TextureHandles[stage] = snapshot.Texture;
     m_State.TextureFlags[stage] = snapshot.TextureFlags;
     memcpy(m_State.StageStates[stage], snapshot.States, sizeof(m_State.StageStates[stage]));
@@ -409,6 +416,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
         return;
     }
 
+    m_State.MarkStageWritten(stage);
     const CKDWORD oldMirrorOnceMask =
         CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
     const uint64_t stateBit = 1ull << (CKDWORD)type;
@@ -502,6 +510,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
 void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) {
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
+    m_State.MarkStageWritten(stage);
     const CKDWORD oldMirrorOnceMask =
         CKFFResolveMirrorOnceAddressMask(m_State.StageStates[stage]);
     const uint64_t stateBit = 1ull << (CKDWORD)type;
@@ -713,6 +722,7 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
             if (idx < CKFF_MAX_TEXTURE_STAGES) {
                 if (m_State.TexMatrix[idx] == matrix)
                     return;
+                m_State.MarkStageWritten(idx);
                 m_State.TexMatrix[idx] = matrix;
                 OnFixedFunctionStateChanged(CKFF_CHANGE_STATIC_UNIFORM);
             }
@@ -851,6 +861,7 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWO
     const CKDWORD oldFlags = m_State.TextureFlags[stage];
     const CKDWORD oldStaticFlags = CKFFStaticTextureFlags(m_State.TextureFlags[stage]);
     const CKDWORD newStaticFlags = CKFFStaticTextureFlags(normalizedFlags);
+    m_State.MarkStageWritten(stage);
     m_State.TextureHandles[stage] = textureHandle;
     m_State.TextureFlags[stage] = normalizedFlags;
     m_TextureBinder.InvalidateStage(stage);

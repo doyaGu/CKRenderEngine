@@ -39,6 +39,10 @@ struct CKFFStateStore {
     // A bit selects the single stored value, including an explicitly cleared
     // zero. This is independent of the combine-expression explicit mask.
     uint64_t StageStateQueryMasks[CKFF_MAX_TEXTURE_STAGES];
+    // Bit s of ResetStageMasks[flavour] is set while stage s still holds the
+    // image its last reset wrote (flavour 1: material reset marking defaults
+    // set). Every other write to a stage clears its bits.
+    CKDWORD ResetStageMasks[2];
     CKBYTE TexcoordComponentCounts[CKFF_MAX_TEXTURE_STAGES];
 
     float Viewport[4];               // POSITIONT screen -> viewport-relative clip mapping
@@ -71,6 +75,10 @@ struct CKFFStateStore {
     }
     void MarkObjectViewProjectionDirty() {
         m_ObjectViewProjectionDirty = TRUE;
+    }
+    void MarkStageWritten(int stage) {
+        ResetStageMasks[0] &= ~(1u << stage);
+        ResetStageMasks[1] &= ~(1u << stage);
     }
 
     void Reset();
