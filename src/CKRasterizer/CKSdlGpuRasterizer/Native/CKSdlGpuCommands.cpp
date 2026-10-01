@@ -495,72 +495,100 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     bool depthPadStages[CKFF_MAX_TEXTURE_STAGES] = {};
     float depthPadTransforms[CKFF_MAX_TEXTURE_STAGES][4];
     bool hasDepthPad = false;
+    const CKDWORD boundSlots = desc->Textures ? desc->TextureSlots : 0u;
     for (unsigned slot = 0; slot < (unsigned)draw.Program->Interface.Samplers.Size(); ++slot) {
         const auto &decl = draw.Program->Interface.Samplers[slot];
         const bool nativeComparisonSampler =
             slot < draw.Program->CompareSamplerCount;
         static const CKFFTextureSlot emptyBinding;
-        const auto &binding = desc->Textures ? (*desc->Textures)[decl.Slot] : emptyBinding;
-        auto &cached = SamplerBindings[decl.Slot];
-        if (decl.MetadataBufferSlot == UINT32_MAX && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
-            binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
-            return CKERR_NOTIMPLEMENTED;
-        const auto &sourceTexture = binding.Texture ?
-            Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
-        const std::shared_ptr<CKSdlGpuTexture> *textureOwner = &sourceTexture;
-        CKSdlGpuTexture *texture = sourceTexture.get();
-        if (!texture || (texture->Depth &&
-            (texture->Info.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) == 0) ||
-            texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
-            (Target && (sourceTexture == Target->Color || sourceTexture == Target->Depth)))
-            return CKERR_INVALIDPARAMETER;
-        if (nativeComparisonSampler && texture->Depth &&
-            binding.Sampler.CompareFunc != CKRST_COMPARE_NONE &&
-            (binding.ShaderState &
-             CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) == 0 &&
-            (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
-             binding.Sampler.AddressV == CKRST_ADDRESS_BORDER)) {
-            float transform[4];
-            std::shared_ptr<CKSdlGpuTexture> &padded = paddedOwners.Borrow(slot);
-            const CKERROR padError = PrepareDepthPad(
-                sourceTexture, binding.Sampler, padded, transform);
-            if (padError != CK_OK)
-                return padError;
-            textureOwner = &padded;
-            texture = padded.get();
-            if (binding.FixedStage >= CKFF_MAX_TEXTURE_STAGES)
+        const bool bound = ((boundSlots >> decl.Slot) & 1u) != 0;
+        const auto &binding = bound ? (*desc->Textures)[decl.Slot] : emptyBinding;
+        const std::shared_ptr<CKSdlGpuTexture> *textureOwner;
+        const std::shared_ptr<SDL_GPUSampler> *samplerOwner;
+        CKSdlGpuTexture *texture;
+        if (!bound) {
+            // The program's default texture, wrapped without comparison or
+            // padding, needs no validation.
+            textureOwner = &draw.Program->DefaultTextures[slot];
+            texture = textureOwner->get();
+            std::shared_ptr<SDL_GPUSampler> &sampler = draw.Program->DefaultSamplers[slot];
+            if (!sampler) {
+                const CKDWORD samplerMode =
+                    (nativeComparisonSampler ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u) |
+                    (texture->Info.type == SDL_GPU_TEXTURETYPE_3D ? CKSDLGPU_SAMPLER_VOLUME : 0u);
+                sampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode));
+                if (!sampler) return Error;
+            }
+            samplerOwner = &sampler;
+        } else {
+            auto &cached = SamplerBindings[decl.Slot];
+            if (decl.MetadataBufferSlot == UINT32_MAX && (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
+                binding.Sampler.AddressV == CKRST_ADDRESS_BORDER || binding.Sampler.AddressW == CKRST_ADDRESS_BORDER))
+                return CKERR_NOTIMPLEMENTED;
+            const auto &sourceTexture = binding.Texture ?
+                Textures.Borrow(binding.Texture) : draw.Program->DefaultTextures[slot];
+            textureOwner = &sourceTexture;
+            texture = sourceTexture.get();
+            if (!texture || (texture->Depth &&
+                (texture->Info.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) == 0) ||
+                texture->Info.type != draw.Program->DefaultTextures[slot]->Info.type ||
+                (Target && (sourceTexture == Target->Color || sourceTexture == Target->Depth)))
                 return CKERR_INVALIDPARAMETER;
-            depthPadStages[binding.FixedStage] = true;
-            std::memcpy(depthPadTransforms[binding.FixedStage], transform,
-                        sizeof(transform));
-            hasDepthPad = true;
+            if (nativeComparisonSampler && texture->Depth &&
+                binding.Sampler.CompareFunc != CKRST_COMPARE_NONE &&
+                (binding.ShaderState &
+                 CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) == 0 &&
+                (binding.Sampler.AddressU == CKRST_ADDRESS_BORDER ||
+                 binding.Sampler.AddressV == CKRST_ADDRESS_BORDER)) {
+                float transform[4];
+                std::shared_ptr<CKSdlGpuTexture> &padded = paddedOwners.Borrow(slot);
+                const CKERROR padError = PrepareDepthPad(
+                    sourceTexture, binding.Sampler, padded, transform);
+                if (padError != CK_OK)
+                    return padError;
+                textureOwner = &padded;
+                texture = padded.get();
+                if (binding.FixedStage >= CKFF_MAX_TEXTURE_STAGES)
+                    return CKERR_INVALIDPARAMETER;
+                depthPadStages[binding.FixedStage] = true;
+                std::memcpy(depthPadTransforms[binding.FixedStage], transform,
+                            sizeof(transform));
+                hasDepthPad = true;
+            }
+            const CKDWORD samplerMode =
+                (nativeComparisonSampler ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u) |
+                (texture->Info.type == SDL_GPU_TEXTURETYPE_3D ? CKSDLGPU_SAMPLER_VOLUME : 0u);
+            if (!cached.NativeSampler || cached.Mode != samplerMode ||
+                !CKSdlGpuSameSampler(cached.Sampler, binding.Sampler)) {
+                cached.Sampler = binding.Sampler;
+                cached.Mode = samplerMode;
+                cached.NativeSampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode));
+                if (!cached.NativeSampler) return Error;
+            }
+            samplerOwner = &cached.NativeSampler;
         }
-        const CKDWORD samplerMode =
-            (nativeComparisonSampler ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u) |
-            (texture->Info.type == SDL_GPU_TEXTURETYPE_3D ? CKSDLGPU_SAMPLER_VOLUME : 0u);
-        if (!cached.NativeSampler || cached.Mode != samplerMode ||
-            !CKSdlGpuSameSampler(cached.Sampler, binding.Sampler)) {
-            cached.Sampler = binding.Sampler;
-            cached.Mode = samplerMode;
-            cached.NativeSampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode));
-            if (!cached.NativeSampler) return Error;
-        }
+        SDL_GPUSampler *sampler = samplerOwner->get();
         bindingInputs.Textures[slot] = texture;
-        bindingInputs.Samplers[slot] = cached.NativeSampler.get();
+        bindingInputs.Samplers[slot] = sampler;
         bindingInputs.TextureOwners[slot] = textureOwner;
-        bindingInputs.SamplerOwners[slot] = &cached.NativeSampler;
+        bindingInputs.SamplerOwners[slot] = samplerOwner;
         bindingInputs.Hash = (bindingInputs.Hash * 16777619u) ^
             (reinterpret_cast<uintptr_t>(texture) >> 4);
         bindingInputs.Hash = (bindingInputs.Hash * 16777619u) ^
-            (reinterpret_cast<uintptr_t>(cached.NativeSampler.get()) >> 4);
+            (reinterpret_cast<uintptr_t>(sampler) >> 4);
         const CKDWORD metadata = draw.Program->SamplerMetadataOffsets[slot];
         if (metadata == UINT32_MAX) continue;
         const CKDWORD metadataBit = 1u << slot;
-        if ((draw.Program->SamplerMetadataValidMask & metadataBit) != 0 &&
-            CKSdlGpuSameSampler(draw.Program->SamplerMetadata[slot], binding.Sampler))
+        if (bound ? (draw.Program->SamplerMetadataValidMask & metadataBit) != 0 &&
+                        CKSdlGpuSameSampler(draw.Program->SamplerMetadata[slot], binding.Sampler)
+                  : (draw.Program->SamplerMetadataDefaultMask & metadataBit) != 0)
             continue;
         draw.Program->SamplerMetadata[slot] = binding.Sampler;
         draw.Program->SamplerMetadataValidMask |= metadataBit;
+        if (bound)
+            draw.Program->SamplerMetadataDefaultMask &= ~metadataBit;
+        else
+            draw.Program->SamplerMetadataDefaultMask |= metadataBit;
         float rgba[4];
         rgba[0] = float((binding.Sampler.BorderColor >> 16) & 255) / 255;
         rgba[1] = float((binding.Sampler.BorderColor >> 8) & 255) / 255;

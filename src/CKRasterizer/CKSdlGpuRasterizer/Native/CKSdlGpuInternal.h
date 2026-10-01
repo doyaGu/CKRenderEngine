@@ -179,6 +179,11 @@ struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     XArray<CKDWORD> SamplerMetadataOffsets;
     CKSamplerDesc SamplerMetadata[CKFF_TEXTURE_SLOT_COUNT] = {};
     CKDWORD SamplerMetadataValidMask = 0;
+    // The slots whose metadata a draw leaving them default has written.
+    CKDWORD SamplerMetadataDefaultMask = 0;
+    // The native sampler of each slot a draw leaves default, made by its
+    // first such draw, once CompareSamplerCount is set.
+    std::shared_ptr<SDL_GPUSampler> DefaultSamplers[CKFF_TEXTURE_SLOT_COUNT];
     // A queued draw retains its program; private image helpers do too after
     // their public handle is removed. Pipelines follow those exact lifetimes.
     CKSdlGpuPipelineTable Pipelines;
