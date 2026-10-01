@@ -4,6 +4,25 @@
 #include "CKFFProgramLayout.h"
 #include <string.h>
 
+// Batch byte arenas grow geometrically and keep their storage from one batch
+// to the next, so steady-state frames neither reallocate nor recopy earlier
+// draws. An arena that grew past the retention cap is released at reset.
+inline void CKSdlGpuGrowBytes(XArray<CKBYTE> &bytes, int size) {
+    if (size > bytes.Allocated()) {
+        int capacity = bytes.Allocated() ? bytes.Allocated() : 4096;
+        while (capacity < size)
+            capacity = capacity > 0x3fffffff ? size : capacity * 2;
+        bytes.Reserve(capacity);
+    }
+    bytes.Resize(size);
+}
+
+inline void CKSdlGpuResetBytes(XArray<CKBYTE> &bytes) {
+    static const int kRetainedBytes = 4 * 1024 * 1024;
+    if (bytes.Allocated() > kRetainedBytes) bytes.Clear();
+    else bytes.Resize(0);
+}
+
 // Each program remembers which immutable buffer data was last copied in this batch.
 // Offsets remain valid when the arena grows; no caller or packing-cache pointer
 // is retained.
@@ -33,9 +52,9 @@ public:
             if (sameBatch && cursor.Changes[i] == buffer.Change) {
                 offsets[i] = cursor.Offsets[i];
             } else {
-                offsets[i] = unsigned(Data.Size());
                 const int oldSize = Data.Size();
-                Data.Resize(oldSize + (int)buffer.Size);
+                offsets[i] = unsigned(oldSize);
+                CKSdlGpuGrowBytes(Data, oldSize + (int)buffer.Size);
                 memcpy(Data.Begin() + oldSize, source, buffer.Size);
             }
         }
@@ -43,6 +62,12 @@ public:
         memcpy(cursor.Offsets, offsets, sizeof(cursor.Offsets));
         for (int i = 0; i < layout.Buffers.Size(); ++i)
             cursor.Changes[i] = layout.Buffers[i].Change;
+    }
+
+    // Starts the next batch. Offsets from the previous batch become stale.
+    void Reset() {
+        CKSdlGpuResetBytes(Data);
+        if (!++Serial) Serial = 1;
     }
 
     void Clear() {

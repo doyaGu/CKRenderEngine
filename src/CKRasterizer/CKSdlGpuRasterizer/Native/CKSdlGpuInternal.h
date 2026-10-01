@@ -197,6 +197,12 @@ struct CKSdlGpuBinding {
     std::shared_ptr<SDL_GPUSampler> NativeSampler;
 };
 
+// Drops every retained reference but keeps the list storage for reuse.
+template<class T> inline void CKSdlGpuReleaseAll(XClassArray<std::shared_ptr<T>> &resources) {
+    for (auto &resource : resources) resource.reset();
+    resources.Resize(0);
+}
+
 // Resources are retained once per batch. Draw packets and binding groups use raw
 // pointers only while this owner is alive, avoiding shared_ptr atomics per draw.
 class CKSdlGpuDrawResourceBatch {
@@ -248,6 +254,14 @@ public:
         for (int i = 0; i < 2; ++i) m_RecentLayouts[i] = nullptr;
         for (int i = 0; i < 3; ++i) m_RecentBuffers[i] = nullptr;
         Programs.Clear(); Layouts.Clear(); Buffers.Clear(); NativeBuffers.Clear();
+    }
+    // Releases the batch references like Clear, keeping storage for the next batch.
+    void Reset() {
+        m_LastProgram = nullptr;
+        for (int i = 0; i < 2; ++i) m_RecentLayouts[i] = nullptr;
+        for (int i = 0; i < 3; ++i) m_RecentBuffers[i] = nullptr;
+        CKSdlGpuReleaseAll(Programs); CKSdlGpuReleaseAll(Layouts);
+        CKSdlGpuReleaseAll(Buffers); CKSdlGpuReleaseAll(NativeBuffers);
     }
 private:
     XClassArray<std::shared_ptr<CKSdlGpuProgram>> Programs;
@@ -315,6 +329,13 @@ public:
         Groups.Clear();
         RetainedTextures.Clear();
         RetainedSamplers.Clear();
+        ResetBuckets();
+    }
+    // Releases the batch references like Clear, keeping storage for the next batch.
+    void Reset() {
+        Groups.Resize(0);
+        CKSdlGpuReleaseAll(RetainedTextures);
+        CKSdlGpuReleaseAll(RetainedSamplers);
         ResetBuckets();
     }
 private:

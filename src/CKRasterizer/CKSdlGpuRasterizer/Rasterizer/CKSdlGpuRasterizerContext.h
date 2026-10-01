@@ -216,6 +216,8 @@ private:
     bool EnsureCommands();
     CKERROR AcquireSwapchain();
     CKERROR Flush(bool PresentWindow = true);
+    // Empties the queued draw batch, keeping its storage warm.
+    void ResetBatch();
     CKSdlGpuGeometryUpload UploadGeometry(const XArray<CKBYTE> &Vertices,
                                           const XArray<CKBYTE> &Indices);
     CKERROR UploadBuffer(SDL_GPUBuffer *Buffer, unsigned Offset,

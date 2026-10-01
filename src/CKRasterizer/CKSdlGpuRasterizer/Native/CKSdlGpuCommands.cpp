@@ -93,7 +93,7 @@ void CKSdlGpuAppendBytes(XArray<CKBYTE> &destination,
     const int remainder = oldSize % (int)alignment;
     const int alignedSize = remainder
         ? oldSize + (int)alignment - remainder : oldSize;
-    destination.Resize(alignedSize + (int)source.Size);
+    CKSdlGpuGrowBytes(destination, alignedSize + (int)source.Size);
     if (alignedSize > oldSize)
         std::memset(destination.Begin() + oldSize, 0,
                     (size_t)(alignedSize - oldSize));
@@ -802,8 +802,7 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         if (acquired != CK_OK) return acquired;
         // A minimized window has no swapchain image. Resource work still submits.
         if (!Swapchain) {
-            Draws.Clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
-            BatchVertices.Clear(); BatchIndices.Clear(); Pass.ClearFlags = 0;
+            ResetBatch(); Pass.ClearFlags = 0;
             return CK_OK;
         }
     }
@@ -1059,9 +1058,14 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
             if (error != CK_OK) return error;
         }
     }
-    Pass.ClearFlags = 0; Draws.Clear(); DrawResources.Clear(); Uniforms.Clear(); Bindings.Clear();
-    BatchVertices.Clear(); BatchIndices.Clear();
+    Pass.ClearFlags = 0; ResetBatch();
     return CK_OK;
+}
+
+void CKSdlGpuRasterizerContext::ResetBatch()
+{
+    Draws.Resize(0); DrawResources.Reset(); Uniforms.Reset(); Bindings.Reset();
+    CKSdlGpuResetBytes(BatchVertices); CKSdlGpuResetBytes(BatchIndices);
 }
 
 CKERROR CKSdlGpuRasterizerContext::AcquireSwapchain()
