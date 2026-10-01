@@ -44,7 +44,8 @@ enum Register {
     REG_COUNT,
 };
 
-// Rows of their fragment constant buffer (cbuffer CKFragment).
+// The fragment uniform rows, in the order of cbuffer CKFragment. NativeRows
+// maps the rows of the native buffers the shaders read to them.
 enum Row {
     ROW_DRAW_PARAMS = 0,
     ROW_BUMP_ENV = 20,
@@ -67,6 +68,75 @@ struct Texture {
     int32_t Size[3];
     int32_t Levels;
 };
+
+// The fragment row each row of the native fragment uniform buffers holds, as
+// CKFFBuildProgramInterface lays them out; ROW_COUNT where none.
+class NativeRows {
+public:
+    NativeRows() : m_Complete(true) {
+        for (uint32_t buffer = 0; buffer < CKJIT_MAX_UNIFORM_BUFFERS; ++buffer) {
+            for (uint32_t row = 0; row < kMaxRows; ++row)
+                m_Rows[buffer][row] = ROW_COUNT;
+        }
+        // Every sampler layout shares the uniform layout.
+        const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE,
+                                                               CKFF_SAMPLER_LAYOUT_WIDE_2D);
+        const struct {
+            CKFFConstantBlock Id;
+            uint32_t First;
+            uint32_t End;
+        } blocks[] = {
+            {CKRST_BLOCK_DRAW_PARAMS, ROW_DRAW_PARAMS, ROW_BUMP_ENV},
+            {CKRST_BLOCK_BUMP_ENV, ROW_BUMP_ENV, ROW_STAGE_PARAMS},
+            {CKRST_BLOCK_STAGE_PARAMS, ROW_STAGE_PARAMS, ROW_PROGRAM},
+            {CKRST_BLOCK_FRAGMENT_PROGRAM, ROW_PROGRAM, ROW_BORDER_COLOR},
+        };
+        bool mapped[ROW_COUNT] = {};
+        for (int i = 0; i < desc.Uniforms.Size(); ++i) {
+            const CKFFUniformBinding &uniform = desc.Uniforms[i];
+            for (const auto &block : blocks) {
+                if (uniform.Stage == CKRST_SHADER_PIXEL && uniform.Slot == (CKDWORD)block.Id)
+                    Map(uniform.BufferSlot, uniform.Offset / 16u, block.First, block.End - block.First, mapped);
+            }
+        }
+        const CKFFSamplerBinding &sampler = desc.Samplers[0];
+        Map(sampler.MetadataBufferSlot, sampler.BorderColorOffset / 16u, ROW_BORDER_COLOR, CKFF_SAMPLER_SLOT_COUNT,
+            mapped);
+        Map(sampler.MetadataBufferSlot, sampler.SamplerStateOffset / 16u, ROW_SAMPLER_INFO, CKFF_SAMPLER_SLOT_COUNT,
+            mapped);
+        for (bool row : mapped)
+            m_Complete = m_Complete && row;
+    }
+
+    uint32_t Row(uint32_t buffer, uint32_t row) const {
+        return buffer < CKJIT_MAX_UNIFORM_BUFFERS && row < kMaxRows ? m_Rows[buffer][row] : (uint32_t)ROW_COUNT;
+    }
+    // Whether each fragment row is in a native buffer exactly once.
+    bool Complete() const { return m_Complete; }
+
+private:
+    static const uint32_t kMaxRows = 128;
+
+    void Map(uint32_t buffer, uint32_t first, uint32_t row, uint32_t count, bool *mapped) {
+        for (uint32_t i = 0; i < count; ++i) {
+            if (buffer >= CKJIT_MAX_UNIFORM_BUFFERS || first + i >= kMaxRows || mapped[row + i] ||
+                m_Rows[buffer][first + i] != ROW_COUNT) {
+                m_Complete = false;
+                continue;
+            }
+            m_Rows[buffer][first + i] = row + i;
+            mapped[row + i] = true;
+        }
+    }
+
+    uint32_t m_Rows[CKJIT_MAX_UNIFORM_BUFFERS][kMaxRows];
+    bool m_Complete;
+};
+
+const NativeRows &Natives() {
+    static const NativeRows rows;
+    return rows;
+}
 
 struct Fragment {
     float Registers[REG_COUNT][4];
@@ -258,10 +328,13 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
             std::memcpy(out.F, fragment.Registers[input.Register], input.Components * sizeof(float));
             break;
         }
-        case CKJIT_OP_UNIFORM:
-            TestCheck(node.Imm[0] < ROW_COUNT, "uniforms are native constant buffer rows");
-            std::memcpy(out.F, fragment.Uniforms[node.Imm[0]], sizeof(out.F));
+        case CKJIT_OP_UNIFORM: {
+            const uint32_t row = Natives().Row(node.Imm[1], node.Imm[0]);
+            TestCheck(row < ROW_COUNT, "uniforms are native constant buffer rows");
+            if (row < ROW_COUNT)
+                std::memcpy(out.F, fragment.Uniforms[row], sizeof(out.F));
             break;
+        }
         case CKJIT_OP_SWIZZLE:
             for (uint32_t i = 0; i < width; ++i) {
                 out.F[i] = a.F[node.Imm[i]];
@@ -1877,7 +1950,7 @@ bool ReadsOnlyOpenUniforms(const CKJitFragmentShader &shader) {
         const CKJitNode &node = shader.Nodes[n];
         if (node.Op != CKJIT_OP_UNIFORM)
             continue;
-        const uint32_t row = node.Imm[0];
+        const uint32_t row = Natives().Row(node.Imm[1], node.Imm[0]);
         if ((row >= ROW_PROGRAM && row < ROW_BORDER_COLOR) || row == ROW_DRAW_PARAMS + 4 ||
             (row >= ROW_STAGE_PARAMS && row < ROW_PROGRAM && (row - ROW_STAGE_PARAMS) % 2 == 0)) {
             return false;
@@ -2244,7 +2317,19 @@ void TestInterface() {
     for (CKFFSamplerLayout layout : kLayouts) {
         CKJitFragmentShader shader;
         TestCheck(Compile(CKFFNativeFragmentKey(), layout, shader), "the empty key compiles");
-        TestCheck(shader.UniformVec4Count == ROW_COUNT, "the uniform block is the native fragment block");
+        const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE, layout);
+        uint32_t buffers = 0;
+        bool sized = true;
+        for (int i = 0; i < desc.UniformBuffers.Size(); ++i) {
+            const CKFFUniformBufferBinding &binding = desc.UniformBuffers[i];
+            if (binding.Stage != CKRST_SHADER_PIXEL)
+                continue;
+            ++buffers;
+            sized = sized && binding.Slot < shader.UniformBufferCount &&
+                    shader.UniformVec4Counts[binding.Slot] == binding.Size / 16u;
+        }
+        TestCheck(sized && buffers == shader.UniformBufferCount, "the uniform blocks are the native fragment buffers");
+        TestCheck(Natives().Complete(), "the native buffers hold every fragment row once");
         TestCheck(shader.Inputs.Size() == REG_COUNT, "every native varying is declared");
 
         const CKJitInput &position = shader.Inputs[0];

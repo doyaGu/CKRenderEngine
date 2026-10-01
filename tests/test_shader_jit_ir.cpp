@@ -401,7 +401,7 @@ void TestFinish() {
     }
     TestCheck(shader.Inputs.Size() == 2 && std::strcmp(shader.Inputs[0].Semantic, "SV_Position") == 0,
               "every declared input is kept");
-    TestCheck(shader.UniformVec4Count == 4, "the uniform block size is kept");
+    TestCheck(shader.UniformBufferCount == 1 && shader.UniformVec4Counts[0] == 4, "the uniform block size is kept");
 
     TestCheck(b.Finish(color, b.Less(alpha, b.Float(0.5f)), shader), "the program finishes with a discard");
     TestCheck(shader.Discard.IsValid() && shader.Node(shader.Discard).Op == CKJIT_OP_LT, "the discard is kept");
@@ -537,6 +537,48 @@ void TestDump() {
                            "discard %5\n";
     const XString dump = CKJitDump(shader);
     TestCheck(std::strcmp(dump.CStr(), expected) == 0, "the listing names every node");
+}
+
+void TestUniformBuffers() {
+    const uint32_t counts[] = {2, 5, 2};
+    CKJitBuilder b(counts, 3);
+    const CKJitValue first = b.Uniform(1);
+    const CKJitValue other = b.Uniform(1, 1);
+    const CKJitValue last = b.Uniform(1, 4);
+    TestCheck(first.IsValid() && other.IsValid() && last.IsValid() && first.Id != other.Id,
+              "a row is addressed by its buffer");
+    TestCheck(b.Uniform(0, 1).Id == first.Id, "a bare row is in buffer 0");
+    const CKJitValue color = b.Add(b.Mul(first, other), b.Mul(last, b.Uniform(2, 0)));
+    CKJitFragmentShader shader;
+    TestCheck(b.Finish(color, CKJitValue(), shader) && CKJitVerify(shader), "the shader verifies");
+    TestCheck(shader.UniformBufferCount == 3 && shader.UniformVec4Counts[0] == 2 && shader.UniformVec4Counts[1] == 5 &&
+                  shader.UniformVec4Counts[2] == 2 && shader.UniformVec4Counts[3] == 0,
+              "every buffer size is kept");
+    TestCheck(std::strstr(CKJitDump(shader).CStr(), "UNIFORM float4 cb1 c4\n") != nullptr,
+              "the listing names the buffer of a row");
+
+    int uniform = -1;
+    for (int i = 0; i < shader.Nodes.Size(); ++i) {
+        if (shader.Nodes[i].Op == CKJIT_OP_UNIFORM && shader.Nodes[i].Imm[1] == 1 && shader.Nodes[i].Imm[0] == 4)
+            uniform = i;
+    }
+    TestCheck(uniform >= 0, "the program has the row to corrupt");
+    if (uniform < 0)
+        return;
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[uniform].Imm[1] = 3; }),
+              "uniform buffers are declared");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { s.Nodes[uniform].Imm[1] = 2; }),
+              "uniform rows are in their buffer");
+    TestCheck(!VerifiesAfter(shader, [](CKJitFragmentShader &s) { s.UniformBufferCount = CKJIT_MAX_UNIFORM_BUFFERS + 1; }),
+              "uniform buffers are bounded");
+
+    CKJitBuilder undeclared(counts, 3);
+    TestCheck(!undeclared.Uniform(3, 0).IsValid() && undeclared.Failed(), "an undeclared buffer fails");
+    CKJitBuilder outside(counts, 3);
+    TestCheck(!outside.Uniform(2, 2).IsValid() && outside.Failed(), "a row past its buffer fails");
+    const uint32_t many[CKJIT_MAX_UNIFORM_BUFFERS + 1] = {1, 1, 1, 1, 1};
+    CKJitBuilder tooMany(many, CKJIT_MAX_UNIFORM_BUFFERS + 1);
+    TestCheck(tooMany.Failed() && !tooMany.Uniform(0).IsValid(), "too many buffers fail");
 }
 
 void TestTextureAccess() {
@@ -1195,6 +1237,7 @@ int main() {
     framework.Run("failure propagation", TestFailurePropagation);
     framework.Run("verify", TestVerify);
     framework.Run("dump", TestDump);
+    framework.Run("uniform buffers", TestUniformBuffers);
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);
     framework.Run("if regions", TestIfRegions);

@@ -10,7 +10,8 @@
 // operand and type rules in CKJitBuilder and with every backend.
 
 // Leaves. CONSTANT holds the component bit patterns in Imm[0..3], INPUT the
-// shader input index in Imm[0], UNIFORM the float4 row in Imm[0].
+// shader input index in Imm[0], UNIFORM the float4 row Imm[0] of uniform
+// buffer Imm[1].
 CKJIT_OP(CONSTANT,   0, 0)
 CKJIT_OP(INPUT,      0, 0)
 CKJIT_OP(UNIFORM,    0, 0)

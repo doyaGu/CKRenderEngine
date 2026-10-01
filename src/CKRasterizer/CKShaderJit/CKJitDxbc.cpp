@@ -152,6 +152,7 @@ private:
 struct DxbcValue {
     uint32_t File;     // DxbcOperandTemp, Input, Output, ConstantBuffer or Immediate32
     uint32_t Index;    // register, or constant buffer row
+    uint32_t Buffer;   // constant buffer of the row
     uint32_t Count;    // components
     uint32_t Modifier; // DxbcModifierNeg and DxbcModifierAbs bits
     uint32_t Lanes[4]; // register component of every value component
@@ -461,16 +462,18 @@ private:
     uint32_t m_ResourceIds[CKJIT_MAX_SAMPLERS];   // range ids, dense over the used slots
     uint32_t m_SamplerIds[CKJIT_MAX_SAMPLERS];    // range ids, dense over the sampled slots
     bool m_ColorInOutput;
-    bool m_ReadsUniforms;
+    uint32_t m_UniformIds[CKJIT_MAX_UNIFORM_BUFFERS]; // range ids, dense over the read buffers
+    uint32_t m_ReadUniformBuffers;                    // bit per constant buffer read
 };
 
 DxbcEmitter::DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_SampledSlots(0), m_ColorInOutput(false), m_ReadsUniforms(false) {
+    : m_Shader(shader), m_Layout(layout), m_SampledSlots(0), m_ColorInOutput(false), m_ReadUniformBuffers(0) {
     std::memset(m_InputByRegister, 0xff, sizeof(m_InputByRegister));
     std::memset(m_InputReads, 0, sizeof(m_InputReads));
     std::memset(m_SamplerDims, 0xff, sizeof(m_SamplerDims));
     std::memset(m_ResourceIds, 0, sizeof(m_ResourceIds));
     std::memset(m_SamplerIds, 0, sizeof(m_SamplerIds));
+    std::memset(m_UniformIds, 0, sizeof(m_UniformIds));
 }
 
 bool DxbcEmitter::MapInputs() {
@@ -498,8 +501,11 @@ void DxbcEmitter::Analyze() {
         switch (node.Op) {
         case CKJIT_OP_CONSTANT:
         case CKJIT_OP_INPUT:
+            m_Roots[(int)i] = NoRoot;
+            continue;
         case CKJIT_OP_UNIFORM:
             m_Roots[(int)i] = NoRoot;
+            m_ReadUniformBuffers |= 1u << node.Imm[1];
             continue;
         case CKJIT_OP_SWIZZLE:
         case CKJIT_OP_NEG:
@@ -594,6 +600,11 @@ void DxbcEmitter::Analyze() {
         if ((m_SampledSlots >> slot & 1u) != 0)
             m_SamplerIds[slot] = samplers++;
     }
+    uint32_t uniforms = 0;
+    for (uint32_t buffer = 0; buffer < CKJIT_MAX_UNIFORM_BUFFERS; ++buffer) {
+        if ((m_ReadUniformBuffers >> buffer & 1u) != 0)
+            m_UniformIds[buffer] = uniforms++;
+    }
 }
 
 // Leaves name their register or bits and views adjust their operand's; none
@@ -617,11 +628,13 @@ DxbcValue DxbcEmitter::View(const CKJitNode &node) const {
     case CKJIT_OP_UNIFORM:
         value.File = DxbcOperandConstantBuffer;
         value.Index = node.Imm[0];
+        value.Buffer = node.Imm[1];
         return value;
     case CKJIT_OP_SWIZZLE: {
         const DxbcValue &source = m_Values[(int)node.Operands[0]];
         value.File = source.File;
         value.Index = source.Index;
+        value.Buffer = source.Buffer;
         value.Modifier = source.Modifier;
         for (uint32_t k = 0; k < value.Count; ++k) {
             value.Lanes[k] = source.Lanes[node.Imm[k]];
@@ -715,9 +728,8 @@ void DxbcEmitter::Source(const DxbcValue &value, const DxbcReads &reads) {
     if (value.Modifier != 0)
         m_Code.Token(DxbcExtendedModifier | value.Modifier << DxbcModifierShift);
     if (value.File == DxbcOperandConstantBuffer) {
-        m_Code.Token(0); // range id
-        m_Code.Token(m_Layout.UniformBinding);
-        m_ReadsUniforms = true;
+        m_Code.Token(m_UniformIds[value.Buffer]);
+        m_Code.Token(m_Layout.UniformBinding + value.Buffer);
     } else if (value.File == DxbcOperandInput) {
         m_InputReads[value.Index] |= (uint8_t)lanes;
     }
@@ -1124,10 +1136,12 @@ void DxbcEmitter::Translate(uint32_t index) {
 void DxbcEmitter::Declare(DxbcStream &out) const {
     const uint32_t range = DxbcComponents4 | DxbcSelectSwizzle | DxbcSwizzleIdentity << DxbcSelectorShift | DxbcIndex3D;
     out.Instruction(DxbcOpDclGlobalFlags | DxbcRefactoringAllowed, {});
-    if (m_ReadsUniforms) {
-        out.Instruction(DxbcOpDclConstantBuffer, {DxbcOperandConstantBuffer | range, 0, m_Layout.UniformBinding,
-                                                  m_Layout.UniformBinding, m_Shader.UniformVec4Count,
-                                                  m_Layout.UniformSpace});
+    for (uint32_t buffer = 0; buffer < m_Shader.UniformBufferCount; ++buffer) {
+        if ((m_ReadUniformBuffers >> buffer & 1u) != 0) {
+            const uint32_t binding = m_Layout.UniformBinding + buffer;
+            out.Instruction(DxbcOpDclConstantBuffer, {DxbcOperandConstantBuffer | range, m_UniformIds[buffer], binding,
+                                                      binding, m_Shader.UniformVec4Counts[buffer], m_Layout.UniformSpace});
+        }
     }
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
         if ((m_SampledSlots >> slot & 1u) != 0) {

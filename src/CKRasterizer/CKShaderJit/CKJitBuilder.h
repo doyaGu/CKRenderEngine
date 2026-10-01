@@ -21,7 +21,10 @@
 // counts that depend on inputs or carried values (see CKJitIR.h).
 class CKJitBuilder {
 public:
+    // One uniform buffer of uniformVec4Count float4 rows, or
+    // uniformBufferCount of them, up to CKJIT_MAX_UNIFORM_BUFFERS.
     explicit CKJitBuilder(uint32_t uniformVec4Count);
+    CKJitBuilder(const uint32_t *uniformVec4Counts, uint32_t uniformBufferCount);
 
     bool Failed() const { return m_Failed; }
     CKJitType TypeOf(CKJitValue value) const { return m_Nodes[value.Id].Type; }
@@ -36,7 +39,8 @@ public:
     CKJitValue Int(int32_t x);
     CKJitValue Bool(bool x);
     CKJitValue Input(const CKJitInput &input);
-    CKJitValue Uniform(uint32_t row);
+    CKJitValue Uniform(uint32_t row) { return Uniform(0, row); }
+    CKJitValue Uniform(uint32_t buffer, uint32_t row);
 
     // Component routing. Swizzle takes "xyzw" or "rgba" letters.
     CKJitValue Swizzle(CKJitValue value, const char *components);
@@ -241,7 +245,8 @@ private:
     XArray<CKJitValue> m_Yields;  // their then results and carried values
     XArray<CKJitInput> m_Inputs;
     XSHashTable<uint32_t, CKJitNode, NodeHash, NodeEqual> m_Lookup; // of the values seen
-    uint32_t m_UniformVec4Count;
+    uint32_t m_UniformBufferCount;
+    uint32_t m_UniformVec4Counts[CKJIT_MAX_UNIFORM_BUFFERS];
     uint8_t m_SamplerDims[CKJIT_MAX_SAMPLERS]; // 0xff until a slot is used
     bool m_Failed;
 };

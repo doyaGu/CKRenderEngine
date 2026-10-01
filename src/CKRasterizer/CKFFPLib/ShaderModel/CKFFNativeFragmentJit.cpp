@@ -10,14 +10,21 @@ namespace {
 
 const CKDWORD kStageCount = CKFF_FRAGMENT_PROGRAM_STAGE_COUNT;
 
-// Rows of the native fragment uniform block (CKFFBuildProgramInterface).
+// The first row of a block in the native fragment uniform buffers.
+struct UniformBlock {
+    uint32_t Buffer;
+    uint32_t Row;
+};
+
+// The native fragment uniform buffers (CKFFBuildProgramInterface).
 struct UniformRows {
-    uint32_t DrawParams;
-    uint32_t BumpEnv;
-    uint32_t StageParams;
-    uint32_t BorderColor; // of sampler slot 0, the other slots' following
-    uint32_t SamplerInfo; // likewise
-    uint32_t Count;
+    UniformBlock DrawParams;
+    UniformBlock BumpEnv;
+    UniformBlock StageParams;
+    UniformBlock BorderColor; // of sampler slot 0, the other slots' following
+    UniformBlock SamplerInfo; // likewise
+    uint32_t BufferCount;
+    uint32_t Counts[CKJIT_MAX_UNIFORM_BUFFERS]; // float4 rows of each buffer
 };
 
 // u_bumpEnv rows of a stage (CKFFPackBumpEnvUniform).
@@ -46,7 +53,7 @@ bool ResolveUniformRows(CKFFSamplerLayout layout, UniformRows &rows) {
     struct Block {
         CKFFConstantBlock Id;
         uint32_t MinRows;
-        uint32_t *Row;
+        UniformBlock *Rows;
     };
     const Block blocks[] = {
         {CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_VEC4_COUNT, &rows.DrawParams},
@@ -56,19 +63,32 @@ bool ResolveUniformRows(CKFFSamplerLayout layout, UniformRows &rows) {
 
     // Every packed format shares the native layout; SPIR-V stands for them.
     const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE, layout);
-    CKDWORD buffer = UINT32_MAX;
+    rows.BufferCount = 0;
+    std::memset(rows.Counts, 0, sizeof(rows.Counts));
+    for (int i = 0; i < desc.UniformBuffers.Size(); ++i) {
+        const CKFFUniformBufferBinding &binding = desc.UniformBuffers[i];
+        if (binding.Stage != CKRST_SHADER_PIXEL)
+            continue;
+        if (binding.Slot >= CKJIT_MAX_UNIFORM_BUFFERS)
+            return false;
+        rows.Counts[binding.Slot] = binding.Size / 16u;
+        if (binding.Slot >= rows.BufferCount)
+            rows.BufferCount = binding.Slot + 1u;
+    }
+    // A block's rows all lie in its buffer.
+    auto fits = [&rows](const UniformBlock &block, uint32_t count) {
+        return block.Buffer < rows.BufferCount && block.Row + count <= rows.Counts[block.Buffer];
+    };
+
     for (const Block &block : blocks) {
         bool found = false;
         for (int i = 0; i < desc.Uniforms.Size(); ++i) {
             const CKFFUniformBinding &uniform = desc.Uniforms[i];
             if (uniform.Stage != CKRST_SHADER_PIXEL || uniform.Slot != (CKDWORD)block.Id)
                 continue;
-            if (uniform.Offset % 16u != 0 || uniform.Count < block.MinRows ||
-                (buffer != UINT32_MAX && uniform.BufferSlot != buffer)) {
+            *block.Rows = {(uint32_t)uniform.BufferSlot, (uint32_t)uniform.Offset / 16u};
+            if (uniform.Offset % 16u != 0 || uniform.Count < block.MinRows || !fits(*block.Rows, block.MinRows))
                 return false;
-            }
-            buffer = uniform.BufferSlot;
-            *block.Row = uniform.Offset / 16u;
             found = true;
             break;
         }
@@ -76,31 +96,23 @@ bool ResolveUniformRows(CKFFSamplerLayout layout, UniformRows &rows) {
             return false;
     }
 
-    rows.Count = 0;
-    for (int i = 0; i < desc.UniformBuffers.Size(); ++i) {
-        const CKFFUniformBufferBinding &binding = desc.UniformBuffers[i];
-        if (binding.Stage == CKRST_SHADER_PIXEL && binding.Slot == buffer)
-            rows.Count = binding.Size / 16u;
-    }
-
     // The border colours and sampler metadata the shader-sampling shaders
-    // read: a row of each per sampler slot, in the same buffer.
+    // read: a row of each per sampler slot, in one buffer.
     if (desc.Samplers.Size() != CKFF_SAMPLER_SLOT_COUNT)
         return false;
     for (int slot = 0; slot < desc.Samplers.Size(); ++slot) {
         const CKFFSamplerBinding &sampler = desc.Samplers[slot];
         if (slot == 0) {
-            rows.BorderColor = sampler.BorderColorOffset / 16u;
-            rows.SamplerInfo = sampler.SamplerStateOffset / 16u;
+            rows.BorderColor = {(uint32_t)sampler.MetadataBufferSlot, (uint32_t)sampler.BorderColorOffset / 16u};
+            rows.SamplerInfo = {(uint32_t)sampler.MetadataBufferSlot, (uint32_t)sampler.SamplerStateOffset / 16u};
         }
-        if (sampler.NativeSlot != (CKDWORD)slot || sampler.MetadataBufferSlot != buffer ||
-            sampler.BorderColorOffset != (rows.BorderColor + slot) * 16u ||
-            sampler.SamplerStateOffset != (rows.SamplerInfo + slot) * 16u) {
+        if (sampler.NativeSlot != (CKDWORD)slot || sampler.MetadataBufferSlot != rows.BorderColor.Buffer ||
+            sampler.BorderColorOffset != (rows.BorderColor.Row + slot) * 16u ||
+            sampler.SamplerStateOffset != (rows.SamplerInfo.Row + slot) * 16u) {
             return false;
         }
     }
-    return rows.Count != 0 && rows.BorderColor + CKFF_SAMPLER_SLOT_COUNT <= rows.Count &&
-           rows.SamplerInfo + CKFF_SAMPLER_SLOT_COUNT <= rows.Count;
+    return fits(rows.BorderColor, CKFF_SAMPLER_SLOT_COUNT) && fits(rows.SamplerInfo, CKFF_SAMPLER_SLOT_COUNT);
 }
 
 // ---------------------------------------------------------------------------
@@ -393,18 +405,19 @@ struct BilinearTexels {
 class NativeFragmentCompiler {
 public:
     NativeFragmentCompiler(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout, const UniformRows &rows)
-        : m_B(rows.Count), m_Program(key.Program), m_Switches(key.Switches), m_Layout(layout),
+        : m_B(rows.Counts, rows.BufferCount), m_Program(key.Program), m_Switches(key.Switches), m_Layout(layout),
           m_Comparisons(Comparisons(key.Switches, layout)), m_Rows(rows) {}
 
     bool Compile(CKJitFragmentShader &out);
 
 private:
-    CKJitValue DrawParam(CKFFDrawParamSlot slot) { return m_B.Uniform(m_Rows.DrawParams + slot); }
+    CKJitValue Uniform(const UniformBlock &block, uint32_t row) { return m_B.Uniform(block.Buffer, block.Row + row); }
+    CKJitValue DrawParam(CKFFDrawParamSlot slot) { return Uniform(m_Rows.DrawParams, slot); }
     CKJitValue BumpEnv(CKDWORD stage, BumpEnvRow row) {
-        return m_B.Uniform(m_Rows.BumpEnv + stage * BUMP_ENV_ROWS_PER_STAGE + row);
+        return Uniform(m_Rows.BumpEnv, stage * BUMP_ENV_ROWS_PER_STAGE + row);
     }
     CKJitValue StageParam(CKDWORD stage, CKFFStageParamSlot slot) {
-        return m_B.Uniform(m_Rows.StageParams + CKFFStageParamIndex(stage, slot));
+        return Uniform(m_Rows.StageParams, CKFFStageParamIndex(stage, slot));
     }
     CKDWORD StageField(CKDWORD stage, CKFFFragmentProgramStageField field) const {
         return m_Program.GetStage(stage, field);
@@ -786,13 +799,13 @@ CKJitValue NativeFragmentCompiler::ShaderSample3D(CKDWORD stage, uint32_t slot, 
 // sampling it.
 ShaderSampler NativeFragmentCompiler::Sampler(CKDWORD stage, uint32_t slot, CKJitSamplerDim dim) {
     const CKJitValue state = m_B.FloatToInt(m_B.Component(BumpEnv(stage, BUMP_ENV_LUMINANCE), 3));
-    const CKJitValue info = m_B.Uniform(m_Rows.SamplerInfo + slot);
+    const CKJitValue info = Uniform(m_Rows.SamplerInfo, slot);
     const CKJitValue modes = m_B.FloatToInt(m_B.Component(info, 0));
     ShaderSampler sampler;
     sampler.Slot = slot;
     sampler.Dim = dim;
     sampler.BlendsBorder = false;
-    sampler.Border = m_B.Uniform(m_Rows.BorderColor + slot);
+    sampler.Border = Uniform(m_Rows.BorderColor, slot);
     sampler.Info = info;
     sampler.Modes = dim == CKJIT_SAMPLER_3D
         ? m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15), Bits(modes, 8, 15)})
@@ -1102,14 +1115,14 @@ CKJitValue NativeFragmentCompiler::CompareSample2D(CKDWORD stage, CKJitValue coo
     const CKJitValue dx = m_B.Ddx(original);
     const CKJitValue dy = m_B.Ddy(original);
     const uint32_t ordinal = m_Program.GetSamplerOrdinal(stage);
-    const CKJitValue info = m_B.Uniform(m_Rows.SamplerInfo + ordinal);
+    const CKJitValue info = Uniform(m_Rows.SamplerInfo, ordinal);
     const CKJitValue modes = m_B.FloatToInt(m_B.Component(info, 0));
     const CKJitValue packed = m_B.FloatToInt(m_B.Component(info, 3));
     DepthComparison comparison;
     comparison.Declared = SamplerDeclared(m_Program, stage, m_Layout, m_Comparisons);
     comparison.Slot = comparison.Declared ? CKFFSamplerSlot(CKFF_SAMPLER_DEPTH, ordinal, m_Layout) : 0;
     comparison.Dim = m_Comparisons != 0 ? CKJIT_SAMPLER_2D_COMPARE : CKJIT_SAMPLER_2D;
-    comparison.Border = m_B.Component(m_B.Uniform(m_Rows.BorderColor + ordinal), 0);
+    comparison.Border = m_B.Component(Uniform(m_Rows.BorderColor, ordinal), 0);
     comparison.Modes = m_B.Construct({Bits(modes, 0, 15), Bits(modes, 4, 15)});
     comparison.MipFilter = Bits(packed, 0, 15);
     comparison.Levels = comparison.Declared ? m_B.TextureLevels(comparison.Slot, comparison.Dim) : m_B.Int(1);

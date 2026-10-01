@@ -241,6 +241,8 @@ bool CKJitTextureAccepts(CKJitOp op, CKJitSamplerDim dim) {
 }
 
 bool CKJitVerify(const CKJitFragmentShader &shader) {
+    if (shader.UniformBufferCount > CKJIT_MAX_UNIFORM_BUFFERS)
+        return false;
     for (int i = 0; i < shader.Inputs.Size(); ++i) {
         const CKJitInput &input = shader.Inputs[i];
         if (input.Components < 1 || input.Components > 4 || input.Kind > CKJIT_INPUT_FRAG_COORD ||
@@ -287,8 +289,10 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
             }
             break;
         case CKJIT_OP_UNIFORM:
-            if (node.Imm[0] >= shader.UniformVec4Count || node.Type != CKJIT_TYPE_FLOAT4)
+            if (node.Imm[1] >= shader.UniformBufferCount ||
+                node.Imm[0] >= shader.UniformVec4Counts[node.Imm[1]] || node.Type != CKJIT_TYPE_FLOAT4) {
                 return false;
+            }
             break;
         case CKJIT_OP_SWIZZLE: {
             const CKJitType source = shader.Nodes[(int)node.Operands[0]].Type;
@@ -341,6 +345,8 @@ XString CKJitDump(const CKJitFragmentShader &shader) {
             break;
         }
         case CKJIT_OP_UNIFORM:
+            if (node.Imm[1] != 0)
+                Append(out, " cb%u", node.Imm[1]);
             Append(out, " c%u", node.Imm[0]);
             break;
         case CKJIT_OP_SWIZZLE:

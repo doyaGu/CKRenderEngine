@@ -233,7 +233,7 @@ private:
     uint32_t Enter(uint32_t label);
 
     void DeclareInterface();
-    uint32_t UniformBlock();
+    uint32_t UniformBlock(uint32_t buffer);
     uint32_t ImageType(uint32_t dim);
     uint32_t SampledImage(const CKJitNode &node);
     uint32_t Image(const CKJitNode &node);
@@ -266,7 +266,7 @@ private:
     uint32_t m_Main;
     uint32_t m_GlslImport;
     uint32_t m_Output;
-    uint32_t m_UniformBlock;
+    uint32_t m_UniformBlocks[CKJIT_MAX_UNIFORM_BUFFERS]; // declared on first read
     bool m_ImageQuery; // a size, level or LOD query needs the capability
 };
 
@@ -283,8 +283,9 @@ int SpirvEmitter::DeclarationEqual::operator()(const Declaration &a, const Decla
 }
 
 SpirvEmitter::SpirvEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Block(0), m_Output(0), m_UniformBlock(0),
+    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Block(0), m_Output(0),
       m_ImageQuery(false) {
+    std::memset(m_UniformBlocks, 0, sizeof(m_UniformBlocks));
     std::memset(m_SampledImages, 0, sizeof(m_SampledImages));
     std::memset(m_Images, 0, sizeof(m_Images));
     m_Main = NewId();
@@ -403,19 +404,26 @@ void SpirvEmitter::DeclareInterface() {
     m_Interface.PushBack(m_Output);
 }
 
-// struct { float4 rows[UniformVec4Count]; }, declared when first read.
-uint32_t SpirvEmitter::UniformBlock() {
-    if (m_UniformBlock == 0) {
-        const uint32_t rows = DeclareType(SpvOpTypeArray, {FloatType(4), IntConstant((int32_t)m_Shader.UniformVec4Count)});
-        Decorate(rows, SpvDecorationArrayStride, 16);
+// struct { float4 rows[UniformVec4Counts[buffer]]; }, declared when first
+// read. Buffers of one size share the block type, decorated once.
+uint32_t SpirvEmitter::UniformBlock(uint32_t buffer) {
+    if (m_UniformBlocks[buffer] == 0) {
+        const uint32_t count = m_Shader.UniformVec4Counts[buffer];
+        const uint32_t rows = DeclareType(SpvOpTypeArray, {FloatType(4), IntConstant((int32_t)count)});
         const uint32_t block = DeclareType(SpvOpTypeStruct, {rows});
-        m_Annotations.Emit(SpvOpMemberDecorate, {block, 0, SpvDecorationOffset, 0});
-        m_Annotations.Emit(SpvOpDecorate, {block, SpvDecorationBlock});
-        m_UniformBlock = Variable(SpvStorageClassUniform, block);
-        Decorate(m_UniformBlock, SpvDecorationDescriptorSet, m_Layout.UniformSpace);
-        Decorate(m_UniformBlock, SpvDecorationBinding, m_Layout.UniformBinding);
+        bool decorated = false;
+        for (uint32_t other = 0; other < m_Shader.UniformBufferCount; ++other)
+            decorated = decorated || (m_UniformBlocks[other] != 0 && m_Shader.UniformVec4Counts[other] == count);
+        if (!decorated) {
+            Decorate(rows, SpvDecorationArrayStride, 16);
+            m_Annotations.Emit(SpvOpMemberDecorate, {block, 0, SpvDecorationOffset, 0});
+            m_Annotations.Emit(SpvOpDecorate, {block, SpvDecorationBlock});
+        }
+        m_UniformBlocks[buffer] = Variable(SpvStorageClassUniform, block);
+        Decorate(m_UniformBlocks[buffer], SpvDecorationDescriptorSet, m_Layout.UniformSpace);
+        Decorate(m_UniformBlocks[buffer], SpvDecorationBinding, m_Layout.UniformBinding + buffer);
     }
-    return m_UniformBlock;
+    return m_UniformBlocks[buffer];
 }
 
 uint32_t SpirvEmitter::ImageType(uint32_t dim) {
@@ -626,7 +634,7 @@ uint32_t SpirvEmitter::Translate(uint32_t index) {
     case CKJIT_OP_INPUT: return Op(SpvOpLoad, type, {m_Inputs[(int)node.Imm[0]]});
     case CKJIT_OP_UNIFORM: {
         const uint32_t row = Op(SpvOpAccessChain, PointerType(SpvStorageClassUniform, type),
-                                {UniformBlock(), IntConstant(0), IntConstant((int32_t)node.Imm[0])});
+                                {UniformBlock(node.Imm[1]), IntConstant(0), IntConstant((int32_t)node.Imm[0])});
         return Op(SpvOpLoad, type, {row});
     }
     case CKJIT_OP_SWIZZLE: return Swizzle(node);

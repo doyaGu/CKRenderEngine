@@ -177,7 +177,16 @@ int CKJitBuilder::NodeEqual::operator()(const CKJitNode &a, const CKJitNode &b) 
 }
 
 CKJitBuilder::CKJitBuilder(uint32_t uniformVec4Count)
-    : m_UniformVec4Count(uniformVec4Count), m_Failed(false) {
+    : CKJitBuilder(&uniformVec4Count, 1) {}
+
+CKJitBuilder::CKJitBuilder(const uint32_t *uniformVec4Counts, uint32_t uniformBufferCount)
+    : m_UniformBufferCount(0), m_Failed(uniformBufferCount > CKJIT_MAX_UNIFORM_BUFFERS) {
+    std::memset(m_UniformVec4Counts, 0, sizeof(m_UniformVec4Counts));
+    if (!m_Failed) {
+        m_UniformBufferCount = uniformBufferCount;
+        for (uint32_t buffer = 0; buffer < uniformBufferCount; ++buffer)
+            m_UniformVec4Counts[buffer] = uniformVec4Counts[buffer];
+    }
     std::memset(m_SamplerDims, 0xff, sizeof(m_SamplerDims));
     m_OpenScopes.PushBack(1);
 }
@@ -339,10 +348,10 @@ CKJitValue CKJitBuilder::Input(const CKJitInput &input) {
     return Emit(CKJIT_OP_INPUT, CKJitFloatType(input.Components), {}, {index});
 }
 
-CKJitValue CKJitBuilder::Uniform(uint32_t row) {
-    if (row >= m_UniformVec4Count)
+CKJitValue CKJitBuilder::Uniform(uint32_t buffer, uint32_t row) {
+    if (buffer >= m_UniformBufferCount || row >= m_UniformVec4Counts[buffer])
         return Fail();
-    return Emit(CKJIT_OP_UNIFORM, CKJIT_TYPE_FLOAT4, {}, {row});
+    return Emit(CKJIT_OP_UNIFORM, CKJIT_TYPE_FLOAT4, {}, {row, buffer});
 }
 
 CKJitBuilder::ComponentRef CKJitBuilder::Source(CKJitValue value, uint32_t component) const {
@@ -1199,7 +1208,8 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
         }
     }
     out.Inputs = m_Inputs;
-    out.UniformVec4Count = m_UniformVec4Count;
+    out.UniformBufferCount = m_UniformBufferCount;
+    std::memcpy(out.UniformVec4Counts, m_UniformVec4Counts, sizeof(out.UniformVec4Counts));
     out.Color = CKJitValue{remap[color.Id]};
     out.Discard = discard.IsValid() ? CKJitValue{remap[discard.Id]} : CKJitValue();
     return true;

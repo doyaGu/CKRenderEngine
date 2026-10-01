@@ -440,15 +440,22 @@ void CheckProgram(const XArray<uint32_t> &words) {
     if (!program.WellFormed())
         return;
 
-    uint32_t temps = 0, uniformRows = 0, inputMasks[32] = {}, samplers = 0, resources = 0;
-    bool uniforms = false;
+    uint32_t temps = 0, inputMasks[32] = {}, samplers = 0, resources = 0;
+    uint32_t uniforms = 0, uniformRegisters[CKJIT_MAX_UNIFORM_BUFFERS] = {};
+    uint32_t uniformRows[CKJIT_MAX_UNIFORM_BUFFERS] = {};
     for (int i = 0; i < program.FirstCode(); ++i) {
         const Instruction &dcl = program[i];
         switch (dcl.Opcode) {
         case kOpDclTemps: temps = dcl.Tokens[0]; break;
         case kOpDclConstantBuffer:
-            uniforms = true;
-            uniformRows = dcl.Tokens[4];
+            TestCheck(dcl.Tokens[1] == uniforms && uniforms < CKJIT_MAX_UNIFORM_BUFFERS &&
+                          dcl.Tokens[2] == dcl.Tokens[3] &&
+                          (uniforms == 0 || dcl.Tokens[2] > uniformRegisters[uniforms - 1]),
+                      "uniform blocks are single registers, in order, with dense range ids");
+            if (uniforms < CKJIT_MAX_UNIFORM_BUFFERS) {
+                uniformRegisters[uniforms] = dcl.Tokens[2];
+                uniformRows[uniforms++] = dcl.Tokens[4];
+            }
             break;
         case kOpDclSampler: samplers |= 1u << dcl.Tokens[2]; break;
         case kOpDclResource: resources |= 1u << dcl.Tokens[2]; break;
@@ -526,8 +533,9 @@ void CheckProgram(const XArray<uint32_t> &words) {
                 break;
             }
             case kOperandConstantBuffer:
-                TestCheck(uniforms && source.IndexCount == 3 && source.Indices[0] == 0 &&
-                              source.Indices[2] < uniformRows,
+                TestCheck(source.IndexCount == 3 && source.Indices[0] < uniforms &&
+                              source.Indices[1] == uniformRegisters[source.Indices[0] % CKJIT_MAX_UNIFORM_BUFFERS] &&
+                              source.Indices[2] < uniformRows[source.Indices[0] % CKJIT_MAX_UNIFORM_BUFFERS],
                           "uniform rows are within the declared block");
                 break;
             case kOperandResource:
@@ -895,6 +903,44 @@ void TestResources() {
     TestCheck(multiply >= 0 && other[multiply].Operands[2].Type == kOperandConstantBuffer &&
                   other[multiply].Operands[2].Indices[1] == 4 && other[multiply].Operands[2].Indices[2] == 5,
               "uniform reads address the block's register");
+}
+
+void TestUniformBuffers() {
+    // Buffer 1 is never read.
+    const uint32_t counts[] = {4, 6, 5};
+    CKJitBuilder b(counts, 3);
+    const CKJitValue first = b.Uniform(0, 3);
+    const CKJitValue last = b.Uniform(2, 4);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Mul(first, last), CKJitValue(), words, {3, 1, 2}), "the shader compiles");
+    Save("uniform_buffers", words);
+
+    const Container container(words);
+    const Program program(container.Find("SHEX"));
+    const int block = program.Find(kOpDclConstantBuffer);
+    TestCheck(block >= 0 && program.Count(kOpDclConstantBuffer) == 2, "a block per buffer read");
+    if (block < 0 || program.Count(kOpDclConstantBuffer) != 2)
+        return;
+    const Instruction &zero = program[block];
+    const Instruction &two = program[block + 1];
+    TestCheck(zero.Tokens[1] == 0 && zero.Tokens[2] == 1 && zero.Tokens[3] == 1 && zero.Tokens[4] == 4 &&
+                  zero.Tokens[5] == 3 && two.Tokens[1] == 1 && two.Tokens[2] == 3 && two.Tokens[3] == 3 &&
+                  two.Tokens[4] == 5 && two.Tokens[5] == 3,
+              "buffer b is register b1 + b in space 3, with a dense range id");
+    int reads = 0;
+    for (int i = program.FirstCode(); i < program.Size(); ++i) {
+        const Instruction &instruction = program[i];
+        for (uint32_t operand = 0; operand < instruction.OperandCount; ++operand) {
+            const Operand &uniform = instruction.Operands[operand];
+            if (uniform.Type != kOperandConstantBuffer)
+                continue;
+            ++reads;
+            TestCheck((uniform.Indices[0] == 0 && uniform.Indices[1] == 1 && uniform.Indices[2] == 3) ||
+                          (uniform.Indices[0] == 1 && uniform.Indices[1] == 3 && uniform.Indices[2] == 4),
+                      "a read addresses its buffer's range and register");
+        }
+    }
+    TestCheck(reads == 2, "each row is read once");
 }
 
 void TestLowering() {
@@ -1566,6 +1612,7 @@ int main(int argc, char **argv) {
     framework.Run("matches fxc", TestMatchesFxc);
     framework.Run("interface", TestInterface);
     framework.Run("resources", TestResources);
+    framework.Run("uniform buffers", TestUniformBuffers);
     framework.Run("lowering", TestLowering);
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);

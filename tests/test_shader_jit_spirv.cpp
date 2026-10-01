@@ -487,6 +487,32 @@ void TestResources() {
               "the resource layout places the block and the samplers");
 }
 
+void TestUniformBuffers() {
+    // Buffers 0 and 2 have one size and 1 another; 3 is never read.
+    const uint32_t counts[] = {4, 6, 4, 2};
+    CKJitBuilder b(counts, 4);
+    const CKJitValue first = b.Uniform(0, 3);
+    const CKJitValue second = b.Uniform(1, 5);
+    const CKJitValue third = b.Uniform(2, 1);
+    XArray<uint32_t> words;
+    TestCheck(Compile(b, b.Add(b.Mul(first, second), third), CKJitValue(), words, {3, 1, 2}), "the shader compiles");
+    Save("uniform_buffers", words);
+
+    const Module module(words);
+    TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageUniform}) == 3, "a block per buffer read");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBlock}) == 2 &&
+                  module.Count(kOpMemberDecorate, {kAny, 0, kDecorationOffset, 0}) == 2 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationArrayStride, 16}) == 2,
+              "buffers of one size share a block type, decorated once");
+    TestCheck(module.Count(kOpDecorate, {kAny, kDecorationDescriptorSet, 3}) == 3 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationBinding, 1}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationBinding, 2}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationBinding, 3}) == 1 &&
+                  module.Count(kOpDecorate, {kAny, kDecorationBinding, 4}) == 0,
+              "buffer b binds at the layout's uniform binding plus b");
+    TestCheck(module.Count(kOpAccessChain) == 3, "each row is read once");
+}
+
 void TestLowering() {
     CKJitBuilder b(89);
     CKJitValue color, discard;
@@ -993,6 +1019,7 @@ int main(int argc, char **argv) {
     framework.Run("module layout", TestModuleLayout);
     framework.Run("interface", TestInterface);
     framework.Run("resources", TestResources);
+    framework.Run("uniform buffers", TestUniformBuffers);
     framework.Run("lowering", TestLowering);
     framework.Run("texture access", TestTextureAccess);
     framework.Run("depth comparison", TestDepthComparison);

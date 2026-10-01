@@ -82,6 +82,7 @@ enum CKJitSamplerDim : uint8_t {
 bool CKJitTextureAccepts(CKJitOp op, CKJitSamplerDim dim);
 
 static const uint32_t CKJIT_MAX_SAMPLERS = 16;
+static const uint32_t CKJIT_MAX_UNIFORM_BUFFERS = 4;
 
 enum CKJitInputKind : uint8_t {
     CKJIT_INPUT_SMOOTH,     // perspective-correct varying
@@ -127,18 +128,20 @@ static_assert(sizeof(CKJitNode) == 36, "CKJitNode must not contain padding");
 struct CKJitFragmentShader {
     XArray<CKJitInput> Inputs;
     XArray<CKJitNode> Nodes;
-    uint32_t UniformVec4Count = 0; // float4 rows of the fragment uniform block
+    uint32_t UniformBufferCount = 0;                            // fragment uniform blocks
+    uint32_t UniformVec4Counts[CKJIT_MAX_UNIFORM_BUFFERS] = {}; // float4 rows of each
     CKJitValue Color;              // FLOAT4 written to render target 0
     CKJitValue Discard;            // optional scalar BOOL; true discards the fragment
 
     const CKJitNode &Node(CKJitValue value) const { return Nodes[(int)value.Id]; }
 };
 
-// Where a backend places the fragment resources. Sampler slot s is one
-// combined texture and sampler at binding (register) s of SamplerSpace.
+// Where a backend places the fragment resources. Uniform buffer b is at
+// binding (register) UniformBinding + b of UniformSpace and sampler slot s is
+// one combined texture and sampler at binding (register) s of SamplerSpace.
 struct CKJitResourceLayout {
     uint32_t UniformSpace;   // SPIR-V descriptor set / DXBC register space
-    uint32_t UniformBinding; // SPIR-V binding / DXBC constant buffer register
+    uint32_t UniformBinding; // SPIR-V binding / DXBC constant buffer register of buffer 0
     uint32_t SamplerSpace;
 };
 

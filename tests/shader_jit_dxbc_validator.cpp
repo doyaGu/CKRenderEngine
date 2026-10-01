@@ -172,20 +172,24 @@ bool Validator::CreateRootSignature(UINT samplerSpace, UINT uniformSpace, ComPtr
     ranges[1].NumDescriptors = CKJIT_MAX_SAMPLERS;
     ranges[1].RegisterSpace = samplerSpace;
 
-    D3D12_ROOT_PARAMETER parameters[3] = {};
+    // Like SDL_gpu, a root constant buffer view per uniform buffer.
+    D3D12_ROOT_PARAMETER parameters[2 + CKJIT_MAX_UNIFORM_BUFFERS] = {};
     for (int i = 0; i < 2; ++i) {
         parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         parameters[i].DescriptorTable.NumDescriptorRanges = 1;
         parameters[i].DescriptorTable.pDescriptorRanges = &ranges[i];
         parameters[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
-    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    parameters[2].Descriptor.ShaderRegister = 0;
-    parameters[2].Descriptor.RegisterSpace = uniformSpace;
-    parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    for (UINT buffer = 0; buffer < CKJIT_MAX_UNIFORM_BUFFERS; ++buffer) {
+        D3D12_ROOT_PARAMETER &parameter = parameters[2 + buffer];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        parameter.Descriptor.ShaderRegister = buffer;
+        parameter.Descriptor.RegisterSpace = uniformSpace;
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    }
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};
-    desc.NumParameters = 3;
+    desc.NumParameters = 2 + CKJIT_MAX_UNIFORM_BUFFERS;
     desc.pParameters = parameters;
     ComPtr<ID3DBlob> blob, errors;
     if (FAILED(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors)) ||
