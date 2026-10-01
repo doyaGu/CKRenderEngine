@@ -191,9 +191,17 @@ struct CKSdlGpuTarget {
     std::shared_ptr<CKSdlGpuTexture> Color, Depth;
     std::shared_ptr<SDL_GPUTexture> VolumeSlice;
 };
+// How Draw adjusts a slot's sampler before creating the native object.
+enum CKSdlGpuSamplerMode : CKDWORD {
+    CKSDLGPU_SAMPLER_NATIVE_COMPARE = 1u, // Keep the comparison function.
+    CKSDLGPU_SAMPLER_VOLUME = 2u,         // The shader takes the anisotropic taps.
+};
+// The native sampler of one texture slot, keyed by the slot's source sampler
+// and adjustment mode so that unchanged draws skip the adjustment.
 struct CKSdlGpuBinding {
     CKSamplerDesc Sampler = {CKRST_FILTER_LINEAR, CKRST_FILTER_LINEAR, CKRST_FILTER_NONE,
         CKRST_ADDRESS_WRAP, CKRST_ADDRESS_WRAP, CKRST_ADDRESS_WRAP, 0, CKRST_COMPARE_NONE};
+    CKDWORD Mode = 0;
     std::shared_ptr<SDL_GPUSampler> NativeSampler;
 };
 

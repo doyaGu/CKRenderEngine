@@ -58,6 +58,26 @@ bool CKSdlGpuValidateVertexGeometry(
     return true;
 }
 
+// The native sampler state for a slot sampler in the given adjustment mode.
+CKSamplerDesc CKSdlGpuHardwareSampler(const CKSamplerDesc &source, CKDWORD mode) {
+    CKSamplerDesc sampler = source;
+    if ((mode & CKSDLGPU_SAMPLER_NATIVE_COMPARE) == 0)
+        sampler.CompareFunc = CKRST_COMPARE_NONE;
+    if ((mode & CKSDLGPU_SAMPLER_VOLUME) != 0 && sampler.ShaderAnisotropy) {
+        // The fixed-function 3D shader controls the anisotropic taps.
+        // Keep the native sampler linear for each explicit-LOD lookup.
+        if (sampler.MinFilter == CKRST_FILTER_ANISOTROPIC)
+            sampler.MinFilter = CKRST_FILTER_LINEAR;
+        if (sampler.MagFilter == CKRST_FILTER_ANISOTROPIC)
+            sampler.MagFilter = CKRST_FILTER_LINEAR;
+        if (sampler.MipFilter == CKRST_FILTER_ANISOTROPIC)
+            sampler.MipFilter = CKRST_FILTER_LINEAR;
+        sampler.MaxAnisotropy = 1;
+        sampler.ShaderAnisotropy = 0;
+    }
+    return sampler;
+}
+
 template<class Index>
 bool CKSdlGpuValidateTransientIndices(const CKBYTE *bytes, CKDWORD start,
                                       CKDWORD count, CKDWORD vertexCount)
@@ -514,28 +534,16 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                         sizeof(transform));
             hasDepthPad = true;
         }
-        CKSamplerDesc hardwareSampler = binding.Sampler;
-        if (!nativeComparisonSampler)
-            hardwareSampler.CompareFunc = CKRST_COMPARE_NONE;
-        if (texture->Info.type == SDL_GPU_TEXTURETYPE_3D &&
-            hardwareSampler.ShaderAnisotropy) {
-            // The fixed-function 3D shader controls the anisotropic taps.
-            // Keep the native sampler linear for each explicit-LOD lookup.
-            if (hardwareSampler.MinFilter == CKRST_FILTER_ANISOTROPIC)
-                hardwareSampler.MinFilter = CKRST_FILTER_LINEAR;
-            if (hardwareSampler.MagFilter == CKRST_FILTER_ANISOTROPIC)
-                hardwareSampler.MagFilter = CKRST_FILTER_LINEAR;
-            if (hardwareSampler.MipFilter == CKRST_FILTER_ANISOTROPIC)
-                hardwareSampler.MipFilter = CKRST_FILTER_LINEAR;
-            hardwareSampler.MaxAnisotropy = 1;
-            hardwareSampler.ShaderAnisotropy = 0;
+        const CKDWORD samplerMode =
+            (nativeComparisonSampler ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u) |
+            (texture->Info.type == SDL_GPU_TEXTURETYPE_3D ? CKSDLGPU_SAMPLER_VOLUME : 0u);
+        if (!cached.NativeSampler || cached.Mode != samplerMode ||
+            !CKSdlGpuSameSampler(cached.Sampler, binding.Sampler)) {
+            cached.Sampler = binding.Sampler;
+            cached.Mode = samplerMode;
+            cached.NativeSampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode));
+            if (!cached.NativeSampler) return Error;
         }
-        if (!CKSdlGpuSameSampler(cached.Sampler, hardwareSampler)) {
-            cached.Sampler = hardwareSampler;
-            cached.NativeSampler.reset();
-        }
-        if (!cached.NativeSampler) cached.NativeSampler = Sampler(hardwareSampler);
-        if (!cached.NativeSampler) return Error;
         bindingInputs.Textures[slot] = texture;
         bindingInputs.Samplers[slot] = cached.NativeSampler.get();
         bindingInputs.TextureOwners[slot] = textureOwner;
