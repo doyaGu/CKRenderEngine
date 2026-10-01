@@ -344,6 +344,28 @@ def dxbc_chunks(code: bytes):
     return [code[offset:offset + 4] for offset in offsets]
 
 
+def dxbc_part(code: bytes, fourcc: bytes) -> bytes:
+    for offset in (int.from_bytes(code[32 + 4 * i:36 + 4 * i], "little")
+                   for i in range(int.from_bytes(code[28:32], "little"))):
+        if code[offset:offset + 4] == fourcc:
+            return code[offset + 8:offset + 8 + int.from_bytes(code[offset + 4:offset + 8], "little")]
+    return None
+
+
+def strip_reflection(dxc, output: Path, validated: bytes) -> bytes:
+    """Rebuilds a validated DXIL container without reflection.
+
+    Resources are bound from the shader descriptors and never through
+    reflection, but the listing that validation reads is derived from it.
+    The stripped build must carry the validated program unchanged.
+    """
+    subprocess.run(dxc + ["-Qstrip_reflect", "-Fo", str(output)], check=True)
+    code = output.read_bytes()
+    assert dxbc_part(code, b"DXIL") == dxbc_part(validated, b"DXIL"), "Stripping reflection changed the DXIL program"
+    assert b"STAT" not in dxbc_chunks(code)
+    return code
+
+
 def validate_dxbc(assembly, code, source, clipping, uniforms):
     # FXC listings: every FF vertex shader binds only its uniform buffers, in
     # space 1, and writes the varyings at the registers of the DXIL variant,
@@ -464,10 +486,11 @@ def main() -> None:
                            "/Fo", str(output), "/Fc", str(assembly), str(hlsl)]
             else:
                 optimization = "-O3"
-                command = [args.dxc, "-T", "vs_6_0" if vertex else "ps_6_0", "-E", "main",
-                           optimization, "-Fo", str(output), "-Fc", str(assembly), str(hlsl)]
-            if format_ == "spirv":
-                command += ["-spirv", "-fspv-target-env=vulkan1.0", "-fvk-use-gl-layout"]
+                dxc = [args.dxc, "-T", "vs_6_0" if vertex else "ps_6_0", "-E", "main",
+                       optimization, str(hlsl)]
+                if format_ == "spirv":
+                    dxc += ["-spirv", "-fspv-target-env=vulkan1.0", "-fvk-use-gl-layout"]
+                command = dxc + ["-Fo", str(output), "-Fc", str(assembly)]
             subprocess.run(command, check=True)
             code = output.read_bytes()
             if format_ == "spirv":
@@ -479,6 +502,7 @@ def main() -> None:
                 validate_dxbc(assembly.read_text(encoding="utf-8"), code, source, clipping, uniforms)
             else:
                 validate_dxil(assembly.read_text(encoding="utf-8"), source, vertex, samplers, uniforms)
+                code = strip_reflection(dxc, args.work_dir / f"{format_}_{name}_stripped.bin", code)
             assert code[:4] == (b"\x03\x02\x23\x07" if format_ == "spirv" else b"DXBC")
             header = args.work_dir / f"{format_}_{name}.h"
             pending[args.output_dir / header.name] = header
