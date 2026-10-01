@@ -189,6 +189,25 @@ CKDWORD CKSdlGpuFFFragmentArtifactIndex(
         (artifactKey.UsesShaderSampling ? 1u : 0u);
 }
 
+CKBOOL CKSdlGpuFFFragmentArtifactKeyAt(CKDWORD index,
+                                       CKSdlGpuFFFragmentArtifactKey &out)
+{
+    out = CKSdlGpuFFFragmentArtifactKey();
+    if (index >= CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT)
+        return FALSE;
+    // The wide 2D layout without shader sampling, with it, then with each
+    // comparison count; then each other layout without and with it.
+    const CKDWORD mixedLayoutBase = CKFF_MAX_TEXTURE_STAGES + 2u;
+    if (index < mixedLayoutBase) {
+        out.UsesShaderSampling = index != 0 ? TRUE : FALSE;
+        out.ComparisonResourceCount = (CKBYTE)(index > 1 ? index - 1 : 0);
+    } else {
+        out.SamplerLayout = (CKFFSamplerLayout)((index - mixedLayoutBase) / 2u + 1u);
+        out.UsesShaderSampling = ((index - mixedLayoutBase) & 1u) ? TRUE : FALSE;
+    }
+    return TRUE;
+}
+
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
                                const CKSdlGpuFFFragmentArtifactKey &artifactKey,
                                CKShaderDesc &out)

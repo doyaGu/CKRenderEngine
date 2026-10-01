@@ -50,7 +50,14 @@ struct CKSdlGpuQwordHash {
 typedef CKSdlGpuFixedKey<11> CKSdlGpuPipelineKey;
 typedef CKSdlGpuFixedKey<10> CKSdlGpuSamplerKey;
 typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
-typedef XSHashTable<std::shared_ptr<SDL_GPUGraphicsPipeline>,
+// A program's pipeline for a key. Null while the worker creates it, or after
+// it failed to.
+struct CKSdlGpuPipelineEntry {
+    std::shared_ptr<SDL_GPUGraphicsPipeline> Pipeline;
+    // A draw used it. The manifest records the precompiled programs' ones.
+    bool Drawn = false;
+};
+typedef XSHashTable<CKSdlGpuPipelineEntry,
                     CKSdlGpuPipelineKey,
                     CKSdlGpuFixedKeyHash<11>> CKSdlGpuPipelineTable;
 typedef XSHashTable<std::weak_ptr<SDL_GPUBuffer>,
@@ -172,11 +179,11 @@ struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     // their public handle is removed. Pipelines follow those exact lifetimes.
     CKSdlGpuPipelineTable Pipelines;
     // A specialized program shares Fallback's interface. It draws with
-    // Fallback's pipelines until the worker has created its own; a null
-    // entry in Pipelines marks one that is pending or failed.
+    // Fallback's pipelines until the worker has created its own.
     std::shared_ptr<CKSdlGpuProgram> Fallback;
-    // The jobs of pending pipelines queued at idle priority, promoted when a
-    // draw comes to wait for one. They are only compared.
+    // The jobs of pending pipelines queued at idle priority. A draw that
+    // comes to wait for one promotes it, or claims it if the program has no
+    // fallback. They are only compared.
     XSHashTable<CKSdlGpuJob *, CKSdlGpuPipelineKey, CKSdlGpuFixedKeyHash<11>> IdlePipelines;
 };
 struct CKSdlGpuTarget {

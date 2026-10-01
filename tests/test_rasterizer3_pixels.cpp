@@ -968,13 +968,15 @@ void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCo
 {
     TestCheckf(counts.Queued == expected.Queued && counts.Ready == expected.Ready &&
                    counts.Rejected == expected.Rejected && counts.Programs == expected.Programs &&
-                   counts.Pipelines == expected.Pipelines,
-               "%s: queued=%u ready=%u rejected=%u programs=%u pipelines=%u, "
-               "expected %u %u %u %u %u", what,
+                   counts.Pipelines == expected.Pipelines &&
+                   counts.Precompiled == expected.Precompiled,
+               "%s: queued=%u ready=%u rejected=%u programs=%u pipelines=%u precompiled=%u, "
+               "expected %u %u %u %u %u %u", what,
                (unsigned)counts.Queued, (unsigned)counts.Ready, (unsigned)counts.Rejected,
-               (unsigned)counts.Programs, (unsigned)counts.Pipelines,
+               (unsigned)counts.Programs, (unsigned)counts.Pipelines, (unsigned)counts.Precompiled,
                (unsigned)expected.Queued, (unsigned)expected.Ready, (unsigned)expected.Rejected,
-               (unsigned)expected.Programs, (unsigned)expected.Pipelines);
+               (unsigned)expected.Programs, (unsigned)expected.Pipelines,
+               (unsigned)expected.Precompiled);
 }
 
 // The fragment programs of the artifacts are compiled in the background
@@ -1199,8 +1201,8 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
         }
         saved = context->CountFFJitProgramsForTests();
         TestCheck(saved.Ready != 0 && saved.Programs != 0 && saved.Pipelines != 0 &&
-                      saved.Shaders == 0,
-                  "the saving run compiles programs and pipelines");
+                      saved.Shaders == 0 && saved.Precompiled != 0,
+                  "the saving run draws precompiled, then compiles programs and pipelines");
     }
     CloseBackend(backend);
     int files = 0;
@@ -1230,8 +1232,10 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
         SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", previous, 1);
     else
         SDL_unsetenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE");
-    printf("  prewarmed fragment programs: %u shaders, %u programs and %u pipelines before any draw\n",
-           (unsigned)saved.Ready, (unsigned)saved.Programs, (unsigned)saved.Pipelines);
+    printf("  prewarmed fragment programs: %u shaders, %u programs, %u pipelines and "
+           "%u precompiled pipelines before any draw\n",
+           (unsigned)saved.Ready, (unsigned)saved.Programs, (unsigned)saved.Pipelines,
+           (unsigned)saved.Precompiled);
 }
 #else
 // Only SDL_gpu compiles fragment programs.

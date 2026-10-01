@@ -65,6 +65,29 @@ bool PrewarmablePipeline(SDL_GPUDevice *device, const CKSdlGpuFFJitPipelineRecor
         (SDL_GPUTextureSupportsSampleCount(device, color, samples) &&
          (!hasDepth || SDL_GPUTextureSupportsSampleCount(device, depth, samples)));
 }
+
+// Describes a program's pipeline in a record, false for a key that records
+// cannot describe. Records name vertex layouts by format.
+bool RecordPipeline(const CKSdlGpuPipelineKey &pipeline,
+                    const XSHashTable<CKDWORD, CKDWORD> &vertexFormats, CKBYTE flags,
+                    CKSdlGpuFFJitPipelineRecord &record)
+{
+    const CKDWORD *key = pipeline.Values;
+    const CKDWORD *vertexFormat = vertexFormats.FindPtr(key[0]);
+    if (!vertexFormat || key[1] != 0)
+        return false;
+    record.Flags = (CKBYTE)(flags | (key[10] ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP : 0));
+    record.ColorFormat = (CKBYTE)key[2];
+    record.DepthFormat = (CKBYTE)key[3];
+    record.SampleCount = (CKBYTE)key[4];
+    record.StencilReadMask = (CKBYTE)key[8];
+    record.StencilWriteMask = (CKBYTE)key[9];
+    record.VertexFormat = *vertexFormat;
+    record.StateLo = key[5];
+    record.StateMid = key[6];
+    record.StateHi = key[7];
+    return true;
+}
 }
 
 // Compiles one fragment program and creates its shader on the worker.
@@ -184,20 +207,32 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
     // that neither the draws of their programs nor the compilations create
     // them on this thread.
     ShaderJob *shaders = new ShaderJob(*this);
+    // The precompiled program of each pipeline record, or 0.
+    XArray<CKDWORD> precompiled;
+    precompiled.Resize(manifest.Pipelines.Size());
     for (int i = 0; i < manifest.Pipelines.Size(); ++i) {
         const CKSdlGpuFFJitPipelineRecord &record = manifest.Pipelines[i];
-        if (entries[record.Program] < 0)
+        const bool precompiledPipeline =
+            (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED) != 0;
+        precompiled[i] = 0;
+        CKSdlGpuFFFragmentArtifactKey artifact;
+        if (precompiledPipeline) {
+            // The manifest has checked the index.
+            CKSdlGpuFFFragmentArtifactKeyAt(record.Program, artifact);
+        } else if (entries[record.Program] >= 0) {
+            FFJitProgram &entry = m_FFJitPrograms[entries[record.Program]];
+            entry.Prewarm.PushBack(record);
+            artifact = FFJitArtifact(entry.Key);
+        } else {
             continue;
-        FFJitProgram &entry = m_FFJitPrograms[entries[record.Program]];
-        entry.Prewarm.PushBack(record);
+        }
         if (!PrewarmablePipeline(Device, record))
             continue;
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
-        const CKDWORD precompiled = NativeFFProgram(
-            variant, FFJitArtifact(entry.Key),
-            (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0, shaders);
-        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(precompiled);
-        if (program && m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC)
+        precompiled[i] = NativeFFProgram(
+            variant, artifact, (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0, shaders);
+        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(precompiled[i]);
+        if (program && !precompiledPipeline && m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC)
             FFJitVertexShader(variant, program->Interface.VertexShader, shaders);
     }
     if (shaders->Empty()) {
@@ -205,6 +240,12 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
     } else {
         Worker.Submit(shaders, CKSDLGPU_JOB_IDLE);
         m_FFShaderJob = shaders;
+    }
+    // The pipelines draws used precompiled while their programs compiled
+    // come next, so that the same draws find them before the compilations.
+    for (int i = 0; i < manifest.Pipelines.Size(); ++i) {
+        if ((manifest.Pipelines[i].Flags & CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED) && precompiled[i])
+            PrewarmFFJitPipeline(precompiled[i], manifest.Pipelines[i]);
     }
     for (int i = first; i < m_FFJitPrograms.Size(); ++i) {
         const FFJitKey &key = m_FFJitPrograms[i].Key;
@@ -437,28 +478,34 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
             Entry.State = FFJitProgram::REJECTED;
             break;
         }
-        const CKDWORD layout = GetNativeVertexLayout(record.VertexFormat);
-        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(handle);
-        const std::shared_ptr<CKSdlGpuLayout> &vertexLayout = Layouts.Borrow(layout);
-        if (!program || !vertexLayout)
-            continue;
-        // The fields a pipeline depends on, as the record's draw had them.
-        CKSdlGpuDraw draw;
-        draw.State.State.Lo = record.StateLo;
-        draw.State.State.Mid = record.StateMid;
-        draw.State.State.Hi = record.StateHi;
-        draw.State.StencilReadMask = record.StencilReadMask;
-        draw.State.StencilWriteMask = record.StencilWriteMask;
-        draw.State.DepthClipEnabled =
-            (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP) ? TRUE : FALSE;
-        draw.Program = program.get();
-        draw.Layout = vertexLayout.get();
-        draw.LayoutHandle = layout;
-        QueuePipeline(draw, (SDL_GPUTextureFormat)record.ColorFormat,
-                      (SDL_GPUTextureFormat)record.DepthFormat,
-                      (SDL_GPUSampleCount)record.SampleCount, CKSDLGPU_JOB_IDLE);
+        PrewarmFFJitPipeline(handle, record);
     }
     Entry.Prewarm.Clear();
+}
+
+void CKSdlGpuRasterizerContext::PrewarmFFJitPipeline(CKDWORD Program,
+                                                     const CKSdlGpuFFJitPipelineRecord &Record)
+{
+    const CKDWORD layout = GetNativeVertexLayout(Record.VertexFormat);
+    const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(Program);
+    const std::shared_ptr<CKSdlGpuLayout> &vertexLayout = Layouts.Borrow(layout);
+    if (!program || !vertexLayout)
+        return;
+    // The fields a pipeline depends on, as the record's draw had them.
+    CKSdlGpuDraw draw;
+    draw.State.State.Lo = Record.StateLo;
+    draw.State.State.Mid = Record.StateMid;
+    draw.State.State.Hi = Record.StateHi;
+    draw.State.StencilReadMask = Record.StencilReadMask;
+    draw.State.StencilWriteMask = Record.StencilWriteMask;
+    draw.State.DepthClipEnabled =
+        (Record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP) ? TRUE : FALSE;
+    draw.Program = program.get();
+    draw.Layout = vertexLayout.get();
+    draw.LayoutHandle = layout;
+    QueuePipeline(draw, (SDL_GPUTextureFormat)Record.ColorFormat,
+                  (SDL_GPUTextureFormat)Record.DepthFormat,
+                  (SDL_GPUSampleCount)Record.SampleCount, CKSDLGPU_JOB_IDLE);
 }
 
 void CKSdlGpuRasterizerContext::SaveFFJitManifest()
@@ -504,24 +551,33 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
             record.Variant = (CKBYTE)binding.Variant;
             const bool pad =
                 binding.Precompiled == m_NativeFFPrograms[binding.Variant][artifact][1];
+            const CKBYTE flags = (CKBYTE)(pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0);
             // Pending and failed pipelines are recorded too.
             for (auto it = program->Pipelines.Begin(); it != program->Pipelines.End(); ++it) {
-                const CKDWORD *key = it.GetKey().Values;
-                const CKDWORD *vertexFormat = vertexFormats.FindPtr(key[0]);
-                if (!vertexFormat || key[1] != 0)
+                if (RecordPipeline(it.GetKey(), vertexFormats, flags, record))
+                    manifest.Pipelines.PushBack(record);
+            }
+        }
+    }
+    // The pipelines draws used precompiled before their programs were
+    // compiled. Those only prewarmed are left out, so that a run prewarms
+    // only what the run before it drew.
+    for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
+        for (CKDWORD artifact = 0; artifact < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT; ++artifact) {
+            for (CKDWORD pad = 0; pad < 2; ++pad) {
+                const std::shared_ptr<CKSdlGpuProgram> &program =
+                    Programs.Borrow(m_NativeFFPrograms[variant][artifact][pad]);
+                if (!program)
                     continue;
-                record.Flags = (CKBYTE)((pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0) |
-                                        (key[10] ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP : 0));
-                record.ColorFormat = (CKBYTE)key[2];
-                record.DepthFormat = (CKBYTE)key[3];
-                record.SampleCount = (CKBYTE)key[4];
-                record.StencilReadMask = (CKBYTE)key[8];
-                record.StencilWriteMask = (CKBYTE)key[9];
-                record.VertexFormat = *vertexFormat;
-                record.StateLo = key[5];
-                record.StateMid = key[6];
-                record.StateHi = key[7];
-                manifest.Pipelines.PushBack(record);
+                CKSdlGpuFFJitPipelineRecord record = {};
+                record.Program = (CKBYTE)artifact;
+                record.Variant = (CKBYTE)variant;
+                const CKBYTE flags = (CKBYTE)(CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED |
+                                              (pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0));
+                for (auto it = program->Pipelines.Begin(); it != program->Pipelines.End(); ++it) {
+                    if ((*it).Drawn && RecordPipeline(it.GetKey(), vertexFormats, flags, record))
+                        manifest.Pipelines.PushBack(record);
+                }
             }
         }
     }
@@ -575,11 +631,22 @@ CKSdlGpuRasterizerContext::CountFFJitProgramsForTests() const
             // Null entries are pipelines the worker has not created.
             for (auto pipeline = program->Pipelines.Begin();
                  pipeline != program->Pipelines.End(); ++pipeline) {
-                if (*pipeline)
+                if ((*pipeline).Pipeline)
                     ++counts.Pipelines;
             }
         }
     }
     counts.Shaders = m_FFWorkerShaders;
+    const CKDWORD *precompiled = &m_NativeFFPrograms[0][0][0];
+    for (size_t i = 0; i < sizeof(m_NativeFFPrograms) / sizeof(CKDWORD); ++i) {
+        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(precompiled[i]);
+        if (!program)
+            continue;
+        for (auto pipeline = program->Pipelines.Begin();
+             pipeline != program->Pipelines.End(); ++pipeline) {
+            if ((*pipeline).Pipeline)
+                ++counts.Precompiled;
+        }
+    }
     return counts;
 }

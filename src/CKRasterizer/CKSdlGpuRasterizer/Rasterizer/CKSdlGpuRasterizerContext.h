@@ -194,6 +194,8 @@ public:
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
         // Precompiled shaders the worker has created for the manifest.
         CKDWORD Shaders = 0;
+        // The pipelines of precompiled programs.
+        CKDWORD Precompiled = 0;
     };
     FFJitCounts CountFFJitProgramsForTests() const;
 private:
@@ -267,11 +269,20 @@ private:
     SDL_GPUGraphicsPipeline *Pipeline(
         const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
         SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples);
-    // Queues the worker's creation of the pipeline of a specialized program
-    // for a draw, unless the program has or awaits it already.
+    // Queues the worker's creation of the pipeline of a program for a draw,
+    // unless the program has or awaits it already. The programs are the
+    // specialized ones, and the precompiled ones the manifest prewarms.
     void QueuePipeline(const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
                        SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples,
                        CKSdlGpuJobPriority Priority);
+    // Creates the pipeline of a draw at once, or completes the worker's job
+    // for it when the manifest prewarms it. Null when it cannot be created.
+    CKSdlGpuPipelineEntry *CreatePipeline(CKSdlGpuProgram &Program,
+                                          const CKSdlGpuPipelineKey &Key,
+                                          const CKSdlGpuDraw &Draw,
+                                          SDL_GPUTextureFormat Color,
+                                          SDL_GPUTextureFormat Depth,
+                                          SDL_GPUSampleCount Samples);
     std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc);
     void PruneProgramCaches();
     void Collect();
@@ -421,7 +432,11 @@ private:
     void InitFFJit();
     void LoadFFJitManifest();
     void PrewarmFFJitProgram(FFJitProgram &Entry);
-    // Records the compiled programs and their pipelines for the next run.
+    // Queues at idle priority the pipeline of a manifest record for a
+    // program.
+    void PrewarmFFJitPipeline(CKDWORD Program, const CKSdlGpuFFJitPipelineRecord &Record);
+    // Records for the next run the compiled programs and their pipelines,
+    // and the pipelines drawn precompiled.
     void SaveFFJitManifest();
     CKDWORD ResolveFFJitProgram(const CKFFFragmentProgram &FragmentProgram,
                                 const CKFFConstantSet *Constants,

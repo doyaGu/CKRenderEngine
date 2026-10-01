@@ -2,6 +2,7 @@
 #include "CKBuiltinShaderIdentity.h"
 #include "CKFFDrawTypes.h"
 #include "CKFFProgram.h"
+#include "CKSdlGpuShaders.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -21,11 +22,14 @@ static_assert(kProgramSize == sizeof(CKDWORD) * (CKFF_FRAGMENT_PROGRAM_LANE_COUN
                                                  CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT + 1) &&
               kPipelineSize == 8 + 4 * sizeof(CKDWORD),
               "manifest records have no padding");
-static_assert(CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS <= 256, "programs are indexed by bytes");
+static_assert(CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS <= 256 &&
+                  CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT <= 256,
+              "programs and artifacts are indexed by bytes");
 static_assert(SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT < 256 && SDL_GPU_SAMPLECOUNT_8 < 256,
               "texture formats and sample counts are stored as bytes");
 const CKDWORD kPipelineFlags =
-    CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP | CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD;
+    CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP | CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD |
+    CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED;
 // The switches of switch word 0, of every stage for the per-stage ones.
 const CKDWORD kSwitchMask = CKFF_NATIVE_FRAGMENT_AFFINE | CKFF_NATIVE_FRAGMENT_LINE |
     CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING | CKFF_NATIVE_FRAGMENT_COMPARISONS |
@@ -75,11 +79,25 @@ bool ValidProgram(const CKSdlGpuFFJitProgramRecord &record)
            record.SamplerLayout < CKFF_SAMPLER_LAYOUT_COUNT;
 }
 
+bool Precompiled(const CKSdlGpuFFJitPipelineRecord &record)
+{
+    return (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED) != 0;
+}
+
 // The draw state is checked against the device when it is used.
 bool ValidPipeline(const CKSdlGpuFFJitPipelineRecord &record, CKDWORD programs)
 {
-    return record.Program < programs && record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
+    const CKDWORD limit = Precompiled(record) ? (CKDWORD)CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT
+                                              : programs;
+    return record.Program < limit && record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
            (record.Flags & ~kPipelineFlags) == 0;
+}
+
+// The encoder keeps the pipelines of the programs it keeps, and those of
+// precompiled programs.
+bool Encoded(const CKSdlGpuFFJitPipelineRecord &record, int programs)
+{
+    return Precompiled(record) || record.Program < programs;
 }
 
 // The directory of the module holding this code, with its separator.
@@ -138,7 +156,7 @@ void CKSdlGpuEncodeFFJitManifest(uint64_t Identity, const CKSdlGpuFFJitManifest 
     int pipelines = 0;
     for (int i = 0; i < Manifest.Pipelines.Size() &&
                     pipelines < CKSDL_GPU_FF_JIT_MANIFEST_MAX_PIPELINES; ++i)
-        pipelines += Manifest.Pipelines[i].Program < programs ? 1 : 0;
+        pipelines += Encoded(Manifest.Pipelines[i], programs) ? 1 : 0;
     const size_t size = (size_t)programs * kProgramSize + (size_t)pipelines * kPipelineSize;
     Data.Resize((int)(sizeof(Header) + size));
     CKBYTE *records = Data.Begin() + sizeof(Header);
@@ -146,7 +164,7 @@ void CKSdlGpuEncodeFFJitManifest(uint64_t Identity, const CKSdlGpuFFJitManifest 
         std::memcpy(records, Manifest.Programs.Begin(), (size_t)programs * kProgramSize);
     CKBYTE *pipeline = records + (size_t)programs * kProgramSize;
     for (int i = 0, written = 0; written < pipelines; ++i) {
-        if (Manifest.Pipelines[i].Program >= programs)
+        if (!Encoded(Manifest.Pipelines[i], programs))
             continue;
         std::memcpy(pipeline, &Manifest.Pipelines[i], kPipelineSize);
         pipeline += kPipelineSize;

@@ -9,8 +9,8 @@
 #include <cstdint>
 
 // The compiled fragment programs of earlier runs on one device, with the
-// pipelines their draws used. A later run creates both on the worker before
-// its draws ask for them. The manifest keeps draw state, never code: the
+// pipelines their draws used, precompiled ones too. A later run creates them
+// on the worker before its draws ask for them. The manifest keeps draw state, never code: the
 // compiler is fast, and the driver caches what pipeline creation built. A
 // prewarmed pipeline has the key of the draw it came from, so a record that
 // no draw needs again costs background work only.
@@ -24,13 +24,17 @@ struct CKSdlGpuFFJitProgramRecord {
 
 enum CKSdlGpuFFJitPipelineFlags {
     CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP = 1,
-    // The draw replaced the precompiled program that pads position-T depth.
+    // The precompiled program, or the one the draw replaced, pads position-T
+    // depth.
     CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD = 2,
+    // A pipeline of a precompiled program, which draws used before their
+    // programs were compiled. Program indexes the precompiled artifacts.
+    CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED = 4,
 };
 
 // A pipeline a program was drawn with.
 struct CKSdlGpuFFJitPipelineRecord {
-    // Indexes the manifest's programs.
+    // Indexes the manifest's programs, or the precompiled artifacts.
     CKBYTE Program;
     CKBYTE Variant;
     CKBYTE Flags;
@@ -62,8 +66,8 @@ enum {
 // device, driver, shader format or fixed-function ABI never loads them.
 uint64_t CKSdlGpuFFJitManifestIdentity(const char *Driver, const char *Device,
                                        SDL_GPUShaderFormat Format);
-// Encodes the first programs up to the limit, and the first pipelines of
-// those up to the limit.
+// Encodes the first programs up to the limit, and up to the limit the first
+// pipelines of those and of precompiled programs.
 void CKSdlGpuEncodeFFJitManifest(uint64_t Identity, const CKSdlGpuFFJitManifest &Manifest,
                                  XArray<CKBYTE> &Data);
 // Accepts a manifest only as a whole. Another identity or format revision,

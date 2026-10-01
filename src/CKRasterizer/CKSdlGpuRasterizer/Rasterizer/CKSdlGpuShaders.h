@@ -30,6 +30,10 @@ CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
     CKSdlGpuFFFragmentArtifactKey &Out);
 CKDWORD CKSdlGpuFFFragmentArtifactIndex(
     const CKSdlGpuFFFragmentArtifactKey &ArtifactKey);
+// The key CKSdlGpuFFFragmentArtifactIndex gives an index. False past the
+// artifacts.
+CKBOOL CKSdlGpuFFFragmentArtifactKeyAt(CKDWORD Index,
+                                       CKSdlGpuFFFragmentArtifactKey &Out);
 CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
                                const CKSdlGpuFFFragmentArtifactKey &ArtifactKey,
                                CKShaderDesc &Out);

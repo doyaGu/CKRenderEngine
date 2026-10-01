@@ -92,8 +92,9 @@ struct CKSdlGpuPipelineDesc {
     }
 };
 
-// Creates a specialized program's pipeline on the worker. The program may be
-// destroyed meanwhile; an unused result is released with the job.
+// Creates a program's pipeline on the worker: a specialized program's, or a
+// precompiled one's the manifest prewarms. The program may be destroyed
+// meanwhile; an unused result is released with the job.
 class CKSdlGpuPipelineJob : public CKSdlGpuJob {
 public:
     CKSdlGpuPipelineJob(SDL_GPUDevice *device, std::weak_ptr<CKSdlGpuProgram> program,
@@ -108,7 +109,8 @@ public:
         if (!Desc.Vertex->Shader || !Desc.Fragment->Shader) return;
         const SDL_GPUGraphicsPipelineCreateInfo info = Desc.CreateInfo();
         Result = SDL_CreateGPUGraphicsPipeline(Device, &info);
-        // The program keeps drawing with its fallback, so this is not fatal.
+        // Not fatal: the program draws with its fallback, or creates the
+        // pipeline itself when a draw needs it.
         if (!Result)
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "FF background pipeline failed: %s", SDL_GetError());
@@ -118,7 +120,10 @@ public:
         if (!program) return;
         program->IdlePipelines.Remove(Key);
         if (!Result) return;
-        program->Pipelines.Insert(Key, CKSdlGpuOwn(Device, Result, SDL_ReleaseGPUGraphicsPipeline), TRUE);
+        // A draw that could not wait for the job created the pipeline itself.
+        CKSdlGpuPipelineEntry &entry = program->Pipelines[Key];
+        if (entry.Pipeline) return;
+        entry.Pipeline = CKSdlGpuOwn(Device, Result, SDL_ReleaseGPUGraphicsPipeline);
         Result = nullptr;
     }
 
@@ -222,8 +227,8 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     if (program->Fallback) {
         // Never create a specialized pipeline while drawing: queue it once and
         // use the fallback's pipeline until the worker's result is collected.
-        std::shared_ptr<SDL_GPUGraphicsPipeline> *found = program->Pipelines.FindPtr(key);
-        if (found && *found) return found->get();
+        CKSdlGpuPipelineEntry *found = program->Pipelines.FindPtr(key);
+        if (found && found->Pipeline) return found->Pipeline.get();
         if (!found) {
             QueuePipeline(draw, color, depth, samples, CKSDLGPU_JOB_NORMAL);
         } else {
@@ -236,30 +241,50 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         }
         program = program->Fallback.get();
     }
-    auto &pipelines = program->Pipelines;
-    std::shared_ptr<SDL_GPUGraphicsPipeline> *found = pipelines.FindPtr(key);
-    if (found) return found->get();
-    if (!ClaimShaders(*program))
+    CKSdlGpuPipelineEntry *found = program->Pipelines.FindPtr(key);
+    if (!found || !found->Pipeline) {
+        found = CreatePipeline(*program, key, draw, color, depth, samples);
+        if (!found) return nullptr;
+    }
+    found->Drawn = true;
+    return found->Pipeline.get();
+}
+
+CKSdlGpuPipelineEntry *CKSdlGpuRasterizerContext::CreatePipeline(CKSdlGpuProgram &program,
+    const CKSdlGpuPipelineKey &key, const CKSdlGpuDraw &draw,
+    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
+{
+    if (!ClaimShaders(program))
         return nullptr;
+    // The job of a pipeline the manifest prewarms waits only for the shaders.
+    if (CKSdlGpuJob **idle = program.IdlePipelines.FindPtr(key)) {
+        if (CKSdlGpuJob *job = Worker.Claim(*idle)) {
+            job->Complete();
+            delete job;
+        }
+        CKSdlGpuPipelineEntry *found = program.Pipelines.FindPtr(key);
+        if (found && found->Pipeline) return found;
+    }
     CKSdlGpuPipelineDesc desc;
-    DescribePipeline(*program, draw, color, depth, samples, desc);
+    DescribePipeline(program, draw, color, depth, samples, desc);
     const SDL_GPUGraphicsPipelineCreateInfo info = desc.CreateInfo();
     auto pipeline = CKSdlGpuOwn(Device, SDL_CreateGPUGraphicsPipeline(Device, &info), SDL_ReleaseGPUGraphicsPipeline);
     if (!pipeline) {
         unsigned dimensions[3] = {};
-        for (const CKFFSamplerBinding &sampler : program->Interface.Samplers)
+        for (const CKFFSamplerBinding &sampler : program.Interface.Samplers)
             ++dimensions[sampler.Dimension];
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "FF pipeline details: fragment_bytes=%u compare_samplers=%u dimensions=%u/%u/%u",
-                     program->Fragment->Desc.CodeSize,
-                     program->CompareSamplerCount,
+                     program.Fragment->Desc.CodeSize,
+                     program.CompareSamplerCount,
                      dimensions[CKFF_TEXTURE_2D], dimensions[CKFF_TEXTURE_CUBE],
                      dimensions[CKFF_TEXTURE_3D]);
         Fail("CreateGPUGraphicsPipeline");
         return nullptr;
     }
-    pipelines.Insert(key, pipeline, FALSE);
-    return pipeline.get();
+    CKSdlGpuPipelineEntry &entry = program.Pipelines[key];
+    entry.Pipeline = pipeline;
+    return &entry;
 }
 
 void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
@@ -271,7 +296,7 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
     if (program.Pipelines.FindPtr(key))
         return;
     // A null entry marks the pipeline as pending.
-    program.Pipelines.Insert(key, std::shared_ptr<SDL_GPUGraphicsPipeline>(), FALSE);
+    program.Pipelines.Insert(key, CKSdlGpuPipelineEntry(), FALSE);
     auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key);
     DescribePipeline(program, draw, color, depth, samples, job->Desc);
     // The worker owns the job; an idle one is kept only to promote it. The

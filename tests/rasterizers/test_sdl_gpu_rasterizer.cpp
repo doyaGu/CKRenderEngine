@@ -525,7 +525,7 @@ int main()
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
         malformed = manifest;
-        malformed.Pipelines[6].Flags = CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD << 1;
+        malformed.Pipelines[6].Flags = CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED << 1;
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
         // The writer leaves out pipelines of programs it does not have.
@@ -550,6 +550,19 @@ int main()
         malformed.Pipelines.RemoveAt(1);
         check(CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) && same(malformed, decoded),
               "FF JIT manifests leave out the pipelines of programs they do not have");
+        // Precompiled pipelines index artifacts, whatever programs there are.
+        malformed = manifest;
+        malformed.Pipelines[1].Flags = CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED;
+        malformed.Pipelines[1].Program = CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT - 1;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        const bool precompiledKept =
+            CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) &&
+            same(malformed, decoded);
+        malformed.Pipelines[1].Program = CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
+        CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
+        check(precompiledKept && manifest.Programs.Size() < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT - 1 &&
+                  !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded),
+              "FF JIT manifests keep the pipelines of precompiled artifacts");
 
         XString directory(SDL_GetBasePath() ? SDL_GetBasePath() : "");
         directory << "ffjit-manifest-test";
@@ -723,6 +736,14 @@ int main()
         }
         check(uniqueArtifactCount == CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT,
               "fragment artifact cache index covers every precompiled artifact");
+        bool inverted = true;
+        for (CKDWORD index = 0; index <= CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT; ++index) {
+            CKSdlGpuFFFragmentArtifactKey key;
+            const bool named = CKSdlGpuFFFragmentArtifactKeyAt(index, key) != FALSE;
+            inverted = inverted && named == (index < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT) &&
+                       (!named || CKSdlGpuFFFragmentArtifactIndex(key) == index);
+        }
+        check(inverted, "every fragment artifact cache index names its key");
     }
     for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV}) {
         CKFFShaderSet set;
