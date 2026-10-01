@@ -14,10 +14,18 @@
 namespace {
 const CKDWORD kMagic = 0x4A464B43u; // "CKFJ"
 // Revision of the file layout and of the record fields.
-const CKDWORD kVersion = 3;
-const CKDWORD kRecordDwords = sizeof(CKSdlGpuFFJitRecord) / sizeof(CKDWORD);
-static_assert(sizeof(CKSdlGpuFFJitRecord) == kRecordDwords * sizeof(CKDWORD),
-              "manifest records are plain DWORDs");
+const CKDWORD kVersion = 4;
+const size_t kProgramSize = sizeof(CKSdlGpuFFJitProgramRecord);
+const size_t kPipelineSize = sizeof(CKSdlGpuFFJitPipelineRecord);
+static_assert(kProgramSize == sizeof(CKDWORD) * (CKFF_FRAGMENT_PROGRAM_LANE_COUNT +
+                                                 CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT + 1) &&
+              kPipelineSize == 8 + 4 * sizeof(CKDWORD),
+              "manifest records have no padding");
+static_assert(CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS <= 256, "programs are indexed by bytes");
+static_assert(SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT < 256 && SDL_GPU_SAMPLECOUNT_8 < 256,
+              "texture formats and sample counts are stored as bytes");
+const CKDWORD kPipelineFlags =
+    CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP | CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD;
 // The switches of switch word 0, of every stage for the per-stage ones.
 const CKDWORD kSwitchMask = CKFF_NATIVE_FRAGMENT_AFFINE | CKFF_NATIVE_FRAGMENT_LINE |
     CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING | CKFF_NATIVE_FRAGMENT_COMPARISONS |
@@ -29,12 +37,13 @@ const CKDWORD kSamplingMask = 0x01010101u *
      CKFF_NATIVE_FRAGMENT_BORDER | CKFF_NATIVE_FRAGMENT_GRADIENT | CKFF_NATIVE_FRAGMENT_ANISOTROPY |
      CKFF_NATIVE_FRAGMENT_MIN_MIP);
 
+// Followed by the programs, then the pipelines.
 struct Header {
     CKDWORD Magic;
     CKDWORD Version;
     CKDWORD Identity[2];
-    CKDWORD RecordDwords;
-    CKDWORD Count;
+    CKDWORD ProgramCount;
+    CKDWORD PipelineCount;
     // Covers the fields above and the records.
     CKDWORD Checksum;
 };
@@ -54,7 +63,7 @@ CKDWORD Checksum(const Header &header, const void *records, size_t size)
     return CKFFHashBytes(records, (CKDWORD)size, hash);
 }
 
-bool ValidRecord(const CKSdlGpuFFJitRecord &record)
+bool ValidProgram(const CKSdlGpuFFJitProgramRecord &record)
 {
     for (CKDWORD lane : record.Lanes) {
         if (lane > CKFFFragmentProgram::LaneMask)
@@ -63,9 +72,14 @@ bool ValidRecord(const CKSdlGpuFFJitRecord &record)
     return (record.Switches[0] & ~kSwitchMask) == 0 &&
            (record.Switches[3] & ~kSamplingMask) == 0 &&
            (record.Switches[4] & ~kSamplingMask) == 0 &&
-           record.SamplerLayout < CKFF_SAMPLER_LAYOUT_COUNT &&
-           record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
-           record.DepthClipEnabled <= 1;
+           record.SamplerLayout < CKFF_SAMPLER_LAYOUT_COUNT;
+}
+
+// The draw state is checked against the device when it is used.
+bool ValidPipeline(const CKSdlGpuFFJitPipelineRecord &record, CKDWORD programs)
+{
+    return record.Program < programs && record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
+           (record.Flags & ~kPipelineFlags) == 0;
 }
 
 // The directory of the module holding this code, with its separator.
@@ -105,8 +119,8 @@ XString ModuleDirectory()
 uint64_t CKSdlGpuFFJitManifestIdentity(const char *Driver, const char *Device,
                                        SDL_GPUShaderFormat Format)
 {
-    const CKDWORD revision[] = {kVersion, kRecordDwords, (CKDWORD)Format,
-                                CKFF_SHADER_ABI_VERSION,
+    const CKDWORD revision[] = {kVersion, (CKDWORD)kProgramSize, (CKDWORD)kPipelineSize,
+                                (CKDWORD)Format, CKFF_SHADER_ABI_VERSION,
                                 CKFF_SHADER_NATIVE_INTERFACE_HASH};
     uint64_t hash = HashBytes64(14695981039346656037ull, revision, sizeof(revision));
     // Terminators keep the strings from running together.
@@ -116,26 +130,38 @@ uint64_t CKSdlGpuFFJitManifestIdentity(const char *Driver, const char *Device,
     return HashBytes64(hash, Device, SDL_strlen(Device) + 1);
 }
 
-void CKSdlGpuEncodeFFJitManifest(uint64_t Identity,
-                                 const XArray<CKSdlGpuFFJitRecord> &Records,
+void CKSdlGpuEncodeFFJitManifest(uint64_t Identity, const CKSdlGpuFFJitManifest &Manifest,
                                  XArray<CKBYTE> &Data)
 {
-    const int count = Records.Size() < CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS
-        ? Records.Size() : CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS;
-    const size_t size = (size_t)count * sizeof(CKSdlGpuFFJitRecord);
+    const int programs = Manifest.Programs.Size() < CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS
+        ? Manifest.Programs.Size() : CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS;
+    int pipelines = 0;
+    for (int i = 0; i < Manifest.Pipelines.Size() &&
+                    pipelines < CKSDL_GPU_FF_JIT_MANIFEST_MAX_PIPELINES; ++i)
+        pipelines += Manifest.Pipelines[i].Program < programs ? 1 : 0;
+    const size_t size = (size_t)programs * kProgramSize + (size_t)pipelines * kPipelineSize;
+    Data.Resize((int)(sizeof(Header) + size));
+    CKBYTE *records = Data.Begin() + sizeof(Header);
+    if (programs)
+        std::memcpy(records, Manifest.Programs.Begin(), (size_t)programs * kProgramSize);
+    CKBYTE *pipeline = records + (size_t)programs * kProgramSize;
+    for (int i = 0, written = 0; written < pipelines; ++i) {
+        if (Manifest.Pipelines[i].Program >= programs)
+            continue;
+        std::memcpy(pipeline, &Manifest.Pipelines[i], kPipelineSize);
+        pipeline += kPipelineSize;
+        ++written;
+    }
     Header header = {kMagic, kVersion, {(CKDWORD)Identity, (CKDWORD)(Identity >> 32)},
-                     kRecordDwords, (CKDWORD)count, 0};
-    header.Checksum = Checksum(header, Records.Begin(), size);
-    Data.Resize((int)(sizeof(header) + size));
+                     (CKDWORD)programs, (CKDWORD)pipelines, 0};
+    header.Checksum = Checksum(header, records, size);
     std::memcpy(Data.Begin(), &header, sizeof(header));
-    if (size)
-        std::memcpy(Data.Begin() + sizeof(header), Records.Begin(), size);
 }
 
 bool CKSdlGpuDecodeFFJitManifest(uint64_t Identity, const void *Data, size_t Size,
-                                 XArray<CKSdlGpuFFJitRecord> &Records)
+                                 CKSdlGpuFFJitManifest &Manifest)
 {
-    Records.Clear();
+    Manifest.Clear();
     Header header;
     if (!Data || Size < sizeof(header))
         return false;
@@ -143,23 +169,29 @@ bool CKSdlGpuDecodeFFJitManifest(uint64_t Identity, const void *Data, size_t Siz
     if (header.Magic != kMagic || header.Version != kVersion ||
         header.Identity[0] != (CKDWORD)Identity ||
         header.Identity[1] != (CKDWORD)(Identity >> 32) ||
-        header.RecordDwords != kRecordDwords ||
-        header.Count > CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS)
+        header.ProgramCount > CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS ||
+        header.PipelineCount > CKSDL_GPU_FF_JIT_MANIFEST_MAX_PIPELINES)
         return false;
-    const size_t size = (size_t)header.Count * sizeof(CKSdlGpuFFJitRecord);
+    const size_t programSize = (size_t)header.ProgramCount * kProgramSize;
+    const size_t pipelineSize = (size_t)header.PipelineCount * kPipelineSize;
     const CKBYTE *records = static_cast<const CKBYTE *>(Data) + sizeof(header);
-    if (Size != sizeof(header) + size || Checksum(header, records, size) != header.Checksum)
+    if (Size != sizeof(header) + programSize + pipelineSize ||
+        Checksum(header, records, programSize + pipelineSize) != header.Checksum)
         return false;
-    Records.Resize((int)header.Count);
-    if (size)
-        std::memcpy(Records.Begin(), records, size);
-    for (int i = 0; i < Records.Size(); ++i) {
-        if (!ValidRecord(Records[i])) {
-            Records.Clear();
-            return false;
-        }
-    }
-    return true;
+    Manifest.Programs.Resize((int)header.ProgramCount);
+    Manifest.Pipelines.Resize((int)header.PipelineCount);
+    if (programSize)
+        std::memcpy(Manifest.Programs.Begin(), records, programSize);
+    if (pipelineSize)
+        std::memcpy(Manifest.Pipelines.Begin(), records + programSize, pipelineSize);
+    bool valid = true;
+    for (int i = 0; valid && i < Manifest.Programs.Size(); ++i)
+        valid = ValidProgram(Manifest.Programs[i]);
+    for (int i = 0; valid && i < Manifest.Pipelines.Size(); ++i)
+        valid = ValidPipeline(Manifest.Pipelines[i], header.ProgramCount);
+    if (!valid)
+        Manifest.Clear();
+    return valid;
 }
 
 XString CKSdlGpuFFJitManifestPath(uint64_t Identity)
@@ -182,26 +214,26 @@ XString CKSdlGpuFFJitManifestPath(uint64_t Identity)
 }
 
 bool CKSdlGpuLoadFFJitManifest(const char *Path, uint64_t Identity,
-                               XArray<CKSdlGpuFFJitRecord> &Records)
+                               CKSdlGpuFFJitManifest &Manifest)
 {
-    Records.Clear();
+    Manifest.Clear();
     SDL_PathInfo info;
     if (!Path || !Path[0] || !SDL_GetPathInfo(Path, &info) ||
         info.type != SDL_PATHTYPE_FILE ||
-        info.size > sizeof(Header) +
-            CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS * sizeof(CKSdlGpuFFJitRecord))
+        info.size > sizeof(Header) + CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS * kProgramSize +
+                        CKSDL_GPU_FF_JIT_MANIFEST_MAX_PIPELINES * kPipelineSize)
         return false;
     size_t size = 0;
     void *data = SDL_LoadFile(Path, &size);
     if (!data)
         return false;
-    const bool loaded = CKSdlGpuDecodeFFJitManifest(Identity, data, size, Records);
+    const bool loaded = CKSdlGpuDecodeFFJitManifest(Identity, data, size, Manifest);
     SDL_free(data);
     return loaded;
 }
 
 bool CKSdlGpuSaveFFJitManifest(const char *Path, uint64_t Identity,
-                               const XArray<CKSdlGpuFFJitRecord> &Records)
+                               const CKSdlGpuFFJitManifest &Manifest)
 {
     if (!Path || !Path[0])
         return false;
@@ -215,7 +247,7 @@ bool CKSdlGpuSaveFFJitManifest(const char *Path, uint64_t Identity,
             return false;
     }
     XArray<CKBYTE> data;
-    CKSdlGpuEncodeFFJitManifest(Identity, Records, data);
+    CKSdlGpuEncodeFFJitManifest(Identity, Manifest, data);
     // A per-thread name keeps concurrent writers off each other's file.
     char suffix[32];
     SDL_snprintf(suffix, sizeof(suffix), ".%llx.tmp",

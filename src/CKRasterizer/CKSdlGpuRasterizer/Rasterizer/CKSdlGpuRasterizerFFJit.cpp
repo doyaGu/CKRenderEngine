@@ -39,7 +39,7 @@ bool ValidStencilOps(CKDWORD ops)
 
 // Whether the device can create the pipeline of a manifest record. SDL
 // indexes tables with these enums, so records are checked as input.
-bool PrewarmablePipeline(SDL_GPUDevice *device, const CKSdlGpuFFJitRecord &record)
+bool PrewarmablePipeline(SDL_GPUDevice *device, const CKSdlGpuFFJitPipelineRecord &record)
 {
     const CKDWORD lo = record.StateLo, mid = record.StateMid;
     if (((lo >> 6) & 15) > SDL_GPU_COMPAREOP_ALWAYS ||
@@ -154,13 +154,15 @@ void CKSdlGpuRasterizerContext::InitFFJit()
 
 void CKSdlGpuRasterizerContext::LoadFFJitManifest()
 {
-    XArray<CKSdlGpuFFJitRecord> records;
+    CKSdlGpuFFJitManifest manifest;
     if (m_FFJitManifest.Length() == 0 ||
-        !CKSdlGpuLoadFFJitManifest(m_FFJitManifest.CStr(), m_FFJitIdentity, records))
+        !CKSdlGpuLoadFFJitManifest(m_FFJitManifest.CStr(), m_FFJitIdentity, manifest))
         return;
+    // The entry of each program record, -1 past the limit.
+    XArray<int> entries;
     CKDWORD loaded = 0;
-    for (int i = 0; i < records.Size(); ++i) {
-        const CKSdlGpuFFJitRecord &record = records[i];
+    for (int i = 0; i < manifest.Programs.Size(); ++i) {
+        const CKSdlGpuFFJitProgramRecord &record = manifest.Programs[i];
         const CKFFSamplerLayout layout = (CKFFSamplerLayout)record.SamplerLayout;
         CKFFNativeFragmentKey fragment;
         fragment.Program.SetLanes(record.Lanes, CKFF_FRAGMENT_PROGRAM_LANE_COUNT);
@@ -170,14 +172,17 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
         const FFJitKey key = MakeFFJitKey(fragment, layout);
         const int *found = m_FFJitKeys.FindPtr(key);
         int index = found ? *found : -1;
-        if (!found) {
-            if (loaded == kFFJitLoadedProgramLimit)
-                continue;
+        if (!found && loaded < kFFJitLoadedProgramLimit) {
             index = AddFFJitProgram(key, kFFJitLoadedRank | loaded++);
             if (!SubmitFFJitProgram(m_FFJitPrograms[index], fragment, layout, CKSDLGPU_JOB_IDLE))
                 return;
         }
-        m_FFJitPrograms[index].Prewarm.PushBack(record);
+        entries.PushBack(index);
+    }
+    for (int i = 0; i < manifest.Pipelines.Size(); ++i) {
+        const CKSdlGpuFFJitPipelineRecord &record = manifest.Pipelines[i];
+        if (entries[record.Program] >= 0)
+            m_FFJitPrograms[entries[record.Program]].Prewarm.PushBack(record);
     }
 }
 
@@ -374,11 +379,12 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
     // other artifacts, and bind programs of their own.
     const CKSdlGpuFFFragmentArtifactKey artifact = FFJitArtifact(Entry.Key);
     for (int i = 0; i < Entry.Prewarm.Size(); ++i) {
-        const CKSdlGpuFFJitRecord &record = Entry.Prewarm[i];
+        const CKSdlGpuFFJitPipelineRecord &record = Entry.Prewarm[i];
         if (!PrewarmablePipeline(Device, record))
             continue;
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
-        const CKDWORD precompiled = NativeFFProgram(variant, artifact, FALSE);
+        const CKDWORD precompiled = NativeFFProgram(
+            variant, artifact, (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0);
         // As when a draw creates it, the program is then drawn precompiled.
         const CKDWORD handle = precompiled ? BindFFJitProgram(Entry, variant, precompiled) : 0;
         if (!handle) {
@@ -397,7 +403,8 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
         draw.State.State.Hi = record.StateHi;
         draw.State.StencilReadMask = record.StencilReadMask;
         draw.State.StencilWriteMask = record.StencilWriteMask;
-        draw.State.DepthClipEnabled = (CKBOOL)record.DepthClipEnabled;
+        draw.State.DepthClipEnabled =
+            (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP) ? TRUE : FALSE;
         draw.Program = program.get();
         draw.Layout = vertexLayout.get();
         draw.LayoutHandle = layout;
@@ -424,45 +431,55 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
     }
     std::sort(ranked.Begin(), ranked.End(),
               [](const FFJitProgram *a, const FFJitProgram *b) { return a->Rank < b->Rank; });
-    XArray<CKSdlGpuFFJitRecord> records;
+    CKSdlGpuFFJitManifest manifest;
     for (int i = 0; i < ranked.Size() &&
-                    records.Size() < CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS; ++i) {
+                    manifest.Programs.Size() < CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS; ++i) {
         const FFJitProgram &entry = *ranked[i];
-        // A loaded program not compiled yet keeps the records it came with.
-        for (int r = 0; r < entry.Prewarm.Size(); ++r)
-            records.PushBack(entry.Prewarm[r]);
-        CKSdlGpuFFJitRecord record = {};
-        std::memcpy(record.Lanes, entry.Key.Values, sizeof(record.Lanes));
-        std::memcpy(record.Switches, entry.Key.Values + CKFF_FRAGMENT_PROGRAM_LANE_COUNT,
-                    sizeof(record.Switches));
-        record.SamplerLayout = entry.Key.Values[FF_JIT_KEY_LAYOUT];
+        const CKBYTE index = (CKBYTE)manifest.Programs.Size();
+        CKSdlGpuFFJitProgramRecord programRecord;
+        std::memcpy(programRecord.Lanes, entry.Key.Values, sizeof(programRecord.Lanes));
+        std::memcpy(programRecord.Switches, entry.Key.Values + CKFF_FRAGMENT_PROGRAM_LANE_COUNT,
+                    sizeof(programRecord.Switches));
+        programRecord.SamplerLayout = entry.Key.Values[FF_JIT_KEY_LAYOUT];
+        manifest.Programs.PushBack(programRecord);
+        // A loaded program not compiled yet keeps the pipelines it came with.
+        for (int r = 0; r < entry.Prewarm.Size(); ++r) {
+            manifest.Pipelines.PushBack(entry.Prewarm[r]);
+            manifest.Pipelines.Back().Program = index;
+        }
+        const CKDWORD artifact = CKSdlGpuFFFragmentArtifactIndex(FFJitArtifact(entry.Key));
         for (int b = 0; b < entry.Programs.Size(); ++b) {
-            const std::shared_ptr<CKSdlGpuProgram> &program =
-                Programs.Borrow(entry.Programs[b].Program);
+            const FFJitProgram::Binding &binding = entry.Programs[b];
+            const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(binding.Program);
             if (!program)
                 continue;
-            record.Variant = entry.Programs[b].Variant;
+            CKSdlGpuFFJitPipelineRecord record = {};
+            record.Program = index;
+            record.Variant = (CKBYTE)binding.Variant;
+            const bool pad =
+                binding.Precompiled == m_NativeFFPrograms[binding.Variant][artifact][1];
             // Pending and failed pipelines are recorded too.
             for (auto it = program->Pipelines.Begin(); it != program->Pipelines.End(); ++it) {
                 const CKDWORD *key = it.GetKey().Values;
                 const CKDWORD *vertexFormat = vertexFormats.FindPtr(key[0]);
                 if (!vertexFormat || key[1] != 0)
                     continue;
+                record.Flags = (CKBYTE)((pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0) |
+                                        (key[10] ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP : 0));
+                record.ColorFormat = (CKBYTE)key[2];
+                record.DepthFormat = (CKBYTE)key[3];
+                record.SampleCount = (CKBYTE)key[4];
+                record.StencilReadMask = (CKBYTE)key[8];
+                record.StencilWriteMask = (CKBYTE)key[9];
                 record.VertexFormat = *vertexFormat;
-                record.ColorFormat = key[2];
-                record.DepthFormat = key[3];
-                record.SampleCount = key[4];
                 record.StateLo = key[5];
                 record.StateMid = key[6];
                 record.StateHi = key[7];
-                record.StencilReadMask = key[8];
-                record.StencilWriteMask = key[9];
-                record.DepthClipEnabled = key[10];
-                records.PushBack(record);
+                manifest.Pipelines.PushBack(record);
             }
         }
     }
-    CKSdlGpuSaveFFJitManifest(m_FFJitManifest.CStr(), m_FFJitIdentity, records);
+    CKSdlGpuSaveFFJitManifest(m_FFJitManifest.CStr(), m_FFJitIdentity, manifest);
 }
 
 void CKSdlGpuRasterizerContext::ClearFFJitPrograms()

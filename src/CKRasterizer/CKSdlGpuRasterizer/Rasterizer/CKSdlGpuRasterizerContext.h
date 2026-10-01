@@ -403,7 +403,7 @@ private:
         // A loaded program's compilation, promoted when a draw uses it.
         CKSdlGpuJob *IdleJob = nullptr;
         // The loaded pipelines to queue once the program is compiled.
-        XArray<CKSdlGpuFFJitRecord> Prewarm;
+        XArray<CKSdlGpuFFJitPipelineRecord> Prewarm;
     };
     void InitFFJit();
     void LoadFFJitManifest();

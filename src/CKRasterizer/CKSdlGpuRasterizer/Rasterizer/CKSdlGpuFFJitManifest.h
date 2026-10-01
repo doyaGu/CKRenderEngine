@@ -14,45 +14,71 @@
 // compiler is fast, and the driver caches what pipeline creation built. A
 // prewarmed pipeline has the key of the draw it came from, so a record that
 // no draw needs again costs background work only.
-struct CKSdlGpuFFJitRecord {
-    // The canonical CKFFNativeFragmentKey of the program.
+
+// The canonical CKFFNativeFragmentKey of a program.
+struct CKSdlGpuFFJitProgramRecord {
     CKDWORD Lanes[CKFF_FRAGMENT_PROGRAM_LANE_COUNT];
     CKDWORD Switches[CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT];
     CKDWORD SamplerLayout;
-    CKDWORD Variant;
+};
+
+enum CKSdlGpuFFJitPipelineFlags {
+    CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP = 1,
+    // The draw replaced the precompiled program that pads position-T depth.
+    CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD = 2,
+};
+
+// A pipeline a program was drawn with.
+struct CKSdlGpuFFJitPipelineRecord {
+    // Indexes the manifest's programs.
+    CKBYTE Program;
+    CKBYTE Variant;
+    CKBYTE Flags;
+    CKBYTE ColorFormat, DepthFormat, SampleCount;
+    CKBYTE StencilReadMask, StencilWriteMask;
     // Vertex format flags, which name the draw's native vertex layout.
     CKDWORD VertexFormat;
-    CKDWORD ColorFormat, DepthFormat, SampleCount;
     CKDWORD StateLo, StateMid, StateHi;
-    CKDWORD StencilReadMask, StencilWriteMask, DepthClipEnabled;
+};
+
+struct CKSdlGpuFFJitManifest {
+    XArray<CKSdlGpuFFJitProgramRecord> Programs;
+    XArray<CKSdlGpuFFJitPipelineRecord> Pipelines;
+
+    void Clear()
+    {
+        Programs.Clear();
+        Pipelines.Clear();
+    }
 };
 
 enum {
-    // Bounds the background work one manifest starts.
-    CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS = 1024,
+    // Bound the background work one manifest starts.
+    CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS = 256,
+    CKSDL_GPU_FF_JIT_MANIFEST_MAX_PIPELINES = 1024,
 };
 
 // Changes with everything that gives the records their meaning, so another
 // device, driver, shader format or fixed-function ABI never loads them.
 uint64_t CKSdlGpuFFJitManifestIdentity(const char *Driver, const char *Device,
                                        SDL_GPUShaderFormat Format);
-// Encodes at most CKSDL_GPU_FF_JIT_MANIFEST_MAX_RECORDS records.
-void CKSdlGpuEncodeFFJitManifest(uint64_t Identity,
-                                 const XArray<CKSdlGpuFFJitRecord> &Records,
+// Encodes the first programs up to the limit, and the first pipelines of
+// those up to the limit.
+void CKSdlGpuEncodeFFJitManifest(uint64_t Identity, const CKSdlGpuFFJitManifest &Manifest,
                                  XArray<CKBYTE> &Data);
 // Accepts a manifest only as a whole. Another identity or format revision,
-// a size or checksum mismatch, or any malformed record leaves Records empty.
+// a size or checksum mismatch, or any malformed record leaves it empty.
 bool CKSdlGpuDecodeFFJitManifest(uint64_t Identity, const void *Data, size_t Size,
-                                 XArray<CKSdlGpuFFJitRecord> &Records);
+                                 CKSdlGpuFFJitManifest &Manifest);
 
 // The manifest file of a device, empty when disabled. CKRE_SDL_GPU_FF_JIT_CACHE
 // names its directory, or disables it when "0"; it defaults to CKSdlGpuCache
 // next to the rasterizer.
 XString CKSdlGpuFFJitManifestPath(uint64_t Identity);
 bool CKSdlGpuLoadFFJitManifest(const char *Path, uint64_t Identity,
-                               XArray<CKSdlGpuFFJitRecord> &Records);
+                               CKSdlGpuFFJitManifest &Manifest);
 // Replaces the file only with a complete manifest.
 bool CKSdlGpuSaveFFJitManifest(const char *Path, uint64_t Identity,
-                               const XArray<CKSdlGpuFFJitRecord> &Records);
+                               const CKSdlGpuFFJitManifest &Manifest);
 
 #endif

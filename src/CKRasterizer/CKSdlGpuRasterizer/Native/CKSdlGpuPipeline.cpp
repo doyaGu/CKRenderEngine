@@ -136,10 +136,11 @@ static CKSdlGpuPipelineKey PipelineKey(const CKSdlGpuDraw &draw,
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
 {
     const auto &state = draw.State.State;
+    // SDL takes 8-bit stencil masks.
     const CKDWORD keyValues[11] = {draw.LayoutHandle, draw.Layout1Handle,
         unsigned(color), unsigned(depth), unsigned(samples), state.Lo, state.Mid, state.Hi,
-        draw.State.StencilReadMask, draw.State.StencilWriteMask,
-        (CKDWORD)draw.State.DepthClipEnabled};
+        draw.State.StencilReadMask & 0xffu, draw.State.StencilWriteMask & 0xffu,
+        draw.State.DepthClipEnabled ? 1u : 0u};
     CKSdlGpuPipelineKey key;
     std::memcpy(key.Values, keyValues, sizeof(keyValues));
     return key;
