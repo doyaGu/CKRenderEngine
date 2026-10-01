@@ -319,6 +319,12 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     TestCheck(remapped.Bindings[0].Stage == 7 &&
                   remapped.Hash != changedSampler.Hash,
               "A sampler layout change must miss the final binding-set cache");
+    const CKDWORD previousSlot = changedSampler.Bindings[0].Stage;
+    TestCheck(previousSlot != 7 &&
+                  remapped.NativeBindings[7].Texture == 23 &&
+                  remapped.NativeBindings[previousSlot].Texture == 0 &&
+                  remapped.NativeBindings[previousSlot].FixedStage == UINT32_MAX,
+              "A remapped binding set must release the native slot of the previous layout");
 
     CKFFTextureBindingSet unsampled;
     CKFFSamplerLayoutPlan unsampledPlan = plan;
@@ -327,6 +333,10 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     TestCheck(unsampled.ActiveTextureCount == 0 &&
                   unsampled.Bindings[0].Texture == 0,
               "A sampled-stage mask change must rebuild the final binding set");
+    TestCheck(unsampled.NativeBindings[7].Texture == 0 &&
+                  unsampled.NativeBindings[7].FixedStage == UINT32_MAX &&
+                  unsampled.NativeBindings[7].Sampler.AddressU == CKRST_ADDRESS_WRAP,
+              "A rebuilt binding set must restore every native slot the previous build wrote");
 
     binder.SetRenderOptions(TRUE, FALSE, FALSE);
     CKFFTextureBindingSet overridden;

@@ -14,7 +14,7 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
 {
     if (!set)
         return;
-    CKFFInitTextureBindingSet(set);
+    CKFFResetTextureBindingSet(set);
     CKDWORD stageCount = activeTextureCount;
     if (stageCount > CKFF_MAX_TEXTURE_STAGES)
         stageCount = CKFF_MAX_TEXTURE_STAGES;
@@ -36,6 +36,7 @@ static void CKFFBuildTextureBindingSet(CKFFTextureBindingSet *set,
             native.FixedStage = stage;
             native.ShaderState = shaderStates[stage].Bits;
             native.Sampler = samplers[stage];
+            set->NativeSlotMask |= 1u << nativeSlot;
         }
     }
     set->Hash = CKFFHashTextureBindingSet(set->ActiveTextureCount, set->Bindings);

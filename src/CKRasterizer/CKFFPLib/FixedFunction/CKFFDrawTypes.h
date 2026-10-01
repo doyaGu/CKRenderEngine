@@ -61,6 +61,8 @@ struct CKFFTextureBindingSet {
     CKFFSamplerLayoutPlan SamplerLayoutPlan;
     CKFFTextureBinding Bindings[CKFF_MAX_TEXTURE_STAGES];
     CKFFTextureBindings NativeBindings;
+    // Native slots written since the last reset; every other slot is default.
+    CKDWORD NativeSlotMask;
 };
 
 enum CKFFDrawSource {
@@ -153,7 +155,9 @@ inline void CKFFInitPreparedState(CKFFPreparedState *prepared)
     prepared->TextureBoundMask = 0;
 }
 
-inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
+// Returns an initialized set to its empty state. Only the native slots the
+// last build wrote need restoring, which keeps rebuilds off the full table.
+inline void CKFFResetTextureBindingSet(CKFFTextureBindingSet *set)
 {
     if (!set)
         return;
@@ -162,7 +166,13 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
     set->Hash = 0;
     set->RequiresShaderSampling = FALSE;
     set->SamplerLayoutPlan = CKFFSamplerLayoutPlan();
-    set->NativeBindings = CKFFTextureBindings();
+    static const CKFFTextureSlot emptySlot;
+    CKDWORD written = set->NativeSlotMask;
+    for (CKDWORD slot = 0; written != 0; ++slot, written >>= 1) {
+        if ((written & 1u) != 0)
+            set->NativeBindings[slot] = emptySlot;
+    }
+    set->NativeSlotMask = 0;
     for (CKDWORD stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         set->Bindings[stage].Stage = stage;
         set->Bindings[stage].Texture = 0;
@@ -170,6 +180,15 @@ inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
         set->Bindings[stage].Sampler = CKSamplerDesc();
         set->Bindings[stage].ShaderState = CKFFSamplerShaderState();
     }
+}
+
+inline void CKFFInitTextureBindingSet(CKFFTextureBindingSet *set)
+{
+    if (!set)
+        return;
+    set->NativeBindings = CKFFTextureBindings();
+    set->NativeSlotMask = 0;
+    CKFFResetTextureBindingSet(set);
 }
 
 float CKFFComputeDepthKey(const CKFFStateStore &state, const CKDrawStateCache &drawState);
