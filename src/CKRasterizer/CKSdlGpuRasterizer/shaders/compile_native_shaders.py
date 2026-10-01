@@ -382,12 +382,22 @@ def shader_formats(name: str):
     return ("dxil", "spirv", "dxbc") if name in DXBC_SHADERS else ("dxil", "spirv")
 
 
+def abi_header(abi, abi_hash) -> str:
+    # Uniform buffer counts follow the native layout so the C++ shader
+    # descriptors never restate how the blocks are split across slots.
+    families = (("FF_3D", "vs_ff_3d"), ("FF_POSITIONT", "vs_ff_positiont"),
+                ("FF_FRAGMENT", "fs_ff_stage"), ("PRESENT", "fs_postprocess"))
+    lines = [f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};",
+             f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};"]
+    lines += [f"static constexpr unsigned CKSDL_SHADER_{family}_UNIFORM_BUFFERS = {shader_resources(source)[0]};"
+              for family, source in families]
+    return "\n".join(lines) + "\n"
+
+
 def verify_artifacts(directory, abi, abi_hash):
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert (manifest["abi_version"], manifest["interface_hash"]) == (abi, abi_hash), "Shader ABI is stale"
-    expected_abi = (f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
-                    f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
-    assert (directory / "abi.h").read_text(encoding="utf-8") == expected_abi, "Compiled shader identity is stale"
+    assert (directory / "abi.h").read_text(encoding="utf-8") == abi_header(abi, abi_hash), "Compiled shader identity is stale"
     expected = {(name, format_) for name, _, _, _, _ in SHADERS for format_ in shader_formats(name)}
     assert {(s["name"], s["format"]) for s in manifest["shaders"]} == expected
     sources = {name: hashlib.sha256(make_source(name, source, clipping, compare_count,
@@ -488,9 +498,7 @@ def main() -> None:
     for destination, source in pending.items():
         shutil.copyfile(source, destination)
     (args.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (args.output_dir / "abi.h").write_text(
-        f"static constexpr unsigned CKSDL_SHADER_ABI_VERSION = {abi};\n"
-        f"static constexpr unsigned CKSDL_SHADER_INTERFACE_HASH = 0x{abi_hash:08x};\n")
+    (args.output_dir / "abi.h").write_text(abi_header(abi, abi_hash))
     print("Generated and reflected both complete native shader families and the DXBC vertex shaders.")
 
 

@@ -60,7 +60,7 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
     out.Stage = CKRST_SHADER_VERTEX;
     out.Profile = format == SDL_GPU_SHADERFORMAT_SPIRV ?
         CKRST_SHADER_PROFILE_SPIRV : CKRST_SHADER_PROFILE_DX12;
-    out.UniformBufferCount = 1;
+    out.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
     if (format == SDL_GPU_SHADERFORMAT_DXIL) {
         out.Format = CKRST_SHADER_FORMAT_DXIL;
         if (clipping) {
@@ -101,17 +101,17 @@ CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
     out.Stage = CKRST_SHADER_VERTEX;
     out.Format = CKRST_SHADER_FORMAT_DXBC;
     out.Profile = CKRST_SHADER_PROFILE_DX12;
-    out.UniformBufferCount = 1;
+    out.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
     switch (variant) {
     case CKFF_PROGRAM_3D:
         out.Code = s_sdl_dxbc_vs_ff_3d;
         out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_3d);
-        out.UniformBufferCount = 2;
+        out.UniformBufferCount = CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
         break;
     case CKFF_PROGRAM_3D_CLIP:
         out.Code = s_sdl_dxbc_vs_ff_3d_clip;
         out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_3d_clip);
-        out.UniformBufferCount = 2;
+        out.UniformBufferCount = CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
         break;
     case CKFF_PROGRAM_POSITIONT:
         out.Code = s_sdl_dxbc_vs_ff_positiont;
@@ -224,7 +224,7 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
     out.Profile = format == SDL_GPU_SHADERFORMAT_DXIL ?
         CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
     out.SamplerCount = CKFF_SAMPLER_SLOT_COUNT;
-    out.UniformBufferCount = 1;
+    out.UniformBufferCount = CKSDL_SHADER_FF_FRAGMENT_UNIFORM_BUFFERS;
 #define CKFF_SET_SHADER(_format, _suffix) \
     out.Code = s_sdl_##_format##_fs_ff_stage##_suffix; \
     out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage##_suffix)
@@ -318,10 +318,25 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
         shader.Stage = i == CKRST_SHADER_FF_FRAGMENT || i == CKRST_SHADER_PRESENT_FRAGMENT ? CKRST_SHADER_PIXEL : CKRST_SHADER_VERTEX;
         shader.Format = payload;
         shader.Profile = profile;
-        if (i == CKRST_SHADER_FF_3D || i == CKRST_SHADER_FF_3D_CLIP)
-            shader.UniformBufferCount = 2;
-        else
-            shader.UniformBufferCount = i == CKRST_SHADER_PRESENT_VERTEX ? 0 : 1;
+        switch (i) {
+        case CKRST_SHADER_FF_3D:
+        case CKRST_SHADER_FF_3D_CLIP:
+            shader.UniformBufferCount = CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
+            break;
+        case CKRST_SHADER_FF_POSITIONT:
+        case CKRST_SHADER_FF_POSITIONT_CLIP:
+            shader.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
+            break;
+        case CKRST_SHADER_FF_FRAGMENT:
+            shader.UniformBufferCount = CKSDL_SHADER_FF_FRAGMENT_UNIFORM_BUFFERS;
+            break;
+        case CKRST_SHADER_PRESENT_FRAGMENT:
+            shader.UniformBufferCount = CKSDL_SHADER_PRESENT_UNIFORM_BUFFERS;
+            break;
+        default:
+            shader.UniformBufferCount = 0;
+            break;
+        }
         shader.SamplerCount = i == CKRST_SHADER_FF_FRAGMENT ? 16 : (i == CKRST_SHADER_PRESENT_FRAGMENT ? 1 : 0);
     }
     CKShaderDesc fragment;

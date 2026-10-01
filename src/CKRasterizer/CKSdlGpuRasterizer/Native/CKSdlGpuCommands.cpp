@@ -226,8 +226,9 @@ bool CKSdlGpuPatchDepthPad(const CKSdlGpuProgram &program,
     CKDWORD flags = (CKDWORD)packedFlags;
     const CKDWORD componentCount = flags & 0xffu;
     VxMatrix original;
-    const bool positionT = program.Vertex &&
-        program.Vertex->Desc.UniformBufferCount == 1;
+    // Pre-transformed vertices carry no world/view/projection matrices.
+    const bool positionT = !CKSdlGpuFindUniform(
+        program, CKRST_SHADER_VERTEX, CKRST_BLOCK_MATRICES);
     if (!positionT && componentCount >= 1u && componentCount <= 4u)
         std::memcpy(&original, layout.Data.Begin() + matrixOffset,
                     sizeof(original));
