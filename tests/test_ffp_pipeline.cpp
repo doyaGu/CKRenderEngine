@@ -88,19 +88,21 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
         vertex.Profile = pixel.Profile = format == CKRST_SHADER_FORMAT_DXIL ?
             CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
         pixel.Stage = CKRST_SHADER_PIXEL;
-        vertex.UniformBufferCount = 2;
+        vertex.UniformBufferCount = 3;
         pixel.UniformBufferCount = 1;
         pixel.SamplerCount = 16;
         TestCheck(CKFFValidateProgram(program, vertex, pixel) == CK_OK,
                   "FFP native declarations satisfy generic backend validation");
-        TestCheck(program.UniformBuffers.Size() == 3 &&
+        TestCheck(program.UniformBuffers.Size() == 4 &&
                       program.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
                       program.UniformBuffers[0].Slot == 0 && program.UniformBuffers[0].Size == 512 &&
                       program.UniformBuffers[1].Stage == CKRST_SHADER_VERTEX &&
-                      program.UniformBuffers[1].Slot == 1 && program.UniformBuffers[1].Size == 2368 &&
-                      program.UniformBuffers[2].Stage == CKRST_SHADER_PIXEL &&
-                      program.UniformBuffers[2].Slot == 0 && program.UniformBuffers[2].Size == 1424,
-                  "native 3D declarations isolate per-draw matrices");
+                      program.UniformBuffers[1].Slot == 1 && program.UniformBuffers[1].Size == 320 &&
+                      program.UniformBuffers[2].Stage == CKRST_SHADER_VERTEX &&
+                      program.UniformBuffers[2].Slot == 2 && program.UniformBuffers[2].Size == 2048 &&
+                      program.UniformBuffers[3].Stage == CKRST_SHADER_PIXEL &&
+                      program.UniformBuffers[3].Slot == 0 && program.UniformBuffers[3].Size == 1424,
+                  "native 3D declarations isolate per-draw matrices and draw parameters");
         TestCheck(program.Uniforms.Size() == 13 &&
                       program.Uniforms[9].Slot == CKRST_BLOCK_DRAW_PARAMS &&
                       program.Uniforms[9].BufferSlot == 0 && program.Uniforms[9].Offset == 0 &&
@@ -123,12 +125,14 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
 
         const CKFFProgramDesc positionT = CKFFBuildProgramInterface(
             1, 2, format, FALSE, TRUE);
-        vertex.UniformBufferCount = 1;
+        vertex.UniformBufferCount = 2;
         TestCheck(CKFFValidateProgram(positionT, vertex, pixel) == CK_OK &&
-                      positionT.UniformBuffers.Size() == 2 &&
+                      positionT.UniformBuffers.Size() == 3 &&
                       positionT.UniformBuffers[0].Stage == CKRST_SHADER_VERTEX &&
                       positionT.UniformBuffers[0].Slot == 0 &&
-                      positionT.UniformBuffers[0].Size == 2368,
+                      positionT.UniformBuffers[0].Size == 320 &&
+                      positionT.UniformBuffers[1].Slot == 1 &&
+                      positionT.UniformBuffers[1].Size == 2048,
                   "POSITIONT omits the unused matrix buffer and compacts native slots");
 
         const CKFFProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);

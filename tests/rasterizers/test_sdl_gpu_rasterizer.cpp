@@ -50,24 +50,28 @@ int main()
         unsigned first[2 * CKFF_UNIFORM_BUFFER_COUNT] = {};
         unsigned moved[2 * CKFF_UNIFORM_BUFFER_COUNT] = {};
         unsigned fragment[2 * CKFF_UNIFORM_BUFFER_COUNT] = {};
+        unsigned draw[2 * CKFF_UNIFORM_BUFFER_COUNT] = {};
         batch.Snapshot(layout, cursor, first);
-        check(layout.Buffers.Size() == 3 &&
+        check(layout.Buffers.Size() == 4 &&
               layout.Buffers[0].Stage == CKRST_SHADER_VERTEX && layout.Buffers[0].Slot == 0 &&
               layout.Buffers[0].Size == 512 &&
               layout.Buffers[1].Stage == CKRST_SHADER_VERTEX && layout.Buffers[1].Slot == 1 &&
-              layout.Buffers[1].Size == 2368 &&
-              layout.Buffers[2].Stage == CKRST_SHADER_PIXEL && layout.Buffers[2].Slot == 0 &&
-              layout.Buffers[2].Size == 1424 && batch.Data.Size() == 4304 &&
+              layout.Buffers[1].Size == 320 &&
+              layout.Buffers[2].Stage == CKRST_SHADER_VERTEX && layout.Buffers[2].Slot == 2 &&
+              layout.Buffers[2].Size == 2048 &&
+              layout.Buffers[3].Stage == CKRST_SHADER_PIXEL && layout.Buffers[3].Slot == 0 &&
+              layout.Buffers[3].Size == 1424 && batch.Data.Size() == 4304 &&
               native.NeedsPush(layout.Buffers[0], first[0], batch.Data) &&
               native.NeedsPush(layout.Buffers[1], first[1], batch.Data) &&
-              native.NeedsPush(layout.Buffers[2], first[2], batch.Data),
+              native.NeedsPush(layout.Buffers[2], first[2], batch.Data) &&
+              native.NeedsPush(layout.Buffers[3], first[3], batch.Data),
               "first FFP draw binds every isolated native buffer");
         float matrix[16] = {}; matrix[12] = 2.0f;
         constants.Set(CKRST_BLOCK_MATRICES, matrix, sizeof(matrix));
         layout.Update(constants);
         batch.Snapshot(layout, cursor, moved);
         check(moved[0] != first[0] && moved[1] == first[1] && moved[2] == first[2] &&
-              batch.Data.Size() == 4304 + 512 &&
+              moved[3] == first[3] && batch.Data.Size() == 4304 + 512 &&
               native.NeedsPush(layout.Buffers[0], moved[0], batch.Data) &&
               !native.NeedsPush(layout.Buffers[1], moved[1], batch.Data),
               "matrix-only changes snapshot/push 512 vertex bytes");
@@ -75,10 +79,10 @@ int main()
         constants.Set(CKRST_BLOCK_BUMP_ENV, bump, sizeof(bump));
         layout.Update(constants);
         batch.Snapshot(layout, cursor, fragment);
-        check(fragment[0] == moved[0] && fragment[1] == moved[1] &&
-              fragment[2] != moved[2] && batch.Data.Size() == 4304 + 512 + 1424 &&
+        check(fragment[0] == moved[0] && fragment[1] == moved[1] && fragment[2] == moved[2] &&
+              fragment[3] != moved[3] && batch.Data.Size() == 4304 + 512 + 1424 &&
               !native.NeedsPush(layout.Buffers[0], fragment[0], batch.Data) &&
-              native.NeedsPush(layout.Buffers[2], fragment[2], batch.Data),
+              native.NeedsPush(layout.Buffers[3], fragment[3], batch.Data),
               "fragment-only changes preserve the vertex buffer version and binding");
         auto shared = std::find_if(program.Uniforms.Begin(), program.Uniforms.End(), [](const auto &uniform) {
             return uniform.Slot == CKRST_BLOCK_DRAW_PARAMS && uniform.Stage == CKRST_SHADER_PIXEL;
@@ -90,6 +94,12 @@ int main()
               std::memcmp(layout.Data.Begin() + layout.BufferOffset(CKRST_SHADER_PIXEL, 0) + shared->Offset,
                           factor, sizeof(factor)) == 0,
               "logical data used by both stages is copied into each stage's declared range");
+        batch.Snapshot(layout, cursor, draw);
+        check(draw[0] == fragment[0] && draw[1] != fragment[1] && draw[2] == fragment[2] &&
+              draw[3] != fragment[3] && batch.Data.Size() == 4304 + 512 + 1424 * 2 + 320 &&
+              native.NeedsPush(layout.Buffers[1], draw[1], batch.Data) &&
+              !native.NeedsPush(layout.Buffers[2], draw[2], batch.Data),
+              "draw-parameter changes snapshot/push 320 vertex bytes");
     }
     {
         CKFFProgramLayout layout;
@@ -761,10 +771,10 @@ int main()
         mismatched = set;
         mismatched.InterfaceHash = CKFF_SHADER_INTERFACE_HASH;
         check(!mismatched.Matches(payload, profile), "old shared native layout hash is rejected");
-        check(set.Shaders[CKRST_SHADER_FF_3D].UniformBufferCount == 2 &&
-              set.Shaders[CKRST_SHADER_FF_3D_CLIP].UniformBufferCount == 2 &&
-              set.Shaders[CKRST_SHADER_FF_POSITIONT].UniformBufferCount == 1 &&
-              set.Shaders[CKRST_SHADER_FF_POSITIONT_CLIP].UniformBufferCount == 1 &&
+        check(set.Shaders[CKRST_SHADER_FF_3D].UniformBufferCount == 3 &&
+              set.Shaders[CKRST_SHADER_FF_3D_CLIP].UniformBufferCount == 3 &&
+              set.Shaders[CKRST_SHADER_FF_POSITIONT].UniformBufferCount == 2 &&
+              set.Shaders[CKRST_SHADER_FF_POSITIONT_CLIP].UniformBufferCount == 2 &&
               set.Shaders[CKRST_SHADER_FF_FRAGMENT].UniformBufferCount == 1,
               "native FFP shaders match variant-specific buffer layouts");
         check(set.Shaders[CKRST_SHADER_FF_FRAGMENT].SamplerCount == 16, "FFP logical slots retained");

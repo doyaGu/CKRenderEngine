@@ -117,7 +117,7 @@ CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelSha
     result.PixelShader = pixelShader;
     const bool packed = format != CKRST_SHADER_FORMAT_BGFX;
     const CKDWORD stageCount = present ? 1u : 2u;
-    result.UniformBuffers.Reserve((int)(packed ? stageCount * 2u : 0u));
+    result.UniformBuffers.Reserve((int)(packed ? stageCount * CKFF_UNIFORM_BUFFER_COUNT : 0u));
     result.Uniforms.Reserve((int)(present ? 1u : CKRST_BLOCK_COUNT * stageCount));
 
     CKDWORD metadataBufferSlot = UINT32_MAX;
