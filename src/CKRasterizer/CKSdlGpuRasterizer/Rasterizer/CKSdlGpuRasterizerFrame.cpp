@@ -452,7 +452,8 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
 CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(
     CKFFProgramVariant Variant,
     const CKSdlGpuFFFragmentArtifactKey &Artifact,
-    CKBOOL PositionTDepthPad)
+    CKBOOL PositionTDepthPad,
+    ShaderJob *Job)
 {
     const CKDWORD variant = (CKDWORD)Variant;
     const CKFFSamplerLayout layout = Artifact.SamplerLayout;
@@ -468,7 +469,7 @@ CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(
         if (!CKSdlGpuFFFragmentShader(ShaderFormat, Artifact,
                                      pixelShader) ||
             CreateShader(&pixelShader,
-                         &m_NativeFFPixelShaders[fragmentArtifact]) != CK_OK)
+                         &m_NativeFFPixelShaders[fragmentArtifact], Job) != CK_OK)
             return 0;
     }
     const CKBOOL positionT =
@@ -484,14 +485,14 @@ CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(
             if (!CKSdlGpuFFDepthPadVertexShader(ShaderFormat, clip != 0,
                                                 vertexDesc) ||
                 CreateShader(&vertexDesc,
-                             &m_NativeFFDepthPadVertexShaders[clip]) != CK_OK)
+                             &m_NativeFFDepthPadVertexShaders[clip], Job) != CK_OK)
                 return 0;
         }
         vertexShader = m_NativeFFDepthPadVertexShaders[clip];
     } else {
         if (!m_NativeFFVertexShaders[variant] &&
             CreateShader(&m_ShaderCache.GetVertexShader(Variant),
-                         &m_NativeFFVertexShaders[variant]) != CK_OK)
+                         &m_NativeFFVertexShaders[variant], Job) != CK_OK)
             return 0;
         vertexShader = m_NativeFFVertexShaders[variant];
     }

@@ -1,5 +1,6 @@
 #include "CKRenderProfile.h"
 #include "CKSdlGpuRasterizerContext.h"
+#include "CKSdlGpuShaderJob.h"
 #include "CKSdlGpuTextureData.h"
 
 SDL_GPUSampleCount CKSdlGpuSampleCount(unsigned samples)
@@ -758,7 +759,52 @@ SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKShaderDesc &desc, SDL_GPUShad
     return info;
 }
 
+CKSdlGpuRasterizerContext::ShaderJob::~ShaderJob()
+{
+    for (int i = 0; i < Shaders.Size(); ++i)
+        Shaders[i].Shader->Job = nullptr;
+    if (Context.m_FFShaderJob == this)
+        Context.m_FFShaderJob = nullptr;
+}
+
+void CKSdlGpuRasterizerContext::ShaderJob::Add(const std::shared_ptr<CKSdlGpuShader> &shader,
+                                               SDL_GPUShaderFormat format)
+{
+    shader->Job = this;
+    Pending pending = {shader, format};
+    Shaders.PushBack(pending);
+}
+
+void CKSdlGpuRasterizerContext::ShaderJob::Run()
+{
+    for (int i = 0; i < Shaders.Size(); ++i) {
+        CKSdlGpuShader &shader = *Shaders[i].Shader;
+        const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(shader.Desc, Shaders[i].Format);
+        shader.Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
+        if (shader.Shader) {
+            ++Created;
+        } else if (Created == i) {
+            Error = SDL_GetError();
+        }
+    }
+}
+
+void CKSdlGpuRasterizerContext::ShaderJob::Complete()
+{
+    Context.m_FFWorkerShaders += CKDWORD(Created);
+    if (Created == Shaders.Size())
+        return;
+    SDL_SetError("%s", Error.CStr());
+    Context.Fail("CreateGPUShader");
+}
+
 CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWORD *out)
+{
+    return CreateShader(desc, out, nullptr);
+}
+
+CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWORD *out,
+                                                ShaderJob *job)
 {
     if (out) *out = 0;
     if (!Ready()) return CKERR_INVALIDOPERATION;
@@ -768,11 +814,15 @@ CKERROR CKSdlGpuRasterizerContext::CreateShader(const CKShaderDesc *desc, CKDWOR
         format == SDL_GPU_SHADERFORMAT_INVALID ||
         desc->SamplerCount > 16 || desc->UniformBufferCount > 4 || desc->StorageBufferCount || desc->StorageTextureCount ||
         (desc->Stage != CKRST_SHADER_VERTEX && desc->Stage != CKRST_SHADER_PIXEL)) return CKERR_INVALIDPARAMETER;
-    const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*desc, format);
     auto shader = std::make_shared<CKSdlGpuShader>();
     shader->Desc = *desc;
-    shader->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
-    if (!shader->Shader) return Fail("CreateGPUShader");
+    if (job) {
+        job->Add(shader, format);
+    } else {
+        const SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*desc, format);
+        shader->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
+        if (!shader->Shader) return Fail("CreateGPUShader");
+    }
     *out = ShaderObjects.Add(shader);
     return *out ? CK_OK : CKERR_OUTOFMEMORY;
 }

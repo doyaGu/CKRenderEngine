@@ -1198,7 +1198,8 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
                       "background compilation finishes");
         }
         saved = context->CountFFJitProgramsForTests();
-        TestCheck(saved.Ready != 0 && saved.Programs != 0 && saved.Pipelines != 0,
+        TestCheck(saved.Ready != 0 && saved.Programs != 0 && saved.Pipelines != 0 &&
+                      saved.Shaders == 0,
                   "the saving run compiles programs and pipelines");
     }
     CloseBackend(backend);
@@ -1210,6 +1211,8 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
         CKSdlGpuRasterizerContext *context =
             static_cast<CKSdlGpuRasterizerContext *>(backend.Context);
         TestCheck(context->FinishBackgroundWorkForTests(30000), "prewarming finishes");
+        TestCheck(context->CountFFJitProgramsForTests().Shaders != 0,
+                  "the worker creates the precompiled shaders of the manifest");
         CheckFFJitCounts("prewarmed before drawing", context->CountFFJitProgramsForTests(),
                          saved);
         Samples samples;

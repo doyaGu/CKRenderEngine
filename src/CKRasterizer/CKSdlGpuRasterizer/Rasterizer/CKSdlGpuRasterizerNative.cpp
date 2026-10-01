@@ -248,10 +248,15 @@ static int WorkerThreads()
     return SDL_GetNumLogicalCPUCores() >= 4 ? 2 : 1;
 }
 
+bool CKSdlGpuRasterizerContext::StartWorker()
+{
+    return Worker.Running() || Worker.Start("CKSdlGpuWorker", WorkerThreads());
+}
+
 bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
                                           const CKSdlGpuJob *after)
 {
-    if (!Worker.Running() && !Worker.Start("CKSdlGpuWorker", WorkerThreads())) {
+    if (!StartWorker()) {
         delete job;
         return false;
     }

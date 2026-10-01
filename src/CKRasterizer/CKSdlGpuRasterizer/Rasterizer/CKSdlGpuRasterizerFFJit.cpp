@@ -1,4 +1,5 @@
 #include "CKSdlGpuRasterizerContext.h"
+#include "CKSdlGpuShaderJob.h"
 #include "CKSdlGpuShaders.h"
 #include "CKFFNativeFragmentJit.h"
 #include "CKJitDxbc.h"
@@ -132,6 +133,7 @@ void CKSdlGpuRasterizerContext::InitFFJit()
     m_FFJitManifest = "";
     m_FFJitIdentity = 0;
     m_FFJitUses = 0;
+    m_FFWorkerShaders = 0;
     // CKRE_SDL_GPU_FF_JIT=0 draws every program with the precompiled shaders.
     const char *setting = SDL_getenv("CKRE_SDL_GPU_FF_JIT");
     if (setting && SDL_strcmp(setting, "0") == 0)
@@ -156,10 +158,12 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
 {
     CKSdlGpuFFJitManifest manifest;
     if (m_FFJitManifest.Length() == 0 ||
-        !CKSdlGpuLoadFFJitManifest(m_FFJitManifest.CStr(), m_FFJitIdentity, manifest))
+        !CKSdlGpuLoadFFJitManifest(m_FFJitManifest.CStr(), m_FFJitIdentity, manifest) ||
+        !StartWorker())
         return;
     // The entry of each program record, -1 past the limit.
     XArray<int> entries;
+    const int first = m_FFJitPrograms.Size();
     CKDWORD loaded = 0;
     for (int i = 0; i < manifest.Programs.Size(); ++i) {
         const CKSdlGpuFFJitProgramRecord &record = manifest.Programs[i];
@@ -172,17 +176,44 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
         const FFJitKey key = MakeFFJitKey(fragment, layout);
         const int *found = m_FFJitKeys.FindPtr(key);
         int index = found ? *found : -1;
-        if (!found && loaded < kFFJitLoadedProgramLimit) {
+        if (!found && loaded < kFFJitLoadedProgramLimit)
             index = AddFFJitProgram(key, kFFJitLoadedRank | loaded++);
-            if (!SubmitFFJitProgram(m_FFJitPrograms[index], fragment, layout, CKSDLGPU_JOB_IDLE))
-                return;
-        }
         entries.PushBack(index);
     }
+    // The worker first creates the precompiled shaders of the pipelines, so
+    // that neither the draws of their programs nor the compilations create
+    // them on this thread.
+    ShaderJob *shaders = new ShaderJob(*this);
     for (int i = 0; i < manifest.Pipelines.Size(); ++i) {
         const CKSdlGpuFFJitPipelineRecord &record = manifest.Pipelines[i];
-        if (entries[record.Program] >= 0)
-            m_FFJitPrograms[entries[record.Program]].Prewarm.PushBack(record);
+        if (entries[record.Program] < 0)
+            continue;
+        FFJitProgram &entry = m_FFJitPrograms[entries[record.Program]];
+        entry.Prewarm.PushBack(record);
+        if (!PrewarmablePipeline(Device, record))
+            continue;
+        const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
+        const CKDWORD precompiled = NativeFFProgram(
+            variant, FFJitArtifact(entry.Key),
+            (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0, shaders);
+        const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(precompiled);
+        if (program && m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC)
+            FFJitVertexShader(variant, program->Interface.VertexShader, shaders);
+    }
+    if (shaders->Empty()) {
+        delete shaders;
+    } else {
+        Worker.Submit(shaders, CKSDLGPU_JOB_IDLE);
+        m_FFShaderJob = shaders;
+    }
+    for (int i = first; i < m_FFJitPrograms.Size(); ++i) {
+        const FFJitKey &key = m_FFJitPrograms[i].Key;
+        CKFFNativeFragmentKey fragment;
+        fragment.Program.SetLanes(key.Values, CKFF_FRAGMENT_PROGRAM_LANE_COUNT);
+        std::memcpy(fragment.Switches, key.Values + CKFF_FRAGMENT_PROGRAM_LANE_COUNT,
+                    sizeof(fragment.Switches));
+        SubmitFFJitProgram(m_FFJitPrograms[i], fragment,
+                           (CKFFSamplerLayout)key.Values[FF_JIT_KEY_LAYOUT], CKSDLGPU_JOB_IDLE);
     }
 }
 
@@ -229,8 +260,14 @@ bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
 {
     FFJitJob *job = new FFJitJob(*this, Entry.Key, Fragment, Layout);
     const std::shared_ptr<CKSdlGpuShader> shader = job->Shader;
-    if (SubmitJob(job, Priority))
+    // Compilations run after the job creating the precompiled shaders of the
+    // manifest, so that the pipelines waiting for them find those too. A
+    // draw waiting for one promotes that job as well.
+    if (SubmitJob(job, Priority, m_FFShaderJob)) {
         Entry.PixelShader = ShaderObjects.Add(shader);
+        if (m_FFShaderJob && Priority == CKSDLGPU_JOB_NORMAL)
+            Worker.Promote(job);
+    }
     if (!Entry.PixelShader) {
         Entry.State = FFJitProgram::REJECTED;
         return false;
@@ -328,19 +365,9 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     CKFFProgramDesc desc = fallback->Interface;
     desc.PixelShader = PixelShader;
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC) {
-        // The DXBC shader of the variant, padding depth if the fallback's does.
-        const CKDWORD clip = Variant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
-        const bool pad = desc.VertexShader != 0 &&
-            desc.VertexShader == m_NativeFFDepthPadVertexShaders[clip];
-        CKDWORD &vertexShader =
-            pad ? m_FFJitDepthPadVertexShaders[clip] : m_FFJitVertexShaders[Variant];
-        CKShaderDesc vertexDesc;
-        if (!vertexShader &&
-            (!(pad ? CKSdlGpuFFDepthPadVertexShader(m_FFJitFormat, clip != 0, vertexDesc)
-                   : CKSdlGpuFFDxbcVertexShader(Variant, vertexDesc)) ||
-             CreateShader(&vertexDesc, &vertexShader) != CK_OK))
+        desc.VertexShader = FFJitVertexShader(Variant, desc.VertexShader, nullptr);
+        if (!desc.VertexShader)
             return 0;
-        desc.VertexShader = vertexShader;
     }
     CKDWORD handle = 0;
     if (CreateProgram(&desc, &handle) != CK_OK)
@@ -349,6 +376,25 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     program->CompareSamplerCount = fallback->CompareSamplerCount;
     program->Fallback = std::move(fallback);
     return handle;
+}
+
+CKDWORD CKSdlGpuRasterizerContext::FFJitVertexShader(
+    CKFFProgramVariant Variant,
+    CKDWORD FallbackShader,
+    ShaderJob *Job)
+{
+    const CKDWORD clip = Variant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
+    const bool pad = FallbackShader != 0 &&
+        FallbackShader == m_NativeFFDepthPadVertexShaders[clip];
+    CKDWORD &vertexShader =
+        pad ? m_FFJitDepthPadVertexShaders[clip] : m_FFJitVertexShaders[Variant];
+    CKShaderDesc desc;
+    if (!vertexShader &&
+        (!(pad ? CKSdlGpuFFDepthPadVertexShader(m_FFJitFormat, clip != 0, desc)
+               : CKSdlGpuFFDxbcVertexShader(Variant, desc)) ||
+         CreateShader(&desc, &vertexShader, Job) != CK_OK))
+        return 0;
+    return vertexShader;
 }
 
 void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
@@ -494,6 +540,8 @@ void CKSdlGpuRasterizerContext::ClearFFJitPrograms()
     m_FFJitPrograms.Clear();
     m_FFJitKeys.Clear();
     m_FFJitDrawKeys.Clear();
+    // The job keeps the shaders it creates until it is deleted.
+    m_FFShaderJob = nullptr;
     for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
         if (m_FFJitVertexShaders[variant])
             DestroyObject(m_FFJitVertexShaders[variant], CKRST_OBJ_SHADER);
@@ -532,5 +580,6 @@ CKSdlGpuRasterizerContext::CountFFJitProgramsForTests() const
             }
         }
     }
+    counts.Shaders = m_FFWorkerShaders;
     return counts;
 }

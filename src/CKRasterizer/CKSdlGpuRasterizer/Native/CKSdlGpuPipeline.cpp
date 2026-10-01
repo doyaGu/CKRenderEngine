@@ -104,8 +104,8 @@ public:
     }
 
     void Run() override {
-        // The worker could not create the shader, whose program is not drawn.
-        if (!Desc.Fragment->Shader) return;
+        // A shader the worker could not create has no pipelines.
+        if (!Desc.Vertex->Shader || !Desc.Fragment->Shader) return;
         const SDL_GPUGraphicsPipelineCreateInfo info = Desc.CreateInfo();
         Result = SDL_CreateGPUGraphicsPipeline(Device, &info);
         // The program keeps drawing with its fallback, so this is not fatal.
@@ -239,6 +239,8 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     auto &pipelines = program->Pipelines;
     std::shared_ptr<SDL_GPUGraphicsPipeline> *found = pipelines.FindPtr(key);
     if (found) return found->get();
+    if (!ClaimShaders(*program))
+        return nullptr;
     CKSdlGpuPipelineDesc desc;
     DescribePipeline(*program, draw, color, depth, samples, desc);
     const SDL_GPUGraphicsPipelineCreateInfo info = desc.CreateInfo();
@@ -273,10 +275,25 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
     auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key);
     DescribePipeline(program, draw, color, depth, samples, job->Desc);
     // The worker owns the job; an idle one is kept only to promote it. The
-    // pipeline of a shader the worker is creating waits for it.
-    if (SubmitJob(job, priority, program.Fragment->Job) && priority == CKSDLGPU_JOB_IDLE)
+    // pipeline of shaders the worker is creating waits for them; a compiled
+    // fragment shader is created after the precompiled vertex shaders.
+    const CKSdlGpuJob *after = program.Fragment->Job ? program.Fragment->Job : program.Vertex->Job;
+    if (SubmitJob(job, priority, after) && priority == CKSDLGPU_JOB_IDLE)
         program.IdlePipelines.Insert(key, job, TRUE);
     CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
+}
+
+bool CKSdlGpuRasterizerContext::ClaimShaders(const CKSdlGpuProgram &program)
+{
+    // Completed out of the order the jobs ran, which nothing depends on.
+    // Both shaders may come from one job.
+    for (const CKSdlGpuShader *shader : {program.Vertex.get(), program.Fragment.get()}) {
+        if (CKSdlGpuJob *job = Worker.Claim(shader->Job)) {
+            job->Complete();
+            delete job;
+        }
+    }
+    return program.Vertex->Shader && program.Fragment->Shader;
 }
 
 static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)

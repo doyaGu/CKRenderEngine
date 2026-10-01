@@ -192,6 +192,8 @@ public:
     CKBOOL FinishBackgroundWorkForTests(Sint32 TimeoutMs);
     struct FFJitCounts {
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
+        // Precompiled shaders the worker has created for the manifest.
+        CKDWORD Shaders = 0;
     };
     FFJitCounts CountFFJitProgramsForTests() const;
 private:
@@ -282,6 +284,16 @@ private:
     // calling thread's time is spent; the next call completes the rest.
     // Call only at a frame boundary.
     void CollectJobs(Uint64 BudgetNs);
+    bool StartWorker();
+    // Creates shaders on the worker. Programs take them at once; their
+    // pipelines wait for the job, and a pipeline created while drawing
+    // claims it.
+    class ShaderJob;
+    // CreateShader, leaving the SDL shader to Job when given.
+    CKERROR CreateShader(const CKShaderDesc *Desc, CKDWORD *Out, ShaderJob *Job);
+    // Completes now the jobs creating a program's shaders. False when one
+    // is missing.
+    bool ClaimShaders(const CKSdlGpuProgram &Program);
 
     // Snapshot of the current target at RequestReadback, completed by an
     // owned backend ticket and delivered at a frame boundary.
@@ -353,10 +365,11 @@ private:
         const CKFFTextureBindingSet &Textures,
         const CKFFConstantSet *Constants,
         CKBOOL PositionTDepthPad);
-    // The precompiled program of an artifact, created on first use.
+    // The precompiled program of an artifact, created on first use. Job,
+    // when given, creates the shaders it adds.
     CKDWORD NativeFFProgram(CKFFProgramVariant Variant,
                             const CKSdlGpuFFFragmentArtifactKey &Artifact,
-                            CKBOOL PositionTDepthPad);
+                            CKBOOL PositionTDepthPad, ShaderJob *Job = nullptr);
     void ClearNativeFFPrograms();
 
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
@@ -367,7 +380,7 @@ private:
     // precompiled pipelines until the worker has created the programs' own,
     // right after the shader. The manifest of the device queues the
     // programs and pipelines of earlier runs at idle priority before any
-    // draw asks for them.
+    // draw asks for them, after the precompiled shaders they draw with.
     class FFJitJob;
     // The lanes and switches of a CKFFNativeFragmentKey, then the sampler
     // layout.
@@ -430,6 +443,10 @@ private:
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
                                CKFFProgramVariant Variant,
                                CKDWORD Precompiled);
+    // The DXBC vertex shader of a variant, padding depth if the fallback's
+    // shader does. Created on first use, by Job when given.
+    CKDWORD FFJitVertexShader(CKFFProgramVariant Variant, CKDWORD FallbackShader,
+                              ShaderJob *Job);
     // The shader holds no SDL shader when the worker could not compile or
     // create it.
     void CompleteFFJitProgram(const FFJitKey &Key,
@@ -470,6 +487,10 @@ private:
         CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
     // INVALID when every program draws with the precompiled shaders.
     SDL_GPUShaderFormat m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    // The job creating the precompiled shaders of the manifest, which
+    // compilations run after.
+    ShaderJob *m_FFShaderJob = nullptr;
+    CKDWORD m_FFWorkerShaders = 0;
     // Entries by creation, and the index of each canonical key's entry.
     XClassArray<FFJitProgram> m_FFJitPrograms;
     XSHashTable<int, FFJitKey, FFJitKeyHash> m_FFJitKeys;
