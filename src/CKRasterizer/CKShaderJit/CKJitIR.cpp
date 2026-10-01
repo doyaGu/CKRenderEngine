@@ -241,7 +241,7 @@ bool CKJitTextureAccepts(CKJitOp op, CKJitSamplerDim dim) {
 }
 
 bool CKJitVerify(const CKJitFragmentShader &shader) {
-    if (shader.UniformBufferCount > CKJIT_MAX_UNIFORM_BUFFERS)
+    if (shader.UniformBufferCount > CKJIT_MAX_UNIFORM_BUFFERS || shader.SamplerCount > CKJIT_MAX_SAMPLERS)
         return false;
     for (int i = 0; i < shader.Inputs.Size(); ++i) {
         const CKJitInput &input = shader.Inputs[i];
@@ -274,7 +274,7 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
         if ((kOps[node.Op].Flags & CKJIT_OPFLAG_TEXTURE) != 0) {
             const uint32_t slot = node.Imm[0];
             const uint32_t dim = node.Imm[1];
-            if (slot >= CKJIT_MAX_SAMPLERS || dim > CKJIT_SAMPLER_2D_COMPARE ||
+            if (slot >= shader.SamplerCount || dim > CKJIT_SAMPLER_2D_COMPARE ||
                 (dims[slot] != 0xff && dims[slot] != dim) ||
                 !CKJitTextureAccepts((CKJitOp)node.Op, (CKJitSamplerDim)dim)) {
                 return false;

@@ -1196,6 +1196,7 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
     XArray<uint32_t> remap;
     remap.Resize(count);
     out.Nodes.Clear();
+    uint32_t samplers = 0;
     for (int pass = 0; pass < 2; ++pass) {
         for (int i = 0; i < count; ++i) {
             if (!live[i] || IsLeaf(m_Nodes[i].Op) != (pass == 0))
@@ -1205,9 +1206,13 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
                 node.Operands[operand] = remap[node.Operands[operand]];
             remap[i] = (uint32_t)out.Nodes.Size();
             out.Nodes.PushBack(node);
+            // The shader binds the slots up to the highest one it reads.
+            if ((CKJitOpFlags(node.Op) & CKJIT_OPFLAG_TEXTURE) != 0 && node.Imm[0] >= samplers)
+                samplers = node.Imm[0] + 1;
         }
     }
     out.Inputs = m_Inputs;
+    out.SamplerCount = samplers;
     out.UniformBufferCount = m_UniformBufferCount;
     std::memcpy(out.UniformVec4Counts, m_UniformVec4Counts, sizeof(out.UniformVec4Counts));
     out.Color = CKJitValue{remap[color.Id]};

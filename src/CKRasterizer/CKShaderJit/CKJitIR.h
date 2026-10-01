@@ -130,6 +130,7 @@ struct CKJitFragmentShader {
     XArray<CKJitNode> Nodes;
     uint32_t UniformBufferCount = 0;                            // fragment uniform blocks
     uint32_t UniformVec4Counts[CKJIT_MAX_UNIFORM_BUFFERS] = {}; // float4 rows of each
+    uint32_t SamplerCount = 0;                                  // sampler slots bound, above every slot read
     CKJitValue Color;              // FLOAT4 written to render target 0
     CKJitValue Discard;            // optional scalar BOOL; true discards the fragment
 

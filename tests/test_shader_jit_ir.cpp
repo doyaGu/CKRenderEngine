@@ -514,6 +514,18 @@ void TestVerify() {
                                  s.Nodes[FindOp(s, CKJIT_OP_SAMPLE)].Imm[0] = 1;
                              }),
               "a sampler slot has one dimension");
+    TestCheck(twoSlots.SamplerCount == 2, "a shader binds the slots up to the highest it reads");
+    TestCheck(!VerifiesAfter(twoSlots, [&](CKJitFragmentShader &s) { s.SamplerCount = 1; }),
+              "sampler slots are below the bound count");
+    TestCheck(!VerifiesAfter(twoSlots, [&](CKJitFragmentShader &s) { s.SamplerCount = CKJIT_MAX_SAMPLERS + 1; }),
+              "the bound count is bounded");
+
+    CKJitBuilder dead(4);
+    const CKJitValue kept = dead.Sample(2, CKJIT_SAMPLER_2D, dead.Input(kTexCoord), dead.Float(0.0f));
+    dead.Sample(9, CKJIT_SAMPLER_2D, dead.Input(kTexCoord), dead.Float(0.0f));
+    CKJitFragmentShader live;
+    TestCheck(dead.Finish(kept, CKJitValue(), live) && CKJitVerify(live) && live.SamplerCount == 3,
+              "slots that only dead operations read are not bound");
 }
 
 void TestDump() {
