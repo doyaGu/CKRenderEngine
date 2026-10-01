@@ -13,7 +13,7 @@ int ckAddress(int index, int extent, uint mode, inout bool outside)
     return clamp(index, 0, extent - 1);
 }
 
-float4 ckTap2D(Texture2D<float4> image, uint slot, int2 p, uint2 extent, uint mip, uint modes)
+float4 ckTap2D(CKFFTexture2D image, uint slot, int2 p, uint2 extent, uint mip, uint modes)
 {
     bool outside = false;
     p.x = ckAddress(p.x, int(extent.x), modes & 15, outside);
@@ -21,7 +21,7 @@ float4 ckTap2D(Texture2D<float4> image, uint slot, int2 p, uint2 extent, uint mi
     return outside ? ck_borderColor[slot] : image.Load(int3(p, mip));
 }
 
-float4 ckLevel2D(Texture2D<float4> image, uint slot, float2 uv, uint mip, bool filtered, uint modes)
+float4 ckLevel2D(CKFFTexture2D image, uint slot, float2 uv, uint mip, bool filtered, uint modes)
 {
     uint width, height, levels;
     image.GetDimensions(mip, width, height, levels);
@@ -34,7 +34,7 @@ float4 ckLevel2D(Texture2D<float4> image, uint slot, float2 uv, uint mip, bool f
                 lerp(ckTap2D(image, slot, p + int2(0,1), extent, mip, modes), ckTap2D(image, slot, p + 1, extent, mip, modes), f.x), f.y);
 }
 
-float4 ckMips2D(Texture2D<float4> image, uint slot, float2 uv, float lod, uint levels, bool filtered, uint modes, uint mipFilter)
+float4 ckMips2D(CKFFTexture2D image, uint slot, float2 uv, float lod, uint levels, bool filtered, uint modes, uint mipFilter)
 {
     mipFilter &= 15;
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
@@ -43,7 +43,7 @@ float4 ckMips2D(Texture2D<float4> image, uint slot, float2 uv, float lod, uint l
     return lerp(ckLevel2D(image, slot, uv, lower, filtered, modes), ckLevel2D(image, slot, uv, upper, filtered, modes), frac(lod));
 }
 
-float4 ckSample2DBias(Texture2D<float4> image, SamplerState state, uint slot,
+float4 ckSample2DBias(CKFFTexture2D image, CKFFSampler state, uint slot,
                       float2 uv, float bias, float minMip,
                       float maxAnisotropy)
 {
@@ -72,12 +72,12 @@ float4 ckSample2DBias(Texture2D<float4> image, SamplerState state, uint slot,
     return ckMips2D(image, slot, uv, lod, levels, filter != 1, modes, uint(ck_samplerInfo[slot].w));
 }
 
-float4 ckSample2D(Texture2D<float4> image, SamplerState state, uint slot, float2 uv)
+float4 ckSample2D(CKFFTexture2D image, CKFFSampler state, uint slot, float2 uv)
 {
     return ckSample2DBias(image, state, slot, uv, 0.0, 0.0, 0.0);
 }
 
-float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
+float4 ckSample2DGrad(CKFFTexture2D image, CKFFSampler state, uint slot,
                       float2 uv, float2 dx, float2 dy, float minMip,
                       float maxAnisotropy)
 {
@@ -107,7 +107,7 @@ float4 ckSample2DGrad(Texture2D<float4> image, SamplerState state, uint slot,
 }
 
 
-float4 ckTap3D(Texture3D<float4> image, uint slot, int3 p, uint3 extent, uint mip, uint modes)
+float4 ckTap3D(CKFFTexture3D image, uint slot, int3 p, uint3 extent, uint mip, uint modes)
 {
     bool outside = false;
     p.x = ckAddress(p.x, int(extent.x), modes & 15, outside);
@@ -116,7 +116,7 @@ float4 ckTap3D(Texture3D<float4> image, uint slot, int3 p, uint3 extent, uint mi
     return outside ? ck_borderColor[slot] : image.Load(int4(p, mip));
 }
 
-float4 ckLevel3D(Texture3D<float4> image, uint slot, float3 uv, uint mip, bool filtered, uint modes)
+float4 ckLevel3D(CKFFTexture3D image, uint slot, float3 uv, uint mip, bool filtered, uint modes)
 {
     uint width, height, depth, levels;
     image.GetDimensions(mip, width, height, depth, levels);
@@ -132,7 +132,7 @@ float4 ckLevel3D(Texture3D<float4> image, uint slot, float3 uv, uint mip, bool f
     return value;
 }
 
-float4 ckSample3DAtLod(Texture3D<float4> image, uint slot, float3 uv, float lod, uint modes)
+float4 ckSample3DAtLod(CKFFTexture3D image, uint slot, float3 uv, float lod, uint modes)
 {
     uint width, height, depth, levels;
     image.GetDimensions(0, width, height, depth, levels);
@@ -155,8 +155,8 @@ float ckBorderAxisCoverage(float uv, uint extent, uint mode, bool filtered)
            (base + 1 >= 0 && base + 1 < int(extent) ? fraction : 0.0);
 }
 
-float4 ckCompareVariantBorderLevel2D(Texture2D<float4> image,
-                                     SamplerState state, uint slot,
+float4 ckCompareVariantBorderLevel2D(CKFFTexture2D image,
+                                     CKFFSampler state, uint slot,
                                      float2 uv, uint mip, bool filtered,
                                      uint modes)
 {
@@ -172,8 +172,8 @@ float4 ckCompareVariantBorderLevel2D(Texture2D<float4> image,
                 image.SampleLevel(state, sampleUv, float(mip)), coverage);
 }
 
-float4 ckCompareVariantBorderMips2D(Texture2D<float4> image,
-                                    SamplerState state, uint slot,
+float4 ckCompareVariantBorderMips2D(CKFFTexture2D image,
+                                    CKFFSampler state, uint slot,
                                     float2 uv, float lod, uint levels,
                                     bool filtered, uint modes)
 {
@@ -190,8 +190,8 @@ float4 ckCompareVariantBorderMips2D(Texture2D<float4> image,
                 frac(lod));
 }
 
-float4 ckCompareVariantBorder2D(Texture2D<float4> image,
-                                SamplerState state, uint slot, float2 uv,
+float4 ckCompareVariantBorder2D(CKFFTexture2D image,
+                                CKFFSampler state, uint slot, float2 uv,
                                 float2 dx, float2 dy, float bias,
                                 float minMip, float maxAnisotropy)
 {
@@ -223,8 +223,8 @@ float4 ckCompareVariantBorder2D(Texture2D<float4> image,
         image, state, slot, uv, lod, levels, filter != 1, modes);
 }
 
-float4 ckCompareVariantSample2DBias(Texture2D<float4> image,
-                                    SamplerState state, uint slot,
+float4 ckCompareVariantSample2DBias(CKFFTexture2D image,
+                                    CKFFSampler state, uint slot,
                                     float2 uv, float bias, float minMip,
                                     float maxAnisotropy)
 {
@@ -236,8 +236,8 @@ float4 ckCompareVariantSample2DBias(Texture2D<float4> image,
                                     maxAnisotropy);
 }
 
-float4 ckCompareVariantSample2DGrad(Texture2D<float4> image,
-                                    SamplerState state, uint slot,
+float4 ckCompareVariantSample2DGrad(CKFFTexture2D image,
+                                    CKFFSampler state, uint slot,
                                     float2 uv, float2 dx, float2 dy,
                                     float minMip, float maxAnisotropy)
 {
@@ -248,7 +248,7 @@ float4 ckCompareVariantSample2DGrad(Texture2D<float4> image,
                                     dx, dy, 0.0, minMip, maxAnisotropy);
 }
 
-float4 ckSample3DBorderLevel(Texture3D<float4> image, SamplerState state,
+float4 ckSample3DBorderLevel(CKFFTexture3D image, CKFFSampler state,
                              uint slot, float3 uv, uint mip, uint modes,
                              bool filtered)
 {
@@ -261,7 +261,7 @@ float4 ckSample3DBorderLevel(Texture3D<float4> image, SamplerState state,
                 coverage);
 }
 
-float4 ckSample3DBorderLod(Texture3D<float4> image, SamplerState state,
+float4 ckSample3DBorderLod(CKFFTexture3D image, CKFFSampler state,
                            uint slot, float3 uv, float lod, uint modes)
 {
     uint width, height, depth, levels;
@@ -278,7 +278,7 @@ float4 ckSample3DBorderLod(Texture3D<float4> image, SamplerState state,
                 frac(lod));
 }
 
-float4 ckSample3DBias(Texture3D<float4> image, SamplerState state, uint slot,
+float4 ckSample3DBias(CKFFTexture3D image, CKFFSampler state, uint slot,
                       float3 uv, float bias, float minMip)
 {
     uint modes = uint(ck_samplerInfo[slot].x);
@@ -288,12 +288,12 @@ float4 ckSample3DBias(Texture3D<float4> image, SamplerState state, uint slot,
     return ckSample3DAtLod(image, slot, uv, lod, modes);
 }
 
-float4 ckSample3D(Texture3D<float4> image, SamplerState state, uint slot, float3 uv)
+float4 ckSample3D(CKFFTexture3D image, CKFFSampler state, uint slot, float3 uv)
 {
     return ckSample3DBias(image, state, slot, uv, 0.0, 0.0);
 }
 
-float4 ckSample3DGrad(Texture3D<float4> image, SamplerState state, uint slot,
+float4 ckSample3DGrad(CKFFTexture3D image, CKFFSampler state, uint slot,
                       float3 uv, float3 originalUv, int mirrorOnceMask,
                       float bias, float minMip)
 {

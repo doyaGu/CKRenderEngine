@@ -225,7 +225,7 @@ vec4 ckffTexture3DAniso(BgfxSampler3D sampleState, vec3 uv, vec3 dx, vec3 dy,
 #define CKFF_TEXTURE_3D_GRAD(_sampler, _uv, _original, _dx, _dy, _mirror, _bias) \
     (_mirror != 0 ? ckffTexture3DGrad(_sampler, _uv, _dx * exp2(_bias), _dy * exp2(_bias)) : CKFF_TEXTURE_3D_BIAS(_sampler, _uv, _bias))
 #else
-vec4 ckffNative3DAniso(Texture3D<float4> image, SamplerState state, uint slot,
+vec4 ckffNative3DAniso(CKFFTexture3D image, CKFFSampler state, uint slot,
                        vec3 uv, vec3 dx, vec3 dy, float bias,
                        float minMip, float maxAnisotropy)
 {
@@ -247,7 +247,7 @@ vec4 ckffNative3DAniso(Texture3D<float4> image, SamplerState state, uint slot,
     }
     return color / plan.x;
 }
-vec4 ckffNative3DSample(Texture3D<float4> image, SamplerState state, uint slot,
+vec4 ckffNative3DSample(CKFFTexture3D image, CKFFSampler state, uint slot,
                         vec3 uv, vec3 originalUv, vec3 dx, vec3 dy,
                         int mirrorOnceMask, float bias, float minMip,
                         float maxAnisotropy)

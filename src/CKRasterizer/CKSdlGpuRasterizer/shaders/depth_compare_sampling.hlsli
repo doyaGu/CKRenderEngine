@@ -17,11 +17,11 @@ float ckManualCompareDepth(float depth, float reference, int function)
 #if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0
 #define CKFF_DISPATCH_COMPARE_RESOURCE(_ordinal, _result, _operation) \
     CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
-uint3 ckCompareDimensionsOf2D(Texture2D<float> image, uint mip)
+uint3 ckCompareDimensionsOf2D(CKFFDepthTexture2D image, uint mip)
 #else
 #define CKFF_DISPATCH_COMPARE_RESOURCE(_ordinal, _result, _operation) \
     CKFF_DISPATCH_2D_ALL(_ordinal, _result, _operation)
-uint3 ckCompareDimensionsOf2D(Texture2D<float4> image, uint mip)
+uint3 ckCompareDimensionsOf2D(CKFFTexture2D image, uint mip)
 #endif
 {
     uint width, height, levels;

@@ -188,7 +188,11 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
             originalDx3 = dFdx(originalCoord3);
             originalDy3 = dFdy(originalCoord3);
         }
-#if CKFF_NATIVE_SDL_GPU
+#if CKFF_NATIVE_SDL_GPU && CKFF_VOLUME_RESOURCE_ARRAY
+#define CKFF_SAMPLE_3D(_sampler) ckffNative3DSample( \
+    _sampler, _sampler##Sampler, _sampler##Slot, coord.xyz, originalCoord3, \
+    originalDx3, originalDy3, mirrorOnceMask, lodBias, minMip, maxAnisotropy)
+#elif CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_3D(_sampler) (manualAnisotropy ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias))
@@ -199,18 +203,9 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)))
 #endif
 #if CKFF_NATIVE_SDL_GPU
-#if CKFF_VOLUME_RESOURCE_ARRAY
-        return ckffNative3DSample(s_textureVolume[ordinal],
-                                  s_textureVolumeSampler[ordinal],
-                                  uint(CKFF_VOLUME_SLOT_BASE + ordinal),
-                                  coord.xyz, originalCoord3, originalDx3,
-                                  originalDy3, mirrorOnceMask, lodBias, minMip,
-                                  maxAnisotropy);
-#else
         vec4 volumeColor = vec4_splat(0.0);
         CKFF_DISPATCH_VOLUME(ordinal, volumeColor, CKFF_SAMPLE_3D)
         return volumeColor;
-#endif
 #else
 // CKFF_BGFX_ONLY_BEGIN
         vec4 volumeColor = vec4_splat(0.0);

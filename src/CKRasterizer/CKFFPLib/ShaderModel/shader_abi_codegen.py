@@ -71,6 +71,35 @@ def _dispatch_macro(name: str, selector: str, result: str, operation: str,
     return lines
 
 
+def _select_macro(name: str,
+                  sampler_names: list[tuple[int, str]]) -> list[str]:
+    # A native selection applies a statement to the texture and sampler of
+    # the resource an index selects.
+    if not sampler_names:
+        return [f"#define {name}(_index, _statement)"]
+    lines = [f"#define {name}(_index, _statement) \\",
+             "    switch (_index) { \\"]
+    for value, sampler in sampler_names:
+        lines.append(f"    case {value}: _statement({sampler}, "
+                     f"{sampler}Sampler); break; \\")
+    lines.append("    }")
+    return lines
+
+
+def _handle_dispatch_macro(name: str, selector: str, handle: str, base: str,
+                           sampler_names: list[tuple[int, str]]) -> list[str]:
+    # A native dispatch passes the operation a handle of the resource the
+    # selector selects among sampler_names, whose ordinals are contiguous.
+    if not sampler_names:
+        return [f"#define {name}({selector}, _result, _operation)"]
+    first, end = sampler_names[0][0], sampler_names[-1][0] + 1
+    return [
+        f"#define {name}({selector}, _result, _operation) \\",
+        f"    CKFF_DISPATCH_HANDLE({handle}, {base}, {first}, {end}, "
+        f"{selector}, _result, _operation)",
+    ]
+
+
 def sampler_layout_source(definition: Path) -> str:
     layouts = sampler_layouts(definition)
     lines = [
@@ -120,6 +149,51 @@ def sampler_layout_source(definition: Path) -> str:
                 for ordinal in range(layout.counts[1])]
         volume = [(ordinal, f"s_textureVolume{ordinal}")
                   for ordinal in range(layout.counts[2])]
+
+        # Native dispatches pass handles (sampler_handles.hlsli), whose
+        # methods select each resource with these selections.
+        lines.append("#if CKFF_NATIVE_SDL_GPU")
+        lines += _select_macro("CKFF_SELECT_CUBE", cube)
+        if layout.name == "WIDE_VOLUME":
+            lines += [
+                "#if CKFF_VOLUME_RESOURCE_ARRAY",
+                "#define CKFF_SELECT_VOLUME(_index, _statement) \\",
+                "    { _statement(s_textureVolume[_index], "
+                "s_textureVolumeSampler[_index]); }",
+                "#else",
+            ]
+            lines += _select_macro("CKFF_SELECT_VOLUME", volume)
+            lines.append("#endif")
+        else:
+            lines += _select_macro("CKFF_SELECT_VOLUME", volume)
+        lines += _handle_dispatch_macro(
+            "CKFF_DISPATCH_CUBE", "_ordinal", "CKFFTextureCube",
+            "CKFF_CUBE_SLOT_BASE", cube)
+        lines += _handle_dispatch_macro(
+            "CKFF_DISPATCH_VOLUME", "_ordinal", "CKFFTexture3D",
+            "CKFF_VOLUME_SLOT_BASE", volume)
+        for compare_count in range(layout.counts[0] + 1):
+            lines.append(("#if" if compare_count == 0 else "#elif") +
+                         f" CKFF_DEPTH_COMPARE_SAMPLER_COUNT == {compare_count}")
+            ordinary = two_d[compare_count:]
+            compare = two_d[:compare_count]
+            lines += _select_macro("CKFF_SELECT_2D", ordinary)
+            lines += _select_macro("CKFF_SELECT_DEPTH_2D", compare)
+            if not compare:
+                # Only a layout of ordinary 2D resources dispatches them all.
+                lines += _handle_dispatch_macro(
+                    "CKFF_DISPATCH_2D_ALL", "_ordinal", "CKFFTexture2D",
+                    "CKFF_2D_SLOT_BASE", ordinary)
+                lines += _handle_dispatch_macro(
+                    "CKFF_DISPATCH_2D_STAGE", "_stage", "CKFFTexture2D",
+                    "CKFF_2D_SLOT_BASE", ordinary)
+            lines += _handle_dispatch_macro(
+                "CKFF_DISPATCH_2D_ORDINARY", "_ordinal", "CKFFTexture2D",
+                "CKFF_2D_SLOT_BASE", ordinary)
+            lines += _handle_dispatch_macro(
+                "CKFF_DISPATCH_DEPTH_COMPARE", "_ordinal",
+                "CKFFDepthTexture2D", "CKFF_2D_SLOT_BASE", compare)
+        lines += ["#endif", "#else"]
         lines += _dispatch_macro(
             "CKFF_DISPATCH_2D_ALL", "_ordinal", "_result", "_operation",
             two_d)
@@ -129,28 +203,9 @@ def sampler_layout_source(definition: Path) -> str:
         lines += _dispatch_macro(
             "CKFF_DISPATCH_CUBE", "_ordinal", "_result", "_operation",
             cube)
-        if layout.name == "WIDE_VOLUME":
-            lines.append("#if !CKFF_NATIVE_SDL_GPU || defined(__spirv__)")
-            lines += _dispatch_macro(
-                "CKFF_DISPATCH_VOLUME", "_ordinal", "_result", "_operation",
-                volume)
-            lines.append("#endif")
-        else:
-            lines += _dispatch_macro(
-                "CKFF_DISPATCH_VOLUME", "_ordinal", "_result", "_operation",
-                volume)
-
-        lines.append("#if CKFF_NATIVE_SDL_GPU")
-        for compare_count in range(layout.counts[0] + 1):
-            lines.append(("#if" if compare_count == 0 else "#elif") +
-                         f" CKFF_DEPTH_COMPARE_SAMPLER_COUNT == {compare_count}")
-            lines += _dispatch_macro(
-                "CKFF_DISPATCH_2D_ORDINARY", "_ordinal", "_result",
-                "_operation", two_d[compare_count:])
-            lines += _dispatch_macro(
-                "CKFF_DISPATCH_DEPTH_COMPARE", "_ordinal", "_result",
-                "_operation", two_d[:compare_count])
-        lines += ["#endif", "#else"]
+        lines += _dispatch_macro(
+            "CKFF_DISPATCH_VOLUME", "_ordinal", "_result", "_operation",
+            volume)
         lines += _dispatch_macro(
             "CKFF_DISPATCH_2D_ORDINARY", "_ordinal", "_result",
             "_operation", two_d)

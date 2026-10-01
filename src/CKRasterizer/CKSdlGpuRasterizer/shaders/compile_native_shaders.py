@@ -108,12 +108,12 @@ def source_body(path: Path) -> str:
             if include[1] != "bgfx_shader.sh":
                 result.append(source_body(path.parent / include[1]))
                 if include[1] == "ff_sampler_layout.sh":
-                    # Explicit-gradient comparison dispatches concrete sampler
-                    # resources.  Keep only that helper after the declarations;
-                    # the established native sampling source order remains
-                    # unchanged for the driver-sensitive common shader.
-                    result.append(HERE.joinpath(
-                        "depth_compare_sampling.hlsli").read_text(
+                    # Native sampling takes handles of the resources the
+                    # layout declares.
+                    for helper in ("sampler_handles.hlsli",
+                                   "native_sampling.hlsli",
+                                   "depth_compare_sampling.hlsli"):
+                        result.append(HERE.joinpath(helper).read_text(
                             encoding="utf-8"))
         else:
             result.append(line)
@@ -255,8 +255,7 @@ def make_source(shader_name: str, source: str, clipping: bool,
                        f"#define CKFF_DEPTH_COMPARE_SAMPLER_COUNT {compare_count}",
                        f"#define CKFF_NATIVE_SAMPLER_LAYOUT {sampler_layout}",
                        HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8"),
-                       uniform_declaration(source),
-                       "" if vertex else HERE.joinpath("native_sampling.hlsli").read_text(encoding="utf-8"), *declarations,
+                       uniform_declaration(source), *declarations,
                        source_body(SHARED / f"{source}.sc"), *entry])
 
 
