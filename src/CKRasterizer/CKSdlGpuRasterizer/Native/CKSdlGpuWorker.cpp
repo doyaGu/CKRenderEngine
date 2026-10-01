@@ -9,15 +9,26 @@ static int Position(const XArray<CKSdlGpuJob *> &jobs, const CKSdlGpuJob *job)
     return -1;
 }
 
+// Removes a job from a list, or returns null.
+static CKSdlGpuJob *Take(XArray<CKSdlGpuJob *> &jobs, const CKSdlGpuJob *job)
+{
+    const int position = Position(jobs, job);
+    if (position < 0) return nullptr;
+    CKSdlGpuJob *taken = jobs[position];
+    jobs.RemoveAt(position);
+    return taken;
+}
+
 bool CKSdlGpuWorker::Start(const char *name, int threads)
 {
     if (Running()) return true;
     Lock = SDL_CreateMutex();
     Work = SDL_CreateCondition();
     Idle = SDL_CreateCondition();
+    Done = SDL_CreateCondition();
     Stopping = false;
     threads = threads < 1 ? 1 : threads > MaxThreads ? MaxThreads : threads;
-    while (Lock && Work && Idle && ThreadCount < threads) {
+    while (Lock && Work && Idle && Done && ThreadCount < threads) {
         SDL_Thread *thread = SDL_CreateThread(Main, name, this);
         if (!thread) break;
         Threads[ThreadCount++] = thread;
@@ -42,11 +53,12 @@ void CKSdlGpuWorker::Stop()
     for (int i = 0; i < Waiting.Size(); ++i) delete Waiting[i];
     for (int i = 0; i < Finished.Size(); ++i) delete Finished[i];
     Queued.Clear(); IdleQueued.Clear(); Waiting.Clear(); Finished.Clear();
-    Active = 0;
+    Active.Clear();
+    if (Done) SDL_DestroyCondition(Done);
     if (Idle) SDL_DestroyCondition(Idle);
     if (Work) SDL_DestroyCondition(Work);
     if (Lock) SDL_DestroyMutex(Lock);
-    Idle = Work = nullptr; Lock = nullptr;
+    Done = Idle = Work = nullptr; Lock = nullptr;
 }
 
 bool CKSdlGpuWorker::Submit(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,
@@ -105,11 +117,36 @@ CKSdlGpuJob *CKSdlGpuWorker::Collect()
     return job;
 }
 
+CKSdlGpuJob *CKSdlGpuWorker::Claim(const CKSdlGpuJob *job)
+{
+    if (!Running() || !job) return nullptr;
+    SDL_LockMutex(Lock);
+    while (Position(Active, job) >= 0) {
+        Claiming = job;
+        SDL_WaitCondition(Done, Lock);
+    }
+    Claiming = nullptr;
+    CKSdlGpuJob *claimed = Take(Finished, job);
+    if (!claimed) {
+        claimed = Take(Queued, job);
+        if (!claimed) claimed = Take(IdleQueued, job);
+        if (claimed) {
+            Active.PushBack(claimed);
+            SDL_UnlockMutex(Lock);
+            claimed->Run();
+            SDL_LockMutex(Lock);
+            Finish(claimed);
+        }
+    }
+    SDL_UnlockMutex(Lock);
+    return claimed;
+}
+
 int CKSdlGpuWorker::Pending() const
 {
     if (!Running()) return 0;
     SDL_LockMutex(Lock);
-    const int pending = Queued.Size() + IdleQueued.Size() + Waiting.Size() + Active;
+    const int pending = Queued.Size() + IdleQueued.Size() + Waiting.Size() + Active.Size();
     SDL_UnlockMutex(Lock);
     return pending;
 }
@@ -147,9 +184,19 @@ void CKSdlGpuWorker::Release(const CKSdlGpuJob *job)
     }
 }
 
+void CKSdlGpuWorker::Finish(CKSdlGpuJob *job)
+{
+    Active.RemoveAt(Position(Active, job));
+    job->Ran = true;
+    Release(job);
+    if (Idling())
+        SDL_BroadcastCondition(Idle);
+}
+
 bool CKSdlGpuWorker::Idling() const
 {
-    return Active == 0 && Queued.Size() == 0 && IdleQueued.Size() == 0 && Waiting.Size() == 0;
+    return Active.Size() == 0 && Queued.Size() == 0 && IdleQueued.Size() == 0 &&
+           Waiting.Size() == 0;
 }
 
 int SDLCALL CKSdlGpuWorker::Main(void *data)
@@ -167,16 +214,14 @@ int SDLCALL CKSdlGpuWorker::Main(void *data)
             worker.Queued.Size() != 0 ? worker.Queued : worker.IdleQueued;
         CKSdlGpuJob *job = queue.Front();
         queue.PopFront();
-        ++worker.Active;
+        worker.Active.PushBack(job);
         SDL_UnlockMutex(worker.Lock);
         job->Run();
         SDL_LockMutex(worker.Lock);
-        --worker.Active;
-        job->Ran = true;
-        worker.Release(job);
+        worker.Finish(job);
         worker.Finished.PushBack(job);
-        if (worker.Idling())
-            SDL_BroadcastCondition(worker.Idle);
+        if (job == worker.Claiming)
+            SDL_SignalCondition(worker.Done);
     }
     SDL_UnlockMutex(worker.Lock);
     return 0;

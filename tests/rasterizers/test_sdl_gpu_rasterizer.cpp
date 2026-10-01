@@ -227,8 +227,10 @@ int main()
             SDL_Semaphore *Started = nullptr, *Gate = nullptr;
             int *Deleted = nullptr;
             int Order = -1;
+            SDL_ThreadID Thread = 0;
             ~Job() override { ++*Deleted; }
             void Run() override {
+                Thread = SDL_GetCurrentThreadID();
                 if (Started) SDL_SignalSemaphore(Started);
                 if (Gate) SDL_WaitSemaphore(Gate);
                 Order = SDL_AddAtomicInt(Sequence, 1);
@@ -367,6 +369,45 @@ int main()
         worker.Stop();
         check(!worker.Running() && deleted == 30 && worker.Pending() == 0,
               "stopping two threads deletes their jobs");
+        check(worker.Start("CKSdlGpuWorkerTest") && !worker.Claim(nullptr), "worker starts for claims");
+        Job *running = job(started, gate), *queuedClaim = job(), *idleClaim = job(),
+            *dependent = job(), *waitingClaim = job();
+        worker.Submit(running);
+        check(SDL_WaitSemaphoreTimeout(started, 5000), "blocking job starts");
+        worker.Submit(queuedClaim);
+        worker.Submit(idleClaim, CKSDLGPU_JOB_IDLE);
+        worker.Submit(dependent, CKSDLGPU_JOB_NORMAL, queuedClaim);
+        worker.Submit(waitingClaim, CKSDLGPU_JOB_NORMAL, running);
+        check(!worker.Claim(dependent) && !worker.Claim(waitingClaim) && worker.Pending() == 5,
+              "a job waiting for another is not claimed");
+        const SDL_ThreadID owner = SDL_GetCurrentThreadID();
+        check(worker.Claim(idleClaim) == idleClaim && idleClaim->Thread == owner &&
+              worker.Claim(queuedClaim) == queuedClaim && queuedClaim->Thread == owner &&
+              worker.Pending() == 3,
+              "claiming a queued job runs it on the calling thread");
+        check(worker.Claim(dependent) == dependent && dependent->Thread == owner,
+              "a job waiting for a claimed one is queued once that has run");
+        struct Opener {
+            static int SDLCALL Run(void *gate)
+            {
+                SDL_Delay(20);
+                SDL_SignalSemaphore(static_cast<SDL_Semaphore *>(gate));
+                return 0;
+            }
+        };
+        SDL_Thread *opener = SDL_CreateThread(Opener::Run, "CKSdlGpuWorkerTestGate", gate);
+        check(opener && worker.Claim(running) == running && running->Order >= 0 &&
+              running->Thread != owner,
+              "claiming a running job waits for its thread");
+        SDL_WaitThread(opener, nullptr);
+        check(worker.WaitIdle(5000) && worker.Claim(waitingClaim) == waitingClaim &&
+              waitingClaim->Thread != owner,
+              "claiming a finished job takes it");
+        check(!worker.Claim(waitingClaim) && !worker.Collect() && worker.Pending() == 0,
+              "a claimed job is the caller's");
+        for (Job *each : {running, queuedClaim, idleClaim, dependent, waitingClaim}) delete each;
+        worker.Stop();
+        check(deleted == 35, "stopping leaves claimed jobs to the caller");
         SDL_DestroySemaphore(started);
         SDL_DestroySemaphore(gate);
     }
