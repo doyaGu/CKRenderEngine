@@ -1,40 +1,23 @@
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
-#include "VxWindowFunctions.h"
 
 #include <cstdarg>
 #include <cstring>
 
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#endif
 
-static XString CKDebugLoggerSiblingFile(const char *path, const char *file) {
-    if (!path || !file)
-        return "";
-
-    const char *slash = strrchr(path, '/');
-    const char *backslash = strrchr(path, '\\');
-    const char *last = slash;
-    if (!last || (backslash && backslash > last))
-        last = backslash;
-    if (!last)
-        return file;
-
-    XString sibling(path, (int)(last - path + 1));
-    sibling << file;
-    return sibling;
-}
-
-static XString CKDebugLoggerModuleSiblingFile(const void *address, const char *file) {
-    HMODULE module = nullptr;
-    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            reinterpret_cast<LPCSTR>(address), &module))
-        return "";
-
-    XString modulePath = VxGetModuleFileName((INSTANCE_HANDLE)module);
-    return CKDebugLoggerSiblingFile(modulePath.CStr(), file);
+static void CKDebugLoggerWriteDebugger(const char *msg) {
+#ifdef _WIN32
+    OutputDebugStringA(msg);
+    OutputDebugStringA("\n");
+#else
+    fprintf(stderr, "%s\n", msg);
+#endif
 }
 
 CKDebugLogger &CKDebugLogger::Instance() {
@@ -51,9 +34,7 @@ CKDebugLogger::CKDebugLogger()
       m_DebuggerEnabled(true),
       m_FileEnabled(true),
       m_File(nullptr) {
-    InitializeCriticalSection(&m_CriticalSection);
-
-    m_LogFilePath = CKDebugLoggerModuleSiblingFile((const void *)&CKDebugLogger::Instance, "CK2_3D_Debug.log");
+    m_LogFilePath = CKRenderModuleSiblingFile((const void *)&CKDebugLogger::Instance, "CK2_3D_Debug.log");
     if (m_LogFilePath.Length() == 0)
         m_LogFilePath = "CK2_3D_Debug.log";
 
@@ -63,40 +44,35 @@ CKDebugLogger::CKDebugLogger()
 }
 
 CKDebugLogger::~CKDebugLogger() {
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
     if (m_File) {
         fflush(m_File);
         fclose(m_File);
         m_File = nullptr;
     }
-    LeaveCriticalSection(&m_CriticalSection);
-    DeleteCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::EnableOutput(bool enable) {
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
     m_OutputEnabled = enable;
     if (!m_OutputEnabled && m_File) {
         fclose(m_File);
         m_File = nullptr;
     }
-    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::EnableDebuggerOutput(bool enable) {
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
     m_DebuggerEnabled = enable;
-    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::EnableFileOutput(bool enable) {
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
     m_FileEnabled = enable;
     if (!m_FileEnabled && m_File) {
         fclose(m_File);
         m_File = nullptr;
     }
-    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::SetLogFilePath(const char *path) {
@@ -104,13 +80,12 @@ void CKDebugLogger::SetLogFilePath(const char *path) {
         return;
     }
 
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
     m_LogFilePath = path;
     if (m_File) {
         fclose(m_File);
         m_File = nullptr;
     }
-    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::Log(const char *msg) {
@@ -118,16 +93,14 @@ void CKDebugLogger::Log(const char *msg) {
         return;
     }
 
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
 
     if (!m_OutputEnabled) {
-        LeaveCriticalSection(&m_CriticalSection);
         return;
     }
 
     if (m_DebuggerEnabled) {
-        OutputDebugStringA(msg);
-        OutputDebugStringA("\n");
+        CKDebugLoggerWriteDebugger(msg);
     }
 
     if (m_FileEnabled) {
@@ -137,8 +110,6 @@ void CKDebugLogger::Log(const char *msg) {
             fflush(m_File);
         }
     }
-
-    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::Logf(const char *fmt, ...) {
@@ -149,7 +120,7 @@ void CKDebugLogger::Logf(const char *fmt, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
-    _vsnprintf_s(buffer, sizeof(buffer), _TRUNCATE, fmt, args);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
     Log(buffer);
@@ -171,18 +142,17 @@ void CKDebugLogger::LogTaggedf(const char *tag, const char *fmt, ...) {
     char messageBuffer[1024];
     va_list args;
     va_start(args, fmt);
-    _vsnprintf_s(messageBuffer, sizeof(messageBuffer), _TRUNCATE, fmt, args);
+    vsnprintf(messageBuffer, sizeof(messageBuffer), fmt, args);
     va_end(args);
 
     Logf("[CK2_3D] [%s] %s", safeTag, messageBuffer);
 }
 
 void CKDebugLogger::Flush() {
-    EnterCriticalSection(&m_CriticalSection);
+    VxMutexLock lock(m_Mutex);
     if (m_File) {
         fflush(m_File);
     }
-    LeaveCriticalSection(&m_CriticalSection);
 }
 
 void CKDebugLogger::OpenFileIfNeeded() {
@@ -190,5 +160,5 @@ void CKDebugLogger::OpenFileIfNeeded() {
         return;
     }
 
-    fopen_s(&m_File, m_LogFilePath.CStr(), "w");
+    m_File = fopen(m_LogFilePath.CStr(), "w");
 }

@@ -56,7 +56,7 @@ static XString CKRenderSettingsSiblingFile(const char *path, const char *file)
 }
 
 #ifdef _WIN32
-static XString CKRenderSettingsModuleSiblingFile(const void *address, const char *file)
+XString CKRenderModuleSiblingFile(const void *address, const char *file)
 {
     HMODULE hMod = NULL;
     if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -67,7 +67,7 @@ static XString CKRenderSettingsModuleSiblingFile(const void *address, const char
     return CKRenderSettingsSiblingFile(modulePath.CStr(), file);
 }
 #else
-static XString CKRenderSettingsModuleSiblingFile(const void *address, const char *file)
+XString CKRenderModuleSiblingFile(const void *address, const char *file)
 {
     Dl_info info;
     if (dladdr(address, &info) && info.dli_fname)
@@ -138,7 +138,7 @@ static void CKRenderSettingsLoad(VxConfiguration &config) {
     if (overridePath && overridePath[0] != 0 && CKRenderSettingsLoadFile(config, overridePath))
         return;
 
-    XString path = CKRenderSettingsModuleSiblingFile((const void *)&CKRenderSettingsLoad, kRenderSettingsFile);
+    XString path = CKRenderModuleSiblingFile((const void *)&CKRenderSettingsLoad, kRenderSettingsFile);
     if (path.Length() > 0 && CKRenderSettingsLoadFile(config, path.CStr()))
         return;
 

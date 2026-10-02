@@ -7,10 +7,7 @@
 
 #include <cstdio>
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
+#include "VxMutex.h"
 
 class CKDebugLogger {
 public:
@@ -43,7 +40,7 @@ private:
     bool m_DebuggerEnabled;
     bool m_FileEnabled;
     FILE *m_File;
-    CRITICAL_SECTION m_CriticalSection;
+    VxMutex m_Mutex;
 };
 
 #define CK_LOG(category, msg)            do { if (CKDebugLogger::OutputEnabled()) CKDebugLogger::Instance().LogTagged(category, msg); } while (0)

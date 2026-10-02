@@ -17,6 +17,9 @@ enum class CKRenderSettingsSection {
     DebugMeshLog
 };
 
+// Path of file next to the module that contains address, or "" when the module is unknown.
+XString CKRenderModuleSiblingFile(const void *address, const char *file);
+
 bool CKRenderSettingsParseBool(const char *value, bool fallback);
 
 bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize);
