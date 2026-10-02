@@ -238,7 +238,7 @@ private:
         CKBOOL Retired;
     };
 
-    static const CKDWORD SLOT_MASK = 0xffffu;
+    static constexpr CKDWORD SLOT_MASK = 0xffffu;
     static CKDWORD Encode(CKDWORD slot, CKWORD generation)
     {
         return ((CKDWORD)generation << 16) | slot;
