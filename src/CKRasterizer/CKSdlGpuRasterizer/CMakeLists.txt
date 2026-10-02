@@ -125,12 +125,18 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
 endif ()
 
 # Checked-in native payloads are sufficient at runtime and in ordinary builds.
-# Verify source/ABI ownership without invoking a shader compiler.
+# Verify source/ABI ownership of the embedded formats without invoking a
+# shader compiler.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
+    set(_cksdl_shader_formats spirv)
+    if (CKRE_ENABLE_DIRECTX)
+        string(APPEND _cksdl_shader_formats ",dxil,dxbc")
+    endif ()
     add_custom_target(CKSdlGpuShaderArtifacts
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_native_shaders.py --verify
+            --formats ${_cksdl_shader_formats}
         VERBATIM
     )
     foreach (_target IN LISTS _cksdl_targets)
@@ -140,6 +146,7 @@ if (Python3_Interpreter_FOUND)
         add_test(NAME SdlGpuShaderArtifacts
             COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_native_shaders.py --verify
+                --formats ${_cksdl_shader_formats}
         )
     endif ()
 endif ()
