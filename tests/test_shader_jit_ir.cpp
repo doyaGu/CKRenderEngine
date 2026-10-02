@@ -1,6 +1,7 @@
 #include "CKJitBuilder.h"
 #include "TestTriangleMultiset.h"
 
+#include <cfenv>
 #include <cstring>
 #include <limits>
 
@@ -82,8 +83,14 @@ void TestAlgebraicIdentities() {
     CKJitBuilder b(4);
     const CKJitValue x = b.Input(kColor);
     const CKJitValue y = b.Uniform(0);
-    TestCheck(Same(b.Add(x, b.Float(0.0f)), x) && Same(b.Add(b.Float4(0, 0, 0, 0), x), x), "x + 0");
+    TestCheck(IsOp(b, b.Add(x, b.Float(0.0f)), CKJIT_OP_ADD) &&
+                  IsOp(b, b.Add(b.Float4(0, 0, 0, 0), x), CKJIT_OP_ADD),
+              "adding positive zero must retain its effect on negative zero");
+    TestCheck(Same(b.Add(x, b.Float(-0.0f)), x) && Same(b.Add(b.Float(-0.0f), x), x), "x + -0");
     TestCheck(Same(b.Sub(x, b.Float(0.0f)), x), "x - 0");
+    TestCheck(IsOp(b, b.Sub(x, b.Float(-0.0f)), CKJIT_OP_SUB), "subtracting negative zero can change a zero's sign");
+    TestCheck(IsOp(b, b.Add(x, b.Float4(-0.0f, 0.0f, -0.0f, 0.0f)), CKJIT_OP_ADD),
+              "zero identities check every component's sign");
     TestCheck(IsOp(b, b.Sub(b.Float(0.0f), x), CKJIT_OP_SUB), "0 - x is not x");
     TestCheck(Same(b.Mul(x, b.Float(1.0f)), x) && Same(b.Mul(b.Float(1.0f), x), x), "x * 1");
     TestCheck(Same(b.Div(x, b.Float(1.0f)), x), "x / 1");
@@ -111,6 +118,37 @@ void TestAlgebraicIdentities() {
     TestCheck(Same(b.Length(b.Component(x, 0)), b.Abs(b.Component(x, 0))), "scalar length is abs");
     TestCheck(b.TypeOf(b.Mul(x, b.Component(y, 2))) == CKJIT_TYPE_FLOAT4, "scalars splat against vectors");
     TestCheck(!b.Failed(), "identities are not errors");
+}
+
+void TestRoundingEnvironment() {
+    const int previous = std::fegetround();
+    const int modes[] = {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO};
+    bool configured = true;
+    bool rounded = true;
+    bool arithmetic = true;
+    bool preserved = true;
+    for (int mode : modes) {
+        configured &= std::fesetround(mode) == 0;
+        CKJitBuilder b(0);
+        rounded &= Same(b.RoundEven(b.Float4(0.5f, 1.5f, 2.5f, 3.5f)), b.Float4(0, 2, 2, 4));
+        rounded &= Same(b.RoundEven(b.Float4(-0.5f, -1.5f, -2.5f, -3.5f)), b.Float4(-0.0f, -2, -2, -4));
+        rounded &= Same(b.RoundEven(b.Float4(0.0f, -0.0f, 0.25f, -0.25f)), b.Float4(0.0f, -0.0f, 0.0f, -0.0f));
+        rounded &= Same(b.RoundEven(b.Float4(0.49999997f, 0.50000006f, -0.49999997f, -0.50000006f)),
+                        b.Float4(0.0f, 1.0f, -0.0f, -1.0f));
+        rounded &= Same(b.RoundEven(b.Float4(8388607.5f, -8388607.5f, 8388608.0f, -8388608.0f)),
+                        b.Float4(8388608.0f, -8388608.0f, 8388608.0f, -8388608.0f));
+        const float infinity = std::numeric_limits<float>::infinity();
+        rounded &= Same(b.RoundEven(b.Float2(infinity, -infinity)), b.Float2(infinity, -infinity));
+        const CKJitValue sum = b.Add(b.Float(1.0f), b.Float(0x1p-24f));
+        arithmetic &= mode == FE_TONEAREST ? Same(sum, b.Float(1.0f)) : IsOp(b, sum, CKJIT_OP_ADD);
+        preserved &= std::fegetround() == mode;
+    }
+    // The test harness uses longjmp, so restore before any assertion can fail.
+    const bool restored = std::fesetround(previous) == 0;
+    TestCheck(configured && restored, "the test can set and restore the rounding environment");
+    TestCheck(rounded, "round-even folds ties, signs and large values independently of the host rounding mode");
+    TestCheck(arithmetic, "inexact host arithmetic is not folded under a directed rounding mode");
+    TestCheck(preserved, "folding preserves the caller's rounding mode");
 }
 
 void TestSwizzles() {
@@ -218,6 +256,14 @@ void TestIntegers() {
     const CKJitValue pair = b.Construct({b.Int(1), b.Int(-2)});
     TestCheck(IsOp(b, pair, CKJIT_OP_CONSTANT) && b.TypeOf(pair) == CKJIT_TYPE_INT2, "integer constants construct");
     TestCheck(Same(b.FloatToInt(b.Float2(1.5f, -2.5f)), pair), "vector conversions fold per component");
+    TestCheck(Same(b.FloatToInt(b.Float2(-2147483648.0f, 2147483520.0f)),
+                   b.Construct({b.Int(INT32_MIN), b.Int(2147483520)})),
+              "both representable conversion boundaries fold");
+    TestCheck(IsOp(b, b.FloatToInt(b.Float(2147483648.0f)), CKJIT_OP_FTOI) &&
+                  IsOp(b, b.FloatToInt(b.Float(-2147483904.0f)), CKJIT_OP_FTOI) &&
+                  IsOp(b, b.FloatToInt(b.Float(std::numeric_limits<float>::infinity())), CKJIT_OP_FTOI) &&
+                  IsOp(b, b.FloatToInt(b.Float(std::numeric_limits<float>::quiet_NaN())), CKJIT_OP_FTOI),
+              "conversions outside the portable domain are left to the backend");
     TestCheck(Same(b.IntAdd(pair, b.Int(1)), b.Construct({b.Int(2), b.Int(-1)})), "a scalar integer splats");
     TestCheck(Same(b.Swizzle(pair, "yx"), b.Construct({b.Int(-2), b.Int(1)})), "integer swizzles fold");
 
@@ -528,6 +574,114 @@ void TestVerify() {
               "slots that only dead operations read are not bound");
 }
 
+bool VerifiesTypedNode(CKJitOp op, CKJitType type, std::initializer_list<CKJitType> operands,
+                       CKJitSamplerDim dim = CKJIT_SAMPLER_2D) {
+    CKJitFragmentShader shader;
+    CKJitNode color = {};
+    color.Op = CKJIT_OP_CONSTANT;
+    color.Type = CKJIT_TYPE_FLOAT4;
+    shader.Nodes.PushBack(color);
+    shader.Color = CKJitValue{0};
+    shader.SamplerCount = 1;
+    CKJitNode node = {};
+    node.Op = op;
+    node.Type = type;
+    node.Imm[1] = dim;
+    for (CKJitType operand : operands) {
+        CKJitNode constant = {};
+        constant.Op = CKJIT_OP_CONSTANT;
+        constant.Type = operand;
+        node.Operands[node.OperandCount++] = (uint32_t)shader.Nodes.Size();
+        shader.Nodes.PushBack(constant);
+    }
+    shader.Nodes.PushBack(node);
+    return CKJitVerify(shader);
+}
+
+void TestVerifyOperandTypes() {
+    const CKJitOp floatBinary[] = {CKJIT_OP_ADD, CKJIT_OP_SUB, CKJIT_OP_MUL, CKJIT_OP_DIV, CKJIT_OP_MIN, CKJIT_OP_MAX};
+    for (CKJitOp op : floatBinary) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_FLOAT2, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT2}), "float vector arithmetic verifies");
+        TestCheck(!VerifiesTypedNode(op, CKJIT_TYPE_FLOAT2, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT}), "IR arithmetic needs explicit splats");
+        TestCheck(!VerifiesTypedNode(op, CKJIT_TYPE_INT2, {CKJIT_TYPE_INT2, CKJIT_TYPE_INT2}), "float arithmetic rejects integer operands");
+    }
+    const CKJitOp floatUnary[] = {CKJIT_OP_NEG, CKJIT_OP_ABS, CKJIT_OP_SATURATE, CKJIT_OP_FLOOR, CKJIT_OP_CEIL,
+                                CKJIT_OP_ROUND_EVEN, CKJIT_OP_EXP2, CKJIT_OP_LOG2, CKJIT_OP_SQRT, CKJIT_OP_DDX, CKJIT_OP_DDY};
+    for (CKJitOp op : floatUnary) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_FLOAT3, {CKJIT_TYPE_FLOAT3}), "float unary operation verifies");
+        TestCheck(!VerifiesTypedNode(op, CKJIT_TYPE_FLOAT2, {CKJIT_TYPE_FLOAT3}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_INT, {CKJIT_TYPE_INT}), "float unary operation preserves type");
+    }
+    const CKJitOp intBinary[] = {CKJIT_OP_IADD, CKJIT_OP_ISUB, CKJIT_OP_IMUL, CKJIT_OP_IMIN, CKJIT_OP_IMAX,
+                               CKJIT_OP_IMOD, CKJIT_OP_IAND, CKJIT_OP_ISHR};
+    for (CKJitOp op : intBinary) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_INT4, {CKJIT_TYPE_INT4, CKJIT_TYPE_INT4}), "integer arithmetic verifies");
+        TestCheck(!VerifiesTypedNode(op, CKJIT_TYPE_INT4, {CKJIT_TYPE_INT, CKJIT_TYPE_INT4}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_FLOAT, {CKJIT_TYPE_FLOAT, CKJIT_TYPE_FLOAT}), "integer operands have one type");
+    }
+    const CKJitOp comparisons[] = {CKJIT_OP_LT, CKJIT_OP_LE, CKJIT_OP_EQ, CKJIT_OP_NE,
+                                  CKJIT_OP_ILT, CKJIT_OP_ILE, CKJIT_OP_IEQ, CKJIT_OP_INE};
+    for (CKJitOp op : comparisons) {
+        const CKJitType input = op <= CKJIT_OP_NE ? CKJIT_TYPE_FLOAT2 : CKJIT_TYPE_INT2;
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_BOOL2, {input, input}), "comparison produces a boolean per lane");
+        TestCheck(!VerifiesTypedNode(op, CKJIT_TYPE_BOOL, {input, input}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_BOOL2, {CKJIT_TYPE_BOOL2, CKJIT_TYPE_BOOL2}), "comparison types are checked");
+    }
+    TestCheck(VerifiesTypedNode(CKJIT_OP_CONSTRUCT, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT, CKJIT_TYPE_FLOAT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_CONSTRUCT, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_CONSTRUCT, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_INT, CKJIT_TYPE_FLOAT3}),
+              "construct concatenates exactly the result width of one kind");
+    TestCheck(VerifiesTypedNode(CKJIT_OP_DOT, CKJIT_TYPE_FLOAT, {CKJIT_TYPE_FLOAT3, CKJIT_TYPE_FLOAT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_DOT, CKJIT_TYPE_FLOAT3, {CKJIT_TYPE_FLOAT3, CKJIT_TYPE_FLOAT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_DOT, CKJIT_TYPE_FLOAT, {CKJIT_TYPE_FLOAT, CKJIT_TYPE_FLOAT}), "dot reduces float vectors");
+    TestCheck(VerifiesTypedNode(CKJIT_OP_FTOI, CKJIT_TYPE_INT3, {CKJIT_TYPE_FLOAT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_FTOI, CKJIT_TYPE_INT2, {CKJIT_TYPE_FLOAT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_FTOI, CKJIT_TYPE_INT3, {CKJIT_TYPE_INT3}) &&
+                  VerifiesTypedNode(CKJIT_OP_ITOF, CKJIT_TYPE_FLOAT3, {CKJIT_TYPE_INT3}) &&
+                  !VerifiesTypedNode(CKJIT_OP_ITOF, CKJIT_TYPE_FLOAT3, {CKJIT_TYPE_FLOAT3}), "conversions check both kinds and widths");
+    for (CKJitOp op : {CKJIT_OP_AND, CKJIT_OP_OR}) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_BOOL2, {CKJIT_TYPE_BOOL2, CKJIT_TYPE_BOOL2}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_BOOL2, {CKJIT_TYPE_BOOL, CKJIT_TYPE_BOOL2}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_INT, {CKJIT_TYPE_INT, CKJIT_TYPE_INT}), "boolean binary operands match");
+    }
+    TestCheck(VerifiesTypedNode(CKJIT_OP_NOT, CKJIT_TYPE_BOOL2, {CKJIT_TYPE_BOOL2}) &&
+                  !VerifiesTypedNode(CKJIT_OP_NOT, CKJIT_TYPE_BOOL, {CKJIT_TYPE_BOOL2}), "not preserves its boolean type");
+    for (CKJitOp op : {CKJIT_OP_ANY, CKJIT_OP_ALL}) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_BOOL, {CKJIT_TYPE_BOOL3}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_BOOL3, {CKJIT_TYPE_BOOL3}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_BOOL, {CKJIT_TYPE_INT3}), "reductions produce a scalar boolean");
+    }
+    TestCheck(VerifiesTypedNode(CKJIT_OP_SELECT, CKJIT_TYPE_INT2, {CKJIT_TYPE_BOOL, CKJIT_TYPE_INT2, CKJIT_TYPE_INT2}) &&
+                  VerifiesTypedNode(CKJIT_OP_SELECT, CKJIT_TYPE_INT2, {CKJIT_TYPE_BOOL2, CKJIT_TYPE_INT2, CKJIT_TYPE_INT2}) &&
+                  !VerifiesTypedNode(CKJIT_OP_SELECT, CKJIT_TYPE_INT2, {CKJIT_TYPE_BOOL3, CKJIT_TYPE_INT2, CKJIT_TYPE_INT2}) &&
+                  !VerifiesTypedNode(CKJIT_OP_SELECT, CKJIT_TYPE_INT2, {CKJIT_TYPE_BOOL, CKJIT_TYPE_INT2, CKJIT_TYPE_FLOAT2}),
+              "select checks its condition and both arms");
+    for (CKJitOp op : {CKJIT_OP_SAMPLE, CKJIT_OP_SAMPLE_LEVEL}) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT3, CKJIT_TYPE_FLOAT}) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT2}), "samples check coordinates and scalar LOD");
+    }
+    TestCheck(VerifiesTypedNode(CKJIT_OP_SAMPLE_GRAD, CKJIT_TYPE_FLOAT4,
+                               {CKJIT_TYPE_FLOAT3, CKJIT_TYPE_FLOAT3, CKJIT_TYPE_FLOAT3}, CKJIT_SAMPLER_3D) &&
+                  !VerifiesTypedNode(CKJIT_OP_SAMPLE_GRAD, CKJIT_TYPE_FLOAT4,
+                                     {CKJIT_TYPE_FLOAT3, CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT3}, CKJIT_SAMPLER_3D), "gradients match the coordinates");
+    TestCheck(VerifiesTypedNode(CKJIT_OP_CALC_LOD, CKJIT_TYPE_FLOAT, {CKJIT_TYPE_FLOAT3}, CKJIT_SAMPLER_CUBE) &&
+                  !VerifiesTypedNode(CKJIT_OP_CALC_LOD, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT3}, CKJIT_SAMPLER_CUBE), "LOD query is scalar");
+    for (CKJitOp op : {CKJIT_OP_SAMPLE_CMP, CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO}) {
+        TestCheck(VerifiesTypedNode(op, CKJIT_TYPE_FLOAT, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT}, CKJIT_SAMPLER_2D_COMPARE) &&
+                      !VerifiesTypedNode(op, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT2, CKJIT_TYPE_FLOAT}, CKJIT_SAMPLER_2D_COMPARE),
+                  "depth comparison samples produce a scalar");
+    }
+    TestCheck(VerifiesTypedNode(CKJIT_OP_LOAD, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_INT4}, CKJIT_SAMPLER_3D) &&
+                  !VerifiesTypedNode(CKJIT_OP_LOAD, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_INT3}, CKJIT_SAMPLER_3D) &&
+                  !VerifiesTypedNode(CKJIT_OP_LOAD, CKJIT_TYPE_FLOAT4, {CKJIT_TYPE_FLOAT3}), "loads use integer coordinates with a mip");
+    TestCheck(VerifiesTypedNode(CKJIT_OP_SIZE, CKJIT_TYPE_INT2, {CKJIT_TYPE_INT}) &&
+                  !VerifiesTypedNode(CKJIT_OP_SIZE, CKJIT_TYPE_INT3, {CKJIT_TYPE_INT}) &&
+                  !VerifiesTypedNode(CKJIT_OP_SIZE, CKJIT_TYPE_INT2, {CKJIT_TYPE_FLOAT}) &&
+                  VerifiesTypedNode(CKJIT_OP_LEVELS, CKJIT_TYPE_INT, {}) &&
+                  !VerifiesTypedNode(CKJIT_OP_LEVELS, CKJIT_TYPE_FLOAT, {}), "texture queries return integer dimensions");
+}
+
 void TestDump() {
     // Argument evaluation order is unspecified: create the nodes one by one.
     CKJitBuilder b(4);
@@ -651,8 +805,8 @@ void TestTextureAccess() {
               "texture access verifies");
     TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 2, CKJIT_SAMPLER_CUBE); }),
               "no cube is loaded from");
-    TestCheck(VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 1, CKJIT_SAMPLER_3D); }),
-              "other operations take any colour dimension");
+    TestCheck(!VerifiesAfter(shader, [&](CKJitFragmentShader &s) { Redimension(s, 1, CKJIT_SAMPLER_3D); }),
+              "changing a cube to a volume also requires a three-component size result");
     TestCheck(!VerifiesAfter(shader,
                              [&](CKJitFragmentShader &s) {
                                  s.Nodes[FindOp(s, CKJIT_OP_LEVELS)].Imm[0] = CKJIT_MAX_SAMPLERS;
@@ -893,6 +1047,8 @@ void TestIfRegions() {
               "an end follows its region's else arm");
     TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[9].Operands[2] = 6; }),
               "a PHI follows its region's end");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &s) { s.Nodes[9].Operands[0] = 3; }),
+              "PHI arms have the result's type");
     TestCheck(!VerifiesAfter(listing,
                              [&](CKJitFragmentShader &s) {
                                  s.Nodes[9].Operands[0] = 7;
@@ -1078,6 +1234,12 @@ void TestLoops() {
               "a bound is 1..2^31 - 1");
     TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[4].Operands[0] = 2; }),
               "an index directly follows its loop");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[4].Type = CKJIT_TYPE_FLOAT; }),
+              "an index is an integer");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[5].Operands[0] = 2; }),
+              "a carry has its initial value's type");
+    TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[9].Operands[1] = 4; }),
+              "the next iteration preserves the carried type");
     TestCheck(!VerifiesAfter(listing, [&](CKJitFragmentShader &c) { c.Nodes[5].Operands[1] = 2; }),
               "a carried value is of the loop being checked");
     TestCheck(!VerifiesAfter(listing,
@@ -1237,6 +1399,7 @@ int main() {
     TestFramework framework;
     framework.Run("hash consing", TestHashConsing);
     framework.Run("constant folding", TestConstantFolding);
+    framework.Run("rounding environment", TestRoundingEnvironment);
     framework.Run("algebraic identities", TestAlgebraicIdentities);
     framework.Run("swizzles", TestSwizzles);
     framework.Run("constructs", TestConstructs);
@@ -1248,6 +1411,7 @@ int main() {
     framework.Run("finish", TestFinish);
     framework.Run("failure propagation", TestFailurePropagation);
     framework.Run("verify", TestVerify);
+    framework.Run("verify operand types", TestVerifyOperandTypes);
     framework.Run("dump", TestDump);
     framework.Run("uniform buffers", TestUniformBuffers);
     framework.Run("texture access", TestTextureAccess);

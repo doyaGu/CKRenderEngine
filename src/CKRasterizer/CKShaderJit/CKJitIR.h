@@ -145,12 +145,13 @@ struct CKJitResourceLayout {
 };
 
 // Checks what backends rely on without re-checking it: every operation has
-// its operand count, operands precede their users, input, uniform, swizzle
+// its operand count and operand/result types, operands precede their users,
+// boolean constants are 0 or 1, input, uniform, swizzle
 // and sampler references are in range, a sampler slot has one dimension its
 // operations accept, regions and loops nest with their PHIs, headers and
 // RESULTs in place, nodes read only values their arm or body sees, QUAD
 // operations run in uniform control flow and the outputs have their types.
-// Operand typing is CKJitBuilder's contract.
+// This also checks shaders assembled or changed without CKJitBuilder.
 bool CKJitVerify(const CKJitFragmentShader &shader);
 
 // Readable listing for tests and diagnostics.

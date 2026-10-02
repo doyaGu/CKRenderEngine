@@ -22,7 +22,12 @@ CKJIT_OP(UNIFORM,    0, 0)
 CKJIT_OP(SWIZZLE,    1, 0)
 CKJIT_OP(CONSTRUCT,  4, CKJIT_OPFLAG_VARIADIC)
 
-// Float arithmetic.
+// Float arithmetic uses binary32. The host's FP rounding mode is not shader
+// state. ROUND_EVEN rounds to the nearest integer, ties to even, preserving
+// signed zero. NaN payloads, denormal preservation and the accuracy of DIV,
+// DOT and transcendental functions depend on the backend; this is not a
+// bit-exact cross-device arithmetic contract. Algebraic identities must not
+// change zero signs or assume finite operands.
 CKJIT_OP(ADD,        2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(SUB,        2, 0)
 CKJIT_OP(MUL,        2, CKJIT_OPFLAG_COMMUTATIVE)
@@ -52,8 +57,11 @@ CKJIT_OP(LE,         2, 0)
 CKJIT_OP(EQ,         2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(NE,         2, CKJIT_OPFLAG_COMMUTATIVE)
 
-// Integers. FTOI converts floats truncating toward zero and ITOF converts
-// back. IADD, ISUB and IMUL wrap around. IMOD is the floored remainder (it has
+// Integers. FTOI truncates toward zero; its portable domain is finite values
+// whose truncated result fits int32 (-2^31 <= x < 2^31 for binary32). Outside
+// that domain the result is backend-dependent, not guaranteed to saturate.
+// ITOF converts back, with backend-dependent rounding if not exactly
+// representable. IADD, ISUB and IMUL wrap around. IMOD is the floored remainder (it has
 // the sign of the divisor), defined for positive divisors only. ISHR is
 // arithmetic and shifts by the low five bits of its count.
 CKJIT_OP(FTOI,       1, 0)

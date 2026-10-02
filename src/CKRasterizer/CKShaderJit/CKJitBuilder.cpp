@@ -1,5 +1,6 @@
 #include "CKJitBuilder.h"
 
+#include <cfenv>
 #include <cmath>
 #include <cstring>
 
@@ -23,9 +24,36 @@ bool Foldable(float x) {
     return !std::isnan(x) && std::fpclassify(x) != FP_SUBNORMAL;
 }
 
+// Round binary32 to an integral value, ties to even, without consulting or
+// changing the host FP environment. Preserve the sign when rounding to zero.
+float RoundEven(float value) {
+    const uint32_t bits = FloatBits(value);
+    uint32_t magnitude = bits & 0x7fffffffu;
+    const int exponent = (int)(magnitude >> 23) - 127;
+    if (exponent >= 23)
+        return value; // Already integral, or non-finite.
+    if (exponent < 0) {
+        magnitude = magnitude > 0x3f000000u ? 0x3f800000u : 0u;
+    } else {
+        const uint32_t unit = 1u << (23 - exponent);
+        const uint32_t fraction = magnitude & (unit - 1u);
+        magnitude &= ~(unit - 1u);
+        if (fraction > unit / 2u || (fraction == unit / 2u && (magnitude & unit) != 0))
+            magnitude += unit;
+    }
+    return BitsFloat((bits & 0x80000000u) | magnitude);
+}
+
 bool FoldFloat(CKJitOp op, float a, float b, float &out) {
     if (!Foldable(a) || !Foldable(b))
         return false;
+    // The shader does not inherit the caller's directed rounding mode.
+    // Keep arithmetic on the GPU in that case; the other folds are exact or
+    // have an explicit rounding direction.
+    if ((op == CKJIT_OP_ADD || op == CKJIT_OP_SUB || op == CKJIT_OP_MUL || op == CKJIT_OP_DIV) &&
+        std::fegetround() != FE_TONEAREST) {
+        return false;
+    }
     switch (op) {
     case CKJIT_OP_ADD: out = a + b; break;
     case CKJIT_OP_SUB: out = a - b; break;
@@ -38,7 +66,7 @@ bool FoldFloat(CKJitOp op, float a, float b, float &out) {
     case CKJIT_OP_SATURATE: out = a < 0.0f ? 0.0f : (a > 1.0f ? 1.0f : a); break;
     case CKJIT_OP_FLOOR: out = std::floor(a); break;
     case CKJIT_OP_CEIL: out = std::ceil(a); break;
-    case CKJIT_OP_ROUND_EVEN: out = std::nearbyint(a); break;
+    case CKJIT_OP_ROUND_EVEN: out = RoundEven(a); break;
     case CKJIT_OP_EXP2:
         // Integral exponents give exact powers of two on every GPU.
         if (a != std::floor(a) || a < -126.0f || a > 127.0f)
@@ -88,9 +116,10 @@ bool FoldComponent(CKJitOp op, uint32_t a, uint32_t b, uint32_t &out) {
         return true;
     }
     case CKJIT_OP_FTOI: {
-        // Out-of-range conversions saturate on GPUs and are undefined in C++.
+        // Only finite values whose truncated result fits int32 are portable
+        // across backends. In particular, SPIR-V does not promise saturation.
         const float value = BitsFloat(a);
-        if (!Foldable(value) || value <= -2147483648.0f || value >= 2147483648.0f)
+        if (!Foldable(value) || value < -2147483648.0f || value >= 2147483648.0f)
             return false;
         out = (uint32_t)(int32_t)value;
         return true;
@@ -543,6 +572,17 @@ bool CKJitBuilder::IsConstantInt(CKJitValue value, int32_t x) const {
     return true;
 }
 
+bool CKJitBuilder::IsConstantZero(CKJitValue value, bool negative) const {
+    if (!IsConstant(value) || !CKJitIsFloat(TypeOf(value)))
+        return false;
+    const CKJitNode &node = m_Nodes[value.Id];
+    for (uint32_t i = 0; i < CKJitComponentCount(node.Type); ++i) {
+        if (node.Imm[i] != (negative ? 0x80000000u : 0u))
+            return false;
+    }
+    return true;
+}
+
 bool CKJitBuilder::IsConstantBool(CKJitValue value, bool x) const {
     if (!IsConstant(value) || !CKJitIsBool(TypeOf(value)))
         return false;
@@ -563,13 +603,15 @@ CKJitValue CKJitBuilder::FloatBinary(CKJitOp op, CKJitValue a, CKJitValue b) {
         return folded;
     switch (op) {
     case CKJIT_OP_ADD:
-        if (IsConstantSplat(b, 0.0f))
+        // With round-to-nearest, x + -0 and x - +0 preserve either zero's
+        // sign. The opposite signs can turn a negative zero into +0.
+        if (IsConstantZero(b, true))
             return a;
-        if (IsConstantSplat(a, 0.0f))
+        if (IsConstantZero(a, true))
             return b;
         break;
     case CKJIT_OP_SUB:
-        if (IsConstantSplat(b, 0.0f))
+        if (IsConstantZero(b, false))
             return a;
         break;
     case CKJIT_OP_MUL:

@@ -8,9 +8,11 @@
 
 // Creates IR values. Every node is hash-consed, so structurally equal values
 // are the same value, and constant or trivial forms are folded on creation.
-// Folding evaluates correctly rounded IEEE arithmetic only: no
-// transcendentals, and no NaN or denormal operands or results, so it never
-// moves a result outside what the GPU computes for the unfolded form.
+// Folding leaves NaNs, denormals and approximate transcendental operations
+// to the GPU. Arithmetic folds require the host's round-to-nearest mode;
+// RoundEven folds independently of it. Folding never changes that mode.
+// Zero identities preserve the sign of zero. See CKJitOps.def for the
+// portable numeric domain and the remaining backend-dependent behavior.
 //
 // A scalar operand is splatted against a vector operand of its kind.
 // Ill-typed operands never reach a backend: the operation returns an invalid
@@ -227,6 +229,7 @@ private:
     CKJitValue Texture(CKJitOp op, CKJitType type, uint32_t slot, CKJitSamplerDim dim,
                        std::initializer_list<CKJitValue> operands);
     bool Operands(CKJitType kind, CKJitValue &a, CKJitValue &b);
+    bool IsConstantZero(CKJitValue value, bool negative) const;
     bool Unify(CKJitValue &a, CKJitValue &b);
     // A value of this builder the arm being built sees.
     bool Valid(CKJitValue value) const {

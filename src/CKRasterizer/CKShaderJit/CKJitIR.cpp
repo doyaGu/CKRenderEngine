@@ -56,6 +56,103 @@ void AppendConstant(XString &out, const CKJitNode &node) {
     out << ")";
 }
 
+// Called only after operand counts, indices and types have been checked.
+// Builders insert splats explicitly; backends may assume exact IR widths.
+bool CheckTypes(const CKJitFragmentShader &shader, const CKJitNode &node) {
+    const auto operand = [&](uint32_t i) { return shader.Nodes[(int)node.Operands[i]].Type; };
+    const auto same = [&]() {
+        for (uint32_t i = 0; i < node.OperandCount; ++i) {
+            if (operand(i) != node.Type)
+                return false;
+        }
+        return true;
+    };
+    const auto comparison = [&](CKJitType kind) {
+        return CKJitScalarOf(operand(0)) == kind && operand(0) == operand(1) &&
+               node.Type == CKJitBoolType(CKJitComponentCount(operand(0)));
+    };
+    const CKJitType coordinate = node.Imm[1] == CKJIT_SAMPLER_CUBE || node.Imm[1] == CKJIT_SAMPLER_3D
+                                    ? CKJIT_TYPE_FLOAT3 : CKJIT_TYPE_FLOAT2;
+    switch (node.Op) {
+    case CKJIT_OP_CONSTANT:
+        if (CKJitIsBool(node.Type)) {
+            for (uint32_t i = 0; i < CKJitComponentCount(node.Type); ++i) {
+                if (node.Imm[i] > 1)
+                    return false;
+            }
+        }
+        return node.Type != CKJIT_TYPE_VOID;
+    case CKJIT_OP_INPUT:
+    case CKJIT_OP_UNIFORM:
+    case CKJIT_OP_SWIZZLE:
+        return true; // Checked with their references below.
+    case CKJIT_OP_CONSTRUCT: {
+        uint32_t width = 0;
+        for (uint32_t i = 0; i < node.OperandCount; ++i) {
+            if (CKJitScalarOf(operand(i)) != CKJitScalarOf(node.Type))
+                return false;
+            width += CKJitComponentCount(operand(i));
+        }
+        return node.Type != CKJIT_TYPE_VOID && width == CKJitComponentCount(node.Type);
+    }
+    case CKJIT_OP_ADD: case CKJIT_OP_SUB: case CKJIT_OP_MUL: case CKJIT_OP_DIV:
+    case CKJIT_OP_MIN: case CKJIT_OP_MAX: case CKJIT_OP_NEG: case CKJIT_OP_ABS:
+    case CKJIT_OP_SATURATE: case CKJIT_OP_FLOOR: case CKJIT_OP_CEIL: case CKJIT_OP_ROUND_EVEN:
+    case CKJIT_OP_EXP2: case CKJIT_OP_LOG2: case CKJIT_OP_SQRT: case CKJIT_OP_DDX: case CKJIT_OP_DDY:
+        return CKJitIsFloat(node.Type) && same();
+    case CKJIT_OP_DOT:
+        return node.Type == CKJIT_TYPE_FLOAT && CKJitIsFloat(operand(0)) &&
+               CKJitComponentCount(operand(0)) >= 2 && operand(0) == operand(1);
+    case CKJIT_OP_LT: case CKJIT_OP_LE: case CKJIT_OP_EQ: case CKJIT_OP_NE:
+        return comparison(CKJIT_TYPE_FLOAT);
+    case CKJIT_OP_FTOI:
+        return CKJitIsFloat(operand(0)) && node.Type == CKJitIntType(CKJitComponentCount(operand(0)));
+    case CKJIT_OP_ITOF:
+        return CKJitIsInt(operand(0)) && node.Type == CKJitFloatType(CKJitComponentCount(operand(0)));
+    case CKJIT_OP_IADD: case CKJIT_OP_ISUB: case CKJIT_OP_IMUL: case CKJIT_OP_IMIN: case CKJIT_OP_IMAX:
+    case CKJIT_OP_IMOD: case CKJIT_OP_IAND: case CKJIT_OP_ISHR:
+        return CKJitIsInt(node.Type) && same();
+    case CKJIT_OP_ILT: case CKJIT_OP_ILE: case CKJIT_OP_IEQ: case CKJIT_OP_INE:
+        return comparison(CKJIT_TYPE_INT);
+    case CKJIT_OP_AND: case CKJIT_OP_OR: case CKJIT_OP_NOT:
+        return CKJitIsBool(node.Type) && same();
+    case CKJIT_OP_ANY: case CKJIT_OP_ALL:
+        return node.Type == CKJIT_TYPE_BOOL && CKJitIsBool(operand(0)) && CKJitComponentCount(operand(0)) >= 2;
+    case CKJIT_OP_SELECT:
+        return node.Type != CKJIT_TYPE_VOID && operand(1) == node.Type && operand(2) == node.Type &&
+               (operand(0) == CKJIT_TYPE_BOOL || operand(0) == CKJitBoolType(CKJitComponentCount(node.Type)));
+    case CKJIT_OP_IF:
+        return node.Type == CKJIT_TYPE_VOID && operand(0) == CKJIT_TYPE_BOOL;
+    case CKJIT_OP_LOOP:
+        return node.Type == CKJIT_TYPE_VOID && operand(0) == CKJIT_TYPE_INT;
+    case CKJIT_OP_ELSE: case CKJIT_OP_ENDIF: case CKJIT_OP_ENDLOOP:
+        return node.Type == CKJIT_TYPE_VOID && operand(0) == CKJIT_TYPE_VOID;
+    case CKJIT_OP_INDEX:
+        return node.Type == CKJIT_TYPE_INT && operand(0) == CKJIT_TYPE_VOID;
+    case CKJIT_OP_CARRY:
+        return node.Type != CKJIT_TYPE_VOID && operand(0) == node.Type && operand(1) == CKJIT_TYPE_VOID;
+    case CKJIT_OP_PHI: case CKJIT_OP_RESULT:
+        return node.Type != CKJIT_TYPE_VOID && operand(0) == node.Type && operand(1) == node.Type &&
+               operand(2) == CKJIT_TYPE_VOID;
+    case CKJIT_OP_SAMPLE: case CKJIT_OP_SAMPLE_LEVEL:
+        return node.Type == CKJIT_TYPE_FLOAT4 && operand(0) == coordinate && operand(1) == CKJIT_TYPE_FLOAT;
+    case CKJIT_OP_SAMPLE_GRAD:
+        return node.Type == CKJIT_TYPE_FLOAT4 && operand(0) == coordinate && operand(1) == coordinate && operand(2) == coordinate;
+    case CKJIT_OP_CALC_LOD:
+        return node.Type == CKJIT_TYPE_FLOAT && operand(0) == coordinate;
+    case CKJIT_OP_SAMPLE_CMP: case CKJIT_OP_SAMPLE_CMP_LEVEL_ZERO:
+        return node.Type == CKJIT_TYPE_FLOAT && operand(0) == CKJIT_TYPE_FLOAT2 && operand(1) == CKJIT_TYPE_FLOAT;
+    case CKJIT_OP_LOAD:
+        return node.Type == CKJIT_TYPE_FLOAT4 && operand(0) == (node.Imm[1] == CKJIT_SAMPLER_3D ? CKJIT_TYPE_INT4 : CKJIT_TYPE_INT3);
+    case CKJIT_OP_SIZE:
+        return node.Type == (node.Imm[1] == CKJIT_SAMPLER_3D ? CKJIT_TYPE_INT3 : CKJIT_TYPE_INT2) && operand(0) == CKJIT_TYPE_INT;
+    case CKJIT_OP_LEVELS:
+        return node.Type == CKJIT_TYPE_INT;
+    default:
+        return false;
+    }
+}
+
 // Structural checks of the regions and loops, in node order, and of where
 // control flow is uniform. A node's scope is the IF, ELSE or LOOP marker that
 // opened its arm or body, or Root.
@@ -269,7 +366,7 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
             if (node.Operands[operand] >= i)
                 return false;
         }
-        if (!regions.Check(i))
+        if (!CheckTypes(shader, node) || !regions.Check(i))
             return false;
         if ((kOps[node.Op].Flags & CKJIT_OPFLAG_TEXTURE) != 0) {
             const uint32_t slot = node.Imm[0];
