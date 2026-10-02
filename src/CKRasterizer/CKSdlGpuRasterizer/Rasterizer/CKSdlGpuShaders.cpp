@@ -35,6 +35,7 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
                                             CKSDL_SHADER_VS_FF_POSITIONT_DEPTH_PAD, out);
 }
 
+#if CKRE_ENABLE_DIRECTX
 CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
                                   CKShaderDesc &out)
 {
@@ -62,6 +63,7 @@ CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
     }
     return SetShaderCode(SDL_GPU_SHADERFORMAT_DXBC, shader, out);
 }
+#endif
 
 CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
     const CKFFSamplerLayoutPlan &samplerLayoutPlan,

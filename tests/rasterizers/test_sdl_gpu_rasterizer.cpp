@@ -3,9 +3,11 @@
 #include "CKSdlGpuFFJitManifest.h"
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuShaderPack.h"
+#include "shaders/generated/spirv_pack.h"
+#if CKRE_ENABLE_DIRECTX
 #include "shaders/generated/dxbc_pack.h"
 #include "shaders/generated/dxil_pack.h"
-#include "shaders/generated/spirv_pack.h"
+#endif
 #include "CKSdlGpuTextureData.h"
 #include "CKSdlGpuWorker.h"
 #include "CKFFShaderInterface.h"
@@ -766,27 +768,38 @@ int main()
         }
         check(inverted, "every fragment artifact cache index names its key");
     }
+    // SPIR-V, and with DirectX DXIL and the DXBC vertex shaders.
+    SDL_GPUShaderFormat packFormats = SDL_GPU_SHADERFORMAT_SPIRV;
+#if CKRE_ENABLE_DIRECTX
+    packFormats |= SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_DXBC;
+#endif
+    check(CKSdlGpuShaderPackFormats() == packFormats, "shader packs are embedded for the platform's APIs");
     {
         // The first use of the packs in this process. This thread loads them
         // in the reverse of the prefetch's order, so it decodes some itself
         // and waits for others; each still decodes once.
-        const SDL_GPUShaderFormat formats[] = {SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC,
-                                               SDL_GPU_SHADERFORMAT_DXIL};
+        const SDL_GPUShaderFormat formats[] = {SDL_GPU_SHADERFORMAT_DXBC, SDL_GPU_SHADERFORMAT_DXIL,
+                                               SDL_GPU_SHADERFORMAT_SPIRV};
         const CKBYTE *first[3] = {}, *later = nullptr;
         CKDWORD size = 0;
         bool once = true;
         {
-            CKSdlGpuShaderPrefetch prefetch(formats[0] | formats[1] | formats[2]);
+            CKSdlGpuShaderPrefetch prefetch(packFormats);
             CKSdlGpuShaderPrefetch none(SDL_GPU_SHADERFORMAT_MSL);
             for (int i = 0; i < 3; ++i)
-                once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, first[i], size) && once;
+                if (packFormats & formats[i])
+                    once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, first[i], size) && once;
         }
-        CKSdlGpuShaderPrefetch decoded(formats[0] | formats[1] | formats[2]);
+        CKSdlGpuShaderPrefetch decoded(packFormats);
         for (int i = 0; i < 3; ++i)
-            once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, later, size) && later == first[i] && once;
+            if (packFormats & formats[i])
+                once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, later, size) && later == first[i] &&
+                       once;
         check(once, "prefetched shader packs decode once");
     }
     for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV}) {
+        if (!(packFormats & format))
+            continue;
         CKFFShaderSet set;
         check(CKSdlGpuShaderSet(format, set) != FALSE, "complete native shader family");
         const auto payload = set.Shaders[0].Format, profile = set.Shaders[0].Profile;
@@ -936,6 +949,7 @@ int main()
               layout.BufferOffset(CKRST_SHADER_PIXEL, 0) == 16,
               "private image operations do not allocate or share the FFP constant layout");
     }
+#if CKRE_ENABLE_DIRECTX
     {
         CKFFShaderSet dxil;
         check(CKSdlGpuShaderSet(SDL_GPU_SHADERFORMAT_DXIL, dxil) != FALSE, "DXIL family for DXBC comparison");
@@ -962,36 +976,38 @@ int main()
         check(!CKSdlGpuFFDxbcVertexShader(CKFF_PROGRAM_VARIANT_COUNT, invalid),
               "DXBC vertex shaders reject unknown variants");
     }
+#endif
     {
         // Every embedded pack decodes to the shaders of its format; DXBC
-        // carries only the fixed-function vertex shaders.
+        // carries only the fixed-function vertex shaders. A format without
+        // a pack has no shaders.
         bool complete = true;
-        for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC}) {
-            complete = complete && CKSdlGpuLoadShaders(format);
+        for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC,
+                            SDL_GPU_SHADERFORMAT_MSL}) {
+            const bool packed = (packFormats & format) != 0;
+            complete = complete && (CKSdlGpuLoadShaders(format) != FALSE) == packed;
             const char *magic = format == SDL_GPU_SHADERFORMAT_SPIRV ? "#" : "DXBC";
             for (int shader = 0; shader <= CKSDL_SHADER_COUNT; ++shader) {
                 const CKBYTE *code = nullptr;
                 CKDWORD size = 0;
                 const bool present = CKSdlGpuShaderCode(format, (CKSdlShader)shader, code, size) != FALSE;
-                const bool expected = shader < CKSDL_SHADER_COUNT && (format != SDL_GPU_SHADERFORMAT_DXBC ||
-                    shader <= CKSDL_SHADER_VS_FF_POSITIONT_CLIP_DEPTH_PAD);
+                const bool expected = packed && shader < CKSDL_SHADER_COUNT &&
+                    (format != SDL_GPU_SHADERFORMAT_DXBC || shader <= CKSDL_SHADER_VS_FF_POSITIONT_CLIP_DEPTH_PAD);
                 complete = complete && present == expected &&
                            (!present || (size > 4 && std::memcmp(code, magic, 4) == 0));
             }
         }
-        const CKBYTE *code = nullptr;
-        CKDWORD size = 0;
-        check(complete && !CKSdlGpuLoadShaders(SDL_GPU_SHADERFORMAT_MSL) &&
-                  !CKSdlGpuShaderCode(SDL_GPU_SHADERFORMAT_MSL, CKSDL_SHADER_VS_FF_3D, code, size),
-              "embedded shader packs hold exactly the shaders of their formats");
+        check(complete, "embedded shader packs hold exactly the shaders of their formats");
 
         // A damaged pack fails to decode, or decodes to the original shaders
         // when the damage misses everything the decoder reads.
         struct Pack { const unsigned char *Data; size_t Size; };
         const Pack packs[] = {
-            {s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
             {s_sdl_spirv_pack, sizeof(s_sdl_spirv_pack)},
+#if CKRE_ENABLE_DIRECTX
+            {s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
             {s_sdl_dxbc_pack, sizeof(s_sdl_dxbc_pack)},
+#endif
         };
         bool faithful = true, cleared = true, truncated = true;
         for (const Pack &pack : packs) {

@@ -1,10 +1,13 @@
 #include "CKSdlGpuShaderPack.h"
 
-#include "CKSdlGpuDxilCodec.h"
 #include "CKSdlGpuShaderStreams.h"
+#include "shaders/generated/spirv_pack.h"
+
+#if CKRE_ENABLE_DIRECTX
+#include "CKSdlGpuDxilCodec.h"
 #include "shaders/generated/dxbc_pack.h"
 #include "shaders/generated/dxil_pack.h"
-#include "shaders/generated/spirv_pack.h"
+#endif
 
 #include <SDL3/SDL_endian.h>
 #include <SDL3/SDL_mutex.h>
@@ -19,6 +22,13 @@ using namespace CKSdlGpuPack;
 namespace {
 
 enum { CODEC_RAW, CODEC_SPIRV, CODEC_DXIL };
+
+// Only DirectX builds embed and decode DXIL packs.
+#if CKRE_ENABLE_DIRECTX
+const CKDWORD CODEC_LAST = CODEC_DXIL;
+#else
+const CKDWORD CODEC_LAST = CODEC_SPIRV;
+#endif
 
 const CKDWORD PACK_VERSION = 2;
 const CKDWORD PACK_HEADER_SIZE = 16;
@@ -480,7 +490,7 @@ CKBOOL DecodePack(const CKBYTE *pack, size_t size, CKSdlGpuShaderArtifacts &out)
         return FALSE;
     const CKDWORD codec = pack[5], properties = pack[6];
     const CKDWORD dictionary = Load32(pack + 8), payloadSize = Load32(pack + 12);
-    if (pack[4] != PACK_VERSION || codec > CODEC_DXIL || properties >= 225 ||
+    if (pack[4] != PACK_VERSION || codec > CODEC_LAST || properties >= 225 ||
         properties % 9 + properties / 9 % 5 > 4 || payloadSize > MAX_DECODED_SIZE)
         return FALSE;
     XArray<CKBYTE> payload;
@@ -529,7 +539,9 @@ CKBOOL DecodePack(const CKBYTE *pack, size_t size, CKSdlGpuShaderArtifacts &out)
 
     out.Code.Resize((int)total);
     SpirvDecoder spirv(symbols);
+#if CKRE_ENABLE_DIRECTX
     DxilDecoder dxil(symbols);
+#endif
     if (codec == CODEC_SPIRV && !spirv.ReadSchema())
         return FALSE;
     for (CKQWORD i = 0; i < shaders; ++i) {
@@ -540,8 +552,10 @@ CKBOOL DecodePack(const CKBYTE *pack, size_t size, CKSdlGpuShaderArtifacts &out)
         CKBOOL decoded;
         if (codec == CODEC_SPIRV) {
             decoded = spirv.Decode(code, length);
+#if CKRE_ENABLE_DIRECTX
         } else if (codec == CODEC_DXIL) {
             decoded = dxil.Decode(code, length);
+#endif
         } else {
             const CKBYTE *raw = symbols.Bytes(0, length);
             decoded = raw != NULL;
@@ -568,9 +582,11 @@ struct EmbeddedPack {
 };
 
 EmbeddedPack s_Packs[] = {
-    {SDL_GPU_SHADERFORMAT_DXIL, s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
     {SDL_GPU_SHADERFORMAT_SPIRV, s_sdl_spirv_pack, sizeof(s_sdl_spirv_pack)},
+#if CKRE_ENABLE_DIRECTX
+    {SDL_GPU_SHADERFORMAT_DXIL, s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
     {SDL_GPU_SHADERFORMAT_DXBC, s_sdl_dxbc_pack, sizeof(s_sdl_dxbc_pack)},
+#endif
 };
 
 const EmbeddedPack *LoadPack(SDL_GPUShaderFormat format)
@@ -607,6 +623,14 @@ CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size, CKSdlGpuShaderA
     Out.Code.Clear();
     Out.Offsets.Clear();
     return FALSE;
+}
+
+SDL_GPUShaderFormat CKSdlGpuShaderPackFormats()
+{
+    SDL_GPUShaderFormat formats = 0;
+    for (const EmbeddedPack &pack : s_Packs)
+        formats |= pack.Format;
+    return formats;
 }
 
 CKBOOL CKSdlGpuLoadShaders(SDL_GPUShaderFormat Format)

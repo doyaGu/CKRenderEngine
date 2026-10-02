@@ -179,11 +179,11 @@ void CKSdlGpuRasterizerContext::InitFFJit()
     else if (NativeShaderFormat(CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX12) ==
              SDL_GPU_SHADERFORMAT_DXBC)
         m_FFJitFormat = SDL_GPU_SHADERFORMAT_DXBC;
-#endif
     // Compiled DXBC programs pair with the DXBC vertex shaders; decode them
     // now rather than when the first program is compiled.
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC && !CKSdlGpuLoadShaders(SDL_GPU_SHADERFORMAT_DXBC))
         m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
+#endif
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_INVALID)
         return;
     const char *device = SDL_GetStringProperty(
@@ -248,9 +248,11 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
         precompiled[i] = NativeFFProgram(
             variant, artifact, (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0, shaders);
+#if CKRE_ENABLE_DIRECTX
         const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(precompiled[i]);
         if (program && !precompiledPipeline && m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC)
             FFJitVertexShader(variant, program->Interface.VertexShader, shaders);
+#endif
     }
     if (shaders->Empty()) {
         delete shaders;
@@ -422,11 +424,13 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     // program's own, so it takes the fallback's interface as it is.
     CKFFProgramDesc desc = fallback->Interface;
     desc.PixelShader = PixelShader;
+#if CKRE_ENABLE_DIRECTX
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC) {
         desc.VertexShader = FFJitVertexShader(Variant, desc.VertexShader, nullptr);
         if (!desc.VertexShader)
             return 0;
     }
+#endif
     CKDWORD handle = 0;
     if (CreateProgram(&desc, &handle) != CK_OK)
         return 0;
@@ -436,6 +440,7 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     return handle;
 }
 
+#if CKRE_ENABLE_DIRECTX
 CKDWORD CKSdlGpuRasterizerContext::FFJitVertexShader(
     CKFFProgramVariant Variant,
     CKDWORD FallbackShader,
@@ -454,6 +459,7 @@ CKDWORD CKSdlGpuRasterizerContext::FFJitVertexShader(
         return 0;
     return vertexShader;
 }
+#endif
 
 void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
     const FFJitKey &Key, const std::shared_ptr<CKSdlGpuShader> &Shader)

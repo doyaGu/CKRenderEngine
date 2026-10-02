@@ -77,8 +77,9 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
         else if (target.Format == CKRST_SHADER_FORMAT_SPIRV && target.Profile == CKRST_SHADER_PROFILE_SPIRV)
             allowedFormats |= SDL_GPU_SHADERFORMAT_SPIRV;
     }
+    allowedFormats &= CKSdlGpuShaderPackFormats();
     if (!allowedFormats) {
-        SDL_SetError("Requested shader targets contain neither DXIL/DX12 nor SPIR-V/SPIR-V");
+        SDL_SetError("Requested shader targets contain no format of the embedded shaders");
         return Fail("Init.shaderTargets");
     }
     const char *driver = SDL_getenv("CKRE_SDL_GPU_DRIVER");

@@ -38,7 +38,7 @@ static bool CheckExactCopyMatchesBlit(SDL_Window *window)
     const char *driver = SDL_getenv("CKRE_SDL_GPU_DRIVER");
     if (driver && SDL_strcmp(driver, "auto") == 0) driver = nullptr;
 #ifdef _WIN32
-    if (!driver) driver = "direct3d12";
+    if (!driver) driver = CKRE_ENABLE_DIRECTX ? "direct3d12" : "vulkan";
 #endif
     SDL_GPUDevice *device = SDL_CreateGPUDevice(
         SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, true, driver);

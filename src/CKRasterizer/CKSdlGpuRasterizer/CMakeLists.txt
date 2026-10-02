@@ -3,7 +3,6 @@ find_package(SDL3 3.4 CONFIG REQUIRED)
 
 set(CKSDL_GPU_RASTERIZER_SOURCES
     Native/CKSdlGpuCommands.cpp
-    Native/CKSdlGpuDxilCodec.cpp
     Native/CKSdlGpuMipmaps.cpp
     Native/CKSdlGpuNativeShaders.cpp
     Native/CKSdlGpuPipeline.cpp
@@ -25,7 +24,6 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Rasterizer/CKSdlGpuShaders.cpp
 )
 set(CKSDL_GPU_RASTERIZER_HEADERS
-    Native/CKSdlGpuDxilCodec.h
     Native/CKSdlGpuInternal.h
     Native/CKSdlGpuNativeShaders.h
     Native/CKSdlGpuShaderJob.h
@@ -39,6 +37,11 @@ set(CKSDL_GPU_RASTERIZER_HEADERS
     Rasterizer/CKSdlGpuRasterizerContext.h
     Rasterizer/CKSdlGpuShaders.h
 )
+# The DirectX shader packs embed DXIL, which needs its decoder.
+if (CKRE_ENABLE_DIRECTX)
+    list(APPEND CKSDL_GPU_RASTERIZER_SOURCES Native/CKSdlGpuDxilCodec.cpp)
+    list(APPEND CKSDL_GPU_RASTERIZER_HEADERS Native/CKSdlGpuDxilCodec.h)
+endif ()
 
 function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
@@ -99,6 +102,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
         )
         target_link_libraries(${_test} PRIVATE CKFFPLib SDL3::SDL3)
+        ckre_apply_platform_definitions(${_test} PRIVATE)
         if (TARGET CKSdlGpuRasterizerStatic)
             target_link_libraries(${_test} PRIVATE CKSdlGpuRasterizerStatic)
         else ()

@@ -20,6 +20,10 @@ struct CKSdlGpuShaderArtifacts {
 CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size,
                                 CKSdlGpuShaderArtifacts &Out);
 
+// The formats of the embedded packs: SPIR-V, and with DirectX DXIL and the
+// DXBC vertex shaders that compiled DXBC programs pair with.
+SDL_GPUShaderFormat CKSdlGpuShaderPackFormats();
+
 // The embedded packs. The first use of a format decodes its pack once per
 // process and is thread safe; a pack that fails to decode leaves its format
 // without shaders. Decoded code stays valid until the process exits.

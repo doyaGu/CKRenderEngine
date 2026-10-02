@@ -4362,7 +4362,7 @@ void BackendRendersFixedFunctionSemantics()
 {
 #ifdef CKRE_PIXEL_SDL_GPU
     const char *requestedBackend = GetEnvValue("CKRE_SDL_GPU_DRIVER");
-    if (!requestedBackend) requestedBackend = "direct3d12";
+    if (!requestedBackend) requestedBackend = CKRE_ENABLE_DIRECTX ? "direct3d12" : "vulkan";
 #else
     const char *requestedBackend = GetEnvValue("CKRE_RUNTIME_BACKEND");
     if (!requestedBackend)
