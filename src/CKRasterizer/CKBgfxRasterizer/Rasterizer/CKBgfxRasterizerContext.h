@@ -79,6 +79,7 @@ struct CKBgfxTextureFormatCaps {
 #define CKBGFX_DRAWMAP_SOURCE_COUNT 6
 #define CKBGFX_DRAWMAP_HASH_INIT 2166136261u
 #define CKBGFX_MAX_FRAME_LATENCY 2u
+#define CKBGFX_READBACK_TIMEOUT_FRAMES 120
 
 struct CKBgfxDrawMapVertexBinding {
     CKDWORD Buffer;
@@ -451,6 +452,7 @@ private:
 
     // Readback
     XArray<PendingReadback *> m_Readbacks;
+    CKDWORD m_ReadbackTimeoutFrames;   // frames a synchronous readback may wait
 
     // Stats
     CKDWORD m_FrameDrawCalls;

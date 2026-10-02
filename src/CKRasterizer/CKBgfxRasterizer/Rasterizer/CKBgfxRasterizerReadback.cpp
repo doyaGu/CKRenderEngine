@@ -1,4 +1,5 @@
 #include "CKBgfxRasterizerContext.h"
+#include "CKBgfxInternal.h"
 #include "CKFFImage.h"
 
 // CKBgfxRasterizerContext synchronous and asynchronous readback.
@@ -208,6 +209,9 @@ CKBOOL CKBgfxRasterizerContext::RequestReadback(const CKRECT *Rect, VXBUFFER_TYP
 
 CKBOOL CKBgfxRasterizerContext::CompleteReadback(PendingReadback &readback, CKBOOL wait)
 {
+    // A synchronous wait submits empty frames until bgfx delivers the copy;
+    // the frame budget turns a readback that never lands into a failure.
+    CKDWORD waitedFrames = 0;
     for (;;) {
         const CKReadbackState state = PollReadback(readback.Ticket, wait);
         if (state == CKRST_READBACK_READY) {
@@ -222,6 +226,11 @@ CKBOOL CKBgfxRasterizerContext::CompleteReadback(PendingReadback &readback, CKBO
         if (state == CKRST_READBACK_FAILED) break;
         if (!wait) return FALSE;
         if (state == CKRST_READBACK_NEEDS_SUBMIT) {
+            if (waitedFrames++ == m_ReadbackTimeoutFrames) {
+                CKBgfxLogf("Readback", "synchronous readback timed out after %u frames",
+                           (unsigned)m_ReadbackTimeoutFrames);
+                break;
+            }
             CKDWORD submission = 0;
             if (!SubmitReadbackFrame(m_Frame.NativePresented, FALSE, &submission)) break;
             m_LastDeviceFrame = submission;

@@ -120,7 +120,8 @@ static CKBgfxTextureOrientation CKBgfxMergeOrientation(
 CKBgfxRasterizerContext::CKBgfxRasterizerContext()
     : CKRasterizerContext(), m_PassTarget(0), m_LastDeviceFrame(0),
       m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0),
-      m_CopyWidth(0), m_CopyHeight(0), m_FrameDrawCalls(0),
+      m_CopyWidth(0), m_CopyHeight(0),
+      m_ReadbackTimeoutFrames(CKBGFX_READBACK_TIMEOUT_FRAMES), m_FrameDrawCalls(0),
       m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0),
       m_LayoutMismatchLogged(FALSE),
@@ -303,6 +304,8 @@ CKERROR CKBgfxRasterizerContext::Init(const CKRasterizerInitParameters *Desc)
     m_BgfxPosY = Desc->PosY;
     m_BgfxFullscreen = Desc->Fullscreen;
     m_DebugFlags = Desc->DebugFlags;
+    m_ReadbackTimeoutFrames = (CKDWORD)CKBgfxConfigPositiveInt(
+        "Readback", "TimeoutFrames", CKBGFX_READBACK_TIMEOUT_FRAMES);
 
     if (Width <= 0 || Height <= 0)
     {
