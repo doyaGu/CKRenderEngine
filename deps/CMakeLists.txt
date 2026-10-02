@@ -118,15 +118,21 @@ if (MSVC)
 endif ()
 
 if (TARGET bgfx)
-    # Fixed-function GLSL 150 needs an OpenGL 3.2 context. The 2.1 fallback
-    # also binds integer blend indices through glVertexAttribPointer.
-    target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_OPENGL_MIN_VERSION=32)
-endif ()
-
-if (TARGET bgfx AND CKRE_BGFX_OPENGLES_VERSION)
-    target_compile_definitions(bgfx PRIVATE
-            BGFX_CONFIG_RENDERER_OPENGLES=${CKRE_BGFX_OPENGLES_VERSION}
-    )
+    # Only the renderers of CKRE_BGFX_RENDERERS; bgfx leaves out every renderer
+    # that is not defined. The OpenGL renderers take their context version.
+    foreach (_ckre_renderer IN LISTS CKRE_BGFX_RENDERERS)
+        if (_ckre_renderer STREQUAL "OPENGL")
+            # Fixed-function GLSL 150 needs an OpenGL 3.2 context. The 2.1
+            # fallback also binds integer blend indices through
+            # glVertexAttribPointer.
+            set(_ckre_value 32)
+        elseif (_ckre_renderer STREQUAL "OPENGLES")
+            set(_ckre_value ${CKRE_BGFX_OPENGLES_VERSION})
+        else ()
+            set(_ckre_value 1)
+        endif ()
+        target_compile_definitions(bgfx PRIVATE BGFX_CONFIG_RENDERER_${_ckre_renderer}=${_ckre_value})
+    endforeach ()
 endif ()
 
 if (TARGET bgfx AND CKRE_BUILD_SHARED AND BGFX_LIBRARY_TYPE STREQUAL "STATIC")
