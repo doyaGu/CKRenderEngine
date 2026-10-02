@@ -519,12 +519,11 @@ CKJitValue NativeFragmentCompiler::SafeDivisor(CKJitValue v, float epsilon) {
 void NativeFragmentCompiler::DeclareInputs() {
     // The whole interface is declared, used or not, so that the shader links
     // with the native vertex shaders exactly like the one it replaces.
-    m_FragCoord = m_B.Input({"SV_Position", 0, 0, 0, 4, CKJIT_INPUT_FRAG_COORD});
+    m_FragCoord = m_B.Input({0, 4, CKJIT_INPUT_FRAG_COORD});
     for (uint32_t v = 0; v < VARYING_COUNT; ++v) {
         const bool flat = v == VARYING_FLAT_COLOR0 || v == VARYING_FLAT_COLOR1;
         const uint8_t components = v == VARYING_LINE_OFFSET ? 2 : 4;
-        m_Varyings[v] =
-            m_B.Input({"TEXCOORD", v, v + 1, v, components, flat ? CKJIT_INPUT_FLAT : CKJIT_INPUT_SMOOTH});
+        m_Varyings[v] = m_B.Input({v, components, flat ? CKJIT_INPUT_FLAT : CKJIT_INPUT_SMOOTH});
     }
 }
 

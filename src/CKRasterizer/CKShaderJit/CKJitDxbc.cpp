@@ -119,6 +119,16 @@ enum : uint32_t {
     DxbcMaxInputRegisters = 32,
 };
 
+// Vertex shaders write the position to register 0 and the varying at location
+// n as TEXCOORDn to register n + 1.
+bool DxbcIsPosition(const CKJitInput &input) {
+    return input.Kind == CKJIT_INPUT_FRAG_COORD;
+}
+
+uint32_t DxbcInputRegister(const CKJitInput &input) {
+    return DxbcIsPosition(input) ? 0u : input.Location + 1u;
+}
+
 uint32_t FourCC(const char *code) {
     return (uint32_t)(uint8_t)code[0] | (uint32_t)(uint8_t)code[1] << 8 | (uint32_t)(uint8_t)code[2] << 16 |
            (uint32_t)(uint8_t)code[3] << 24;
@@ -479,9 +489,12 @@ DxbcEmitter::DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceL
 bool DxbcEmitter::MapInputs() {
     for (int i = 0; i < m_Shader.Inputs.Size(); ++i) {
         const CKJitInput &input = m_Shader.Inputs[i];
-        if (!input.Semantic || input.Register >= DxbcMaxInputRegisters || m_InputByRegister[input.Register] >= 0)
+        if (!DxbcIsPosition(input) && input.Location >= DxbcMaxInputRegisters - 1u)
             return false;
-        m_InputByRegister[input.Register] = i;
+        const uint32_t reg = DxbcInputRegister(input);
+        if (m_InputByRegister[reg] >= 0)
+            return false;
+        m_InputByRegister[reg] = i;
     }
     return true;
 }
@@ -623,7 +636,7 @@ DxbcValue DxbcEmitter::View(const CKJitNode &node) const {
         return value;
     case CKJIT_OP_INPUT:
         value.File = DxbcOperandInput;
-        value.Index = m_Shader.Inputs[(int)node.Imm[0]].Register;
+        value.Index = DxbcInputRegister(m_Shader.Inputs[(int)node.Imm[0]]);
         return value;
     case CKJIT_OP_UNIFORM:
         value.File = DxbcOperandConstantBuffer;
@@ -1191,10 +1204,11 @@ void DxbcEmitter::Signatures(XArray<uint32_t> &input, XArray<uint32_t> &output) 
         if (m_InputByRegister[reg] < 0)
             continue;
         const CKJitInput &source = m_Shader.Inputs[m_InputByRegister[reg]];
+        const bool position = DxbcIsPosition(source);
         const DxbcSignatureElement element = {
-            source.Semantic,
-            source.SemanticIndex,
-            source.Kind == CKJIT_INPUT_FRAG_COORD ? (uint32_t)DxbcNamePosition : 0u,
+            position ? "SV_Position" : "TEXCOORD",
+            position ? 0u : source.Location,
+            position ? (uint32_t)DxbcNamePosition : 0u,
             reg,
             (1u << source.Components) - 1u,
             m_InputReads[reg],

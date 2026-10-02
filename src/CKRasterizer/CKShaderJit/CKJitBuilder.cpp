@@ -328,19 +328,19 @@ CKJitValue CKJitBuilder::Bool(bool x) {
 }
 
 CKJitValue CKJitBuilder::Input(const CKJitInput &input) {
-    if (!input.Semantic || input.Components < 1 || input.Components > 4 ||
+    if (input.Components < 1 || input.Components > 4 ||
         (input.Kind == CKJIT_INPUT_FRAG_COORD && input.Components != 4)) {
         return Fail();
     }
+    // The position is one input and every varying location another.
+    const bool position = input.Kind == CKJIT_INPUT_FRAG_COORD;
     uint32_t index = 0;
     for (; index < (uint32_t)m_Inputs.Size(); ++index) {
         const CKJitInput &other = m_Inputs[index];
-        if (other.Register != input.Register)
+        if ((other.Kind == CKJIT_INPUT_FRAG_COORD) != position || (!position && other.Location != input.Location))
             continue;
-        if (std::strcmp(other.Semantic, input.Semantic) != 0 || other.SemanticIndex != input.SemanticIndex ||
-            other.Location != input.Location || other.Components != input.Components || other.Kind != input.Kind) {
+        if (other.Components != input.Components || other.Kind != input.Kind)
             return Fail();
-        }
         break;
     }
     if (index == (uint32_t)m_Inputs.Size())

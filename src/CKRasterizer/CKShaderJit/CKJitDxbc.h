@@ -9,11 +9,12 @@
 // the equivalent HLSL: negation and absolute values are source modifiers, a
 // SUB is an ADD of the negated operand, LE is GE with swapped operands, a
 // select is MOVC and the discard is a DISCARD_NZ after all other work. Every
-// declared input is in the input signature at its register; resources are
-// SM 5.1 ranges in the layout's register spaces. words receives the
-// container's little-endian dwords. Returns false for a program the backend
-// cannot express (input registers must be unique and below 32); words is then
-// undefined.
+// declared input is in the input signature where the vertex shaders write it:
+// the position as SV_Position in register 0 and the varying at location n as
+// TEXCOORDn in register n + 1. Resources are SM 5.1 ranges in the layout's
+// register spaces. words receives the container's little-endian dwords.
+// Returns false for a program the backend cannot express (varying locations
+// must be unique and below 31); words is then undefined.
 bool CKJitEmitDxbc(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout,
                    XArray<uint32_t> &words);
 

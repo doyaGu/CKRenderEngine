@@ -6,9 +6,9 @@
 
 namespace {
 
-const CKJitInput kColor = {"TEXCOORD", 1, 2, 1, 4, CKJIT_INPUT_SMOOTH};
-const CKJitInput kTexCoord = {"TEXCOORD", 4, 5, 4, 2, CKJIT_INPUT_SMOOTH};
-const CKJitInput kFragCoord = {"SV_Position", 0, 0, 0, 4, CKJIT_INPUT_FRAG_COORD};
+const CKJitInput kColor = {1, 4, CKJIT_INPUT_SMOOTH};
+const CKJitInput kTexCoord = {4, 2, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFragCoord = {0, 4, CKJIT_INPUT_FRAG_COORD};
 
 bool Same(CKJitValue a, CKJitValue b) {
     return a.IsValid() && a == b;
@@ -372,7 +372,7 @@ void TestSamplesAndInputs() {
     CKJitInput conflicting = kTexCoord;
     conflicting.Kind = CKJIT_INPUT_FLAT;
     inputs.Input(kTexCoord);
-    TestCheck(!inputs.Input(conflicting).IsValid(), "a register has one declaration");
+    TestCheck(!inputs.Input(conflicting).IsValid(), "a location has one declaration");
     CKJitInput narrowFragCoord = kFragCoord;
     narrowFragCoord.Components = 2;
     TestCheck(!inputs.Input(narrowFragCoord).IsValid(), "the fragment position is a float4");
@@ -399,7 +399,7 @@ void TestFinish() {
         for (uint32_t operand = 0; operand < node.OperandCount; ++operand)
             TestCheck(node.Operands[operand] < (uint32_t)i, "operands precede their users");
     }
-    TestCheck(shader.Inputs.Size() == 2 && std::strcmp(shader.Inputs[0].Semantic, "SV_Position") == 0,
+    TestCheck(shader.Inputs.Size() == 2 && shader.Inputs[0].Kind == CKJIT_INPUT_FRAG_COORD,
               "every declared input is kept");
     TestCheck(shader.UniformBufferCount == 1 && shader.UniformVec4Counts[0] == 4, "the uniform block size is kept");
 
@@ -539,7 +539,7 @@ void TestDump() {
     const CKJitValue discard = b.Less(alpha, reference);
     CKJitFragmentShader shader;
     TestCheck(b.Finish(color, discard, shader), "the program finishes");
-    const char *expected = "%0 = INPUT float4 TEXCOORD1\n"
+    const char *expected = "%0 = INPUT float4 location1\n"
                            "%1 = UNIFORM float4 c2\n"
                            "%2 = CONSTANT float (0.5)\n"
                            "%3 = MUL float4 %0, %1\n"
@@ -741,7 +741,7 @@ void TestDepthComparison() {
     const CKJitValue lit = listed.SampleCmpLevelZero(5, coordinate, threshold);
     CKJitFragmentShader listing;
     TestCheck(listed.Finish(listed.Splat(lit, 4), CKJitValue(), listing), "the comparison finishes");
-    const char *expected = "%0 = INPUT float2 TEXCOORD4\n"
+    const char *expected = "%0 = INPUT float2 location4\n"
                            "%1 = CONSTANT float (0.25)\n"
                            "%2 = SAMPLE_CMP_LEVEL_ZERO float %0, %1 slot 5 dim 3\n"
                            "%3 = SWIZZLE float4 %2 .xxxx\n"
@@ -857,7 +857,7 @@ void TestIfRegions() {
     CKJitFragmentShader listing;
     TestCheck(listed.Finish(listed.Splat(magnitude, 4), CKJitValue(), listing) && CKJitVerify(listing),
               "the region finishes");
-    const char *expected = "%0 = INPUT float2 TEXCOORD4\n"
+    const char *expected = "%0 = INPUT float2 location4\n"
                            "%1 = CONSTANT float (0.5)\n"
                            "%2 = SWIZZLE float %0 .x\n"
                            "%3 = LT bool %2, %1\n"
@@ -1053,7 +1053,7 @@ void TestLoops() {
     CKJitFragmentShader listing;
     TestCheck(listed.Finish(listed.Splat(result, 4), CKJitValue(), listing) && CKJitVerify(listing),
               "the loop finishes");
-    const char *expected = "%0 = INPUT float2 TEXCOORD4\n"
+    const char *expected = "%0 = INPUT float2 location4\n"
                            "%1 = SWIZZLE float %0 .x\n"
                            "%2 = FTOI int %1\n"
                            "%3 = LOOP void %2 bound 8\n"

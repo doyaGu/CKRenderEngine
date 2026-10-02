@@ -120,11 +120,11 @@ const uint32_t kAny = 0xffffffffu;
 // The SDL_gpu fragment ABI: uniforms in set 3, samplers in set 2.
 const CKJitResourceLayout kLayout = {3, 0, 2};
 
-const CKJitInput kColor0 = {"TEXCOORD", 0, 1, 0, 4, CKJIT_INPUT_SMOOTH};
-const CKJitInput kFlatColor0 = {"TEXCOORD", 2, 3, 2, 4, CKJIT_INPUT_FLAT};
-const CKJitInput kTexCoord0 = {"TEXCOORD", 4, 5, 4, 2, CKJIT_INPUT_SMOOTH};
-const CKJitInput kTexCoord1 = {"TEXCOORD", 5, 6, 5, 3, CKJIT_INPUT_SMOOTH};
-const CKJitInput kFragCoord = {"SV_Position", 0, 0, 0, 4, CKJIT_INPUT_FRAG_COORD};
+const CKJitInput kColor0 = {0, 4, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFlatColor0 = {2, 4, CKJIT_INPUT_FLAT};
+const CKJitInput kTexCoord0 = {4, 2, CKJIT_INPUT_SMOOTH};
+const CKJitInput kTexCoord1 = {5, 3, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFragCoord = {0, 4, CKJIT_INPUT_FRAG_COORD};
 
 const char *g_ModuleDirectory = nullptr;
 

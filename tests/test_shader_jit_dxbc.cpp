@@ -107,11 +107,11 @@ enum {
 // The SDL_gpu fragment ABI: uniforms in space 3, samplers in space 2.
 const CKJitResourceLayout kLayout = {3, 0, 2};
 
-const CKJitInput kColor0 = {"TEXCOORD", 0, 1, 0, 4, CKJIT_INPUT_SMOOTH};
-const CKJitInput kFlatColor0 = {"TEXCOORD", 2, 3, 2, 4, CKJIT_INPUT_FLAT};
-const CKJitInput kTexCoord0 = {"TEXCOORD", 4, 5, 4, 2, CKJIT_INPUT_SMOOTH};
-const CKJitInput kTexCoord1 = {"TEXCOORD", 5, 6, 5, 3, CKJIT_INPUT_SMOOTH};
-const CKJitInput kFragCoord = {"SV_Position", 0, 0, 0, 4, CKJIT_INPUT_FRAG_COORD};
+const CKJitInput kColor0 = {0, 4, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFlatColor0 = {2, 4, CKJIT_INPUT_FLAT};
+const CKJitInput kTexCoord0 = {4, 2, CKJIT_INPUT_SMOOTH};
+const CKJitInput kTexCoord1 = {5, 3, CKJIT_INPUT_SMOOTH};
+const CKJitInput kFragCoord = {0, 4, CKJIT_INPUT_FRAG_COORD};
 
 // FXC 10.1 output (fxc /T ps_5_1 /Qstrip_reflect) for
 //   float4 main(float4 p : SV_Position) : SV_Target { return p; }
@@ -1588,17 +1588,17 @@ void TestRejects() {
     corrupted.Nodes[corrupted.Nodes.Size() - 1].Operands[0] = (uint32_t)corrupted.Nodes.Size() - 1;
     TestCheck(!CKJitEmitDxbc(corrupted, kLayout, words), "shaders that fail verification are refused");
 
-    CKJitFragmentShader unnamed = shader;
-    unnamed.Inputs[0].Semantic = nullptr;
-    TestCheck(!CKJitEmitDxbc(unnamed, kLayout, words), "inputs need a semantic");
+    CKJitFragmentShader highest = shader;
+    highest.Inputs[1].Location = 30;
+    TestCheck(CKJitEmitDxbc(highest, kLayout, words), "location 30 is in the last input register");
 
     CKJitFragmentShader high = shader;
-    high.Inputs[1].Register = 32;
-    TestCheck(!CKJitEmitDxbc(high, kLayout, words), "input registers are below 32");
+    high.Inputs[1].Location = 31;
+    TestCheck(!CKJitEmitDxbc(high, kLayout, words), "varying locations are below 31");
 
     CKJitFragmentShader shared = shader;
-    shared.Inputs[1].Register = shared.Inputs[0].Register;
-    TestCheck(!CKJitEmitDxbc(shared, kLayout, words), "input registers are unique");
+    shared.Inputs[1].Location = shared.Inputs[0].Location;
+    TestCheck(!CKJitEmitDxbc(shared, kLayout, words), "varying locations are unique");
 }
 
 } // namespace

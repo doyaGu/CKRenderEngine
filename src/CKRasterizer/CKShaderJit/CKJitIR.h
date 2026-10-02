@@ -90,15 +90,13 @@ enum CKJitInputKind : uint8_t {
     CKJIT_INPUT_FRAG_COORD, // SV_Position / FragCoord exactly as the API delivers it
 };
 
-// One fragment input. Backends keep every declared input in their signatures
-// (DXBC linkage matches registers against the vertex outputs), whether or not
-// the program reads it.
+// One fragment input: the fragment position, or the varying the vertex shader
+// writes at Location. Each backend derives its linkage from the location and
+// keeps every declared input in its interface, whether or not the program
+// reads it.
 struct CKJitInput {
-    const char *Semantic;   // DXBC signature name; static storage
-    uint32_t SemanticIndex;
-    uint32_t Register;      // DXBC input register
-    uint32_t Location;      // SPIR-V location (ignored for FRAG_COORD)
-    uint8_t Components;     // 1..4 floats
+    uint32_t Location;  // varying location (ignored for FRAG_COORD)
+    uint8_t Components; // 1..4 floats
     CKJitInputKind Kind;
 };
 

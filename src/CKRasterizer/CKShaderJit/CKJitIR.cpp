@@ -341,7 +341,10 @@ XString CKJitDump(const CKJitFragmentShader &shader) {
             break;
         case CKJIT_OP_INPUT: {
             const CKJitInput &input = shader.Inputs[(int)node.Imm[0]];
-            Append(out, " %s%u", input.Semantic, input.SemanticIndex);
+            if (input.Kind == CKJIT_INPUT_FRAG_COORD)
+                Append(out, " position");
+            else
+                Append(out, " location%u", input.Location);
             break;
         }
         case CKJIT_OP_UNIFORM:

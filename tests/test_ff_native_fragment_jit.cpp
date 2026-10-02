@@ -324,8 +324,9 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
             break;
         case CKJIT_OP_INPUT: {
             const CKJitInput &input = shader.Inputs[(int)node.Imm[0]];
-            TestCheck(input.Register < REG_COUNT, "inputs are native shader registers");
-            std::memcpy(out.F, fragment.Registers[input.Register], input.Components * sizeof(float));
+            const uint32_t reg = input.Kind == CKJIT_INPUT_FRAG_COORD ? REG_POSITION : input.Location + 1;
+            TestCheck(reg < REG_COUNT, "inputs are native shader registers");
+            std::memcpy(out.F, fragment.Registers[reg], input.Components * sizeof(float));
             break;
         }
         case CKJIT_OP_UNIFORM: {
@@ -2333,15 +2334,11 @@ void TestInterface() {
         TestCheck(shader.Inputs.Size() == REG_COUNT, "every native varying is declared");
 
         const CKJitInput &position = shader.Inputs[0];
-        TestCheck(position.Kind == CKJIT_INPUT_FRAG_COORD && position.Register == REG_POSITION &&
-                      position.Components == 4 && std::strcmp(position.Semantic, "SV_Position") == 0,
-                  "SV_Position comes first");
+        TestCheck(position.Kind == CKJIT_INPUT_FRAG_COORD && position.Components == 4, "the position comes first");
         for (uint32_t v = 0; v + 1 < REG_COUNT; ++v) {
             const CKJitInput &input = shader.Inputs[(int)v + 1];
             const bool flat = v + 1 == REG_FLAT_COLOR0 || v + 1 == REG_FLAT_COLOR1;
-            TestCheck(std::strcmp(input.Semantic, "TEXCOORD") == 0 && input.SemanticIndex == v &&
-                          input.Location == v && input.Register == v + 1,
-                      "varying v is TEXCOORDv at location v and register v + 1");
+            TestCheck(input.Location == v, "varying v is at location v");
             TestCheck(input.Components == (v + 1 == REG_LINE_OFFSET ? 2 : 4), "varyings keep their widths");
             TestCheck(input.Kind == (flat ? CKJIT_INPUT_FLAT : CKJIT_INPUT_SMOOTH),
                       "only the flat colours are not interpolated");
