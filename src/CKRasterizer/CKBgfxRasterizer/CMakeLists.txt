@@ -101,8 +101,6 @@ function(ckre_configure_bgfx_rasterizer TARGET_NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Native
         ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel
     )
     target_link_libraries(${TARGET_NAME} PRIVATE
         CKFFPLib
@@ -183,8 +181,6 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Native
         ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel
     )
     target_link_libraries(test_bgfx_rasterizer PRIVATE CKFFPLib bgfx bimg bx SDL3::SDL3)
     if (TARGET CKBgfxRasterizerStatic)

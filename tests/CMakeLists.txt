@@ -20,17 +20,9 @@ function(ckre_register_test TARGET_NAME)
     set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 60)
 endfunction()
 
-function(ckre_enable_ckff_internal_access TARGET_NAME)
-    target_include_directories(${TARGET_NAME} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
-    )
-endfunction()
-
 # These tests intentionally inspect the test-owned recording Context.
 # Keep its private header unavailable to every other test target.
 function(ckre_enable_recording_context_white_box TARGET_NAME)
-    ckre_enable_ckff_internal_access(${TARGET_NAME})
     target_compile_definitions(${TARGET_NAME} PRIVATE
         CKRE_RECORDING_CONTEXT_WHITE_BOX=1
     )
@@ -53,8 +45,6 @@ add_library(ckre_recording_support STATIC
 target_include_directories(ckre_recording_support PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/support
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
 )
 target_link_libraries(ckre_recording_support PUBLIC CKFFPLib)
 target_compile_features(ckre_recording_support PRIVATE cxx_std_20)
@@ -77,7 +67,6 @@ endfunction()
 function(ckre_add_ckff_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
-    ckre_enable_ckff_internal_access(${TARGET_NAME})
     target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib)
     ckre_register_test(${TARGET_NAME})
 endfunction()
@@ -93,7 +82,6 @@ endfunction()
 function(ckre_add_recording_ckff_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})
-    ckre_enable_ckff_internal_access(${TARGET_NAME})
     target_link_libraries(${TARGET_NAME} PRIVATE ckre_recording_support)
     ckre_register_test(${TARGET_NAME})
 endfunction()
@@ -256,8 +244,6 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Native
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKFFPLib/ShaderModel
     )
     target_link_libraries(sdl_gpu_pipeline_benchmark PRIVATE
         CKFFPLib CKSdlGpuRasterizerStatic SDL3::SDL3)

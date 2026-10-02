@@ -43,10 +43,8 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Native
         ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel
     )
-    target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib SDL3::SDL3)
+    target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib CKShaderJit SDL3::SDL3)
     set_target_properties(${TARGET_NAME} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         FOLDER "Rasterizer"
@@ -95,8 +93,6 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_CURRENT_SOURCE_DIR}/Native
             ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
-            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/FixedFunction
-            ${CMAKE_CURRENT_SOURCE_DIR}/../CKFFPLib/ShaderModel
         )
         target_link_libraries(${_test} PRIVATE CKFFPLib SDL3::SDL3)
         if (TARGET CKSdlGpuRasterizerStatic)

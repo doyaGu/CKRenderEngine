@@ -80,12 +80,13 @@ set(CKFFP_LIB_HEADERS
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
 target_compile_features(CKFFPLib PRIVATE cxx_std_20)
 ckre_apply_diagnostic_definitions(CKFFPLib PRIVATE)
+# Rasterizer contexts own the fixed-function objects and build shaders from the
+# shader model, so every layer except Core is part of the library interface.
 target_include_directories(CKFFPLib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Interface>
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction
-        ${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel>
 )
 target_link_libraries(CKFFPLib
     PUBLIC CKRasterizerLib CKShaderJit
