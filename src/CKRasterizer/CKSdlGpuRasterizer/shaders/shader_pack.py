@@ -26,22 +26,20 @@ Pack layout (little endian):
     u32 dictionary size, u32 decoded size, LZMA1 payload.
 The decoded payload starts with varints: the shader count, then per shader
 its size (0 when absent), then the stream count and per stream its context
-and size. FNV-1a checksums (u32) of the present shaders and the streams in
-that order follow.
+and size. XXH32 checksums (u32, seed 0) of the present shaders and the
+streams in that order follow.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import lzma
 import struct
 
 MAGIC = b"CKSP"
-VERSION = 1
+VERSION = 2
 RAW, SPIRV, DXIL = range(3)
 CODECS = {"dxbc": RAW, "spirv": SPIRV, "dxil": DXIL}
-# LZMA literal context bits, literal position bits and position bits; the
-# containers of the raw codec align to words, the streams of the others do not.
-LZMA_OPTIONS = {RAW: (0, 0, 2), SPIRV: (1, 0, 0), DXIL: (1, 0, 0)}
 
 # SPIR-V stream contexts.
 SPIRV_SCHEMA, SPIRV_HEADER, SPIRV_OPCODE, SPIRV_COUNT, SPIRV_LITERAL, \
@@ -79,11 +77,34 @@ _NO_VALUE = frozenset((1, 10, 11, 12, 15, 24, 31, 33, 35, 36, 39, 42, 44, 45))
 _TERMINATORS = frozenset((10, 11, 12, 13, 15, 31, 39))
 
 
-def fnv1a(data: bytes) -> int:
-    value = 0x811C9DC5
-    for byte in data:
-        value = ((value ^ byte) * 16777619) & 0xFFFFFFFF
-    return value
+_XXH_PRIMES = (0x9E3779B1, 0x85EBCA77, 0xC2B2AE3D, 0x27D4EB2F, 0x165667B1)
+
+
+def _rotl(value: int, bits: int) -> int:
+    return (value << bits | value >> (32 - bits)) & 0xFFFFFFFF
+
+
+def xxh32(data: bytes) -> int:
+    """XXH32 of the data with seed 0, after the xxHash specification."""
+    p1, p2, p3, p4, p5 = _XXH_PRIMES
+    size, at = len(data), 0
+    if size >= 16:
+        lanes = [(p1 + p2) & 0xFFFFFFFF, p2, 0, -p1 & 0xFFFFFFFF]
+        words = struct.unpack_from(f"<{size // 16 * 4}I", data)
+        for i, word in enumerate(words):
+            lanes[i & 3] = _rotl((lanes[i & 3] + word * p2) & 0xFFFFFFFF, 13) * p1 & 0xFFFFFFFF
+        value = _rotl(lanes[0], 1) + _rotl(lanes[1], 7) + _rotl(lanes[2], 12) + _rotl(lanes[3], 18)
+        at = len(words) * 4
+    else:
+        value = p5
+    value = (value + size) & 0xFFFFFFFF
+    for (word,) in struct.iter_unpack("<I", data[at:at + (size - at) // 4 * 4]):
+        value = _rotl((value + word * p3) & 0xFFFFFFFF, 17) * p4 & 0xFFFFFFFF
+    for byte in data[size - (size - at) % 4:]:
+        value = _rotl((value + byte * p5) & 0xFFFFFFFF, 11) * p1 & 0xFFFFFFFF
+    value = (value ^ value >> 15) * p2 & 0xFFFFFFFF
+    value = (value ^ value >> 13) * p3 & 0xFFFFFFFF
+    return value ^ value >> 16
 
 
 def _zig(value: int) -> int:
@@ -839,6 +860,25 @@ def _lzma_filter(dictionary, lc, lp, pb, **options):
              "lc": lc, "lp": lp, "pb": pb, **options}]
 
 
+# Encoder settings tried for every pack. The optimal parse of LZMA reacts
+# chaotically to small changes of its input, so no fixed setting stays the
+# best one; each pack keeps the smallest encoding over these settings and the
+# literal context, literal position and position bits lc 0-3, lp 0-1, pb 0-2.
+_LZMA_SETTINGS = ({"preset": 9 | lzma.PRESET_EXTREME},
+                  {"mode": lzma.MODE_NORMAL, "mf": lzma.MF_BT2, "nice_len": 273})
+
+
+def _compress(payload, dictionary):
+    """Returns the LZMA properties and the smallest raw LZMA1 encoding found."""
+    best = None
+    for lc, lp, pb, settings in itertools.product(range(4), range(2), range(3), _LZMA_SETTINGS):
+        data = lzma.compress(payload, format=lzma.FORMAT_RAW,
+                             filters=_lzma_filter(dictionary, lc, lp, pb, **settings))
+        if best is None or len(data) < len(best[1]):
+            best = lc + 9 * (lp + 5 * pb), data
+    return best
+
+
 def encode(format_, artifacts, spirv_grammar=None):
     """Packs the artifacts of one format; None marks a missing artifact."""
     codec = CODECS[format_]
@@ -873,15 +913,11 @@ def encode(format_, artifacts, spirv_grammar=None):
         _varint(payload, len(data))
     for code in artifacts:
         if code is not None:
-            payload += struct.pack("<I", fnv1a(code))
+            payload += struct.pack("<I", xxh32(code))
     for _, data in streams:
         payload += data
     dictionary = 1 << max(len(payload) - 1, 4095).bit_length()
-    lc, lp, pb = LZMA_OPTIONS[codec]
-    compressed = lzma.compress(bytes(payload), format=lzma.FORMAT_RAW,
-                               filters=_lzma_filter(dictionary, lc, lp, pb,
-                                                    preset=9 | lzma.PRESET_EXTREME))
-    properties = lc + 9 * (lp + 5 * pb)
+    properties, compressed = _compress(bytes(payload), dictionary)
     pack = MAGIC + struct.pack("<BBBBII", VERSION, codec, properties, 0,
                                dictionary, len(payload)) + compressed
     if decode(pack) != list(artifacts):
@@ -941,7 +977,7 @@ def decode(pack):
         else:
             artifacts.append(coder.bytes(0, shader_size))
     for code, checksum in zip((a for a in artifacts if a is not None), checksums):
-        if len(code) == 0 or fnv1a(code) != checksum:
+        if len(code) == 0 or xxh32(code) != checksum:
             raise ValueError("shader pack checksum mismatch")
     if any(coder.positions[c] != len(streams[c]) for c in streams):
         raise ValueError("shader pack streams are not fully consumed")

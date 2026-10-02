@@ -4,6 +4,7 @@
 #include "shaders/generated/dxil_pack.h"
 #include "shaders/generated/spirv_pack.h"
 
+#include <SDL3/SDL_endian.h>
 #include <SDL3/SDL_mutex.h>
 #include <new>
 #include <string.h>
@@ -15,13 +16,16 @@ namespace {
 
 enum { CODEC_RAW, CODEC_SPIRV, CODEC_DXIL };
 
+const CKDWORD PACK_VERSION = 2;
 const CKDWORD PACK_HEADER_SIZE = 16;
 const CKDWORD MAX_DECODED_SIZE = 1u << 26;
 const CKDWORD CONTEXT_COUNT = 5u << 11;     // past every context of the codecs
 
 CKDWORD Load32(const CKBYTE *p)
 {
-    return (CKDWORD)p[0] | (CKDWORD)p[1] << 8 | (CKDWORD)p[2] << 16 | (CKDWORD)p[3] << 24;
+    CKDWORD value;
+    memcpy(&value, p, sizeof(value));
+    return SDL_Swap32LE(value);
 }
 
 void Store32(CKBYTE *p, CKDWORD value)
@@ -30,12 +34,35 @@ void Store32(CKBYTE *p, CKDWORD value)
     p[2] = (CKBYTE)(value >> 16); p[3] = (CKBYTE)(value >> 24);
 }
 
-CKDWORD Fnv1a(const CKBYTE *data, CKDWORD size)
+CKDWORD Rotl(CKDWORD value, int bits)
 {
-    CKDWORD value = 0x811C9DC5u;
-    for (CKDWORD i = 0; i < size; ++i)
-        value = (value ^ data[i]) * 16777619u;
-    return value;
+    return value << bits | value >> (32 - bits);
+}
+
+// XXH32 with seed 0, after the xxHash specification.
+CKDWORD Xxh32(const CKBYTE *data, CKDWORD size)
+{
+    const CKDWORD P1 = 0x9E3779B1u, P2 = 0x85EBCA77u, P3 = 0xC2B2AE3Du, P4 = 0x27D4EB2Fu, P5 = 0x165667B1u;
+    const CKBYTE *at = data, *end = data + size;
+    CKDWORD value = P5;
+    if (size >= 16) {
+        CKDWORD a = P1 + P2, b = P2, c = 0, d = 0 - P1;
+        for (; end - at >= 16; at += 16) {
+            a = Rotl(a + Load32(at) * P2, 13) * P1;
+            b = Rotl(b + Load32(at + 4) * P2, 13) * P1;
+            c = Rotl(c + Load32(at + 8) * P2, 13) * P1;
+            d = Rotl(d + Load32(at + 12) * P2, 13) * P1;
+        }
+        value = Rotl(a, 1) + Rotl(b, 7) + Rotl(c, 12) + Rotl(d, 18);
+    }
+    value += size;
+    for (; end - at >= 4; at += 4)
+        value = Rotl(value + Load32(at) * P3, 17) * P4;
+    for (; at < end; ++at)
+        value = Rotl(value + *at * P5, 11) * P1;
+    value = (value ^ value >> 15) * P2;
+    value = (value ^ value >> 13) * P3;
+    return value ^ value >> 16;
 }
 
 CKQWORD Unzig(CKQWORD value)
@@ -1225,7 +1252,7 @@ CKBOOL DecodePack(const CKBYTE *pack, size_t size, CKSdlGpuShaderArtifacts &out)
         return FALSE;
     const CKDWORD codec = pack[5], properties = pack[6];
     const CKDWORD dictionary = Load32(pack + 8), payloadSize = Load32(pack + 12);
-    if (pack[4] != 1 || codec > CODEC_DXIL || properties >= 225 ||
+    if (pack[4] != PACK_VERSION || codec > CODEC_DXIL || properties >= 225 ||
         properties % 9 + properties / 9 % 5 > 4 || payloadSize > MAX_DECODED_SIZE)
         return FALSE;
     XArray<CKBYTE> payload;
@@ -1293,7 +1320,7 @@ CKBOOL DecodePack(const CKBYTE *pack, size_t size, CKSdlGpuShaderArtifacts &out)
             if (raw)
                 memcpy(code, raw, length);
         }
-        if (!decoded || symbols.Failed || Fnv1a(code, length) != Load32(checksums))
+        if (!decoded || symbols.Failed || Xxh32(code, length) != Load32(checksums))
             return FALSE;
         checksums += 4;
     }
