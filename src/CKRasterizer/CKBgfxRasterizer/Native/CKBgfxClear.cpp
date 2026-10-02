@@ -1,9 +1,15 @@
 #include "CKBgfxRasterizerContext.h"
+
+// Direct3D 11 partial clears draw a rect; builds without its shaders have no
+// Direct3D 11 renderer.
+#if CKBGFX_SHADER_DX11
 #include "shaders/native/vs_rect_clear.h"
 #include "shaders/native/fs_rect_clear.h"
+#endif
 
 CKERROR CKBgfxRasterizerContext::PrepareRectClear()
 {
+#if CKBGFX_SHADER_DX11
     if (bgfx::isValid(m_RectClearProgram)) return CK_OK;
     const bgfx::ShaderHandle vertex = bgfx::createShader(bgfx::makeRef(ck_vs_rect_clear_dx11, sizeof(ck_vs_rect_clear_dx11)));
     const bgfx::ShaderHandle fragment = bgfx::createShader(bgfx::makeRef(ck_fs_rect_clear_dx11, sizeof(ck_fs_rect_clear_dx11)));
@@ -25,6 +31,9 @@ CKERROR CKBgfxRasterizerContext::PrepareRectClear()
         return CKERR_OUTOFMEMORY;
     }
     return CK_OK;
+#else
+    return CKERR_NOTIMPLEMENTED;
+#endif
 }
 
 void CKBgfxRasterizerContext::EncodeRectClear(bgfx::ViewId View, const CKRenderPassDesc &Desc)

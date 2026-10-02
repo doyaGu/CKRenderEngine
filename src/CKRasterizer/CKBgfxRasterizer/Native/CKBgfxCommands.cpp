@@ -86,7 +86,7 @@ CKERROR CKBgfxRasterizerContext::BeginPass(const CKRenderPassDesc *Desc)
         return CKERR_OUTOFMEMORY;
     // D3D11's native partial clear uses an internal draw. Keep independent
     // attachment write masks under our control without patching bgfx.
-    const bool drawClear = m_RendererType == bgfx::RendererType::Direct3D11 && Desc->ClearFlags &&
+    const bool drawClear = CKBGFX_SHADER_DX11 && m_RendererType == bgfx::RendererType::Direct3D11 && Desc->ClearFlags &&
         (rect.left != 0 || rect.top != 0 || CKDWORD(rect.right) != attachmentWidth ||
          CKDWORD(rect.bottom) != attachmentHeight);
     if (drawClear) {
