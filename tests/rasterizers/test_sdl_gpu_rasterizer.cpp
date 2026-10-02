@@ -766,6 +766,26 @@ int main()
         }
         check(inverted, "every fragment artifact cache index names its key");
     }
+    {
+        // The first use of the packs in this process. This thread loads them
+        // in the reverse of the prefetch's order, so it decodes some itself
+        // and waits for others; each still decodes once.
+        const SDL_GPUShaderFormat formats[] = {SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC,
+                                               SDL_GPU_SHADERFORMAT_DXIL};
+        const CKBYTE *first[3] = {}, *later = nullptr;
+        CKDWORD size = 0;
+        bool once = true;
+        {
+            CKSdlGpuShaderPrefetch prefetch(formats[0] | formats[1] | formats[2]);
+            CKSdlGpuShaderPrefetch none(SDL_GPU_SHADERFORMAT_MSL);
+            for (int i = 0; i < 3; ++i)
+                once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, first[i], size) && once;
+        }
+        CKSdlGpuShaderPrefetch decoded(formats[0] | formats[1] | formats[2]);
+        for (int i = 0; i < 3; ++i)
+            once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, later, size) && later == first[i] && once;
+        check(once, "prefetched shader packs decode once");
+    }
     for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV}) {
         CKFFShaderSet set;
         check(CKSdlGpuShaderSet(format, set) != FALSE, "complete native shader family");

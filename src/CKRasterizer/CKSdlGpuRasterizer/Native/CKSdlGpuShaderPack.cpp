@@ -1360,6 +1360,14 @@ const EmbeddedPack *LoadPack(SDL_GPUShaderFormat format)
     return NULL;
 }
 
+int SDLCALL DecodePacks(void *formats)
+{
+    for (EmbeddedPack &pack : s_Packs)
+        if ((SDL_GPUShaderFormat)(uintptr_t)formats & pack.Format)
+            LoadPack(pack.Format);
+    return 0;
+}
+
 } // namespace
 
 CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size, CKSdlGpuShaderArtifacts &Out)
@@ -1376,6 +1384,22 @@ CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size, CKSdlGpuShaderA
 CKBOOL CKSdlGpuLoadShaders(SDL_GPUShaderFormat Format)
 {
     return LoadPack(Format) != NULL;
+}
+
+CKSdlGpuShaderPrefetch::CKSdlGpuShaderPrefetch(SDL_GPUShaderFormat Formats) : m_Thread(NULL)
+{
+    SDL_GPUShaderFormat pending = 0;
+    for (EmbeddedPack &pack : s_Packs)
+        if ((Formats & pack.Format) && SDL_GetAtomicInt(&pack.Init.status) == SDL_INIT_STATUS_UNINITIALIZED)
+            pending |= pack.Format;
+    if (pending)
+        m_Thread = SDL_CreateThread(DecodePacks, "CKSdlGpuShaderPack", (void *)(uintptr_t)pending);
+}
+
+CKSdlGpuShaderPrefetch::~CKSdlGpuShaderPrefetch()
+{
+    if (m_Thread)
+        SDL_WaitThread(m_Thread, NULL);
 }
 
 CKBOOL CKSdlGpuShaderCode(SDL_GPUShaderFormat Format, CKSdlShader Shader,

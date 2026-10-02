@@ -5,6 +5,7 @@
 #include "XArray.h"
 #include "shaders/generated/shaders.h"
 #include <SDL3/SDL_gpu.h>
+#include <SDL3/SDL_thread.h>
 #include <stddef.h>
 
 // The precompiled shaders of one format. Shader i is
@@ -25,5 +26,20 @@ CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size,
 CKBOOL CKSdlGpuLoadShaders(SDL_GPUShaderFormat Format);
 CKBOOL CKSdlGpuShaderCode(SDL_GPUShaderFormat Format, CKSdlShader Shader,
                           const CKBYTE *&Code, CKDWORD &Size);
+
+// Decodes the embedded packs of some formats on a thread, so that decoding
+// overlaps other work; the destructor waits for the thread. A use of a pack
+// meanwhile finds it decoded, waits for it or decodes it itself, so each pack
+// still decodes once.
+class CKSdlGpuShaderPrefetch {
+public:
+    explicit CKSdlGpuShaderPrefetch(SDL_GPUShaderFormat Formats);
+    ~CKSdlGpuShaderPrefetch();
+    CKSdlGpuShaderPrefetch(const CKSdlGpuShaderPrefetch &) = delete;
+    CKSdlGpuShaderPrefetch &operator=(const CKSdlGpuShaderPrefetch &) = delete;
+
+private:
+    SDL_Thread *m_Thread;
+};
 
 #endif

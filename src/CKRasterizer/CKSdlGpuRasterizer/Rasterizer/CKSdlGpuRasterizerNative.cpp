@@ -1,4 +1,5 @@
 #include "CKSdlGpuRasterizerContext.h"
+#include "CKSdlGpuShaderPack.h"
 
 CKERROR CKSdlGpuRasterizerContext::Fail(const char *operation)
 {
@@ -32,6 +33,18 @@ static SDL_Window *FindWindow(WIN_HANDLE handle)
     }
     SDL_free(windows);
     return result;
+}
+
+// The formats of the shader packs a device of the driver uses: its own, and on
+// D3D12 the DXBC of the programs the FF JIT compiles. Off Windows an unnamed
+// driver is Vulkan, the only other backend taking DXIL or SPIR-V.
+static SDL_GPUShaderFormat DriverPackFormats(const char *driver, SDL_GPUShaderFormat allowedFormats)
+{
+    if (!driver || SDL_strcmp(driver, "vulkan") == 0)
+        return allowedFormats & SDL_GPU_SHADERFORMAT_SPIRV;
+    if (SDL_strcmp(driver, "direct3d12") == 0 && (allowedFormats & SDL_GPU_SHADERFORMAT_DXIL))
+        return SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_DXBC;
+    return 0;
 }
 
 CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
@@ -74,6 +87,8 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     if (!driver) driver = allowedFormats & SDL_GPU_SHADERFORMAT_DXIL ? "direct3d12" : "vulkan";
 #endif
     const bool debug = SDL_getenv("CKRE_SDL_GPU_DEBUG") && SDL_strcmp(SDL_getenv("CKRE_SDL_GPU_DEBUG"), "0") != 0;
+    // Decode the shader packs while the device is created.
+    CKSdlGpuShaderPrefetch prefetch(DriverPackFormats(driver, allowedFormats));
     Device = SDL_CreateGPUDevice(allowedFormats, debug, driver);
     if (!Device) return Fail("CreateGPUDevice");
     PresentCopySupported = CKSdlGpuSupportsSwapchainCopy(SDL_GetGPUDeviceDriver(Device));
