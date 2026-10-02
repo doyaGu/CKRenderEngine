@@ -3,6 +3,7 @@ find_package(SDL3 3.4 CONFIG REQUIRED)
 
 set(CKSDL_GPU_RASTERIZER_SOURCES
     Native/CKSdlGpuCommands.cpp
+    Native/CKSdlGpuDxilCodec.cpp
     Native/CKSdlGpuMipmaps.cpp
     Native/CKSdlGpuNativeShaders.cpp
     Native/CKSdlGpuPipeline.cpp
@@ -24,10 +25,12 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Rasterizer/CKSdlGpuShaders.cpp
 )
 set(CKSDL_GPU_RASTERIZER_HEADERS
+    Native/CKSdlGpuDxilCodec.h
     Native/CKSdlGpuInternal.h
     Native/CKSdlGpuNativeShaders.h
     Native/CKSdlGpuShaderJob.h
     Native/CKSdlGpuShaderPack.h
+    Native/CKSdlGpuShaderStreams.h
     Native/CKSdlGpuTextureData.h
     Native/CKSdlGpuUniformBatch.h
     Native/CKSdlGpuWorker.h
