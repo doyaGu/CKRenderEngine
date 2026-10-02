@@ -549,9 +549,9 @@ static void TestSamplerFilterAndAddressConventions()
                 "native palette indices beyond fifteen are rejected");
 }
 
-static void TestOpenGLAutoMipPolicy()
+static void TestAutoMipPolicy()
 {
-    TEST_SECTION("OpenGL Auto Mip Policy");
+    TEST_SECTION("Auto Mip Policy");
 
     CKDWORD full = CKBgfxTextureMipCount(256, 128, 1);
     TEST_ASSERT(full == 9, "full mip count follows largest texture dimension");
@@ -568,17 +568,15 @@ static void TestOpenGLAutoMipPolicy()
                 CKBgfxCanRepresentMipCount(4, full) == FALSE,
                 "bgfx rejects partial explicit chains that would leave physical mips uninitialized");
 
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE, FALSE) == FALSE,
-                "OpenGL defers automatic mips until data can populate the full chain");
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE, TRUE) == TRUE,
-                "OpenGL creates automatic mip chain when complete data is available");
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, FALSE, FALSE) == FALSE,
-                "all backends defer automatic mips until data can populate the full chain");
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(0, full, TRUE, TRUE) == FALSE,
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, FALSE) == FALSE,
+                "automatic mips wait until data can populate the full chain");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain((CKDWORD)-1, full, TRUE) == TRUE,
+                "automatic mips create the full chain when complete data is available");
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(0, full, TRUE) == FALSE,
                 "zero mip request creates a base-level texture");
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(1, full, TRUE, TRUE) == FALSE,
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(1, full, TRUE) == FALSE,
                 "one mip request creates a base-level texture");
-    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(4, full, TRUE, FALSE) == TRUE,
+    TEST_ASSERT(CKBgfxShouldCreateTextureMipChain(4, full, FALSE) == TRUE,
                 "explicit mip requests still allocate a mip chain");
 
     TEST_ASSERT(CKBgfxImageRowBytes(4, 32) == 16,
@@ -1059,7 +1057,7 @@ int main()
     TestBackendProfileMapping();
     TestBgfxStateBackendConventions();
     TestSamplerFilterAndAddressConventions();
-    TestOpenGLAutoMipPolicy();
+    TestAutoMipPolicy();
     TestBgfxRasterizerLifecycle();
     TestDrawMapTraceBindingOrder();
     TestPersistentCacheCallback();

@@ -136,13 +136,6 @@ uint32_t CKBgfxBuildResetFlags(CKBOOL vsync, CKDWORD samples)
     return flags;
 }
 
-bool CKBgfxIsOpenGLRenderer()
-{
-    const bgfx::RendererType::Enum type = bgfx::getRendererType();
-    return type == bgfx::RendererType::OpenGL ||
-           type == bgfx::RendererType::OpenGLES;
-}
-
 CKBOOL CKBgfxDrawMapChannelEnabled(CKDWORD flags, CKDWORD channel)
 {
     if ((flags & CKRST_DEBUG_DRAWMAP) == 0)
@@ -617,10 +610,8 @@ CKBOOL CKBgfxCanRepresentMipCount(CKDWORD requestedMipCount, CKDWORD fullMipCoun
 
 CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD requestedMipCount,
                                           CKDWORD fullMipCount,
-                                          CKBOOL openGL,
                                           CKBOOL autoMipDataAvailable)
 {
-    (void)openGL;
     if (CKBgfxIsAutoMipRequest(requestedMipCount, fullMipCount))
         return autoMipDataAvailable ? TRUE : FALSE;
 

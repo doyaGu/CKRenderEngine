@@ -371,13 +371,12 @@ CKERROR CKBgfxRasterizerContext::CreateTexture(const CKTextureDesc *Desc,
     // entire chain. A partial explicit chain would expose uninitialized mips.
     if (!CKBgfxCanRepresentMipCount(requestedMipCount, fullMipCount))
         return CKERR_NOTIMPLEMENTED;
-    CKBOOL openGL = CKBgfxIsOpenGLRenderer() ? TRUE : FALSE;
     CKBOOL requestedAutoMips = CKBgfxIsAutoMipRequest(
         requestedMipCount, fullMipCount);
     CKBOOL autoMipDataAvailable = (requestedAutoMips &&
                                    CKBgfxCanUseGeneratedMipChain(Desc->Flags, fmt, d, Data)) ? TRUE : FALSE;
     bool hasMips = CKBgfxShouldCreateTextureMipChain(
-        requestedMipCount, fullMipCount, openGL, autoMipDataAvailable) == TRUE;
+        requestedMipCount, fullMipCount, autoMipDataAvailable) == TRUE;
     bool uploadInitialAfterCreate = hasMips && autoMipDataAvailable && Data && Data->Image;
 
     uint64_t texFlags = CKBgfxTextureFlagsFromDescFlags(Desc->Flags);

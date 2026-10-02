@@ -531,11 +531,6 @@ CKERROR CKBgfxRasterizerContext::Init(const CKRasterizerInitParameters *Desc)
                    (caps->supported & BGFX_CAPS_TEXTURE_3D) ? 1u : 0u,
                    (caps->supported & BGFX_CAPS_RENDERER_MULTITHREADED) ? 1u : 0u);
     }
-    CKBgfxLogf("Init",
-               "texture policy openGLAutoMipWorkaround=%u shaderDepthCompare=%u samplerBaseLevelAlias=%u",
-               CKBgfxIsOpenGLRenderer() ? 1u : 0u,
-               1u,
-               CKBgfxIsOpenGLRenderer() ? 1u : 0u);
 
     bgfx::setViewRect(0, 0, 0, (uint16_t)Width, (uint16_t)Height);
     bgfx::setViewClear(0,

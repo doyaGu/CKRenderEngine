@@ -35,7 +35,6 @@ CK_SHADER_PROFILE CKBgfxShaderProfile(bgfx::RendererType::Enum type);
 bool CKBgfxTryRendererType(const char *Name, bgfx::RendererType::Enum &Renderer);
 bool CKBgfxParseRequestedRenderer(bgfx::RendererType::Enum &Renderer);
 uint32_t CKBgfxBuildResetFlags(CKBOOL VSync, CKDWORD Samples);
-bool CKBgfxIsOpenGLRenderer();
 CKBOOL CKBgfxDrawMapChannelEnabled(CKDWORD Flags, CKDWORD Channel);
 bool CKBgfxIsBumpLuminanceFormat(VX_PIXELFORMAT Format);
 bool CKBgfxCanExposeReadback(VX_PIXELFORMAT Format,
@@ -73,7 +72,6 @@ CKBOOL CKBgfxIsAutoMipRequest(CKDWORD RequestedMipCount, CKDWORD FullMipCount);
 CKBOOL CKBgfxCanRepresentMipCount(CKDWORD RequestedMipCount, CKDWORD FullMipCount);
 CKBOOL CKBgfxShouldCreateTextureMipChain(CKDWORD RequestedMipCount,
                                          CKDWORD FullMipCount,
-                                         CKBOOL OpenGL,
                                          CKBOOL AutoMipDataAvailable);
 
 typedef enum CKBgfxAutoMipUpdateAction {
