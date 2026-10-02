@@ -1,6 +1,6 @@
 #include "CKFFStageState.h"
 #include "CKFFStateDesc.h"
-#include "CKVertexLayoutCache.h"
+#include "CKFFVertexFormat.h"
 
 #include <string.h>
 

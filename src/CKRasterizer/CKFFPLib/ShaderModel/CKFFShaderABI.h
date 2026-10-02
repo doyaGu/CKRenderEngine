@@ -3,6 +3,7 @@
 
 #include "CKBuiltinShaderIdentity.h"
 #include "CKFFConstants.h"
+#include "CKFFSamplerLayout.h"
 #include "CKFFShaderKey.h"
 #include "CKFFFragmentProgram.h"
 #include "CKRasterizerContextEnums.h"

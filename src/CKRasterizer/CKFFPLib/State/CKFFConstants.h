@@ -9,20 +9,6 @@
 #define CKFF_MAX_TEXTURE_STAGES 8
 #define CKFF_MAX_TEXTURE_STAGE_STATES (CKRST_TSS_MAXSTATE + 1)
 #define CKFF_VERTEX_BLEND_MATRIX_COUNT 4
-// Each native fragment shader exposes sixteen samplers. Three layouts cover
-// every mix of the eight logical texture stages: when one non-2D type needs
-// more than four slots, at most three stages remain for the other two types.
-#define CKFF_NARROW_SAMPLER_COUNT 4
-#define CKFF_WIDE_SAMPLER_COUNT 8
-
-enum CKFFSamplerLayout {
-#define CKFF_SAMPLER_LAYOUT(name, value, twoD, cube, volume) \
-    CKFF_SAMPLER_LAYOUT_##name = value,
-#include "../ShaderModel/CKFFSamplerLayout.def"
-#undef CKFF_SAMPLER_LAYOUT
-    CKFF_SAMPLER_LAYOUT_COUNT,
-};
-
 // Logical colour precision of the active D3D-compatible render target. Modern
 // backends may store the packed 16-bit formats in a wider native texture; the
 // fixed-function fragment stage still has to expose the declared precision.

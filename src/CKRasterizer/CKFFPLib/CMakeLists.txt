@@ -1,8 +1,19 @@
 # Reusable CPU fixed-function implementation shared by the concrete
-# SDL_gpu and bgfx rasterizer contexts.
+# SDL_gpu and bgfx rasterizer contexts. Each layer includes only the layers
+# listed before it:
+#   Interface      data contracts shared with the rasterizer contexts
+#   State          fixed-function state vocabulary and texture stage rules
+#   ShaderModel    shader keys, shader ABI and the native fragment JIT front end
+#   FixedFunction  the pipeline runtime the contexts own
+# Core implements Interface.
 set(CKFFP_LIB_SOURCES
     Core/CKFFProgramDesc.cpp
     Core/CKFFProgramLayout.cpp
+    State/CKFFStageState.cpp
+    ShaderModel/CKFFShaderInterface.cpp
+    ShaderModel/CKFFShaderKey.cpp
+    ShaderModel/CKFFFragmentProgram.cpp
+    ShaderModel/CKFFNativeFragmentJit.cpp
     FixedFunction/CKDrawStateCache.cpp
     FixedFunction/CKFFBufferUseTracker.cpp
     FixedFunction/CKFFBufferData.cpp
@@ -16,11 +27,6 @@ set(CKFFP_LIB_SOURCES
     FixedFunction/CKFFPipelineState.cpp
     FixedFunction/CKFFPresentDraw.cpp
     FixedFunction/CKFFShaderCache.cpp
-    ShaderModel/CKFFShaderInterface.cpp
-    ShaderModel/CKFFShaderKey.cpp
-    ShaderModel/CKFFFragmentProgram.cpp
-    ShaderModel/CKFFNativeFragmentJit.cpp
-    FixedFunction/CKFFStageState.cpp
     FixedFunction/CKFFStateResolver.cpp
     FixedFunction/CKFFStateStore.cpp
     FixedFunction/CKFFTextureBinder.cpp
@@ -44,11 +50,23 @@ set(CKFFP_LIB_HEADERS
     Interface/CKRasterizerContextEnums.h
     Interface/CKRasterizerContextTypes.h
     Interface/CKRasterizerValidation.h
+    State/CKFFConstants.h
+    State/CKFFStageState.h
+    State/CKFFStateDesc.h
+    State/CKFFVertexFormat.h
+    ShaderModel/CKFFShaderABI.h
+    ShaderModel/CKFFShaderInterface.h
+    ShaderModel/CKFFShaderKey.h
+    ShaderModel/CKFFSamplerLayout.h
+    ShaderModel/CKFFSamplerLayout.def
+    ShaderModel/CKFFFragmentProgram.h
+    ShaderModel/CKFFFragmentProgramLayout.def
+    ShaderModel/CKFFFragmentProgramLayout.h
+    ShaderModel/CKFFNativeFragmentJit.h
     FixedFunction/CKDrawStateCache.h
     FixedFunction/CKFFBufferUseTracker.h
     FixedFunction/CKFFBufferData.h
     FixedFunction/CKFFContextState.h
-    FixedFunction/CKFFConstants.h
     FixedFunction/CKFFDebug.h
     FixedFunction/CKFFDrawProbes.h
     FixedFunction/CKFFDrawTypes.h
@@ -57,8 +75,6 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKFFProgram.h
     FixedFunction/CKFFResourceStore.h
     FixedFunction/CKFFShaderCache.h
-    FixedFunction/CKFFStageState.h
-    FixedFunction/CKFFStateDesc.h
     FixedFunction/CKFFStateResolver.h
     FixedFunction/CKFFStateStore.h
     FixedFunction/CKFFTextureBinder.h
@@ -67,14 +83,6 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKFixedFunctionPipeline.h
     FixedFunction/CKTransientGeometry.h
     FixedFunction/CKVertexLayoutCache.h
-    ShaderModel/CKFFShaderABI.h
-    ShaderModel/CKFFShaderInterface.h
-    ShaderModel/CKFFShaderKey.h
-    ShaderModel/CKFFSamplerLayout.def
-    ShaderModel/CKFFFragmentProgram.h
-    ShaderModel/CKFFFragmentProgramLayout.def
-    ShaderModel/CKFFFragmentProgramLayout.h
-    ShaderModel/CKFFNativeFragmentJit.h
 )
 
 add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
@@ -85,6 +93,7 @@ ckre_apply_diagnostic_definitions(CKFFPLib PRIVATE)
 target_include_directories(CKFFPLib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Interface>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/State>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel>
 )

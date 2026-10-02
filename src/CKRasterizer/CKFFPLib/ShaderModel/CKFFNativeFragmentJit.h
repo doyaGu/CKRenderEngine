@@ -3,6 +3,7 @@
 
 #include "CKFFConstantSet.h"
 #include "CKFFConstants.h"
+#include "CKFFSamplerLayout.h"
 #include "CKFFFragmentProgram.h"
 #include "CKJitIR.h"
 

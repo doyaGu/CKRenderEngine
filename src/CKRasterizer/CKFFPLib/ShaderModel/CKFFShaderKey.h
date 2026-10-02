@@ -3,6 +3,7 @@
 
 #include "CKFFStateDesc.h"
 #include "CKFFConstants.h"
+#include "CKFFSamplerLayout.h"
 #include "CKFFFragmentProgram.h"
 #include "CKRenderEngineTypes.h"
 
