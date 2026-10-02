@@ -77,12 +77,23 @@ set(_ckbgfx_shader_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
 )
 if (CKRE_GENERATE_SHADERS AND Python3_Interpreter_FOUND AND CKRE_SHADERC_COMMAND)
+    # Every checked-in profile that the host's shaderc compiles stays current;
+    # the Direct3D ones need DirectX.
+    set(_ckbgfx_generate_args)
+    set(_ckbgfx_generate_backends spirv glsl essl metal)
+    if (CKRE_ENABLE_DIRECTX)
+        list(PREPEND _ckbgfx_generate_backends dx11 dx12)
+    endif ()
+    foreach (_ckbgfx_backend IN LISTS _ckbgfx_generate_backends)
+        list(APPEND _ckbgfx_generate_args --backend ${_ckbgfx_backend})
+    endforeach ()
     set(_ckbgfx_shader_stamp "${CMAKE_CURRENT_BINARY_DIR}/CKBgfxShaderArtifacts.stamp")
     add_custom_command(OUTPUT "${_ckbgfx_shader_stamp}"
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_shaders.py
             --shaderc "${CKRE_SHADERC_COMMAND}"
             --bgfx-source "${BGFX_DIR}"
+            ${_ckbgfx_generate_args}
         COMMAND "${CMAKE_COMMAND}" -E touch "${_ckbgfx_shader_stamp}"
         DEPENDS ${CKRE_SHADERC_DEPENDS} ${_ckbgfx_shader_sources}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders

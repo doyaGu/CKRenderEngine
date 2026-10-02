@@ -5,6 +5,9 @@ One program family serves every draw: two vertex shaders (3D, POSITIONT), each
 with a clip-distance variant, three fragment shaders covering the exact
 sixteen-slot sampler layouts, and the postprocess pair. The generated headers hold the bgfx binary
 blob per renderer backend; the runtime selects the set for its shader profile.
+
+--backend limits compilation to some backends, such as the ones shaderc can
+compile on the host; the headers of the others are kept.
 """
 
 from __future__ import annotations
