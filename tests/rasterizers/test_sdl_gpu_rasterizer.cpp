@@ -2,10 +2,15 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuFFJitManifest.h"
 #include "CKSdlGpuShaders.h"
+#include "CKSdlGpuShaderPack.h"
+#include "shaders/generated/dxbc_pack.h"
+#include "shaders/generated/dxil_pack.h"
+#include "shaders/generated/spirv_pack.h"
 #include "CKSdlGpuTextureData.h"
 #include "CKSdlGpuWorker.h"
 #include "CKFFShaderInterface.h"
 #include <cstdio>
+#include <cstring>
 
 int main()
 {
@@ -936,6 +941,68 @@ int main()
         CKShaderDesc invalid;
         check(!CKSdlGpuFFDxbcVertexShader(CKFF_PROGRAM_VARIANT_COUNT, invalid),
               "DXBC vertex shaders reject unknown variants");
+    }
+    {
+        // Every embedded pack decodes to the shaders of its format; DXBC
+        // carries only the fixed-function vertex shaders.
+        bool complete = true;
+        for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC}) {
+            complete = complete && CKSdlGpuLoadShaders(format);
+            const char *magic = format == SDL_GPU_SHADERFORMAT_SPIRV ? "#" : "DXBC";
+            for (int shader = 0; shader <= CKSDL_SHADER_COUNT; ++shader) {
+                const CKBYTE *code = nullptr;
+                CKDWORD size = 0;
+                const bool present = CKSdlGpuShaderCode(format, (CKSdlShader)shader, code, size) != FALSE;
+                const bool expected = shader < CKSDL_SHADER_COUNT && (format != SDL_GPU_SHADERFORMAT_DXBC ||
+                    shader <= CKSDL_SHADER_VS_FF_POSITIONT_CLIP_DEPTH_PAD);
+                complete = complete && present == expected &&
+                           (!present || (size > 4 && std::memcmp(code, magic, 4) == 0));
+            }
+        }
+        const CKBYTE *code = nullptr;
+        CKDWORD size = 0;
+        check(complete && !CKSdlGpuLoadShaders(SDL_GPU_SHADERFORMAT_MSL) &&
+                  !CKSdlGpuShaderCode(SDL_GPU_SHADERFORMAT_MSL, CKSDL_SHADER_VS_FF_3D, code, size),
+              "embedded shader packs hold exactly the shaders of their formats");
+
+        // A damaged pack fails to decode, or decodes to the original shaders
+        // when the damage misses everything the decoder reads.
+        struct Pack { const unsigned char *Data; size_t Size; };
+        const Pack packs[] = {
+            {s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
+            {s_sdl_spirv_pack, sizeof(s_sdl_spirv_pack)},
+            {s_sdl_dxbc_pack, sizeof(s_sdl_dxbc_pack)},
+        };
+        bool faithful = true, cleared = true, truncated = true;
+        for (const Pack &pack : packs) {
+            CKSdlGpuShaderArtifacts original, damaged;
+            faithful = faithful && CKSdlGpuDecodeShaderPack(pack.Data, pack.Size, original);
+            auto decode = [&](const CKBYTE *data, size_t length) {
+                if (!CKSdlGpuDecodeShaderPack(data, length, damaged)) {
+                    cleared = cleared && damaged.Code.Size() == 0 && damaged.Offsets.Size() == 0;
+                    return false;
+                }
+                faithful = faithful && damaged.Code.Size() == original.Code.Size() &&
+                           damaged.Offsets.Size() == original.Offsets.Size() &&
+                           std::memcmp(damaged.Code.Begin(), original.Code.Begin(), original.Code.Size()) == 0 &&
+                           std::memcmp(damaged.Offsets.Begin(), original.Offsets.Begin(),
+                                       original.Offsets.Size() * sizeof(CKDWORD)) == 0;
+                return true;
+            };
+            XArray<CKBYTE> bytes;
+            bytes.Resize((int)pack.Size);
+            std::memcpy(bytes.Begin(), pack.Data, pack.Size);
+            for (size_t length = 0; length < pack.Size; length += 1 + length / 3)
+                truncated = truncated && (!decode(bytes.Begin(), length) || length + 16 > pack.Size);
+            for (size_t at = 0; at < pack.Size; at += at < 16 ? 1 : 1 + pack.Size / 48) {
+                for (CKBYTE flip : {0x01, 0x80}) {
+                    bytes[(int)at] ^= flip;
+                    decode(bytes.Begin(), pack.Size);
+                    bytes[(int)at] ^= flip;
+                }
+            }
+        }
+        check(faithful && cleared && truncated, "damaged shader packs never decode to other shaders");
     }
     CKFFShaderSet rejected;
     check(!CKSdlGpuShaderSet(SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, rejected), "ambiguous payload rejected");

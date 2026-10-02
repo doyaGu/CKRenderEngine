@@ -1,56 +1,28 @@
 #include "CKSdlGpuShaders.h"
 #include "CKFFShaderABI.h"
+#include "CKSdlGpuShaderPack.h"
 #include "shaders/generated/abi.h"
-#include "shaders/generated/dxil_vs_ff_3d.h"
-#include "shaders/generated/dxil_vs_ff_3d_clip.h"
-#include "shaders/generated/dxil_vs_ff_positiont.h"
-#include "shaders/generated/dxil_vs_ff_positiont_clip.h"
-#include "shaders/generated/dxil_vs_ff_positiont_depth_pad.h"
-#include "shaders/generated/dxil_vs_ff_positiont_clip_depth_pad.h"
-#include "shaders/generated/dxil_fs_ff_stage.h"
-#include "shaders/generated/dxil_fs_ff_stage_native.h"
-#include "shaders/generated/dxil_fs_ff_stage_cube_native.h"
-#include "shaders/generated/dxil_fs_ff_stage_volume_native.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare1.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare2.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare3.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare4.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare5.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare6.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare7.h"
-#include "shaders/generated/dxil_fs_ff_stage_compare8.h"
-#include "shaders/generated/dxil_fs_ff_stage_cube.h"
-#include "shaders/generated/dxil_fs_ff_stage_volume.h"
-#include "shaders/generated/dxil_vs_postprocess.h"
-#include "shaders/generated/dxil_fs_postprocess.h"
-#include "shaders/generated/dxbc_vs_ff_3d.h"
-#include "shaders/generated/dxbc_vs_ff_3d_clip.h"
-#include "shaders/generated/dxbc_vs_ff_positiont.h"
-#include "shaders/generated/dxbc_vs_ff_positiont_clip.h"
-#include "shaders/generated/dxbc_vs_ff_positiont_depth_pad.h"
-#include "shaders/generated/dxbc_vs_ff_positiont_clip_depth_pad.h"
-#include "shaders/generated/spirv_vs_ff_3d.h"
-#include "shaders/generated/spirv_vs_ff_3d_clip.h"
-#include "shaders/generated/spirv_vs_ff_positiont.h"
-#include "shaders/generated/spirv_vs_ff_positiont_clip.h"
-#include "shaders/generated/spirv_vs_ff_positiont_depth_pad.h"
-#include "shaders/generated/spirv_vs_ff_positiont_clip_depth_pad.h"
-#include "shaders/generated/spirv_fs_ff_stage.h"
-#include "shaders/generated/spirv_fs_ff_stage_native.h"
-#include "shaders/generated/spirv_fs_ff_stage_cube_native.h"
-#include "shaders/generated/spirv_fs_ff_stage_volume_native.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare1.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare2.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare3.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare4.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare5.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare6.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare7.h"
-#include "shaders/generated/spirv_fs_ff_stage_compare8.h"
-#include "shaders/generated/spirv_fs_ff_stage_cube.h"
-#include "shaders/generated/spirv_fs_ff_stage_volume.h"
-#include "shaders/generated/spirv_vs_postprocess.h"
-#include "shaders/generated/spirv_fs_postprocess.h"
+
+namespace {
+
+CKBOOL SetShaderCode(SDL_GPUShaderFormat format, CKSdlShader shader, CKShaderDesc &out)
+{
+    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
+        out.Format = CKRST_SHADER_FORMAT_DXIL;
+        out.Profile = CKRST_SHADER_PROFILE_DX12;
+    } else if (format == SDL_GPU_SHADERFORMAT_DXBC) {
+        out.Format = CKRST_SHADER_FORMAT_DXBC;
+        out.Profile = CKRST_SHADER_PROFILE_DX12;
+    } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
+        out.Format = CKRST_SHADER_FORMAT_SPIRV;
+        out.Profile = CKRST_SHADER_PROFILE_SPIRV;
+    } else {
+        return FALSE;
+    }
+    return CKSdlGpuShaderCode(format, shader, out.Code, out.CodeSize);
+}
+
+} // namespace
 
 CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
                                      CKBOOL clipping,
@@ -58,40 +30,9 @@ CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat format,
 {
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_VERTEX;
-    out.Profile = format == SDL_GPU_SHADERFORMAT_SPIRV ?
-        CKRST_SHADER_PROFILE_SPIRV : CKRST_SHADER_PROFILE_DX12;
     out.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
-    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        out.Format = CKRST_SHADER_FORMAT_DXIL;
-        if (clipping) {
-            out.Code = s_sdl_dxil_vs_ff_positiont_clip_depth_pad;
-            out.CodeSize = sizeof(s_sdl_dxil_vs_ff_positiont_clip_depth_pad);
-        } else {
-            out.Code = s_sdl_dxil_vs_ff_positiont_depth_pad;
-            out.CodeSize = sizeof(s_sdl_dxil_vs_ff_positiont_depth_pad);
-        }
-    } else if (format == SDL_GPU_SHADERFORMAT_DXBC) {
-        out.Format = CKRST_SHADER_FORMAT_DXBC;
-        if (clipping) {
-            out.Code = s_sdl_dxbc_vs_ff_positiont_clip_depth_pad;
-            out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont_clip_depth_pad);
-        } else {
-            out.Code = s_sdl_dxbc_vs_ff_positiont_depth_pad;
-            out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont_depth_pad);
-        }
-    } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
-        out.Format = CKRST_SHADER_FORMAT_SPIRV;
-        if (clipping) {
-            out.Code = s_sdl_spirv_vs_ff_positiont_clip_depth_pad;
-            out.CodeSize = sizeof(s_sdl_spirv_vs_ff_positiont_clip_depth_pad);
-        } else {
-            out.Code = s_sdl_spirv_vs_ff_positiont_depth_pad;
-            out.CodeSize = sizeof(s_sdl_spirv_vs_ff_positiont_depth_pad);
-        }
-    } else {
-        return FALSE;
-    }
-    return TRUE;
+    return SetShaderCode(format, clipping ? CKSDL_SHADER_VS_FF_POSITIONT_CLIP_DEPTH_PAD :
+                                            CKSDL_SHADER_VS_FF_POSITIONT_DEPTH_PAD, out);
 }
 
 CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
@@ -99,32 +40,27 @@ CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
 {
     out = CKShaderDesc();
     out.Stage = CKRST_SHADER_VERTEX;
-    out.Format = CKRST_SHADER_FORMAT_DXBC;
-    out.Profile = CKRST_SHADER_PROFILE_DX12;
     out.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
+    CKSdlShader shader;
     switch (variant) {
     case CKFF_PROGRAM_3D:
-        out.Code = s_sdl_dxbc_vs_ff_3d;
-        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_3d);
+        shader = CKSDL_SHADER_VS_FF_3D;
         out.UniformBufferCount = CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
         break;
     case CKFF_PROGRAM_3D_CLIP:
-        out.Code = s_sdl_dxbc_vs_ff_3d_clip;
-        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_3d_clip);
+        shader = CKSDL_SHADER_VS_FF_3D_CLIP;
         out.UniformBufferCount = CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
         break;
     case CKFF_PROGRAM_POSITIONT:
-        out.Code = s_sdl_dxbc_vs_ff_positiont;
-        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont);
+        shader = CKSDL_SHADER_VS_FF_POSITIONT;
         break;
     case CKFF_PROGRAM_POSITIONT_CLIP:
-        out.Code = s_sdl_dxbc_vs_ff_positiont_clip;
-        out.CodeSize = sizeof(s_sdl_dxbc_vs_ff_positiont_clip);
+        shader = CKSDL_SHADER_VS_FF_POSITIONT_CLIP;
         break;
     default:
         return FALSE;
     }
-    return TRUE;
+    return SetShaderCode(SDL_GPU_SHADERFORMAT_DXBC, shader, out);
 }
 
 CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
@@ -212,77 +148,26 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
                                const CKSdlGpuFFFragmentArtifactKey &artifactKey,
                                CKShaderDesc &out)
 {
-    const CKFFSamplerLayout samplerLayout = artifactKey.SamplerLayout;
-    const CKDWORD compareSamplerCount = artifactKey.ComparisonResourceCount;
-    if (CKSdlGpuFFFragmentArtifactIndex(artifactKey) >=
-        CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT)
-        return FALSE;
+    // By artifact index: the wide 2D layout without and with shader
+    // sampling, then with each comparison count; then the cube and volume
+    // layouts without and with it.
+    static const CKSdlShader shaders[CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {
+        CKSDL_SHADER_FS_FF_STAGE_NATIVE, CKSDL_SHADER_FS_FF_STAGE,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE1, CKSDL_SHADER_FS_FF_STAGE_COMPARE2,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE3, CKSDL_SHADER_FS_FF_STAGE_COMPARE4,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE5, CKSDL_SHADER_FS_FF_STAGE_COMPARE6,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE7, CKSDL_SHADER_FS_FF_STAGE_COMPARE8,
+        CKSDL_SHADER_FS_FF_STAGE_CUBE_NATIVE, CKSDL_SHADER_FS_FF_STAGE_CUBE,
+        CKSDL_SHADER_FS_FF_STAGE_VOLUME_NATIVE, CKSDL_SHADER_FS_FF_STAGE_VOLUME,
+    };
+    const CKDWORD index = CKSdlGpuFFFragmentArtifactIndex(artifactKey);
     out = CKShaderDesc();
+    if (index >= CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT || format == SDL_GPU_SHADERFORMAT_DXBC)
+        return FALSE;
     out.Stage = CKRST_SHADER_PIXEL;
-    out.Format = format == SDL_GPU_SHADERFORMAT_DXIL ?
-        CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_SPIRV;
-    out.Profile = format == SDL_GPU_SHADERFORMAT_DXIL ?
-        CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
     out.SamplerCount = CKFF_SAMPLER_SLOT_COUNT;
     out.UniformBufferCount = CKSDL_SHADER_FF_FRAGMENT_UNIFORM_BUFFERS;
-#define CKFF_SET_SHADER(_format, _suffix) \
-    out.Code = s_sdl_##_format##_fs_ff_stage##_suffix; \
-    out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage##_suffix)
-#define CKFF_SELECT_WIDE_2D(_format) \
-    switch (compareSamplerCount) { \
-    case 0: out.Code = s_sdl_##_format##_fs_ff_stage; \
-            out.CodeSize = sizeof(s_sdl_##_format##_fs_ff_stage); break; \
-    case 1: CKFF_SET_SHADER(_format, _compare1); break; \
-    case 2: CKFF_SET_SHADER(_format, _compare2); break; \
-    case 3: CKFF_SET_SHADER(_format, _compare3); break; \
-    case 4: CKFF_SET_SHADER(_format, _compare4); break; \
-    case 5: CKFF_SET_SHADER(_format, _compare5); break; \
-    case 6: CKFF_SET_SHADER(_format, _compare6); break; \
-    case 7: CKFF_SET_SHADER(_format, _compare7); break; \
-    case 8: CKFF_SET_SHADER(_format, _compare8); break; \
-    default: return FALSE; \
-    }
-#define CKFF_SELECT_NATIVE(_format) \
-    if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
-        CKFF_SET_SHADER(_format, _native); \
-    } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) { \
-        CKFF_SET_SHADER(_format, _cube_native); \
-    } else { \
-        CKFF_SET_SHADER(_format, _volume_native); \
-    }
-    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D &&
-            compareSamplerCount != 0) {
-            CKFF_SELECT_WIDE_2D(dxil);
-        } else if (!artifactKey.UsesShaderSampling) {
-            CKFF_SELECT_NATIVE(dxil);
-        } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
-            CKFF_SELECT_WIDE_2D(dxil);
-        } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) {
-            CKFF_SET_SHADER(dxil, _cube);
-        } else {
-            CKFF_SET_SHADER(dxil, _volume);
-        }
-    } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
-        if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D &&
-            compareSamplerCount != 0) {
-            CKFF_SELECT_WIDE_2D(spirv);
-        } else if (!artifactKey.UsesShaderSampling) {
-            CKFF_SELECT_NATIVE(spirv);
-        } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
-            CKFF_SELECT_WIDE_2D(spirv);
-        } else if (samplerLayout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) {
-            CKFF_SET_SHADER(spirv, _cube);
-        } else {
-            CKFF_SET_SHADER(spirv, _volume);
-        }
-    } else {
-        return FALSE;
-    }
-#undef CKFF_SELECT_WIDE_2D
-#undef CKFF_SELECT_NATIVE
-#undef CKFF_SET_SHADER
-    return out.Code && out.CodeSize;
+    return SetShaderCode(format, shaders[index], out);
 }
 
 void CKSdlGpuShaderTargets(XClassArray<CKFFShaderTarget> &out)
@@ -302,27 +187,16 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
     out = CKFFShaderSet();
     out.ABIVersion = CKSDL_SHADER_ABI_VERSION;
     out.InterfaceHash = CKSDL_SHADER_INTERFACE_HASH;
-    switch (format) {
-    case SDL_GPU_SHADERFORMAT_DXIL:
-        out.Shaders[0].Code = s_sdl_dxil_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_sdl_dxil_vs_ff_3d);
-        out.Shaders[1].Code = s_sdl_dxil_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_sdl_dxil_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_sdl_dxil_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_sdl_dxil_vs_ff_positiont);
-        out.Shaders[3].Code = s_sdl_dxil_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_sdl_dxil_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_sdl_dxil_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_sdl_dxil_fs_ff_stage);
-        out.Shaders[5].Code = s_sdl_dxil_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_sdl_dxil_vs_postprocess);
-        out.Shaders[6].Code = s_sdl_dxil_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_sdl_dxil_fs_postprocess);
-        break;
-    case SDL_GPU_SHADERFORMAT_SPIRV:
-        out.Shaders[0].Code = s_sdl_spirv_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_sdl_spirv_vs_ff_3d);
-        out.Shaders[1].Code = s_sdl_spirv_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_sdl_spirv_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_sdl_spirv_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_sdl_spirv_vs_ff_positiont);
-        out.Shaders[3].Code = s_sdl_spirv_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_sdl_spirv_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_sdl_spirv_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_sdl_spirv_fs_ff_stage);
-        out.Shaders[5].Code = s_sdl_spirv_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_sdl_spirv_vs_postprocess);
-        out.Shaders[6].Code = s_sdl_spirv_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_sdl_spirv_fs_postprocess);
-        break;
-    default: return FALSE;
-    }
+    static const CKSdlShader shaders[CKRST_BUILTIN_SHADER_COUNT] = {
+        CKSDL_SHADER_VS_FF_3D, CKSDL_SHADER_VS_FF_3D_CLIP,
+        CKSDL_SHADER_VS_FF_POSITIONT, CKSDL_SHADER_VS_FF_POSITIONT_CLIP,
+        CKSDL_SHADER_FS_FF_STAGE, CKSDL_SHADER_VS_POSTPROCESS, CKSDL_SHADER_FS_POSTPROCESS,
+    };
+    if (format != SDL_GPU_SHADERFORMAT_DXIL && format != SDL_GPU_SHADERFORMAT_SPIRV)
+        return FALSE;
+    for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i)
+        if (!CKSdlGpuShaderCode(format, shaders[i], out.Shaders[i].Code, out.Shaders[i].CodeSize))
+            return FALSE;
     const CK_SHADER_FORMAT payload = format == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_SPIRV;
     const CK_SHADER_PROFILE profile = format == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
     for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i) {

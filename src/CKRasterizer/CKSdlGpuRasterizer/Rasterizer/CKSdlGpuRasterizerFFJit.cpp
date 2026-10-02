@@ -1,6 +1,7 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuShaderJob.h"
 #include "CKSdlGpuShaders.h"
+#include "CKSdlGpuShaderPack.h"
 #include "CKFFNativeFragmentJit.h"
 #include "CKJitDxbc.h"
 #include "CKJitSpirv.h"
@@ -168,6 +169,10 @@ void CKSdlGpuRasterizerContext::InitFFJit()
     else if (NativeShaderFormat(CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX12) ==
              SDL_GPU_SHADERFORMAT_DXBC)
         m_FFJitFormat = SDL_GPU_SHADERFORMAT_DXBC;
+    // Compiled DXBC programs pair with the DXBC vertex shaders; decode them
+    // now rather than when the first program is compiled.
+    if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC && !CKSdlGpuLoadShaders(SDL_GPU_SHADERFORMAT_DXBC))
+        m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_INVALID)
         return;
     const char *device = SDL_GetStringProperty(

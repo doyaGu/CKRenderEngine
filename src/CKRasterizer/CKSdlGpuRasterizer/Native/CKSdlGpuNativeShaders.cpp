@@ -1,12 +1,5 @@
 #include "CKSdlGpuNativeShaders.h"
-#include "shaders/generated/dxil_vs_clear.h"
-#include "shaders/generated/dxil_fs_clear.h"
-#include "shaders/generated/spirv_vs_clear.h"
-#include "shaders/generated/spirv_fs_clear.h"
-#include "shaders/generated/dxil_fs_volume_mip.h"
-#include "shaders/generated/spirv_fs_volume_mip.h"
-#include "shaders/generated/dxil_fs_dither_resolve.h"
-#include "shaders/generated/spirv_fs_dither_resolve.h"
+#include "CKSdlGpuShaderPack.h"
 
 CKBOOL CKSdlGpuNativeClearShaders(SDL_GPUShaderFormat format, CKShaderDesc &vertex, CKShaderDesc &fragment)
 {
@@ -16,41 +9,26 @@ CKBOOL CKSdlGpuNativeClearShaders(SDL_GPUShaderFormat format, CKShaderDesc &vert
     if (format == SDL_GPU_SHADERFORMAT_DXIL) {
         vertex.Format = fragment.Format = CKRST_SHADER_FORMAT_DXIL;
         vertex.Profile = fragment.Profile = CKRST_SHADER_PROFILE_DX12;
-        vertex.Code = s_sdl_dxil_vs_clear; vertex.CodeSize = sizeof(s_sdl_dxil_vs_clear);
-        fragment.Code = s_sdl_dxil_fs_clear; fragment.CodeSize = sizeof(s_sdl_dxil_fs_clear);
     } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
         vertex.Format = fragment.Format = CKRST_SHADER_FORMAT_SPIRV;
         vertex.Profile = fragment.Profile = CKRST_SHADER_PROFILE_SPIRV;
-        vertex.Code = s_sdl_spirv_vs_clear; vertex.CodeSize = sizeof(s_sdl_spirv_vs_clear);
-        fragment.Code = s_sdl_spirv_fs_clear; fragment.CodeSize = sizeof(s_sdl_spirv_fs_clear);
     } else return FALSE;
-    return TRUE;
+    return CKSdlGpuShaderCode(format, CKSDL_SHADER_VS_CLEAR, vertex.Code, vertex.CodeSize) &&
+           CKSdlGpuShaderCode(format, CKSDL_SHADER_FS_CLEAR, fragment.Code, fragment.CodeSize);
 }
 
 CKBOOL CKSdlGpuNativeVolumeShaders(SDL_GPUShaderFormat format, CKShaderDesc &vertex, CKShaderDesc &fragment)
 {
     if (!CKSdlGpuNativeClearShaders(format, vertex, fragment)) return FALSE;
     fragment.SamplerCount = 1;
-    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        fragment.Code = s_sdl_dxil_fs_volume_mip; fragment.CodeSize = sizeof(s_sdl_dxil_fs_volume_mip);
-    } else {
-        fragment.Code = s_sdl_spirv_fs_volume_mip; fragment.CodeSize = sizeof(s_sdl_spirv_fs_volume_mip);
-    }
-    return TRUE;
+    return CKSdlGpuShaderCode(format, CKSDL_SHADER_FS_VOLUME_MIP, fragment.Code, fragment.CodeSize);
 }
 
 CKBOOL CKSdlGpuNativeDitherShaders(SDL_GPUShaderFormat format, CKShaderDesc &vertex, CKShaderDesc &fragment)
 {
     if (!CKSdlGpuNativeClearShaders(format, vertex, fragment)) return FALSE;
     fragment.SamplerCount = 1;
-    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        fragment.Code = s_sdl_dxil_fs_dither_resolve;
-        fragment.CodeSize = sizeof(s_sdl_dxil_fs_dither_resolve);
-    } else {
-        fragment.Code = s_sdl_spirv_fs_dither_resolve;
-        fragment.CodeSize = sizeof(s_sdl_spirv_fs_dither_resolve);
-    }
-    return TRUE;
+    return CKSdlGpuShaderCode(format, CKSDL_SHADER_FS_DITHER_RESOLVE, fragment.Code, fragment.CodeSize);
 }
 
 CKFFProgramDesc CKSdlGpuNativeProgram(CKDWORD vertex, CKDWORD fragment,
