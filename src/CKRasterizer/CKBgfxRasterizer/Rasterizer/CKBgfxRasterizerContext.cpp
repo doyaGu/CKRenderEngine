@@ -1,6 +1,7 @@
 #include "CKBgfxRasterizerContext.h"
 #include "CKFFContextState.h"
 #include "CKBgfxRasterizer.h"
+#include "CKBgfxResources.h"
 
 // Concrete bgfx context lifecycle, fixed-function state access and statistics.
 
