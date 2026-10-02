@@ -1,6 +1,15 @@
 #include "CKBgfxRasterizer.h"
 #include "CKRasterizerContextData.h"
 #include "shaders/generated/CKFFShaderABI.generated.h"
+
+// The profiles of the build's bgfx renderers. CMake defines CKBGFX_SHADER_<X>
+// for each compile_shaders.py backend.
+#if !CKBGFX_SHADER_DX11 && !CKBGFX_SHADER_DX12 && !CKBGFX_SHADER_SPIRV && \
+    !CKBGFX_SHADER_GLSL && !CKBGFX_SHADER_ESSL && !CKBGFX_SHADER_METAL
+#error "The build embeds the shaders of no bgfx renderer"
+#endif
+
+#if CKBGFX_SHADER_DX11
 #include "shaders/generated/dx11/vs_ff_3d.bin.h"
 #include "shaders/generated/dx11/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/dx11/vs_ff_positiont.bin.h"
@@ -14,6 +23,9 @@
 #include "shaders/generated/dx11/vs_postprocess.bin.h"
 #include "shaders/generated/dx11/fs_postprocess.bin.h"
 #include "shaders/generated/dx11/fs_dither_resolve.bin.h"
+#endif
+
+#if CKBGFX_SHADER_DX12
 #include "shaders/generated/dx12/vs_ff_3d.bin.h"
 #include "shaders/generated/dx12/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/dx12/vs_ff_positiont.bin.h"
@@ -27,6 +39,9 @@
 #include "shaders/generated/dx12/vs_postprocess.bin.h"
 #include "shaders/generated/dx12/fs_postprocess.bin.h"
 #include "shaders/generated/dx12/fs_dither_resolve.bin.h"
+#endif
+
+#if CKBGFX_SHADER_SPIRV
 #include "shaders/generated/spirv/vs_ff_3d.bin.h"
 #include "shaders/generated/spirv/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/spirv/vs_ff_positiont.bin.h"
@@ -40,6 +55,9 @@
 #include "shaders/generated/spirv/vs_postprocess.bin.h"
 #include "shaders/generated/spirv/fs_postprocess.bin.h"
 #include "shaders/generated/spirv/fs_dither_resolve.bin.h"
+#endif
+
+#if CKBGFX_SHADER_GLSL
 #include "shaders/generated/glsl/vs_ff_3d.bin.h"
 #include "shaders/generated/glsl/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/glsl/vs_ff_positiont.bin.h"
@@ -53,6 +71,9 @@
 #include "shaders/generated/glsl/vs_postprocess.bin.h"
 #include "shaders/generated/glsl/fs_postprocess.bin.h"
 #include "shaders/generated/glsl/fs_dither_resolve.bin.h"
+#endif
+
+#if CKBGFX_SHADER_ESSL
 #include "shaders/generated/essl/vs_ff_3d.bin.h"
 #include "shaders/generated/essl/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/essl/vs_ff_positiont.bin.h"
@@ -66,6 +87,9 @@
 #include "shaders/generated/essl/vs_postprocess.bin.h"
 #include "shaders/generated/essl/fs_postprocess.bin.h"
 #include "shaders/generated/essl/fs_dither_resolve.bin.h"
+#endif
+
+#if CKBGFX_SHADER_METAL
 #include "shaders/generated/metal/vs_ff_3d.bin.h"
 #include "shaders/generated/metal/vs_ff_3d_clip.bin.h"
 #include "shaders/generated/metal/vs_ff_positiont.bin.h"
@@ -79,156 +103,157 @@
 #include "shaders/generated/metal/vs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_postprocess.bin.h"
 #include "shaders/generated/metal/fs_dither_resolve.bin.h"
+#endif
+
+namespace {
+
+// The shaders compile_shaders.py compiles for each profile.
+enum CKBgfxShader {
+    VS_FF_3D,
+    VS_FF_3D_CLIP,
+    VS_FF_POSITIONT,
+    VS_FF_POSITIONT_CLIP,
+    FS_FF_STAGE,
+    FS_FF_STAGE_CUBE,
+    FS_FF_STAGE_VOLUME,
+    FS_FF_STAGE_NATIVE,
+    FS_FF_STAGE_CUBE_NATIVE,
+    FS_FF_STAGE_VOLUME_NATIVE,
+    VS_POSTPROCESS,
+    FS_POSTPROCESS,
+    FS_DITHER_RESOLVE,
+    SHADER_COUNT
+};
+
+struct ProfileShaders {
+    CK_SHADER_PROFILE Profile;
+    struct {
+        const CKBYTE *Code;
+        CKDWORD Size;
+    } Shaders[SHADER_COUNT];
+};
+
+#define CKBGFX_SHADER(_backend, _name) {s_##_backend##_##_name, (CKDWORD)sizeof(s_##_backend##_##_name)}
+#define CKBGFX_PROFILE(_profile, _backend) {_profile, { \
+    CKBGFX_SHADER(_backend, vs_ff_3d), CKBGFX_SHADER(_backend, vs_ff_3d_clip), \
+    CKBGFX_SHADER(_backend, vs_ff_positiont), CKBGFX_SHADER(_backend, vs_ff_positiont_clip), \
+    CKBGFX_SHADER(_backend, fs_ff_stage), CKBGFX_SHADER(_backend, fs_ff_stage_cube), \
+    CKBGFX_SHADER(_backend, fs_ff_stage_volume), CKBGFX_SHADER(_backend, fs_ff_stage_native), \
+    CKBGFX_SHADER(_backend, fs_ff_stage_cube_native), CKBGFX_SHADER(_backend, fs_ff_stage_volume_native), \
+    CKBGFX_SHADER(_backend, vs_postprocess), CKBGFX_SHADER(_backend, fs_postprocess), \
+    CKBGFX_SHADER(_backend, fs_dither_resolve)}}
+
+// In the order the driver advertises them.
+const ProfileShaders s_Profiles[] = {
+#if CKBGFX_SHADER_DX11
+    CKBGFX_PROFILE(CKRST_SHADER_PROFILE_DX11, dx11),
+#endif
+#if CKBGFX_SHADER_DX12
+    CKBGFX_PROFILE(CKRST_SHADER_PROFILE_DX12, dx12),
+#endif
+#if CKBGFX_SHADER_SPIRV
+    CKBGFX_PROFILE(CKRST_SHADER_PROFILE_SPIRV, spirv),
+#endif
+#if CKBGFX_SHADER_GLSL
+    CKBGFX_PROFILE(CKRST_SHADER_PROFILE_GLSL, glsl),
+#endif
+#if CKBGFX_SHADER_ESSL
+    CKBGFX_PROFILE(CKRST_SHADER_PROFILE_ESSL, essl),
+#endif
+#if CKBGFX_SHADER_METAL
+    CKBGFX_PROFILE(CKRST_SHADER_PROFILE_MSL, metal),
+#endif
+};
+
+#undef CKBGFX_PROFILE
+#undef CKBGFX_SHADER
+
+const CKBgfxShader s_BuiltinShaders[CKRST_BUILTIN_SHADER_COUNT] = {
+    VS_FF_3D,             // CKRST_SHADER_FF_3D
+    VS_FF_3D_CLIP,        // CKRST_SHADER_FF_3D_CLIP
+    VS_FF_POSITIONT,      // CKRST_SHADER_FF_POSITIONT
+    VS_FF_POSITIONT_CLIP, // CKRST_SHADER_FF_POSITIONT_CLIP
+    FS_FF_STAGE,          // CKRST_SHADER_FF_FRAGMENT
+    VS_POSTPROCESS,       // CKRST_SHADER_PRESENT_VERTEX
+    FS_POSTPROCESS,       // CKRST_SHADER_PRESENT_FRAGMENT
+};
+
+const ProfileShaders *FindProfile(const CKRasterizerDeviceCaps &caps)
+{
+    if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX)
+        return NULL;
+    for (const ProfileShaders &profile : s_Profiles) {
+        if (profile.Profile == caps.ShaderProfile)
+            return &profile;
+    }
+    return NULL;
+}
+
+void SetShader(const ProfileShaders &profile, CKBgfxShader shader, CK_SHADER_STAGE stage, CKShaderDesc &out)
+{
+    out = CKShaderDesc();
+    out.Stage = stage;
+    out.Format = CKRST_SHADER_FORMAT_BGFX;
+    out.Profile = profile.Profile;
+    out.Code = profile.Shaders[shader].Code;
+    out.CodeSize = profile.Shaders[shader].Size;
+}
+
+} // namespace
+
+CKDWORD CKBgfxRasterizerShaderProfileCount()
+{
+    return (CKDWORD)(sizeof(s_Profiles) / sizeof(s_Profiles[0]));
+}
+
+CK_SHADER_PROFILE CKBgfxRasterizerShaderProfile(CKDWORD index)
+{
+    return index < CKBgfxRasterizerShaderProfileCount() ? s_Profiles[index].Profile : CKRST_SHADER_PROFILE_UNKNOWN;
+}
 
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,
                                         CKBOOL requiresShaderSampling,
                                         CKShaderDesc &out)
 {
-    if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX ||
-        (CKDWORD)layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+    const ProfileShaders *profile = FindProfile(caps);
+    if (!profile || (CKDWORD)layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
         (requiresShaderSampling != FALSE &&
          requiresShaderSampling != TRUE))
         return FALSE;
-    out = CKShaderDesc();
-    out.Stage = CKRST_SHADER_PIXEL;
-    out.Format = caps.ShaderFormat;
-    out.Profile = caps.ShaderProfile;
-#define CKFF_SELECT_SHADER_LAYOUT(_backend) \
-    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
-        out.Code = s_##_backend##_fs_ff_stage; \
-        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage); \
-    } else if (layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) { \
-        out.Code = s_##_backend##_fs_ff_stage_cube; \
-        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_cube); \
-    } else { \
-        out.Code = s_##_backend##_fs_ff_stage_volume; \
-        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_volume); \
-    }
-#define CKFF_SELECT_NATIVE_LAYOUT(_backend) \
-    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) { \
-        out.Code = s_##_backend##_fs_ff_stage_native; \
-        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_native); \
-    } else if (layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE) { \
-        out.Code = s_##_backend##_fs_ff_stage_cube_native; \
-        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_cube_native); \
-    } else { \
-        out.Code = s_##_backend##_fs_ff_stage_volume_native; \
-        out.CodeSize = sizeof(s_##_backend##_fs_ff_stage_volume_native); \
-    }
-#define CKFF_SELECT_LAYOUT(_backend) \
-    if (requiresShaderSampling) { \
-        CKFF_SELECT_SHADER_LAYOUT(_backend) \
-    } else { \
-        CKFF_SELECT_NATIVE_LAYOUT(_backend) \
-    }
-    switch (caps.ShaderProfile) {
-    case CKRST_SHADER_PROFILE_DX11: CKFF_SELECT_LAYOUT(dx11); break;
-    case CKRST_SHADER_PROFILE_DX12: CKFF_SELECT_LAYOUT(dx12); break;
-    case CKRST_SHADER_PROFILE_SPIRV: CKFF_SELECT_LAYOUT(spirv); break;
-    case CKRST_SHADER_PROFILE_GLSL: CKFF_SELECT_LAYOUT(glsl); break;
-    case CKRST_SHADER_PROFILE_ESSL: CKFF_SELECT_LAYOUT(essl); break;
-    case CKRST_SHADER_PROFILE_MSL: CKFF_SELECT_LAYOUT(metal); break;
-    default: return FALSE;
-    }
-#undef CKFF_SELECT_LAYOUT
-#undef CKFF_SELECT_NATIVE_LAYOUT
-#undef CKFF_SELECT_SHADER_LAYOUT
-    return out.Code && out.CodeSize ? TRUE : FALSE;
+    CKBgfxShader shader;
+    if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D)
+        shader = requiresShaderSampling ? FS_FF_STAGE : FS_FF_STAGE_NATIVE;
+    else if (layout == CKFF_SAMPLER_LAYOUT_WIDE_CUBE)
+        shader = requiresShaderSampling ? FS_FF_STAGE_CUBE : FS_FF_STAGE_CUBE_NATIVE;
+    else
+        shader = requiresShaderSampling ? FS_FF_STAGE_VOLUME : FS_FF_STAGE_VOLUME_NATIVE;
+    SetShader(*profile, shader, CKRST_SHADER_PIXEL, out);
+    return TRUE;
 }
 
 CKBOOL CKBgfxRasterizerDitherFragmentShader(
     const CKRasterizerDeviceCaps &caps, CKShaderDesc &out)
 {
-    if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX)
+    const ProfileShaders *profile = FindProfile(caps);
+    if (!profile)
         return FALSE;
-    out = CKShaderDesc();
-    out.Stage = CKRST_SHADER_PIXEL;
-    out.Format = caps.ShaderFormat;
-    out.Profile = caps.ShaderProfile;
-#define CKFF_SELECT_DITHER(_backend) \
-    out.Code = s_##_backend##_fs_dither_resolve; \
-    out.CodeSize = sizeof(s_##_backend##_fs_dither_resolve)
-    switch (caps.ShaderProfile) {
-    case CKRST_SHADER_PROFILE_DX11: CKFF_SELECT_DITHER(dx11); break;
-    case CKRST_SHADER_PROFILE_DX12: CKFF_SELECT_DITHER(dx12); break;
-    case CKRST_SHADER_PROFILE_SPIRV: CKFF_SELECT_DITHER(spirv); break;
-    case CKRST_SHADER_PROFILE_GLSL: CKFF_SELECT_DITHER(glsl); break;
-    case CKRST_SHADER_PROFILE_ESSL: CKFF_SELECT_DITHER(essl); break;
-    case CKRST_SHADER_PROFILE_MSL: CKFF_SELECT_DITHER(metal); break;
-    default: return FALSE;
-    }
-#undef CKFF_SELECT_DITHER
-    return out.Code && out.CodeSize ? TRUE : FALSE;
+    SetShader(*profile, FS_DITHER_RESOLVE, CKRST_SHADER_PIXEL, out);
+    return TRUE;
 }
 
 CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out)
 {
     out = CKFFShaderSet();
-    if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX) return FALSE;
+    const ProfileShaders *profile = FindProfile(caps);
+    if (!profile)
+        return FALSE;
     out.ABIVersion = g_CKFFGeneratedShaderABIVersion;
     out.InterfaceHash = g_CKFFGeneratedShaderInterfaceHash;
-    switch (caps.ShaderProfile) {
-    case CKRST_SHADER_PROFILE_DX11:
-        out.Shaders[0].Code = s_dx11_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_dx11_vs_ff_3d);
-        out.Shaders[1].Code = s_dx11_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_dx11_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_dx11_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_dx11_vs_ff_positiont);
-        out.Shaders[3].Code = s_dx11_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_dx11_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_dx11_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_dx11_fs_ff_stage);
-        out.Shaders[5].Code = s_dx11_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_dx11_vs_postprocess);
-        out.Shaders[6].Code = s_dx11_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_dx11_fs_postprocess);
-        break;
-    case CKRST_SHADER_PROFILE_DX12:
-        out.Shaders[0].Code = s_dx12_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_dx12_vs_ff_3d);
-        out.Shaders[1].Code = s_dx12_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_dx12_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_dx12_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_dx12_vs_ff_positiont);
-        out.Shaders[3].Code = s_dx12_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_dx12_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_dx12_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_dx12_fs_ff_stage);
-        out.Shaders[5].Code = s_dx12_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_dx12_vs_postprocess);
-        out.Shaders[6].Code = s_dx12_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_dx12_fs_postprocess);
-        break;
-    case CKRST_SHADER_PROFILE_SPIRV:
-        out.Shaders[0].Code = s_spirv_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_spirv_vs_ff_3d);
-        out.Shaders[1].Code = s_spirv_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_spirv_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_spirv_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_spirv_vs_ff_positiont);
-        out.Shaders[3].Code = s_spirv_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_spirv_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_spirv_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_spirv_fs_ff_stage);
-        out.Shaders[5].Code = s_spirv_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_spirv_vs_postprocess);
-        out.Shaders[6].Code = s_spirv_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_spirv_fs_postprocess);
-        break;
-    case CKRST_SHADER_PROFILE_GLSL:
-        out.Shaders[0].Code = s_glsl_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_glsl_vs_ff_3d);
-        out.Shaders[1].Code = s_glsl_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_glsl_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_glsl_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_glsl_vs_ff_positiont);
-        out.Shaders[3].Code = s_glsl_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_glsl_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_glsl_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_glsl_fs_ff_stage);
-        out.Shaders[5].Code = s_glsl_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_glsl_vs_postprocess);
-        out.Shaders[6].Code = s_glsl_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_glsl_fs_postprocess);
-        break;
-    case CKRST_SHADER_PROFILE_ESSL:
-        out.Shaders[0].Code = s_essl_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_essl_vs_ff_3d);
-        out.Shaders[1].Code = s_essl_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_essl_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_essl_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_essl_vs_ff_positiont);
-        out.Shaders[3].Code = s_essl_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_essl_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_essl_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_essl_fs_ff_stage);
-        out.Shaders[5].Code = s_essl_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_essl_vs_postprocess);
-        out.Shaders[6].Code = s_essl_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_essl_fs_postprocess);
-        break;
-    case CKRST_SHADER_PROFILE_MSL:
-        out.Shaders[0].Code = s_metal_vs_ff_3d; out.Shaders[0].CodeSize = sizeof(s_metal_vs_ff_3d);
-        out.Shaders[1].Code = s_metal_vs_ff_3d_clip; out.Shaders[1].CodeSize = sizeof(s_metal_vs_ff_3d_clip);
-        out.Shaders[2].Code = s_metal_vs_ff_positiont; out.Shaders[2].CodeSize = sizeof(s_metal_vs_ff_positiont);
-        out.Shaders[3].Code = s_metal_vs_ff_positiont_clip; out.Shaders[3].CodeSize = sizeof(s_metal_vs_ff_positiont_clip);
-        out.Shaders[4].Code = s_metal_fs_ff_stage; out.Shaders[4].CodeSize = sizeof(s_metal_fs_ff_stage);
-        out.Shaders[5].Code = s_metal_vs_postprocess; out.Shaders[5].CodeSize = sizeof(s_metal_vs_postprocess);
-        out.Shaders[6].Code = s_metal_fs_postprocess; out.Shaders[6].CodeSize = sizeof(s_metal_fs_postprocess);
-        break;
-    default: return FALSE;
-    }
     for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i) {
-        out.Shaders[i].Format = caps.ShaderFormat;
-        out.Shaders[i].Profile = caps.ShaderProfile;
-        out.Shaders[i].Stage = i == CKRST_SHADER_FF_FRAGMENT || i == CKRST_SHADER_PRESENT_FRAGMENT ? CKRST_SHADER_PIXEL : CKRST_SHADER_VERTEX;
+        const CK_SHADER_STAGE stage = i == CKRST_SHADER_FF_FRAGMENT || i == CKRST_SHADER_PRESENT_FRAGMENT
+            ? CKRST_SHADER_PIXEL : CKRST_SHADER_VERTEX;
+        SetShader(*profile, s_BuiltinShaders[i], stage, out.Shaders[i]);
     }
     return out.Matches(caps.ShaderFormat, caps.ShaderProfile) ? TRUE : FALSE;
 }

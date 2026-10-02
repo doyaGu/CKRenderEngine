@@ -401,6 +401,15 @@ static void TestSamplerCompareFlags()
                 "trilinear sampler requests mip sampling");
 }
 
+static bool BgfxEmbedsShaderProfile(CK_SHADER_PROFILE profile)
+{
+    for (CKDWORD index = 0; index < CKBgfxRasterizerShaderProfileCount(); ++index) {
+        if (CKBgfxRasterizerShaderProfile(index) == profile)
+            return true;
+    }
+    return false;
+}
+
 static void TestBackendProfileMapping()
 {
     TEST_SECTION("Backend Profile Mapping");
@@ -440,6 +449,23 @@ static void TestBackendProfileMapping()
                 "Shader profile name must be stable for diagnostics");
     TEST_ASSERT(strcmp(CKBgfxShaderProfileName(CKRST_SHADER_PROFILE_ESSL), "essl") == 0,
                 "ESSL shader profile name must be stable for diagnostics");
+
+    bgfx::RendererType::Enum renderers[bgfx::RendererType::Count];
+    const uint8_t rendererCount = bgfx::getSupportedRenderers(bgfx::RendererType::Count, renderers);
+    CKDWORD rendererProfiles = 0;
+    bool embedded = true;
+    for (uint8_t index = 0; index < rendererCount; ++index) {
+        const CK_SHADER_PROFILE profile = CKBgfxShaderProfile(renderers[index]);
+        if (profile == CKRST_SHADER_PROFILE_UNKNOWN)
+            continue;
+        ++rendererProfiles;
+        embedded = embedded && BgfxEmbedsShaderProfile(profile);
+    }
+    TEST_ASSERT(embedded && rendererProfiles == CKBgfxRasterizerShaderProfileCount(),
+                "the rasterizer embeds the shader profiles of exactly the bgfx renderers");
+    TEST_ASSERT(CKBgfxRasterizerShaderProfile(CKBgfxRasterizerShaderProfileCount()) ==
+                    CKRST_SHADER_PROFILE_UNKNOWN,
+                "embedded shader profiles out of range are unknown");
 }
 
 static void TestBgfxStateBackendConventions()
@@ -609,7 +635,8 @@ static void TestBgfxRasterizerLifecycle()
 
     XClassArray<CKFFShaderTarget> shaderTargets;
     driver->GetShaderTargets(shaderTargets);
-    TEST_ASSERT(shaderTargets.Size() == 6, "rasterizer advertises six complete bgfx artifact profiles");
+    TEST_ASSERT(shaderTargets.Size() == (int)CKBgfxRasterizerShaderProfileCount(),
+                "rasterizer advertises each embedded bgfx artifact profile");
     for (int targetIndex = 0; targetIndex < shaderTargets.Size(); ++targetIndex) {
         const CKFFShaderTarget &target = shaderTargets[targetIndex];
         CKRasterizerDeviceCaps caps;
@@ -938,6 +965,12 @@ void TestFixedFunctionFragmentSamplingVariants()
     caps.ShaderFormat = CKRST_SHADER_FORMAT_BGFX;
     for (CK_SHADER_PROFILE profile : profiles) {
         caps.ShaderProfile = profile;
+        if (!BgfxEmbedsShaderProfile(profile)) {
+            CKShaderDesc none;
+            TEST_ASSERT(!CKBgfxRasterizerFFFragmentShader(caps, CKFF_SAMPLER_LAYOUT_WIDE_2D, TRUE, none),
+                        "a profile the build does not embed has no fixed-function shaders");
+            continue;
+        }
         for (CKDWORD layout = 0; layout < CKFF_SAMPLER_LAYOUT_COUNT; ++layout) {
             CKShaderDesc shaderControlled, hardware;
             TEST_ASSERT(CKBgfxRasterizerFFFragmentShader(
@@ -972,6 +1005,7 @@ void TestFixedFunctionFragmentSamplingVariants()
         }
     }
     CKShaderDesc invalid;
+    caps.ShaderProfile = CKBgfxRasterizerShaderProfile(0);
     TEST_ASSERT(!CKBgfxRasterizerFFFragmentShader(
                     caps, CKFF_SAMPLER_LAYOUT_WIDE_2D,
                     (CKBOOL)2, invalid),

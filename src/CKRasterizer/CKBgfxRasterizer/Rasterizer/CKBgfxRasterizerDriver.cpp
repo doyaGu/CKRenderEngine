@@ -36,18 +36,10 @@ CKBgfxRasterizerDriver::~CKBgfxRasterizerDriver()
 
 void CKBgfxRasterizerDriver::BuildShaderLibrary()
 {
-    const CK_SHADER_PROFILE profiles[] = {
-        CKRST_SHADER_PROFILE_DX11,
-        CKRST_SHADER_PROFILE_DX12,
-        CKRST_SHADER_PROFILE_SPIRV,
-        CKRST_SHADER_PROFILE_GLSL,
-        CKRST_SHADER_PROFILE_ESSL,
-        CKRST_SHADER_PROFILE_MSL,
-    };
-    for (size_t index = 0; index < sizeof(profiles) / sizeof(profiles[0]); ++index) {
+    for (CKDWORD index = 0; index < CKBgfxRasterizerShaderProfileCount(); ++index) {
         CKRasterizerDeviceCaps caps;
         caps.ShaderFormat = CKRST_SHADER_FORMAT_BGFX;
-        caps.ShaderProfile = profiles[index];
+        caps.ShaderProfile = CKBgfxRasterizerShaderProfile(index);
         CKFFShaderSet shaderSet;
         if (CKBgfxRasterizerShaderSet(caps, shaderSet))
             m_Shaders.Add(shaderSet);

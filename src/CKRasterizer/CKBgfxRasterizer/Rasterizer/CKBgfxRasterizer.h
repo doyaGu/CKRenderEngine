@@ -10,6 +10,11 @@ class CKBgfxRasterizerDriver;
 class CKBgfxRasterizerContext;
 struct CKRasterizerDeviceCaps;
 
+// The shader profiles the build embeds: those of its bgfx renderers. Indices
+// out of range have CKRST_SHADER_PROFILE_UNKNOWN.
+CKDWORD CKBgfxRasterizerShaderProfileCount();
+CK_SHADER_PROFILE CKBgfxRasterizerShaderProfile(CKDWORD index);
+
 CKBOOL CKBgfxRasterizerShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out);
 CKBOOL CKBgfxRasterizerFFFragmentShader(const CKRasterizerDeviceCaps &caps,
                                         CKFFSamplerLayout layout,

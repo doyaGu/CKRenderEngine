@@ -36,6 +36,21 @@ set(CKBGFX_RASTERIZER_HEADERS
 )
 set(CKBGFX_RASTERIZER_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/CKBgfxRasterizer.ini")
 
+# The rasterizer embeds the shaders of the bgfx renderers of the build, by
+# their compile_shaders.py backends.
+set(_ckbgfx_shader_definitions)
+foreach (_ckbgfx_pair DIRECT3D11:dx11 DIRECT3D12:dx12 VULKAN:spirv OPENGL:glsl OPENGLES:essl METAL:metal)
+    string(REPLACE ":" ";" _ckbgfx_pair "${_ckbgfx_pair}")
+    list(GET _ckbgfx_pair 0 _ckbgfx_renderer)
+    list(GET _ckbgfx_pair 1 _ckbgfx_backend)
+    string(TOUPPER "${_ckbgfx_backend}" _ckbgfx_backend)
+    if (_ckbgfx_renderer IN_LIST CKRE_BGFX_RENDERERS)
+        list(APPEND _ckbgfx_shader_definitions CKBGFX_SHADER_${_ckbgfx_backend}=1)
+    else ()
+        list(APPEND _ckbgfx_shader_definitions CKBGFX_SHADER_${_ckbgfx_backend}=0)
+    endif ()
+endforeach ()
+
 # The bgfx rasterizer owns compilation of its shader containers. The fixed-function
 # source calculations remain canonical input owned by CKFFPLib.
 find_package(Python3 COMPONENTS Interpreter)
@@ -97,6 +112,7 @@ endif ()
 
 function(ckre_configure_bgfx_rasterizer TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
+    target_compile_definitions(${TARGET_NAME} PRIVATE ${_ckbgfx_shader_definitions})
     target_include_directories(${TARGET_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/Native
@@ -190,7 +206,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
             ${CKBGFX_RASTERIZER_SOURCES}
             ${CKBGFX_RASTERIZER_HEADERS}
         )
-        target_compile_definitions(test_bgfx_rasterizer PRIVATE CK_LIB=1)
+        target_compile_definitions(test_bgfx_rasterizer PRIVATE CK_LIB=1 ${_ckbgfx_shader_definitions})
     endif ()
     set_target_properties(test_bgfx_rasterizer PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
