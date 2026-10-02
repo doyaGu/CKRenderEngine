@@ -23,6 +23,8 @@ enum {
         CKFF_SAMPLER_LAYOUT_COUNT * 2 + CKFF_MAX_TEXTURE_STAGES
 };
 
+// The shader targets the plugin has artifacts for, in device preference order.
+void CKSdlGpuShaderTargets(XClassArray<CKFFShaderTarget> &Out);
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat Format, CKFFShaderSet &Out);
 CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
     const CKFFSamplerLayoutPlan &SamplerLayoutPlan,

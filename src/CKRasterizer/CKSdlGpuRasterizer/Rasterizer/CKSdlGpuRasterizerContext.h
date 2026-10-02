@@ -41,7 +41,6 @@ public:
 
     CKSdlGpuRasterizerContext();
     CKSdlGpuRasterizerContext(CKRasterizerDriver *Driver,
-                              const CKFFShaderLibrary *Shaders,
                               CKSdlGpuContextReadyFunction Ready = NULL,
                               void *ReadyUser = NULL);
     ~CKSdlGpuRasterizerContext() override;
@@ -495,7 +494,6 @@ private:
     CKBOOL CompleteReadback(PendingReadback &Readback, CKBOOL Wait);
     CKBOOL ValidateRect(const CKRECT *Rect, CKDWORD Width, CKDWORD Height) const;
 
-    CKFFShaderLibrary m_ShaderLibrary;
     CKSdlGpuContextReadyFunction m_Ready;
     void *m_ReadyUser;
     CKFixedFunctionPipeline m_FFP;

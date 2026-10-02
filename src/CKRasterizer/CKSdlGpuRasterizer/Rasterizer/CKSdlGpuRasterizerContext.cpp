@@ -21,13 +21,10 @@ CKSdlGpuRasterizerContext::CKSdlGpuRasterizerContext()
 }
 
 CKSdlGpuRasterizerContext::CKSdlGpuRasterizerContext(
-    CKRasterizerDriver *Driver, const CKFFShaderLibrary *Shaders,
-    CKSdlGpuContextReadyFunction Ready, void *ReadyUser)
+    CKRasterizerDriver *Driver, CKSdlGpuContextReadyFunction Ready, void *ReadyUser)
     : CKSdlGpuRasterizerContext()
 {
     m_Driver = Driver;
-    if (Shaders)
-        m_ShaderLibrary = *Shaders;
     m_Ready = Ready;
     m_ReadyUser = ReadyUser;
 }
@@ -46,7 +43,7 @@ CKSdlGpuRasterizerContext::~CKSdlGpuRasterizerContext()
 CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp,
                                    CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp)
 {
-    if (m_Created || !m_Driver || m_ShaderLibrary.Empty())
+    if (m_Created || !m_Driver)
         return FALSE;
     CKRasterizerInitParameters init;
     init.Window = Window;
@@ -60,7 +57,7 @@ CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, 
     init.Fullscreen = Fullscreen;
     init.RefreshRate = RefreshRate;
     init.DebugFlags = m_Options.DebugFlags;
-    m_ShaderLibrary.GetTargets(init.ShaderTargets);
+    CKSdlGpuShaderTargets(init.ShaderTargets);
     if (Init(&init) != CK_OK)
         return FALSE;
 
@@ -73,7 +70,8 @@ CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, 
     shaderTarget.ShaderProfile = backendCaps.ShaderProfile;
     shaderTarget.HomogeneousDepth = backendCaps.HomogeneousDepth;
     shaderTarget.OriginBottomLeft = backendCaps.OriginBottomLeft;
-    if (!m_ShaderLibrary.Find(backendCaps.ShaderFormat, backendCaps.ShaderProfile, shaders) ||
+    if (!CKSdlGpuShaderSet(ShaderFormat, shaders) ||
+        !shaders.Matches(backendCaps.ShaderFormat, backendCaps.ShaderProfile) ||
         !m_ShaderCache.Init(shaderTarget, shaders)) {
         Shutdown();
         return FALSE;

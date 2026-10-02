@@ -15,7 +15,6 @@ public:
     {
         CKRSTInitializeDriverCaps(
             m_DisplayModes, m_TextureFormats, m_NativeCaps);
-        BuildShaderLibrary();
     }
 
     ~SdlDriver() override
@@ -25,11 +24,8 @@ public:
 
     CKRasterizerContext *CreateContext() override
     {
-        if (m_Shaders.Empty())
-            return NULL;
-
         CKSdlGpuRasterizerContext *context = new (std::nothrow)
-            CKSdlGpuRasterizerContext(this, &m_Shaders, OnContextReady, this);
+            CKSdlGpuRasterizerContext(this, OnContextReady, this);
         if (!context)
             return NULL;
 
@@ -43,19 +39,6 @@ private:
         SdlDriver *driver = static_cast<SdlDriver *>(user);
         if (driver)
             driver->RefreshCaps(context);
-    }
-
-    void BuildShaderLibrary()
-    {
-        const SDL_GPUShaderFormat formats[] = {
-            SDL_GPU_SHADERFORMAT_DXIL,
-            SDL_GPU_SHADERFORMAT_SPIRV,
-        };
-        for (size_t index = 0; index < sizeof(formats) / sizeof(formats[0]); ++index) {
-            CKFFShaderSet shaderSet;
-            if (CKSdlGpuShaderSet(formats[index], shaderSet))
-                m_Shaders.Add(shaderSet);
-        }
     }
 
     void RefreshCaps(CKSdlGpuRasterizerContext &context)
@@ -83,8 +66,6 @@ private:
         }
         m_CapsFinal = TRUE;
     }
-
-    CKFFShaderLibrary m_Shaders;
 };
 
 class SdlRasterizer final : public CKRasterizer {

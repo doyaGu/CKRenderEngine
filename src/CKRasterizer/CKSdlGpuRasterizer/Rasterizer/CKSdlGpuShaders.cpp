@@ -285,6 +285,18 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
     return out.Code && out.CodeSize;
 }
 
+void CKSdlGpuShaderTargets(XClassArray<CKFFShaderTarget> &out)
+{
+    out.Clear();
+    CKFFShaderTarget target;
+    target.Format = CKRST_SHADER_FORMAT_DXIL;
+    target.Profile = CKRST_SHADER_PROFILE_DX12;
+    out.PushBack(target);
+    target.Format = CKRST_SHADER_FORMAT_SPIRV;
+    target.Profile = CKRST_SHADER_PROFILE_SPIRV;
+    out.PushBack(target);
+}
+
 CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
 {
     out = CKFFShaderSet();
