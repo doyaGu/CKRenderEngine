@@ -182,6 +182,10 @@ public:
     CKERROR FlushPendingCommandsForTests();
     CKERROR AcquireSwapchainForTests();
     void CollectForTests();
+    // Observe a cached texture's lifetime without retaining it past shutdown.
+    std::weak_ptr<CKSdlGpuTexture> GetDepthPadForTests() const {
+        return DepthPads.Size() ? DepthPads.Back().Texture : std::weak_ptr<CKSdlGpuTexture>();
+    }
     CKBOOL CompleteEmptySubmissionsForTests();
     // Runs background jobs and completes them with a spent budget.
     CKBOOL CollectJobsWithinBudgetForTests();

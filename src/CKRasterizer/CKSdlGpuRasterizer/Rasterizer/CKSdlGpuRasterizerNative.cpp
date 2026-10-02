@@ -396,6 +396,9 @@ void CKSdlGpuRasterizerContext::Shutdown()
     DitherScratchWidth = DitherScratchHeight = 0;
     DitherScratchSamples = 1;
     DefaultVertexBuffers.Clear(); DefaultTextures.Clear();
+    // Cached depth copies own GPU textures even after their source expires.
+    // Their deleters must run before SDL_DestroyGPUDevice, not in our dtor.
+    DepthPads.Clear();
     Uniforms.Clear();
     Target.reset(); Targets.Clear(); Programs.Clear(); ShaderObjects.Clear();
     VertexBuffers.Clear(); IndexBuffers.Clear(); Layouts.Clear(); Textures.Clear();

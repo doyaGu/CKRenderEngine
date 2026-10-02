@@ -3919,12 +3919,21 @@ void CheckOrderedReadbacks(Backend &b)
 
 void CheckReadbackShutdown(Backend &b)
 {
+#ifdef CKRE_PIXEL_SDL_GPU
+    const auto depthPad = static_cast<CKSdlGpuRasterizerContext *>(b.Context)->GetDepthPadForTests();
+    const bool hadDepthPad = !depthPad.expired();
+#endif
     ReadbackCapture capture;
     BeginFrame(b.Context, CKRST_CTXCLEAR_COLOR);
     TestCheck(DrawColorTriangle(b.Context, kCenterTriangle, kGreen), "draw before shutdown snapshot");
     TestCheck(b.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &capture),
               "readback before shutdown");
     TestCheck(b.Context->BeginShutdown(), "shutdown with an unsubmitted readback");
+#ifdef CKRE_PIXEL_SDL_GPU
+    TestCheck(depthPad.expired(), "shutdown releases cached depth textures before destroying their GPU device");
+    if (hadDepthPad)
+        printf("  cached depth texture released during shutdown: passed\n");
+#endif
     TestCheck(capture.Calls == 1 && !capture.Success, "shutdown cancels the consumer exactly once");
     TestCheck(b.Context->BeginShutdown() && capture.Calls == 1, "repeated shutdown does not repeat the callback");
 }
