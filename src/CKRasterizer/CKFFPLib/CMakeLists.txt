@@ -1,7 +1,7 @@
 # Reusable CPU fixed-function implementation shared by the concrete
 # SDL_gpu and bgfx rasterizer contexts.
 set(CKFFP_LIB_SOURCES
-    Core/CKFFProgram.cpp
+    Core/CKFFProgramDesc.cpp
     Core/CKFFProgramLayout.cpp
     FixedFunction/CKDrawStateCache.cpp
     FixedFunction/CKFFBufferUseTracker.cpp
