@@ -1,5 +1,6 @@
 #include "CKBgfxConfig.h"
 #include "CKBgfxInternal.h"
+#include "CKRenderSettings.h"
 #include "VxConfiguration.h"
 
 #ifndef _WIN32
@@ -54,7 +55,7 @@ static bool CKBgfxLoadConfigFile(VxConfiguration &config, const char *path)
 
 static void CKBgfxLoadConfig(VxConfiguration &config)
 {
-    XString path = CKBgfxModuleSiblingFile((const void *)&CKBgfxLoadConfig, kCKBgfxConfigFile);
+    XString path = CKRenderModuleSiblingFile((const void *)&CKBgfxLoadConfig, kCKBgfxConfigFile);
     if (path.Length() > 0 && CKBgfxLoadConfigFile(config, path.CStr()))
         return;
 

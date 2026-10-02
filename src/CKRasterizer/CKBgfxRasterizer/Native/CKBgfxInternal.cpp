@@ -1,7 +1,7 @@
 #include "CKBgfxInternal.h"
 #include "CKRasterizerValidation.h"
 #include "CKBgfxConfig.h"
-#include "VxWindowFunctions.h"
+#include "CKRenderSettings.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -9,7 +9,6 @@
 #endif
 #include <Windows.h>
 #else
-#include <dlfcn.h>
 #include <strings.h>
 #endif
 
@@ -55,45 +54,6 @@ static int _snprintf_s(char *buffer, size_t size, size_t truncate, const char *f
 #endif
 
 static FILE *g_BgfxLogFile = nullptr;
-
-static XString CKBgfxSiblingFile(const char *path, const char *file)
-{
-    if (!path || !file)
-        return "";
-
-    const char *slash = strrchr(path, '/');
-    const char *backslash = strrchr(path, '\\');
-    const char *last = slash;
-    if (!last || (backslash && backslash > last))
-        last = backslash;
-    if (!last)
-        return file;
-
-    XString sibling(path, (int)(last - path + 1));
-    sibling << file;
-    return sibling;
-}
-
-#ifdef _WIN32
-XString CKBgfxModuleSiblingFile(const void *address, const char *file)
-{
-    HMODULE hMod = NULL;
-    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                            (LPCSTR)address, &hMod))
-        return "";
-
-    XString modulePath = VxGetModuleFileName((INSTANCE_HANDLE)hMod);
-    return CKBgfxSiblingFile(modulePath.CStr(), file);
-}
-#else
-XString CKBgfxModuleSiblingFile(const void *address, const char *file)
-{
-    Dl_info info;
-    if (dladdr(address, &info) && info.dli_fname)
-        return CKBgfxSiblingFile(info.dli_fname, file);
-    return "";
-}
-#endif
 
 static bool CKBgfxLogNameEquals(const char *lhs, const char *rhs)
 {
@@ -252,7 +212,7 @@ static bool CKBgfxFileLogEnabled()
 static FILE *CKBgfxGetLogFile()
 {
     if (!g_BgfxLogFile) {
-        XString path = CKBgfxModuleSiblingFile((const void *)&CKBgfxGetLogFile, "CKBgfx_Trace.log");
+        XString path = CKRenderModuleSiblingFile((const void *)&CKBgfxGetLogFile, "CKBgfx_Trace.log");
         if (path.Length() == 0)
             path = "CKBgfx_Trace.log";
         fopen_s(&g_BgfxLogFile, path.CStr(), "w");

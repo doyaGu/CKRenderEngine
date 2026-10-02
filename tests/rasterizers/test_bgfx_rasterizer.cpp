@@ -8,6 +8,7 @@
 #include "CKBgfxInternal.h"
 #include "CKBgfxDrawMapTrace.h"
 #include "CKRasterizerValidation.h"
+#include "CKRenderSettings.h"
 #include "VxWindowFunctions.h"
 
 // Pull in bgfx defines for PT mask constants
@@ -720,7 +721,7 @@ static void TestPersistentCacheCallback()
     TEST_ASSERT(memcmp(source, destination, sizeof(source)) == 0,
                 "Cache callback preserves entry contents");
 
-    XString cacheFile = CKBgfxModuleSiblingFile(
+    XString cacheFile = CKRenderModuleSiblingFile(
         (const void *)&TestPersistentCacheCallback,
         "CKBgfxCache/434B525354544553.bin");
     if (cacheFile.Length() > 0)

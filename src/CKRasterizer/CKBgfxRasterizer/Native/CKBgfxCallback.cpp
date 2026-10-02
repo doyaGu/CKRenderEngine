@@ -1,6 +1,7 @@
 #include "CKBgfxRasterizerContext.h"
 #include "CKBgfxInternal.h"
 #include "CKBgfxConfig.h"
+#include "CKRenderSettings.h"
 #include "VxWindowFunctions.h"
 
 #include <stdarg.h>
@@ -120,7 +121,7 @@ static uint32_t CKBgfxCacheMaxFileSize()
 
 static bool CKBgfxCachePath(uint64_t id, bool temporary, XString &path)
 {
-    XString directory = CKBgfxModuleSiblingFile(
+    XString directory = CKRenderModuleSiblingFile(
         (const void *)&CKBgfxCachePath, "CKBgfxCache");
     if (directory.Length() == 0)
         directory = "CKBgfxCache";
