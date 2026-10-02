@@ -3,7 +3,9 @@
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuShaderPack.h"
 #include "CKFFNativeFragmentJit.h"
+#if CKRE_ENABLE_DIRECTX
 #include "CKJitDxbc.h"
+#endif
 #include "CKJitSpirv.h"
 #include "CKRenderProfile.h"
 
@@ -30,6 +32,16 @@ const CKDWORD kFFJitLoadedRank = 0x80000000u;
 const int kFFJitDrawKeyLimit = 4 * kFFJitProgramLimit;
 // SDL_gpu places fragment samplers in space (set) 2, uniform buffers in 3.
 const CKJitResourceLayout kFFJitResources = {3, 0, 2};
+
+// The program in the device's shader format.
+bool FFJitEmit(const CKJitFragmentShader &program, SDL_GPUShaderFormat format, XArray<uint32_t> &code)
+{
+#if CKRE_ENABLE_DIRECTX
+    if (format == SDL_GPU_SHADERFORMAT_DXBC)
+        return CKJitEmitDxbc(program, kFFJitResources, code);
+#endif
+    return format == SDL_GPU_SHADERFORMAT_SPIRV && CKJitEmitSpirv(program, kFFJitResources, code);
+}
 
 bool ValidStencilOps(CKDWORD ops)
 {
@@ -117,10 +129,7 @@ public:
             return;
         CKJitFragmentShader program;
         XArray<uint32_t> code;
-        if (!CKFFCompileNativeFragmentProgram(Fragment, Layout, program) ||
-            !(Format == SDL_GPU_SHADERFORMAT_DXBC
-                  ? CKJitEmitDxbc(program, kFFJitResources, code)
-                  : CKJitEmitSpirv(program, kFFJitResources, code))) {
+        if (!CKFFCompileNativeFragmentProgram(Fragment, Layout, program) || !FFJitEmit(program, Format, code)) {
             SDL_LogError(SDL_LOG_CATEGORY_RENDER,
                          "FF fragment program compilation failed; drawing it precompiled");
             return;
@@ -166,9 +175,11 @@ void CKSdlGpuRasterizerContext::InitFFJit()
     // D3D12 runs the DXBC the compiler emits, as DXIL would need DXC.
     if (ShaderFormat == SDL_GPU_SHADERFORMAT_SPIRV)
         m_FFJitFormat = SDL_GPU_SHADERFORMAT_SPIRV;
+#if CKRE_ENABLE_DIRECTX
     else if (NativeShaderFormat(CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX12) ==
              SDL_GPU_SHADERFORMAT_DXBC)
         m_FFJitFormat = SDL_GPU_SHADERFORMAT_DXBC;
+#endif
     // Compiled DXBC programs pair with the DXBC vertex shaders; decode them
     // now rather than when the first program is compiled.
     if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC && !CKSdlGpuLoadShaders(SDL_GPU_SHADERFORMAT_DXBC))

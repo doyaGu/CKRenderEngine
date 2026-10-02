@@ -38,6 +38,11 @@ option(CKRE_BUILD_SHARED "Build shared library" ON)
 option(CKRE_BUILD_STATIC "Build static library" OFF)
 option(CKRE_BUILD_BGFX_RASTERIZER "Fetch and build the optional bgfx rasterizer" OFF)
 option(CKRE_BUILD_SDL_GPU_RASTERIZER "Build SDL_gpu rasterizer plugin targets" ON)
+# Graphics APIs of the platform. Shader formats and identities are portable;
+# their emitters, embedded shaders and API paths are built for these only.
+include(CMakeDependentOption)
+cmake_dependent_option(CKRE_ENABLE_DIRECTX "Build the Direct3D shaders and backend paths" ON "WIN32" OFF)
+cmake_dependent_option(CKRE_ENABLE_METAL "Build the Metal shaders and backend paths" ON "APPLE" OFF)
 set(CKRE_BGFX_OPENGLES_VERSION "" CACHE STRING
     "Build bgfx with the requested OpenGL ES renderer version instead of its platform defaults")
 set_property(CACHE CKRE_BGFX_OPENGLES_VERSION PROPERTY STRINGS "" 20 30 31 32)
@@ -64,6 +69,13 @@ function(ckre_apply_diagnostic_definitions TARGET_NAME SCOPE)
             CKRE_ENABLE_FRAME_COST_STATS=$<IF:$<BOOL:${CKRE_ENABLE_FRAME_COST_STATS}>,1,0>
             CKRE_ENABLE_FRAME_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_FRAME_DIAGNOSTICS}>,1,0>
             CKRE_ENABLE_MESH_DIAGNOSTICS=$<IF:$<BOOL:${CKRE_ENABLE_MESH_DIAGNOSTICS}>,1,0>
+    )
+endfunction()
+
+function(ckre_apply_platform_definitions TARGET_NAME SCOPE)
+    target_compile_definitions(${TARGET_NAME} ${SCOPE}
+            CKRE_ENABLE_DIRECTX=$<IF:$<BOOL:${CKRE_ENABLE_DIRECTX}>,1,0>
+            CKRE_ENABLE_METAL=$<IF:$<BOOL:${CKRE_ENABLE_METAL}>,1,0>
     )
 endfunction()
 
@@ -349,6 +361,8 @@ if (CKRE_IS_TOP_LEVEL)
     message(STATUS "  Build Static:         ${CKRE_BUILD_STATIC}")
     message(STATUS "  Build bgfx Rasterizer:${CKRE_BUILD_BGFX_RASTERIZER}")
     message(STATUS "  Build SDL_gpu Rasterizer:${CKRE_BUILD_SDL_GPU_RASTERIZER}")
+    message(STATUS "  DirectX:              ${CKRE_ENABLE_DIRECTX}")
+    message(STATUS "  Metal:                ${CKRE_ENABLE_METAL}")
     message(STATUS "  Build Tests:          ${CKRE_BUILD_TESTS}")
     if (VIRTOOLS_SDK_PATH)
         message(STATUS "  Virtools SDK:         ${VIRTOOLS_SDK_PATH}")

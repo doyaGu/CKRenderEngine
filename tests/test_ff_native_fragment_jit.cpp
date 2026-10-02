@@ -2,7 +2,9 @@
 #include "CKFFShaderInterface.h"
 #include "CKFFStageState.h"
 #include "CKFFStateDesc.h"
+#if CKRE_ENABLE_DIRECTX
 #include "CKJitDxbc.h"
+#endif
 #include "CKJitSpirv.h"
 #include "TestTriangleMultiset.h"
 
@@ -2522,13 +2524,15 @@ void TestEmission() {
                 CKJitFragmentShader shader;
                 TestCheck(Compile(key, layout, shader), "every key compiles");
                 XArray<uint32_t> spirv;
-                XArray<uint32_t> dxbc;
                 TestCheck(CKJitEmitSpirv(shader, kLayout, spirv) && spirv.Size() > 0, "every program emits SPIR-V");
-                TestCheck(CKJitEmitDxbc(shader, kLayout, dxbc) && dxbc.Size() > 0, "every program emits DXBC");
-                if (g_ShaderDirectory && p < kSaved) {
+                if (g_ShaderDirectory && p < kSaved)
                     Save(name, p, "spv", spirv);
+#if CKRE_ENABLE_DIRECTX
+                XArray<uint32_t> dxbc;
+                TestCheck(CKJitEmitDxbc(shader, kLayout, dxbc) && dxbc.Size() > 0, "every program emits DXBC");
+                if (g_ShaderDirectory && p < kSaved)
                     Save(name, p, "dxbc", dxbc);
-                }
+#endif
             }
         }
     }

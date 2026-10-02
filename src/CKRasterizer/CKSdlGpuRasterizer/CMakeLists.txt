@@ -45,6 +45,7 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
         ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
     )
     target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib CKShaderJit SDL3::SDL3)
+    ckre_apply_platform_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
         FOLDER "Rasterizer"

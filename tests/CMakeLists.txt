@@ -3,6 +3,7 @@ function(ckre_configure_test_target TARGET_NAME)
         ${CKRE_INCLUDE_DIR}
     )
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
+    ckre_apply_platform_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     )
@@ -120,13 +121,15 @@ endfunction()
 
 ckre_add_shader_jit_test(test_shader_jit_ir ShaderJitIRTests test_shader_jit_ir.cpp)
 ckre_add_shader_jit_test(test_shader_jit_spirv ShaderJitSpirvTests test_shader_jit_spirv.cpp)
-ckre_add_shader_jit_test(test_shader_jit_dxbc ShaderJitDxbcTests test_shader_jit_dxbc.cpp)
+if (CKRE_ENABLE_DIRECTX)
+    ckre_add_shader_jit_test(test_shader_jit_dxbc ShaderJitDxbcTests test_shader_jit_dxbc.cpp)
+endif ()
 
 # Validation tests run a test target with an output directory, then check
 # every shader it writes there: the Vulkan SDK validator the SPIR-V modules,
 # D3D12 on WARP the DXBC containers.
 find_program(CKRE_SPIRV_VAL spirv-val HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin")
-if (WIN32)
+if (CKRE_ENABLE_DIRECTX)
     add_executable(shader_jit_dxbc_validator shader_jit_dxbc_validator.cpp)
     target_link_libraries(shader_jit_dxbc_validator PRIVATE CKShaderJit d3d12 dxgi d3dcompiler)
     set_target_properties(shader_jit_dxbc_validator PROPERTIES
