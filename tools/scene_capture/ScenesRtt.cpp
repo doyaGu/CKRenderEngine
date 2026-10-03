@@ -84,13 +84,33 @@ bool BuildRtt2D(SceneContext &sc)
     return sc.MainCamera != NULL && g_Rtt.Target != NULL;
 }
 
-bool BuildRttCube(SceneContext &sc)
+const CKDWORD kCubeFaceColors[6] = {0xFFFF0000, 0xFF00FF00, 0xFF0000FF,
+                                  0xFFFFFF00, 0xFFFF00FF, 0xFF00FFFF};
+
+bool BuildRttCubeImpl(SceneContext &sc, bool solidFaces)
 {
     if (!BuildRttWorld(sc, true))
         return false;
+    if (solidFaces) {
+        for (int face = 0; face < 6; ++face) {
+            CKBYTE *pixels = g_Rtt.Target->LockSurfacePtr(face);
+            if (!pixels)
+                return false;
+            for (int pixel = 0; pixel < 128 * 128; ++pixel)
+                reinterpret_cast<CKDWORD *>(pixels)[pixel] = kCubeFaceColors[face];
+            g_Rtt.Target->ReleaseSurfacePtr(face);
+        }
+    }
     // Main view: a reflective sphere far away sampling the cube map.
     CKMaterial *mirror = SceneCreateMaterial(sc, "cubemirror", VxColor(1.0f, 1.0f, 1.0f, 1.0f), g_Rtt.Target);
     mirror->SetEmissive(VxColor(0.2f, 0.2f, 0.2f, 1.0f));
+    if (solidFaces) {
+        mirror->SetDiffuse(VxColor(0.0f, 0.0f, 0.0f, 1.0f));
+        mirror->SetAmbient(VxColor(0.0f, 0.0f, 0.0f, 1.0f));
+        mirror->SetEmissive(VxColor(1.0f, 1.0f, 1.0f, 1.0f));
+        mirror->SetTextureMinMode(VXTEXTUREFILTER_LINEAR);
+        mirror->SetTextureMagMode(VXTEXTUREFILTER_LINEAR);
+    }
     mirror->SetEffect(VXEFFECT_TEXGEN);
     CKParameter *parameter = mirror->GetEffectParameter();
     if (sc.Verbose) {
@@ -111,6 +131,41 @@ bool BuildRttCube(SceneContext &sc)
     SceneCreateLight(sc, "sun2", VX_LIGHTDIREC, VxColor(1.0f, 1.0f, 1.0f, 1.0f), VxVector(100.0f, 10.0f, -5.0f), VxVector(0.0f, -1.0f, 0.5f), 100.0f);
     sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(100.0f, 2.0f, -10.0f), VxVector(100.0f, 0.0f, 0.0f), 50.0f);
     return sc.MainCamera != NULL && g_Rtt.Target != NULL;
+}
+
+bool BuildRttCube(SceneContext &sc) { return BuildRttCubeImpl(sc, false); }
+bool BuildCubeFaceFilter(SceneContext &sc) { return BuildRttCubeImpl(sc, true); }
+
+bool ValidateCubeFaceFilter(SceneContext &sc, const RgbaImage &image)
+{
+    int faces[6] = {};
+    int mixed = 0;
+    for (size_t pixel = 0; pixel < image.Pixels.size(); pixel += 4) {
+        const CKDWORD rgb = (CKDWORD(image.Pixels[pixel]) << 16) |
+                            (CKDWORD(image.Pixels[pixel + 1]) << 8) |
+                            CKDWORD(image.Pixels[pixel + 2]);
+        if (rgb == 0x203040)
+            continue;
+        int face = 0;
+        for (; face < 6 && rgb != (kCubeFaceColors[face] & 0xFFFFFF); ++face) {}
+        if (face == 6)
+            ++mixed;
+        else
+            ++faces[face];
+    }
+    printf("cube_face_filter: mixed=%d faces=%d,%d,%d,%d,%d,%d\n",
+           mixed, faces[0], faces[1], faces[2], faces[3], faces[4], faces[5]);
+    if (mixed != 0) {
+        sc.Error = "cube face filtering mixed adjacent face colors";
+        return false;
+    }
+    for (int count : faces) {
+        if (count < 100) {
+            sc.Error = "cube face filtering did not display every face";
+            return false;
+        }
+    }
+    return true;
 }
 
 void RttPreFrame(SceneContext &sc)
@@ -292,6 +347,7 @@ bool ValidateDumpCopy(SceneContext &sc, const RgbaImage &image)
 const SceneDef g_ScenesRtt[] = {
     {"rtt_2d", "TextureRender into a 2D texture shown on a quad", BuildRtt2D, RttPreFrame, NULL, true, 6, 0.97f, NULL},
     {"rtt_cube", "TextureRender into six cube faces sampled with reflection texgen", BuildRttCube, RttPreFrame, NULL, true, 8, 0.95f, NULL},
+    {"cube_face_filter", "Six solid cube faces reflected by a 3D sphere with face-local linear filtering", BuildCubeFaceFilter, NULL, NULL, true, 2, 1.0f, NULL, 0, ValidateCubeFaceFilter},
     {"dump_copy", "DumpToMemory of a region, CopyToVideo into another region next frame", BuildDumpCopy, NULL, DumpCopyPostFrame, true, 4, 0.98f, NULL, 2, ValidateDumpCopy},
 };
 const int g_ScenesRttCount = (int)(sizeof(g_ScenesRtt) / sizeof(g_ScenesRtt[0]));
