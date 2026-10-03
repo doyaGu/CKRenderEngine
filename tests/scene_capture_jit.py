@@ -81,7 +81,7 @@ def main():
                 if mode == "on" and scene in ("composite_2d", "composite_3d"):
                     required = "positiont" if scene == "composite_2d" else "unlit"
                     if not stats.get(required, 0): issues.append(f"no generated {required} vertex draw")
-                if mode == "on" and scene in ("composite_3d", "opaque_lit", "lighting_dynamic", "lighting_attenuation", "tween_3d", "skinning_3d") and not stats.get("lit", 0):
+                if mode == "on" and scene in ("composite_3d", "opaque_lit", "lighting_dynamic", "lighting_attenuation", "lighting_spotlight", "tween_3d", "skinning_3d") and not stats.get("lit", 0):
                     issues.append("no generated lit vertex draw")
                 if mode == "on" and scene == "tween_3d":
                     if not stats.get("tween", 0) or not stats.get("unlit", 0):

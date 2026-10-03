@@ -12,7 +12,7 @@ import scene_capture_jit
 
 
 class SceneCaptureReferenceTest(unittest.TestCase):
-    def run_capture(self, external=True, off_exit=0, off_comparisons=5):
+    def run_capture(self, external=True, off_exit=0, off_comparisons=5, scene="test_scene", lit_draws=0):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             reference = root / "reference"
@@ -26,10 +26,12 @@ class SceneCaptureReferenceTest(unittest.TestCase):
 
             def run(command, **kwargs):
                 if "--list-scenes" in command:
-                    return subprocess.CompletedProcess(command, 0, "test_scene oracle=yes\n")
+                    return subprocess.CompletedProcess(command, 0, scene + " oracle=yes\n")
                 captures.append(command)
                 enabled = kwargs["env"]["CKRE_SDL_GPU_FF_JIT"] == "1"
                 stats = "FFJIT_STATS ready=1 selected=1" if enabled else "FFJIT_STATS ready=0 selected=0"
+                if enabled and kwargs["env"]["CKRE_SDL_GPU_FF_VERTEX_JIT"] == "1":
+                    stats += f" lit={lit_draws}"
                 count = 5 if enabled else off_comparisons
                 comparisons = "max diff 1\n" * count if "--compare" in command else ""
                 return subprocess.CompletedProcess(command, 0 if enabled else off_exit, stats + "\n" + comparisons)
@@ -78,6 +80,15 @@ class SceneCaptureReferenceTest(unittest.TestCase):
                     scene_capture_jit.main()
                 self.assertEqual(error.exception.code, 2)
                 run.assert_not_called()
+
+    def test_spotlight_parity_requires_generated_lighting(self):
+        for draws in (0, 1):
+            with self.subTest(lit_draws=draws):
+                code, _, rows, _, _ = self.run_capture(scene="lighting_spotlight", lit_draws=draws)
+                self.assertEqual(code, int(draws == 0))
+                self.assertEqual(rows[0]["issues"], [])
+                self.assertEqual(rows[1]["issues"], [])
+                self.assertEqual(rows[2]["issues"], [] if draws else ["no generated lit vertex draw"])
 
 
 if __name__ == "__main__":
