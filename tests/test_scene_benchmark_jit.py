@@ -2,10 +2,23 @@
 import copy
 import unittest
 
-from scene_benchmark_jit import aggregate, distribution, paired_foreground, summarize_profile
+from scene_benchmark_jit import aggregate, distribution, mode_order, paired_foreground, summarize_profile
 
 
 class SceneBenchmarkTest(unittest.TestCase):
+    def test_mode_order_balances_positions_and_predecessors_in_six_runs(self):
+        orders = [mode_order(i) for i in range(6)]
+        self.assertEqual(orders[0][0], "off")  # Establish the image reference first.
+        self.assertEqual(len(set(orders)), 6)
+        for mode in ("off", "fragment", "on"):
+            for position in range(3):
+                self.assertEqual(sum(order[position] == mode for order in orders), 2)
+            for other in ("off", "fragment", "on"):
+                if other != mode:
+                    self.assertEqual(sum((mode, other) in tuple(zip(order, order[1:]))
+                                         for order in orders), 2)
+        self.assertEqual(mode_order(6), orders[0])
+
     def setUp(self):
         self.profile = dict(warmupFrames=2, presentEveryFrame=True, waitVBlankRequested=False,
             requestedWidth=640, requestedHeight=480, allMeasuredFramesFocused=True,

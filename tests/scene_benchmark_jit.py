@@ -21,6 +21,14 @@ MODES = ("off", "fragment", "on")
 VERTEX_FIELDS = ("positiont", "unlit", "lit", "tween", "blend", "clip", "pad")
 
 
+def mode_order(repeat):
+    # Cover all permutations: rotations alone never reverse adjacent modes.
+    orders = (("off", "fragment", "on"), ("fragment", "on", "off"),
+              ("on", "off", "fragment"), ("off", "on", "fragment"),
+              ("on", "fragment", "off"), ("fragment", "off", "on"))
+    return orders[repeat % len(orders)]
+
+
 def distribution(values):
     if not values or any(not math.isfinite(x) or x < 0 for x in values):
         raise ValueError("expected finite, nonnegative timing samples")
@@ -189,7 +197,7 @@ def main():
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--drivers", default="direct3d12,vulkan")
     parser.add_argument("--scenes", default="composite_2d,composite_3d")
-    parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--repeats", type=int, default=6)
     parser.add_argument("--warmup", type=int, default=6000)
     parser.add_argument("--measured", type=int, default=12000)
     parser.add_argument("--size", default="1280x720")
@@ -219,7 +227,7 @@ def main():
     (out / "binaries.json").write_text(json.dumps(before, indent=2), encoding="utf-8")
     records = []
     for repeat in range(args.repeats):
-        order = MODES[repeat % 3:] + MODES[:repeat % 3]
+        order = mode_order(repeat)
         for driver in args.drivers.split(","):
             for scene in args.scenes.split(","):
                 for mode in order:
@@ -258,6 +266,7 @@ def main():
                             except subprocess.TimeoutExpired:
                                 pass
                     row = dict(driver=driver, scene=scene, mode=mode, repeat=repeat + 1,
+                               modeOrder=list(order), modePosition=order.index(mode),
                                exit=process.returncode, processWallSeconds=time.monotonic() - started,
                                processMemory=memory.report(), command=command, issues=[])
                     try:
