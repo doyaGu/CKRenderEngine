@@ -1910,6 +1910,23 @@ void MorphCountResizePreservesStateOnAllocationFailure() {
     Check(failures > 0 && succeeded, "Morph allocation failure injection did not cover failure and success");
 }
 
+template<int InvalidKind>
+void MorphReadRejectsInvalidHeaderOrTimes() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphInvalidRead");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
+    VxVector *position = first->PosArray;
+    WireWords input = MorphWire<true>();
+    if (InvalidKind == 0) { input[0] = 0xFFFFFFFFu; input[1] = 0; }
+    if (InvalidKind == 1) { input[0] = 0; input[1] = 0xFFFFFFFFu; }
+    if (InvalidKind == 2) input[3] = 0x7FC00000u;
+    Check(controller->ReadKeysFrom(input.data()) == 0, "Morph reader accepted invalid header/key times");
+    Check(controller->GetKey(0) == first && first->PosArray == position, "Rejected Morph read changed old key/payload addresses");
+    CheckResizedMorphKeys(*controller, 3, 3, true);
+}
+
 template<bool Normals, bool ZeroVertices>
 void MorphSelfClonePreservesOwnedState() {
     CKContext context(nullptr, 0, 0);
@@ -1987,6 +2004,19 @@ void MorphReplacementPreservesStateOnAllocationFailure() {
         if (succeeded) break;
     }
     Check(failures == 5 && succeeded, "Replacement did not cover every header/payload allocation failure");
+}
+
+template<int InvalidKind>
+void MorphReadRejectsOverflowAndUnorderedTimes() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphInvalidReadSize");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    WireWords input = MorphWire<true>();
+    if (InvalidKind < 2) { input[0] = INT_MAX; input[1] = InvalidKind == 0 ? INT_MAX : 0; }
+    if (InvalidKind == 2) { const float time = -1.0f; memcpy(input.data() + 12, &time, sizeof(time)); }
+    Check(controller->ReadKeysFrom(input.data()) == 0, "Morph reader accepted overflowing size or descending times");
+    CheckResizedMorphKeys(*controller, 3, 3, true);
 }
 
 template<int Topology>
@@ -3520,6 +3550,13 @@ int main(int argc, char **argv) {
         {"Morph self-Clone retains zero-sized normal presence", MorphSelfClonePreservesOwnedState<true, true>},
         {"Morph self-Clone retains zero-sized absent normals", MorphSelfClonePreservesOwnedState<false, true>},
         {"Morph Clone allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<true>},
+        {"Morph Read allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<false>},
+        {"Morph read rejects huge payload sizes", MorphReadRejectsOverflowAndUnorderedTimes<0>},
+        {"Morph read rejects huge zero-vertex key counts", MorphReadRejectsOverflowAndUnorderedTimes<1>},
+        {"Morph read rejects descending key times", MorphReadRejectsOverflowAndUnorderedTimes<2>},
+        {"Morph read rejects negative key count atomically", MorphReadRejectsInvalidHeaderOrTimes<0>},
+        {"Morph read rejects negative vertex count atomically", MorphReadRejectsInvalidHeaderOrTimes<1>},
+        {"Morph read rejects nonfinite key times atomically", MorphReadRejectsInvalidHeaderOrTimes<2>},
         {"Loaded Morph resize keeps normals and coherent storage", LoadedMorphCountResizesStorage<true>},
         {"Loaded Morph resize keeps absent normals and coherent storage", LoadedMorphCountResizesStorage<false>},
         {"Morph resize rejects negative/unrepresentable counts", MorphCountRejectsInvalidSizes},

@@ -2680,51 +2680,74 @@ int RCKMorphController::DumpKeysTo(void *Buffer) {
 }
 
 int RCKMorphController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    // This legacy API has no capacity argument; callers must supply a complete
+    // buffer. ObjectAnimation uses the bounded internal entry below.
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKMorphController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    if (!Buffer || BufferSize < static_cast<int>(3 * sizeof(int)))
         return 0;
-
-    // Clean up existing data
-    for (int i = 0; i < m_NbKeys; ++i) {
-        delete[] m_Keys[i].PosArray;
-        delete[] m_Keys[i].NormArray;
+    int header[3];
+    memcpy(header, Buffer, sizeof(header));
+    const int size = MorphWireSize(header[0], header[1], header[2] != 0);
+    if (!size || size > BufferSize || static_cast<size_t>(header[0]) >
+        static_cast<size_t>(-1) / sizeof(CKMorphKey))
+        return 0;
+    const size_t positionBytes = static_cast<size_t>(header[1]) * sizeof(VxVector);
+    const size_t normalBytes = header[2] ? static_cast<size_t>(header[1]) * sizeof(VxCompressedVector) : 0;
+    const size_t keyBytes = sizeof(float) + positionBytes + normalBytes;
+    const char *buf = static_cast<const char *>(Buffer) + sizeof(header);
+    float previousTime = 0.0f;
+    for (int i = 0; i < header[0]; ++i) {
+        float time;
+        memcpy(&time, buf + i * keyBytes, sizeof(time));
+        if (!std::isfinite(time) || (i > 0 && time < previousTime))
+            return 0;
+        previousTime = time;
     }
-    delete[] m_Keys;
-    m_Keys = nullptr;
-    m_NbKeys = 0;
 
-    char *buf = static_cast<char *>(Buffer);
-
-    m_NbKeys = *reinterpret_cast<int *>(buf);
-    buf += sizeof(int);
-
-    m_VertexCount = *reinterpret_cast<int *>(buf);
-    buf += sizeof(int);
-
-    const CKBOOL hasNormals = *reinterpret_cast<CKBOOL *>(buf);
-    buf += sizeof(CKBOOL);
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKMorphKey[m_NbKeys];
-
-        for (int i = 0; i < m_NbKeys; ++i) {
-            m_Keys[i].TimeStep = *reinterpret_cast<float *>(buf);
+    RCKMorphController replacement;
+    replacement.m_VertexCount = header[1];
+    if (header[0] > 0) {
+        replacement.m_Keys = new(std::nothrow) CKMorphKey[header[0]];
+        if (!replacement.m_Keys)
+            return 0;
+        for (int i = 0; i < header[0]; ++i) {
+            replacement.m_Keys[i].PosArray = nullptr;
+            replacement.m_Keys[i].NormArray = nullptr;
+        }
+        replacement.m_NbKeys = header[0];
+        for (int i = 0; i < header[0]; ++i) {
+            CKMorphKey &key = replacement.m_Keys[i];
+            memcpy(&key.TimeStep, buf, sizeof(float));
             buf += sizeof(float);
-
-            m_Keys[i].PosArray = new VxVector[m_VertexCount];
-            memcpy(m_Keys[i].PosArray, buf, m_VertexCount * sizeof(VxVector));
-            buf += m_VertexCount * sizeof(VxVector);
-
-            if (hasNormals) {
-                m_Keys[i].NormArray = new VxCompressedVector[m_VertexCount];
-                memcpy(m_Keys[i].NormArray, buf, m_VertexCount * sizeof(VxCompressedVector));
-                buf += m_VertexCount * sizeof(VxCompressedVector);
-            } else {
-                m_Keys[i].NormArray = nullptr;
+            key.PosArray = new(std::nothrow) VxVector[header[1]];
+            if (!key.PosArray)
+                return 0;
+            if (positionBytes)
+                memcpy(key.PosArray, buf, positionBytes);
+            buf += positionBytes;
+            if (header[2]) {
+                key.NormArray = new(std::nothrow) VxCompressedVector[header[1]];
+                if (!key.NormArray)
+                    return 0;
+                if (normalBytes)
+                    memcpy(key.NormArray, buf, normalBytes);
+                buf += normalBytes;
             }
         }
     }
 
-    return static_cast<int>(buf - static_cast<char *>(Buffer));
+    CKMorphKey *oldKeys = m_Keys;
+    const int oldCount = m_NbKeys;
+    m_Keys = replacement.m_Keys;
+    m_NbKeys = replacement.m_NbKeys;
+    m_VertexCount = replacement.m_VertexCount;
+    replacement.m_Keys = oldKeys;
+    replacement.m_NbKeys = oldCount;
+    // Keep this controller's length, as the native raw reader does.
+    return size;
 }
 
 CKBOOL RCKMorphController::Compare(CKAnimController *control, float Threshold) {

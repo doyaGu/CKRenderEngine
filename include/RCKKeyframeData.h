@@ -303,6 +303,10 @@ public:
 protected:
     CKMorphKey *m_Keys;
     int m_VertexCount;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 #endif // RCKKEYFRAMEDATA_H
