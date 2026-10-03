@@ -320,8 +320,6 @@ CKERROR RCKPatchMesh::Load(CKStateChunk *chunk, CKFile *file) {
                 dst.vec[k] = 0;
             for (int k = 0; k < 4; ++k)
                 dst.interior[k] = 0;
-            for (int k = 0; k < 4; ++k)
-                dst.edge[k] = 0;
 
             const CKBYTE *rec = static_cast<const CKBYTE *>(legacyPatches) + 88 * i;
             dst.type = *reinterpret_cast<const CKDWORD *>(rec + 0);
@@ -345,6 +343,10 @@ CKERROR RCKPatchMesh::Load(CKStateChunk *chunk, CKFile *file) {
             dst.interior[1] = *reinterpret_cast<const short *>(rec + 56);
             dst.interior[2] = *reinterpret_cast<const short *>(rec + 60);
             dst.interior[3] = *reinterpret_cast<const short *>(rec + 64);
+
+            // Legacy DWORD edge indices follow the unused field at offset 68.
+            for (int k = 0; k < 4; ++k)
+                dst.edge[k] = *reinterpret_cast<const short *>(rec + 72 + 4 * k);
         }
 
         // Legacy edge records (24 bytes per edge)
@@ -1224,6 +1226,10 @@ void RCKPatchMesh::BuildRenderMesh() {
             ComputePatchInteriors(p);
     }
 
+    // The original resizes vertices before creating channels and restoring flags.
+    // New channels need their own UV storage even when their saved flag is SAMEUV.
+    SetVertexCount(totalVertices);
+
     // Ensure mesh has the correct number of extra material channels: (textureChannels - 1).
     int desiredExtraChannels = m_TexturePatches.Size() - 1;
     if (desiredExtraChannels < 0)
@@ -1240,11 +1246,23 @@ void RCKPatchMesh::BuildRenderMesh() {
         }
         if (!mat)
             break;
-        AddChannel(mat, FALSE);
+        const int nextChannel = GetChannelCount();
+        if (AddChannel(mat, TRUE) != nextChannel)
+            break;
     }
 
-    // Allocate vertex + face data.
-    SetVertexCount(totalVertices);
+    // 0x1003424F restores this state on every rebuild, including retained
+    // channels. Patch channel offsets 28/32/36 are source/dest blend and flags.
+    for (int i = 0; i < GetChannelCount(); ++i) {
+        const CKPatchChannel &patchChannel = m_TexturePatches[i + 1];
+        VxMaterialChannel &channel = m_MaterialChannels[i];
+        channel.m_SourceBlend = static_cast<VXBLEND_MODE>(patchChannel.Flags);
+        channel.m_DestBlend = static_cast<VXBLEND_MODE>(patchChannel.Type);
+        channel.m_Flags = patchChannel.SubType;
+        channel.m_Material = static_cast<CKMaterial *>(m_Context->GetObject(patchChannel.Material));
+    }
+
+    // Allocate face data.
     SetFaceCount(totalFaces);
 
     CKDWORD posStride = 0;
@@ -1582,8 +1600,14 @@ void *RCKPatchMesh::GetTextureChannelPtr(int textureChannel, CKDWORD *strideOut)
         return nullptr;
     if (textureChannel < 0 || textureChannel >= m_TexturePatches.Size())
         return nullptr;
-    int meshChannel = (textureChannel == 0) ? -1 : (textureChannel - 1);
-    return const_cast<RCKPatchMesh *>(this)->GetTextureCoordinatesPtr(strideOut, meshChannel);
+    if (textureChannel == 0)
+        return const_cast<RCKPatchMesh *>(this)->GetTextureCoordinatesPtr(strideOut, -1);
+    if (textureChannel > m_MaterialChannels.Size())
+        return nullptr;
+    // Tessellation writes the channel's own buffer. The public render accessor
+    // redirects SAMEUV channels to base UVs, which must not be overwritten here.
+    *strideOut = sizeof(Vx2DVector);
+    return m_MaterialChannels[textureChannel - 1].m_UVs;
 }
 
 void RCKPatchMesh::WriteTextureCoordinate(void *base, CKDWORD stride, int vertexIndex, float u, float v) const {

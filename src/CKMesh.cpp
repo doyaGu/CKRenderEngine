@@ -26,6 +26,7 @@
 
 #include <limits.h>
 #include <stdio.h>
+#include <math.h>
 
 // External global for transparency update flag
 extern CKBOOL g_UpdateTransparency;
@@ -1723,6 +1724,132 @@ CKStateChunk *RCKMesh::Save(CKFile *file, CKDWORD flags) {
     return chunk;
 }
 
+// CK2_3D.dll 0x1007C340: versions before 9 use different vertex and face layouts.
+static void LoadLegacyMesh(RCKMesh &mesh, CKStateChunk *chunk) {
+    const int version = chunk->GetDataVersion();
+    CKDWORD saveFlags = 0;
+    if (chunk->SeekIdentifier(CK_STATESAVE_MESHVERTICES)) {
+        const int vertexCount = chunk->ReadInt();
+        mesh.SetVertexCount(vertexCount);
+        if (version >= 5 && vertexCount > 0) {
+            saveFlags = chunk->ReadDword();
+            if (!(saveFlags & 0x10)) {
+                for (int i = 0; i < vertexCount; ++i) {
+                    VxVector position;
+                    chunk->ReadVector(&position);
+                    mesh.SetVertexPosition(i, &position);
+                }
+            }
+            if (mesh.GetLitMode() == VX_LITMESH) {
+                if (!(saveFlags & 0x04)) {
+                    for (int i = 0; i < vertexCount; ++i) {
+                        VxVector normal;
+                        chunk->ReadVector(&normal);
+                        mesh.SetVertexNormal(i, &normal);
+                    }
+                }
+            } else {
+                CKDWORD color = 0;
+                for (int i = 0; i < vertexCount; ++i) {
+                    if (i == 0 || !(saveFlags & 0x01))
+                        color = chunk->ReadDword();
+                    mesh.SetVertexColor(i, color);
+                }
+                for (int i = 0; i < vertexCount; ++i) {
+                    if (i == 0 || !(saveFlags & 0x02))
+                        color = chunk->ReadDword();
+                    mesh.SetVertexSpecularColor(i, color);
+                }
+            }
+            float u = 0.0f, v = 0.0f;
+            for (int i = 0; i < vertexCount; ++i) {
+                if (i == 0 || !(saveFlags & 0x08)) {
+                    u = chunk->ReadFloat();
+                    v = chunk->ReadFloat();
+                }
+                mesh.SetVertexTextureCoordinates(i, u, v, -1);
+            }
+        } else {
+            for (int i = 0; i < vertexCount; ++i) {
+                VxVector position, normal;
+                if (version < 1) {
+                    chunk->ReadAndFillBuffer_LEndian(&position);
+                    chunk->ReadAndFillBuffer_LEndian(&normal);
+                    mesh.SetVertexNormal(i, &normal);
+                } else {
+                    chunk->ReadVector(&position);
+                    if (mesh.GetLitMode() == VX_LITMESH) {
+                        chunk->ReadVector(&normal);
+                        mesh.SetVertexNormal(i, &normal);
+                    }
+                }
+                mesh.SetVertexPosition(i, &position);
+                if (version < 1 || mesh.GetLitMode() == VX_PRELITMESH) {
+                    mesh.SetVertexColor(i, chunk->ReadDword());
+                    mesh.SetVertexSpecularColor(i, chunk->ReadDword());
+                }
+                const float u = chunk->ReadFloat();
+                const float v = chunk->ReadFloat();
+                mesh.SetVertexTextureCoordinates(i, u, v, -1);
+            }
+        }
+    }
+
+    if (chunk->SeekIdentifier(CK_STATESAVE_MESHFACES)) {
+        const int faceCount = chunk->ReadInt();
+        if (faceCount > 0) {
+            mesh.SetFaceCount(faceCount);
+            if (version >= 1) {
+                const int groupCount = chunk->ReadInt();
+                int faceIndex = 0;
+                XArray<int> groupFaces;
+                for (int group = 0; group < groupCount; ++group) {
+                    CKMaterial *material = static_cast<CKMaterial *>(chunk->ReadObject(mesh.GetCKContext()));
+                    const int groupFaceCount = chunk->ReadInt();
+                    groupFaces.Resize(groupFaceCount);
+                    for (int i = 0; i < groupFaceCount; ++i) {
+                        const CKDWORD indices01 = chunk->ReadDwordAsWords();
+                        const CKDWORD index2 = chunk->ReadDwordAsWords();
+                        mesh.SetFaceVertexIndex(faceIndex, indices01 & 0xFFFF, indices01 >> 16, index2 & 0xFFFF);
+                        groupFaces[i] = faceIndex++;
+                    }
+                    mesh.SetFaceMaterialEx(groupFaces.Begin(), groupFaceCount, material);
+                }
+            } else {
+                for (int i = 0; i < faceCount; ++i) {
+                    const int a = chunk->ReadInt();
+                    const int b = chunk->ReadInt();
+                    const int c = chunk->ReadInt();
+                    chunk->ReadDword(); // Obsolete face data.
+                    CKMaterial *material = static_cast<CKMaterial *>(chunk->ReadObject(mesh.GetCKContext()));
+                    mesh.SetFaceMaterial(i, material);
+                    mesh.SetFaceVertexIndex(i, a, b, c);
+                }
+            }
+        }
+    }
+
+    mesh.UnOptimize();
+    if (saveFlags & 0x04)
+        mesh.BuildNormals();
+    else
+        mesh.BuildFaceNormals();
+
+    if (chunk->SeekIdentifier(CK_STATESAVE_MESHLINES)) {
+        const int lineCount = chunk->ReadInt();
+        mesh.SetLineCount(lineCount);
+        if (version >= 1) {
+            chunk->ReadAndFillBuffer_LEndian16(mesh.GetLineIndices());
+        } else {
+            for (int i = 0; i < lineCount; ++i) {
+                const int a = chunk->ReadInt();
+                const int b = chunk->ReadInt();
+                mesh.SetLine(i, a, b);
+            }
+        }
+    }
+}
+
 CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
     if (!chunk)
         return CKERR_INVALIDPARAMETER;
@@ -1847,77 +1974,8 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
             else
                 BuildFaceNormals();
         }
-    } else {
-        // Legacy format (version < 9) - use old loader
-        if (GetClassID() != CKCID_PATCHMESH) {
-            // Call legacy load function (sub_1007C340 in IDA)
-            // For now, fall back to simple element-wise reading
-            if (chunk->SeekIdentifier(CK_STATESAVE_MESHVERTICES)) {
-                int vertexCount = chunk->ReadInt();
-                CKDWORD saveFlags = chunk->ReadDword();
-
-                if (vertexCount > 0) {
-                    SetVertexCount(vertexCount);
-
-                    // Read vertex positions
-                    for (int i = 0; i < vertexCount; i++) {
-                        VxVector pos;
-                        pos.x = chunk->ReadFloat();
-                        pos.y = chunk->ReadFloat();
-                        pos.z = chunk->ReadFloat();
-                        SetVertexPosition(i, &pos);
-                    }
-
-                    // Read vertex normals if present
-                    if (saveFlags & 0x02) {
-                        for (int i = 0; i < vertexCount; i++) {
-                            VxVector normal;
-                            normal.x = chunk->ReadFloat();
-                            normal.y = chunk->ReadFloat();
-                            normal.z = chunk->ReadFloat();
-                            SetVertexNormal(i, &normal);
-                        }
-                    }
-
-                    // Read vertex colors if present
-                    if (saveFlags & 0x04) {
-                        for (int i = 0; i < vertexCount; i++) {
-                            CKDWORD color = chunk->ReadDword();
-                            SetVertexColor(i, color);
-                        }
-                    }
-                }
-            }
-
-            // Load face data (old format)
-            if (chunk->SeekIdentifier(CK_STATESAVE_MESHFACES)) {
-                int faceCount = chunk->ReadInt();
-                if (faceCount > 0) {
-                    SetFaceCount(faceCount);
-                    for (int i = 0; i < faceCount; i++) {
-                        int idx0 = chunk->ReadWord();
-                        int idx1 = chunk->ReadWord();
-                        int idx2 = chunk->ReadWord();
-                        int matIdx = (int) chunk->ReadDword();
-                        SetFaceVertexIndex(i, idx0, idx1, idx2);
-                        if (matIdx < 0 || matIdx >= m_MaterialGroups.Size())
-                            matIdx = 0;
-                        m_Faces[i].m_MatIndex = (CKWORD) matIdx;
-                    }
-                }
-            }
-
-            // Load line data (old format)
-            if (chunk->SeekIdentifier(CK_STATESAVE_MESHLINES)) {
-                int lineCount = chunk->ReadInt();
-                SetLineCount(lineCount);
-                for (int i = 0; i < lineCount; i++) {
-                    int idx0 = chunk->ReadWord();
-                    int idx1 = chunk->ReadWord();
-                    SetLine(i, idx0, idx1);
-                }
-            }
-        }
+    } else if (GetClassID() != CKCID_PATCHMESH) {
+        LoadLegacyMesh(*this, chunk);
     }
 
     // Load material channels - applies to all versions
@@ -2531,21 +2589,23 @@ CKDWORD RCKMesh::GetSaveFlags() {
             faceIndices += 3;
         }
 
+        // 0x10026F1F compares the magnitude of the mean absolute error.
+        // Stored normals retain their length; only the reconstructed normals
+        // are normalized. Normalizing both would discard non-unit normals.
+        VxVector averageError(0.0f, 0.0f, 0.0f);
         for (int i = 0; i < vertexCount && canRebuildNormals; ++i) {
             VxVector computed = vertexNormals[i];
             if (computed.SquareMagnitude() > 0.0f) {
                 computed.Normalize();
             }
-            VxVector stored = m_Vertices[i].m_Normal;
-            if (stored.SquareMagnitude() > 0.0f) {
-                stored.Normalize();
-            }
-            if ((computed - stored).SquareMagnitude() >= 0.000001f) {
-                canRebuildNormals = FALSE;
-            }
+            const VxVector &stored = m_Vertices[i].m_Normal;
+            averageError.x += std::fabs(stored.x - computed.x);
+            averageError.y += std::fabs(stored.y - computed.y);
+            averageError.z += std::fabs(stored.z - computed.z);
         }
+        averageError /= static_cast<float>(vertexCount);
 
-        if (!canRebuildNormals) {
+        if (!canRebuildNormals || averageError.Magnitude() > 0.001) {
             flags &= ~0x04;
         }
     }
