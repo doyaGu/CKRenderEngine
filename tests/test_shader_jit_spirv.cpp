@@ -1,6 +1,7 @@
 #include "CKJitBuilder.h"
 #include "CKJitSpirv.h"
 #include "TestTriangleMultiset.h"
+#include "TestShaderJitVertex.h"
 
 #include <cstdio>
 #include <cstring>
@@ -1010,6 +1011,44 @@ void TestRejects() {
     TestCheck(!CKJitEmitSpirv(shader, kLayout, words), "shaders that fail verification are refused");
 }
 
+void TestVertexShaders() {
+    for (unsigned i = 0; i < sizeof(kVertexCases) / sizeof(kVertexCases[0]); ++i) {
+        CKJitVertexShader shader;
+        XArray<uint32_t> words;
+        TestCheck(BuildVertexCase(i, shader) && CKJitEmitSpirv(shader, kVertexLayout, words), kVertexCases[i]);
+        Save(kVertexCases[i], words);
+        const Module module(words);
+        TestCheck(module.WellFormed() && module.Count(kOpEntryPoint, {0}) == 1, "entry point is vertex");
+        TestCheck(module.Count(kOpExecutionMode) == 0 && module.Count(kOpKill) == 0,
+                  "vertex modules have no fragment execution modes or discard");
+        TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBuiltIn, 0}) == 1,
+                  "the position output uses BuiltIn Position");
+        TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBuiltIn, kBuiltInFragCoord}) == 0,
+                  "vertex attributes are not FragCoord");
+        TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageOutput}) == shader.Outputs.Size() + 1 + (shader.ClipDistances.Size() != 0) &&
+                      module.Count(kOpStore) == shader.Outputs.Size() + 1 + (shader.ClipDistances.Size() != 0), "all outputs are declared and stored");
+        TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageInput}) == shader.Inputs.Size(),
+                  "unused attribute declarations remain in the interface");
+        int flat = 0;
+        for (int j = 0; j < shader.Outputs.Size(); ++j)
+            flat += shader.Outputs[j].Kind == CKJIT_INPUT_FLAT ? 1 : 0;
+        TestCheck(module.Count(kOpDecorate, {kAny, kDecorationFlat}) == flat, "flat varyings retain interpolation");
+        XArray<uint32_t> again;
+        TestCheck(CKJitEmitSpirv(shader, kVertexLayout, again) && again.Size() == words.Size() &&
+                      std::memcmp(again.Begin(), words.Begin(), words.Size() * sizeof(uint32_t)) == 0,
+                  "vertex emission is deterministic");
+        const unsigned clipped = shader.ClipDistances.Size() != 0;
+        TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBuiltIn, 3}) == clipped &&
+                  module.Count(kOpCapability, {32}) == clipped, "clip array has BuiltIn and required capability");
+        if (i == 6) {
+            TestCheck(module.Count(21, {kAny, 32, 0}) == 1, "uint attributes declare an unsigned scalar");
+            TestCheck(module.Count(124) == 4, "uint loads bitcast all widths into signed IR");
+        }
+        shader.Position = CKJitValue();
+        TestCheck(!CKJitEmitSpirv(shader, kVertexLayout, again), "invalid vertex programs never reach emission");
+    }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1029,5 +1068,6 @@ int main(int argc, char **argv) {
     framework.Run("declarations are unique", TestDeclarationsAreUnique);
     framework.Run("constant outputs", TestConstantOutputs);
     framework.Run("rejects", TestRejects);
+    framework.Run("vertex shaders", TestVertexShaders);
     return framework.ExitCode();
 }

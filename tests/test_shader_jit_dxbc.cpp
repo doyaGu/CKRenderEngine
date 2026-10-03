@@ -1,6 +1,7 @@
 #include "CKJitBuilder.h"
 #include "CKJitDxbc.h"
 #include "TestTriangleMultiset.h"
+#include "TestShaderJitVertex.h"
 
 #include <cstdio>
 #include <cstring>
@@ -68,9 +69,11 @@ enum {
     kOpDclResource = 88,
     kOpDclConstantBuffer = 89,
     kOpDclSampler = 90,
+    kOpDclInput = 95,
     kOpDclInputPs = 98,
     kOpDclInputPsSiv = 100,
     kOpDclOutput = 101,
+    kOpDclOutputSiv = 103,
     kOpDclTemps = 104,
     kOpDclGlobalFlags = 106,
     kOpLod = 108,
@@ -298,7 +301,8 @@ bool IsDeclaration(uint32_t opcode) { return opcode >= kOpDclResource && opcode 
 class Program {
 public:
     explicit Program(const Chunk *chunk) : m_WellFormed(false), m_FirstCode(-1) {
-        if (!chunk || chunk->Size < 2 || chunk->Body[0] != 0x51 || chunk->Body[1] != chunk->Size)
+        if (!chunk || chunk->Size < 2 || (chunk->Body[0] != 0x51 && chunk->Body[0] != 0x10051) ||
+            chunk->Body[1] != chunk->Size)
             return;
         const uint32_t *end = chunk->Body + chunk->Size;
         for (const uint32_t *at = chunk->Body + 2; at < end;) {
@@ -429,9 +433,11 @@ void CheckProgram(const XArray<uint32_t> &words) {
     XArray<Element> inputs, outputs;
     TestCheck(ReadSignature(container.Find("ISGN"), inputs) && ReadSignature(container.Find("OSGN"), outputs),
               "the signatures are well formed");
-    TestCheck(outputs.Size() == 1 && std::strcmp(outputs[0].Name, "SV_Target") == 0 && outputs[0].Register == 0 &&
+    const bool vertex = container.Find("SHEX")->Body[0] == 0x10051;
+    TestCheck((vertex ? outputs.Size() >= 1 : outputs.Size() == 1) &&
+                  std::strcmp(outputs[0].Name, vertex ? "SV_Position" : "SV_Target") == 0 && outputs[0].Register == 0 &&
                   outputs[0].Mask == 0xf && outputs[0].ReadWriteMask == 0,
-              "the output is SV_Target 0");
+              "the primary output is position or render target 0");
     for (int i = 1; i < inputs.Size(); ++i)
         TestCheck(inputs[i - 1].Register < inputs[i].Register, "inputs are in register order");
 
@@ -440,7 +446,7 @@ void CheckProgram(const XArray<uint32_t> &words) {
     if (!program.WellFormed())
         return;
 
-    uint32_t temps = 0, inputMasks[32] = {}, samplers = 0, resources = 0;
+    uint32_t temps = 0, inputMasks[32] = {}, outputMasks[32] = {}, samplers = 0, resources = 0;
     uint32_t uniforms = 0, uniformRegisters[CKJIT_MAX_UNIFORM_BUFFERS] = {};
     uint32_t uniformRows[CKJIT_MAX_UNIFORM_BUFFERS] = {};
     for (int i = 0; i < program.FirstCode(); ++i) {
@@ -459,6 +465,12 @@ void CheckProgram(const XArray<uint32_t> &words) {
             break;
         case kOpDclSampler: samplers |= 1u << dcl.Tokens[2]; break;
         case kOpDclResource: resources |= 1u << dcl.Tokens[2]; break;
+        case kOpDclOutput:
+        case kOpDclOutputSiv:
+            if (dcl.Tokens[1] < 32)
+                outputMasks[dcl.Tokens[1]] = dcl.Tokens[0] >> 4 & 0xf;
+            break;
+        case kOpDclInput:
         case kOpDclInputPs:
         case kOpDclInputPsSiv:
             if (dcl.Tokens[1] < 32)
@@ -468,7 +480,14 @@ void CheckProgram(const XArray<uint32_t> &words) {
         }
     }
     TestCheck(program.Find(kOpDclGlobalFlags) == 0, "the global flags come first");
-    TestCheck(program.Count(kOpDclOutput) == 1, "the output is declared");
+    TestCheck(program.Count(kOpDclOutput) + program.Count(kOpDclOutputSiv) == outputs.Size(), "outputs are declared");
+    for (int i = 0; i < outputs.Size(); ++i) {
+        TestCheck(outputs[i].Register < 32 && outputs[i].Mask == outputMasks[outputs[i].Register] &&
+                      (outputs[i].Mask & outputs[i].ReadWriteMask) == 0,
+                  "output signature masks match the declared writes");
+        if (i > 0)
+            TestCheck(outputs[i - 1].Register < outputs[i].Register, "outputs are in register order");
+    }
     for (int i = 0; i < inputs.Size(); ++i) {
         TestCheck(inputs[i].Register < 32 && inputs[i].ReadWriteMask == inputMasks[inputs[i].Register],
                   "an input declares the components its signature reads");
@@ -476,7 +495,7 @@ void CheckProgram(const XArray<uint32_t> &words) {
 
     Written written = {};
     XArray<RegionWrites> regions;
-    uint32_t output = 0;
+    uint32_t output[32] = {};
     for (int i = program.FirstCode(); i < program.Size(); ++i) {
         const Instruction &instruction = program[i];
         if (instruction.Opcode == kOpElse || instruction.Opcode == kOpEndIf) {
@@ -564,8 +583,10 @@ void CheckProgram(const XArray<uint32_t> &words) {
                 TestCheck(dest.Indices[0] < temps, "temporaries are declared");
                 written.Lanes[dest.Indices[0] & 63] |= (uint8_t)dest.Selector;
             } else {
-                TestCheck(dest.Is(kOperandOutput, 0), "only temporaries and o0 are written");
-                output |= dest.Selector;
+                TestCheck(dest.Type == kOperandOutput && dest.Indices[0] < 32 &&
+                              (dest.Selector & ~outputMasks[dest.Indices[0] & 31]) == 0,
+                          "only temporaries and declared output components are written");
+                output[dest.Indices[0] & 31] |= dest.Selector;
             }
         }
         if (instruction.Opcode == kOpIf || instruction.Opcode == kOpBreakc) {
@@ -591,7 +612,8 @@ void CheckProgram(const XArray<uint32_t> &words) {
         }
     }
     TestCheck(regions.Size() == 0, "every region and loop ends");
-    TestCheck(output == 0xf, "every colour component is written");
+    for (uint32_t reg = 0; reg < 32; ++reg)
+        TestCheck(output[reg] == outputMasks[reg], "every declared output component is written");
 }
 
 void Save(const char *name, const XArray<uint32_t> &words) {
@@ -1601,6 +1623,70 @@ void TestRejects() {
     TestCheck(!CKJitEmitDxbc(shared, kLayout, words), "varying locations are unique");
 }
 
+void TestVertexShaders() {
+    for (unsigned i = 0; i < sizeof(kVertexCases) / sizeof(kVertexCases[0]); ++i) {
+        CKJitVertexShader shader;
+        XArray<uint32_t> words;
+        TestCheck(BuildVertexCase(i, shader) && CKJitEmitDxbc(shader, kVertexLayout, words), kVertexCases[i]);
+        CheckProgram(words);
+        Save(kVertexCases[i], words);
+        const Container container(words);
+        const Program program(container.Find("SHEX"));
+        TestCheck(container.Find("SHEX")->Body[0] == 0x10051, "the shader is vs_5_1");
+        TestCheck(program.Count(kOpDclInputPs) == 0 && program.Count(kOpDclInputPsSiv) == 0 &&
+                      program.Count(kOpDiscard) == 0, "vertex bytecode contains no fragment declarations or discard");
+        TestCheck(program.Count(kOpDclOutputSiv) == 1 + (shader.ClipDistances.Size() + 3) / 4,
+                  "position and packed clip distances are system outputs");
+        XArray<Element> inputs, outputs;
+        ReadSignature(container.Find("ISGN"), inputs);
+        ReadSignature(container.Find("OSGN"), outputs);
+        TestCheck(inputs.Size() == shader.Inputs.Size(), "unused attributes remain in the signature");
+        for (int j = 0; j < inputs.Size(); ++j) {
+            TestCheck(std::strcmp(inputs[j].Name, "TEXCOORD") == 0 && inputs[j].SystemValue == 0 &&
+                          inputs[j].SemanticIndex == inputs[j].Register, "attributes map directly to registers");
+            for (const auto &decl : shader.Inputs) if (decl.Location == inputs[j].Register)
+                TestCheck(inputs[j].ComponentType == (decl.Scalar == CKJIT_INPUT_UINT ? 1u : 3u),
+                          "signature preserves uint and float attribute types");
+        }
+        for (int j = 1; j < outputs.Size(); ++j) {
+            if (j > shader.Outputs.Size()) {
+                TestCheck(std::strcmp(outputs[j].Name, "SV_ClipDistance") == 0 && outputs[j].SystemValue == 2 &&
+                          outputs[j].SemanticIndex == unsigned(j - shader.Outputs.Size() - 1), "clip distances use system semantics");
+                continue;
+            }
+            TestCheck(std::strcmp(outputs[j].Name, "TEXCOORD") == 0 && outputs[j].SystemValue == 0 &&
+                          outputs[j].SemanticIndex + 1 == outputs[j].Register, "varyings match the fragment ABI");
+        }
+        XArray<uint32_t> again;
+        TestCheck(CKJitEmitDxbc(shader, kVertexLayout, again) && again.Size() == words.Size() &&
+                      std::memcmp(again.Begin(), words.Begin(), words.Size() * sizeof(uint32_t)) == 0,
+                  "vertex emission is deterministic");
+        shader.Position = CKJitValue();
+        TestCheck(!CKJitEmitDxbc(shader, kVertexLayout, again), "invalid vertex programs never reach emission");
+    }
+
+    CKJitVertexShader shader;
+    XArray<uint32_t> words;
+    TestCheck(BuildVertexCase(1, shader), "build register boundary case");
+    shader.Outputs[0].Location = 30;
+    TestCheck(CKJitEmitDxbc(shader, kVertexLayout, words), "last varying register is supported");
+    CheckProgram(words);
+    Save("vertex_last_register", words);
+    shader.Outputs[0].Location = 31;
+    TestCheck(!CKJitEmitDxbc(shader, kVertexLayout, words), "varyings must fit after position");
+    shader.Outputs[0].Location = 30;
+    CKJitVertexShader clipped;
+    TestCheck(BuildVertexCase(11, clipped), "build clip register boundary");
+    clipped.Outputs[0].Location = 28;
+    TestCheck(CKJitEmitDxbc(clipped, kVertexLayout, words), "two clip registers fit at the output boundary");
+    CheckProgram(words);
+    Save("vertex_clip_last_register", words);
+    clipped.Outputs[0].Location = 29;
+    TestCheck(!CKJitEmitDxbc(clipped, kVertexLayout, words), "clip registers cannot overflow output space");
+    shader.Inputs[0].Location = 32;
+    TestCheck(!CKJitEmitDxbc(shader, kVertexLayout, words), "attributes must fit 32 registers");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1624,5 +1710,6 @@ int main(int argc, char **argv) {
     framework.Run("determinism", TestDeterminism);
     framework.Run("constant outputs", TestConstantOutputs);
     framework.Run("rejects", TestRejects);
+    framework.Run("vertex shaders", TestVertexShaders);
     return framework.ExitCode();
 }
