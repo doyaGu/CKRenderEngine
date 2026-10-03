@@ -349,6 +349,13 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
             ShareDataFrom(sharedAnim);
         } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS)) {
             // Full keyframe data format
+            const int blockBytes = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_OBJANIMCONTROLLERS);
+            const int startWord = chunk->GetCurrentPos();
+            const int totalWords = chunk->GetDataSize() / 4;
+            if (blockBytes < 40 || (blockBytes & 3) || startWord < 0 || startWord > totalWords ||
+                blockBytes / 4 > totalWords - startWord)
+                return CKERR_INVALIDFILE;
+            const int endWord = startWord + blockBytes / 4;
             ResetKeyframeData();
             m_KeyframeData->m_ObjectAnimation = this;
 
@@ -367,21 +374,38 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
             SetKeyframeLength(length);
 
             if (m_Flags & 0x80) {
+                if (chunk->GetCurrentPos() > endWord - 3)
+                    return CKERR_INVALIDFILE;
                 m_MergeFactor = chunk->ReadFloat();
                 m_Anim1 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
                 m_Anim2 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
             }
 
             // Read controllers
-            CKANIMATION_CONTROLLER ctrlType;
-            while ((ctrlType = (CKANIMATION_CONTROLLER) chunk->ReadDword()) != 0) {
-                CKAnimController *ctrl = CreateController(ctrlType);
+            for (;;) {
+                if (chunk->GetCurrentPos() >= endWord)
+                    return CKERR_INVALIDFILE;
+                const CKANIMATION_CONTROLLER ctrlType = static_cast<CKANIMATION_CONTROLLER>(chunk->ReadDword());
+                if (ctrlType == 0)
+                    break;
+                if (chunk->GetCurrentPos() >= endWord)
+                    return CKERR_INVALIDFILE;
                 CKDWORD dataSize = chunk->ReadDword();
+                if (dataSize > static_cast<CKDWORD>(endWord - chunk->GetCurrentPos()))
+                    return CKERR_INVALIDFILE;
+                CKAnimController *ctrl = CreateController(ctrlType);
                 if (ctrl) {
                     void *buffer = chunk->LockReadBuffer();
-                    ctrl->ReadKeysFrom(buffer);
+                    if (ctrl->GetType() == CKANIMATION_MORPH_CONTROL) {
+                        if (!static_cast<RCKMorphController *>(ctrl)->ReadKeysFromBuffer(buffer, static_cast<int>(dataSize) * 4)) {
+                            DeleteController(ctrlType);
+                            return CKERR_INVALIDFILE;
+                        }
+                    } else {
+                        ctrl->ReadKeysFrom(buffer);
+                    }
                 }
-                chunk->Skip(dataSize);
+                chunk->Skip(static_cast<int>(dataSize));
             }
         } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMNEWDATA)) {
             // Legacy/new snapshot format (identifier 0x1000) as implemented by CK2_3D.dll

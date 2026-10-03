@@ -1952,6 +1952,30 @@ void MorphDumpRejectsInconsistentState() {
     for (int i = 0; i < 40; ++i) Check(output[i] == 0x12345678u, "Rejected Morph dump changed caller bytes");
 }
 
+template<int InvalidKind>
+void LoadedMorphRespectsControllerRecordBoundaries() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphBadRecord");
+    // The physical backing contains a complete ordinary fixture; only the
+    // declared controller envelope is inconsistent, so pre-fix checks remain
+    // within allocated bytes rather than serving as an out-of-bounds probe.
+    WireWords input(16, 0u);
+    input[0] = 1; input[1] = 3; input[2] = 1;
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
+    for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+    chunk->WriteDword(0); chunk->WriteObject(nullptr); chunk->WriteFloat(20.0f);
+    chunk->WriteDword(CKANIMATION_MORPH_CONTROL);
+    const CKDWORD declared = InvalidKind == 0 ? 2u : (InvalidKind == 1 ? 3u : (InvalidKind == 2 ? 0xFFFFFFFFu : static_cast<CKDWORD>(input.size())));
+    chunk->WriteDword(declared);
+    chunk->WriteBufferNoSize_LEndian(static_cast<int>(input.size() * 4), input.data());
+    if (InvalidKind != 3) chunk->WriteDword(0);
+    chunk->WriteIdentifier(0x7FFFFFFFu);
+    for (int i = 0; i < 64; ++i) chunk->WriteDword(0);
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE, "Animation accepted an invalid controller envelope");
+}
+
 template<bool Normals, bool ZeroVertices>
 void MorphSelfClonePreservesOwnedState() {
     CKContext context(nullptr, 0, 0);
@@ -2040,6 +2064,58 @@ void MorphReadAndDumpAcceptUnalignedBuffers() {
     Check(controller.ReadKeysFrom(input.data() + 1) == static_cast<int>(expected.size() * 4) &&
           controller.DumpKeysTo(output.data() + 1) == static_cast<int>(expected.size() * 4), "Unaligned Morph buffer failed");
     Check(input == output && output.front() == 0xCD && output.back() == 0xCD, "Unaligned Morph bytes/guards changed");
+}
+
+template<int InvalidKind>
+void LoadedMorphRejectsActualTruncation() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphActualTruncation");
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
+    if (InvalidKind == 0) {
+        for (int i = 0; i < 9; ++i) chunk->WriteDword(0);
+    } else {
+        for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+        chunk->WriteDword(InvalidKind == 1 ? CK_OBJECTANIMATION_MERGED : 0);
+        chunk->WriteObject(nullptr); chunk->WriteFloat(20.0f);
+        if (InvalidKind == 1) {
+            chunk->WriteFloat(0.5f); // both merged references are missing
+        } else {
+            chunk->WriteDword(CKANIMATION_MORPH_CONTROL);
+            chunk->WriteDword(3);
+            chunk->WriteDword(1); chunk->WriteDword(2); chunk->WriteDword(1);
+            chunk->WriteDword(0); // declared header is present, payload is absent
+        }
+    }
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE, "Animation accepted a physically truncated controller block");
+    if (InvalidKind == 2) Check(!animation.GetMorphController(), "Rejected Morph retained a partial controller");
+}
+
+void LoadedMorphSkipsRecordPaddingAndUnknownControllers() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphPaddedRecord");
+    WireWords words = MorphWire<true>();
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
+    for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+    chunk->WriteDword(0); chunk->WriteObject(nullptr); chunk->WriteFloat(20.0f);
+    chunk->WriteDword(CKANIMATION_MORPH_CONTROL); chunk->WriteDword(static_cast<CKDWORD>(words.size() + 2));
+    chunk->WriteBufferNoSize_LEndian(static_cast<int>(words.size() * 4), words.data());
+    chunk->WriteDword(0xABCDEF12u); chunk->WriteDword(0x12345678u);
+    chunk->WriteDword(0x7FFF0000u); chunk->WriteDword(2);
+    chunk->WriteDword(0x87654321u); chunk->WriteDword(0x12345678u);
+    chunk->WriteDword(CKANIMATION_LINPOS_CONTROL); chunk->WriteDword(5);
+    chunk->WriteDword(1); chunk->WriteFloat(0.0f);
+    chunk->WriteFloat(9.0f); chunk->WriteFloat(8.0f); chunk->WriteFloat(7.0f);
+    chunk->WriteDword(0);
+    LoadChunk(animation, chunk.get());
+    WireWords output(words.size(), 0u);
+    Check(animation.GetMorphController() && animation.GetMorphController()->DumpKeysTo(output.data()) == static_cast<int>(words.size() * 4) && output == words,
+          "Padded Morph record changed keys");
+    VxVector position;
+    Check(animation.EvaluatePosition(5.0f, position) && Equal(position, VxVector(9.0f, 8.0f, 7.0f)),
+          "Record padding/unknown controller changed the following controller");
 }
 
 void MorphSaveRejectsIncompletePayloads() {
@@ -3607,6 +3683,10 @@ int main(int argc, char **argv) {
         {"Morph Clone allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<true>},
         {"Morph Read allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<false>},
         {"Morph read/dump retain bytes in unaligned buffers", MorphReadAndDumpAcceptUnalignedBuffers},
+        {"Loaded Morph rejects truncated fixed controller header", LoadedMorphRejectsActualTruncation<0>},
+        {"Loaded Morph rejects truncated merged references", LoadedMorphRejectsActualTruncation<1>},
+        {"Loaded Morph rejects absent declared key payload", LoadedMorphRejectsActualTruncation<2>},
+        {"Loaded Morph skips valid padding/unknown records", LoadedMorphSkipsRecordPaddingAndUnknownControllers},
         {"Morph Save reports incomplete payload rejection", MorphSaveRejectsIncompletePayloads},
         {"Morph read rejects huge payload sizes", MorphReadRejectsOverflowAndUnorderedTimes<0>},
         {"Morph read rejects huge zero-vertex key counts", MorphReadRejectsOverflowAndUnorderedTimes<1>},
@@ -3620,6 +3700,10 @@ int main(int argc, char **argv) {
         {"Morph dump rejects later missing normals", MorphDumpRejectsInconsistentState<3>},
         {"Morph dump rejects nonfinite key times", MorphDumpRejectsInconsistentState<4>},
         {"Morph dump rejects descending key times", MorphDumpRejectsInconsistentState<5>},
+        {"Loaded Morph rejects incomplete header envelope", LoadedMorphRespectsControllerRecordBoundaries<0>},
+        {"Loaded Morph rejects payload outside declared envelope", LoadedMorphRespectsControllerRecordBoundaries<1>},
+        {"Loaded Morph rejects oversized record envelope", LoadedMorphRespectsControllerRecordBoundaries<2>},
+        {"Loaded Morph rejects missing terminator at identifier boundary", LoadedMorphRespectsControllerRecordBoundaries<3>},
         {"Loaded Morph resize keeps normals and coherent storage", LoadedMorphCountResizesStorage<true>},
         {"Loaded Morph resize keeps absent normals and coherent storage", LoadedMorphCountResizesStorage<false>},
         {"Morph resize rejects negative/unrepresentable counts", MorphCountRejectsInvalidSizes},
