@@ -248,25 +248,43 @@ bool BuildTweenScene(SceneContext &sc) {
     return sc.MainCamera != NULL;
 }
 
-struct SkinVertex { float PositionWeights[7]; VxVector Normal; Vx2DVector UV; CKDWORD Color; };
+struct SkinVertex { float PositionWeights[7]; VxVector Normal, Target, TargetNormal; Vx2DVector UV; CKDWORD Color; };
 std::vector<SkinVertex> g_SkinVertices[4];
 std::vector<CKWORD> g_SkinIndices;
 CKMaterial *g_SkinMaterial = NULL;
+CKMaterial *g_ClipHudMaterial = NULL;
+bool g_SkinClip = false;
 
 void DrawSkinScene(CKRenderContext *rc, void *argument) {
     SceneContext &sc = *static_cast<SceneContext *>(argument);
     CKRasterizerContext *rasterizer = rc->GetRasterizerContext();
     if (!rasterizer) { sc.Error = "skin scene has no rasterizer"; return; }
+    const CKDWORD clipMask = sc.FrameIndex < 3 ? 0 : sc.FrameIndex < 20 ? 36 : sc.FrameIndex < 60 ? 63 : 25;
+    const auto setPlanes = [&](const float planes[6][4]) {
+        for (unsigned i = 0; i < 6; ++i) {
+            VxPlane plane; plane.m_Normal = VxVector(planes[i][0], planes[i][1], planes[i][2]); plane.m_D = planes[i][3];
+            if (!rasterizer->SetUserClipPlane(i, plane)) sc.Error = "clip plane upload failed";
+        }
+        rc->SetState(VXRENDERSTATE_CLIPPLANEENABLE, clipMask);
+    };
     for (unsigned object = 0; object < 8; ++object) {
         const unsigned count = object % 4;
-        const bool indexed = sc.FrameIndex >= 3 && sc.FrameIndex < 60;
+        const bool indexed = sc.FrameIndex >= 3 && sc.FrameIndex < 60 && (!g_SkinClip || count >= 2);
         // The public packed layout carries indices after a weight field,
         // even when blend state uses only the implicit weight.
         const unsigned storedWeights = indexed && count == 0 ? 1 : count;
         const bool lit = object < 4;
         rc->SetCurrentMaterial(g_SkinMaterial, lit);
         rc->SetState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
-        rc->SetState(VXRENDERSTATE_VERTEXBLEND, (count ? count : VXVBLEND_0WEIGHTS));
+        rc->SetState(VXRENDERSTATE_VERTEXBLEND, g_SkinClip && count < 2 ?
+            (count ? VXVBLEND_TWEENING : VXVBLEND_DISABLE) : (count ? count : VXVBLEND_0WEIGHTS));
+        if (g_SkinClip) {
+            const float center = float(count) * 5 - 7.5f, z = lit ? 3.5f : -4;
+            const float planes[6][4] = {{1,0,0,2.5f-center}, {-1,0,0,center+2.5f},
+                {0,1,0,-1.5f}, {0,-1,0,4.5f + 0.3f*std::sin(float(sc.FrameIndex)*0.03f)},
+                {0,0,1,0.4f-z}, {0,0,-1,z+0.4f}};
+            setPlanes(planes);
+        }
         rc->SetState(VXRENDERSTATE_INDEXVBLENDENABLE, indexed);
         VxMatrix world; Vx3DMatrixIdentity(world);
         rc->SetWorldTransformationMatrix(world);
@@ -287,6 +305,14 @@ void DrawSkinScene(CKRenderContext *rc, void *argument) {
                      (lit ? CKRST_DP_LIGHT : 0) | (indexed ? CKRST_DP_MATRIXPAL : 0);
         data.PositionPtr = v.PositionWeights; data.NormalPtr = &v.Normal; data.TexCoordPtr = &v.UV; data.ColorPtr = &v.Color;
         data.PositionStride = data.NormalStride = data.TexCoordStride = data.ColorStride = sizeof(v);
+        if (g_SkinClip && count == 1) {
+            const float factor = 0.35f + 0.25f*std::sin(float(sc.FrameIndex)*0.03f);
+            CKDWORD bits; std::memcpy(&bits, &factor, sizeof(bits));
+            rc->SetState(VXRENDERSTATE_TWEENFACTOR, bits);
+            data.Flags |= CKRST_DP_TWEEN;
+            data.TweenPositionPtr = &v.Target; data.TweenNormalPtr = &v.TargetNormal;
+            data.TweenPositionStride = data.TweenNormalStride = sizeof(v);
+        }
         if (!rc->DrawPrimitive(VX_TRIANGLELIST, g_SkinIndices.data(), int(g_SkinIndices.size()), &data))
             sc.Error = "skin scene draw failed";
     }
@@ -295,9 +321,28 @@ void DrawSkinScene(CKRenderContext *rc, void *argument) {
     VxMatrix identity; Vx3DMatrixIdentity(identity);
     rc->SetWorldTransformationMatrix(identity);
     for (unsigned slot = 0; slot < 4; ++slot) rasterizer->SetTransformMatrix(VXMATRIX_WORLDMATRIX(slot), identity);
+    if (g_SkinClip) {
+        rc->SetCurrentMaterial(g_ClipHudMaterial, FALSE);
+        rc->SetState(VXRENDERSTATE_ZENABLE, FALSE);
+        const float width = float(sc.Width), height = float(sc.Height);
+        const float planes[6][4] = {{1,0,0,-width*0.35f}, {-1,0,0,width*0.65f},
+            {0,1,0,-height+45}, {0,-1,0,height-25}, {0,0,1,0}, {0,0,-1,1}};
+        setPlanes(planes);
+        float positions[4][4] = {{30,height-48,0.5f,1}, {width-30,height-48,0.5f,1},
+                                 {width-30,height-22,0.5f,1}, {30,height-22,0.5f,1}};
+        CKDWORD colors[4] = {0xffe09048,0xffe09048,0xffe09048,0xffe09048};
+        CKWORD indices[] = {0,1,2,0,2,3};
+        VxDrawPrimitiveData data = {}; data.VertexCount = 4; data.Flags = CKRST_DP_CL_VCT;
+        data.PositionPtr = positions; data.PositionStride = sizeof(positions[0]);
+        data.ColorPtr = colors; data.ColorStride = sizeof(colors[0]);
+        if (!rc->DrawPrimitive(VX_TRIANGLELIST, indices, 6, &data)) sc.Error = "clipped POSITIONT overlay failed";
+        rc->SetState(VXRENDERSTATE_ZENABLE, TRUE);
+        rc->SetState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
+    }
 }
 
 bool BuildSkinScene(SceneContext &sc) {
+    g_SkinClip = false;
     g_SkinIndices.clear();
     for (auto &vertices : g_SkinVertices) vertices.clear();
     SceneSetBackgroundColor(sc, 0xff283848); SceneSetAmbient(sc, 0xff383838);
@@ -322,6 +367,8 @@ bool BuildSkinScene(SceneContext &sc) {
             const CKDWORD indices = 0x00010203u; // reverse the palette to distinguish indexed and sequential draws
             std::memcpy(v.PositionWeights + 3 + (count ? count : 1), &indices, sizeof(indices));
             v.Normal = VxVector(std::cos(a), 0, std::sin(a)); v.UV = Vx2DVector(float(s) / segments, t * 2); v.Color = 0xffffffff;
+            v.Target = VxVector(v.PositionWeights[0] + 0.6f*std::sin(t*3.14159265f), t*5.5f, v.PositionWeights[2]);
+            v.TargetNormal = VxVector(v.Normal.x, -0.3f*std::cos(t*3.14159265f)*v.Normal.x, v.Normal.z);
             g_SkinVertices[count].push_back(v);
         }
         if (r < rings && s < segments) {
@@ -336,6 +383,12 @@ bool BuildSkinScene(SceneContext &sc) {
     sc.RenderContext->AddPostRenderCallBack(DrawSkinScene, &sc, FALSE, TRUE);
     return sc.MainCamera != NULL;
 }
+bool BuildClipScene(SceneContext &sc) {
+    if (!BuildSkinScene(sc)) return false;
+    g_ClipHudMaterial = SceneCreateMaterial(sc, "clip-overlay", VxColor(1,1,1,1));
+    g_SkinClip = true;
+    return g_ClipHudMaterial != NULL;
+}
 #endif
 }
 
@@ -345,6 +398,7 @@ const SceneDef g_ScenesJit[] = {
     {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, false, 2, 1.0f, NULL},
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
     {"tween_3d", "Six textured lit/prelit morphs with position/normal streams, fog and depth occlusion", BuildTweenScene, NULL, NULL, false, 2, 1.0f, NULL},
+    {"clipping_3d", "Six dynamic user planes over lit/prelit ordinary, tweened and skinned meshes plus a clipped 2D overlay", BuildClipScene, NULL, NULL, false, 2, 1.0f, NULL},
     {"skinning_3d", "Eight lit/prelit skinned tubes with 0-3 weights and changing palette/index state", BuildSkinScene, NULL, NULL, false, 2, 1.0f, NULL},
 #endif
 };
