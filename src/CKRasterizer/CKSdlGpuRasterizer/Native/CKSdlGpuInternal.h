@@ -172,6 +172,9 @@ struct CKSdlGpuShader {
     const CKSdlGpuJob *Job = nullptr;
 };
 struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
+    enum VertexJitKind { PRECOMPILED_VERTEX, POSITIONT_VERTEX, UNLIT_VERTEX, LIT_VERTEX };
+    VertexJitKind VertexJit = PRECOMPILED_VERTEX;
+    bool UserClip = false;
     std::shared_ptr<CKSdlGpuShader> Vertex, Fragment;
     CKFFProgramDesc Interface;
     CKFFProgramLayout UniformLayout;
@@ -417,6 +420,7 @@ struct CKSdlGpuDraw {
     unsigned VertexOffset = 0, VertexOffset1 = 0, IndexOffset = 0;
     bool Index32 = false;
     bool DitherEnable = false;
+    bool Tween = false, MatrixBlend = false;
     CKDWORD ColorTargetFormat = 0;
     // Ordinary Release draws keep this empty; diagnostics and profiling copy
     // the caller's label into the queued packet.

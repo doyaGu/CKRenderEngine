@@ -489,6 +489,16 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     const CKFFConstantSet &constantValues =
         desc->Constants ? *desc->Constants : emptyConstants;
     uniforms.Update(constantValues);
+    if (draw.Program->VertexJit == CKSdlGpuProgram::UNLIT_VERTEX ||
+        draw.Program->VertexJit == CKSdlGpuProgram::LIT_VERTEX) {
+        const auto &params = constantValues[CKRST_BLOCK_DRAW_PARAMS].Bytes;
+        if (params.Size() >= CKFF_DRAW_PARAM_VEC4_COUNT * 16) {
+            float mode;
+            std::memcpy(&mode, params.Begin() + CKFF_DRAW_PARAM_TWEEN * 16 + 4, sizeof(mode));
+            draw.Tween = mode == 2.0f;
+            draw.MatrixBlend = mode == 1.0f;
+        }
+    }
     CKSdlGpuBindingBatch::Inputs bindingInputs;
     bindingInputs.Hash = draw.Program->Identity;
     CKSdlGpuOwnerScratch paddedOwners(DepthPadOwners);

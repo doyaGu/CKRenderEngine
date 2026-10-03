@@ -256,6 +256,12 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         if (found) found->LastUse = PipelineClock;
         if (found && found->Pipeline) {
             ++m_FFJitStats.PipelineReady;
+            if (program->VertexJit == CKSdlGpuProgram::POSITIONT_VERTEX) ++m_FFJitStats.PositionTReady;
+            if (program->VertexJit == CKSdlGpuProgram::UNLIT_VERTEX) ++m_FFJitStats.UnlitReady;
+            if (program->VertexJit == CKSdlGpuProgram::LIT_VERTEX) ++m_FFJitStats.LitReady;
+            if (draw.Tween) ++m_FFJitStats.TweenReady;
+            if (draw.MatrixBlend) ++m_FFJitStats.MatrixBlendReady;
+            if (program->UserClip) ++m_FFJitStats.ClipReady;
             if (owner) *owner = program;
             return UsePipeline(*found);
         }

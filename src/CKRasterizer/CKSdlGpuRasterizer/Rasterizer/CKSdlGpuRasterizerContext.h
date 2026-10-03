@@ -209,6 +209,9 @@ public:
         CKDWORD Precompiled = 0;
         // The sampler slots the ready shaders bind.
         CKDWORD Samplers = 0;
+        CKDWORD PositionTPrograms = 0, PositionTPipelines = 0;
+        CKDWORD UnlitPrograms = 0, UnlitPipelines = 0;
+        CKDWORD LitPrograms = 0, LitPipelines = 0;
     };
     FFJitCounts CountFFJitProgramsForTests() const;
     struct PipelineCacheCounts {
@@ -439,12 +442,16 @@ private:
         Status State = QUEUED;
         // Registered when the entry is queued, before the worker creates it.
         CKDWORD PixelShader = 0;
+        CKDWORD PositionTShader[2] = {};
+        CKDWORD UnlitShader[2] = {};
+        CKDWORD LitShader[2] = {};
         // A program of the shader for the draws of each precompiled program
         // they replace, whose interface and pipelines it takes.
         struct Binding {
             CKDWORD Precompiled;
             CKFFProgramVariant Variant;
             CKDWORD Program;
+            CKSdlGpuProgram::VertexJitKind VertexKind;
         };
         XArray<Binding> Programs;
         CKSdlGpuFFJitUsage Usage;
@@ -483,10 +490,11 @@ private:
     // The program of an entry for the draws of a precompiled program,
     // created on first use. When it cannot be, the entry is rejected.
     CKDWORD BindFFJitProgram(FFJitProgram &Entry, CKFFProgramVariant Variant,
-                             CKDWORD Precompiled);
+                             CKDWORD Precompiled, CKSdlGpuProgram::VertexJitKind VertexKind = CKSdlGpuProgram::PRECOMPILED_VERTEX);
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
                                CKFFProgramVariant Variant,
-                               CKDWORD Precompiled);
+                               CKDWORD Precompiled, CKDWORD PositionTShader, CKDWORD Shader3d,
+                               CKSdlGpuProgram::VertexJitKind VertexKind);
     // The DXBC vertex shader of a variant, padding depth if the fallback's
     // shader does. Created on first use, by Job when given.
     CKDWORD FFJitVertexShader(CKFFProgramVariant Variant, CKDWORD FallbackShader,
@@ -530,6 +538,7 @@ private:
         CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
     // INVALID when every program draws with the precompiled shaders.
     SDL_GPUShaderFormat m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    bool m_FFJitVertexEnabled = true;
     CKSdlGpuFFJitStats m_FFJitStats;
     // The job creating the precompiled shaders of the manifest, which
     // compilations run after.

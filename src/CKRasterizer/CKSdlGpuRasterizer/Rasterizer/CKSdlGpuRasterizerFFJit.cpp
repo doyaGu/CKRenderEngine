@@ -3,6 +3,9 @@
 #include "CKSdlGpuShaders.h"
 #include "CKSdlGpuShaderPack.h"
 #include "CKFFNativeFragmentJit.h"
+#include "CKFFNativePositionTJit.h"
+#include "CKFFNative3dJit.h"
+#include "shaders/generated/abi.h"
 #if CKRE_ENABLE_DIRECTX
 #include "CKJitDxbc.h"
 #endif
@@ -10,6 +13,7 @@
 #include "CKRenderProfile.h"
 
 #include <cstring>
+#include <array>
 
 // CKSdlGpuRasterizerContext runtime compilation of fixed-function fragment
 // programs. A precompiled artifact decodes the fragment program and the draw
@@ -44,6 +48,15 @@ bool FFJitEmit(const CKJitFragmentShader &program, SDL_GPUShaderFormat format, X
     return format == SDL_GPU_SHADERFORMAT_SPIRV && CKJitEmitSpirv(program, kFFJitResources, code);
 }
 
+bool FFJitEmit(const CKJitVertexShader &program, SDL_GPUShaderFormat format, XArray<uint32_t> &code)
+{
+    const CKJitResourceLayout resources = {1, 0, 0};
+#if CKRE_ENABLE_DIRECTX
+    if (format == SDL_GPU_SHADERFORMAT_DXBC)
+        return CKJitEmitDxbc(program, resources, code);
+#endif
+    return format == SDL_GPU_SHADERFORMAT_SPIRV && CKJitEmitSpirv(program, resources, code);
+}
 
 bool ValidStencilOps(CKDWORD ops)
 {
@@ -122,16 +135,68 @@ public:
         desc.Profile = dxbc ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
         desc.Code = nullptr;
         desc.CodeSize = 0;
+        if (context.m_FFJitVertexEnabled) {
+            for (unsigned clip = 0; clip < 2; ++clip) {
+                Vertex[clip] = std::make_shared<CKSdlGpuShader>();
+                Vertex[clip]->Job = this;
+                Vertex[clip]->Desc = desc;
+                Vertex[clip]->Desc.Stage = CKRST_SHADER_VERTEX;
+                Vertex[clip]->Desc.SamplerCount = 0;
+                Vertex[clip]->Desc.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
+                Unlit[clip] = std::make_shared<CKSdlGpuShader>();
+                Unlit[clip]->Job = this;
+                Unlit[clip]->Desc = Vertex[clip]->Desc;
+                Unlit[clip]->Desc.UniformBufferCount = CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
+                Lit[clip] = std::make_shared<CKSdlGpuShader>();
+                Lit[clip]->Job = this;
+                Lit[clip]->Desc = Unlit[clip]->Desc;
+            }
+        }
     }
-    ~FFJitJob() override { Shader->Job = nullptr; }
+    ~FFJitJob() override {
+        Shader->Job = nullptr;
+        for (unsigned clip = 0; clip < 2; ++clip) {
+            if (Vertex[clip]) Vertex[clip]->Job = nullptr;
+            if (Unlit[clip]) Unlit[clip]->Job = nullptr;
+            if (Lit[clip]) Lit[clip]->Job = nullptr;
+        }
+    }
 
     void Run() override {
+        CKRE_PROFILE_SCOPE("CKRE.SDL.FFJitCompile");
         const Uint64 start = SDL_GetTicksNS();
         Compile();
+        for (unsigned clip = 0; clip < 2; ++clip) {
+            if (Vertex[clip]) CompileVertex(Vertex[clip], CKSdlGpuProgram::POSITIONT_VERTEX, clip != 0);
+            if (Unlit[clip]) CompileVertex(Unlit[clip], CKSdlGpuProgram::UNLIT_VERTEX, clip != 0);
+            if (Lit[clip]) CompileVertex(Lit[clip], CKSdlGpuProgram::LIT_VERTEX, clip != 0);
+        }
         ElapsedNs = SDL_GetTicksNS() - start;
     }
+    void CompileVertex(const std::shared_ptr<CKSdlGpuShader> &vertex, CKSdlGpuProgram::VertexJitKind kind, bool clipping) {
+        CKJitVertexShader program;
+        XArray<uint32_t> code;
+        const CK_SHADER_FORMAT reference = Format == SDL_GPU_SHADERFORMAT_DXBC
+            ? CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_SPIRV;
+        const char *name = kind == CKSdlGpuProgram::POSITIONT_VERTEX ? "POSITIONT" :
+            kind == CKSdlGpuProgram::LIT_VERTEX ? "lit 3D" : "unlit 3D";
+        const bool compiled = kind == CKSdlGpuProgram::POSITIONT_VERTEX
+            ? CKFFCompileNativePositionTProgram(Fragment, Layout, reference, program, clipping)
+            : kind == CKSdlGpuProgram::LIT_VERTEX
+                ? CKFFCompileNativeLitProgram(Fragment, Layout, reference, program, clipping)
+                : CKFFCompileNativeUnlitProgram(Fragment, Layout, reference, program, clipping);
+        if (!compiled || program.UniformBufferCount != vertex->Desc.UniformBufferCount || !FFJitEmit(program, Format, code)) {
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "FF %s compilation failed (clip=%d); drawing it precompiled", name, clipping);
+            return;
+        }
+        SDL_GPUShaderCreateInfo info = CKSdlGpuShaderInfo(*vertex, Format);
+        info.code = reinterpret_cast<const Uint8 *>(code.Begin());
+        info.code_size = code.Size() * sizeof(uint32_t);
+        vertex->Shader = CKSdlGpuOwn(Device, SDL_CreateGPUShader(Device, &info), SDL_ReleaseGPUShader);
+        if (!vertex->Shader)
+            SDL_LogError(SDL_LOG_CATEGORY_RENDER, "SDL_gpu CreateGPUShader %s failed (clip=%d): %s", name, clipping, SDL_GetError());
+    }
     void Compile() {
-        CKRE_PROFILE_SCOPE("CKRE.SDL.FFJitCompile");
         if (!Described)
             return;
         CKJitFragmentShader program;
@@ -155,6 +220,13 @@ public:
         CKSdlGpuFFJitStats &stats = Context.m_FFJitStats;
         ++stats.CompileCompleted;
         if (!Shader->Shader) ++stats.CompileFailed;
+        for (unsigned clip = 0; clip < 2; ++clip) {
+            for (const auto &vertex : {Vertex[clip], Unlit[clip], Lit[clip]}) {
+                if (!vertex) continue;
+                ++stats.VertexCompileCompleted;
+                if (!vertex->Shader) ++stats.VertexCompileFailed;
+            }
+        }
         stats.CompileNs += ElapsedNs;
         stats.CompileMaxNs = std::max(stats.CompileMaxNs, ElapsedNs);
         Context.CompleteFFJitProgram(Key, Shader);
@@ -162,6 +234,7 @@ public:
 
     // Programs take the shader before it is created.
     std::shared_ptr<CKSdlGpuShader> Shader;
+    std::shared_ptr<CKSdlGpuShader> Vertex[2], Unlit[2], Lit[2];
 
 private:
     CKSdlGpuRasterizerContext &Context;
@@ -178,6 +251,8 @@ void CKSdlGpuRasterizerContext::InitFFJit()
 {
     m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
     m_FFJitStats = {};
+    const char *vertex = SDL_getenv("CKRE_SDL_GPU_FF_VERTEX_JIT");
+    m_FFJitVertexEnabled = !vertex || SDL_strcmp(vertex, "0") != 0;
     m_FFJitManifest = "";
     m_FFJitIdentity = 0;
     m_FFJitUses = 0;
@@ -335,6 +410,11 @@ void CKSdlGpuRasterizerContext::ReleaseFFJitProgram(FFJitProgram &entry)
         DestroyObject(entry.Programs[b].Program, CKRST_OBJ_PROGRAM);
     if (entry.PixelShader)
         DestroyObject(entry.PixelShader, CKRST_OBJ_SHADER);
+    for (unsigned clip = 0; clip < 2; ++clip) {
+        if (entry.PositionTShader[clip]) DestroyObject(entry.PositionTShader[clip], CKRST_OBJ_SHADER);
+        if (entry.UnlitShader[clip]) DestroyObject(entry.UnlitShader[clip], CKRST_OBJ_SHADER);
+        if (entry.LitShader[clip]) DestroyObject(entry.LitShader[clip], CKRST_OBJ_SHADER);
+    }
 }
 
 int CKSdlGpuRasterizerContext::AdmitFFJitProgram(const FFJitKey &key)
@@ -403,6 +483,9 @@ bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
 {
     FFJitJob *job = new FFJitJob(*this, Entry.Key, Fragment, Layout);
     const std::shared_ptr<CKSdlGpuShader> shader = job->Shader;
+    const auto vertex = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->Vertex[0], job->Vertex[1]};
+    const auto unlit = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->Unlit[0], job->Unlit[1]};
+    const auto lit = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->Lit[0], job->Lit[1]};
     // Compilations run after the job creating the precompiled shaders of the
     // manifest, so that the pipelines waiting for them find those too. A
     // draw waiting for one promotes that job as well.
@@ -411,6 +494,11 @@ bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
         m_FFJitStats.CompilePendingPeak = std::max(m_FFJitStats.CompilePendingPeak,
             m_FFJitStats.CompileQueued - m_FFJitStats.CompileCompleted);
         Entry.PixelShader = ShaderObjects.Add(shader);
+        for (unsigned clip = 0; clip < 2; ++clip) {
+            if (vertex[clip]) Entry.PositionTShader[clip] = ShaderObjects.Add(vertex[clip]);
+            if (unlit[clip]) Entry.UnlitShader[clip] = ShaderObjects.Add(unlit[clip]);
+            if (lit[clip]) Entry.LitShader[clip] = ShaderObjects.Add(lit[clip]);
+        }
         if (m_FFShaderJob && Priority == CKSDLGPU_JOB_NORMAL)
             Worker.Promote(job);
     }
@@ -486,7 +574,13 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
         Worker.Promote(entry.IdleJob);
         entry.IdleJob = nullptr;
     }
-    const CKDWORD program = BindFFJitProgram(entry, Variant, Precompiled);
+    CKSdlGpuProgram::VertexJitKind kind = CKSdlGpuProgram::PRECOMPILED_VERTEX;
+    if (Variant == CKFF_PROGRAM_3D || Variant == CKFF_PROGRAM_3D_CLIP) {
+        const unsigned clip = Variant == CKFF_PROGRAM_3D_CLIP;
+        if (entry.UnlitShader[clip] && CKFFNativeUnlitDraw(*Constants)) kind = CKSdlGpuProgram::UNLIT_VERTEX;
+        else if (entry.LitShader[clip] && CKFFNativeLitDraw(*Constants)) kind = CKSdlGpuProgram::LIT_VERTEX;
+    }
+    const CKDWORD program = BindFFJitProgram(entry, Variant, Precompiled, kind);
     if (program) ++m_FFJitStats.Specialized;
     else ++m_FFJitStats.Rejected;
     return program ? program : Precompiled;
@@ -495,14 +589,20 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
 CKDWORD CKSdlGpuRasterizerContext::BindFFJitProgram(
     FFJitProgram &Entry,
     CKFFProgramVariant Variant,
-    CKDWORD Precompiled)
+    CKDWORD Precompiled, CKSdlGpuProgram::VertexJitKind VertexKind)
 {
+    const unsigned clip = Variant == CKFF_PROGRAM_3D_CLIP || Variant == CKFF_PROGRAM_POSITIONT_CLIP;
+    const CKDWORD shader3d = (Variant != CKFF_PROGRAM_3D && Variant != CKFF_PROGRAM_3D_CLIP) ? 0 :
+        VertexKind == CKSdlGpuProgram::UNLIT_VERTEX ? Entry.UnlitShader[clip] :
+        VertexKind == CKSdlGpuProgram::LIT_VERTEX ? Entry.LitShader[clip] : 0;
+    if (!shader3d) VertexKind = CKSdlGpuProgram::PRECOMPILED_VERTEX;
     for (int i = 0; i < Entry.Programs.Size(); ++i) {
-        if (Entry.Programs[i].Precompiled == Precompiled)
+        if (Entry.Programs[i].Precompiled == Precompiled && Entry.Programs[i].VertexKind == VertexKind)
             return Entry.Programs[i].Program;
     }
     const FFJitProgram::Binding binding = {
-        Precompiled, Variant, CreateFFJitProgram(Entry.PixelShader, Variant, Precompiled)};
+        Precompiled, Variant, CreateFFJitProgram(Entry.PixelShader, Variant, Precompiled, Entry.PositionTShader[clip],
+                                                shader3d, VertexKind), VertexKind};
     // The entry's draws are then drawn precompiled.
     if (!binding.Program) {
         Entry.State = FFJitProgram::REJECTED;
@@ -515,7 +615,7 @@ CKDWORD CKSdlGpuRasterizerContext::BindFFJitProgram(
 CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     CKDWORD PixelShader,
     CKFFProgramVariant Variant,
-    CKDWORD Precompiled)
+    CKDWORD Precompiled, CKDWORD PositionTShader, CKDWORD Shader3d, CKSdlGpuProgram::VertexJitKind VertexKind)
 {
     std::shared_ptr<CKSdlGpuProgram> fallback = Programs.Get(Precompiled);
     if (!fallback)
@@ -524,8 +624,14 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     // program's own, so it takes the fallback's interface as it is.
     CKFFProgramDesc desc = fallback->Interface;
     desc.PixelShader = PixelShader;
+    const unsigned clip = Variant == CKFF_PROGRAM_3D_CLIP || Variant == CKFF_PROGRAM_POSITIONT_CLIP;
+    const bool positionT = PositionTShader && (Variant == CKFF_PROGRAM_POSITIONT || Variant == CKFF_PROGRAM_POSITIONT_CLIP) &&
+        desc.VertexShader != m_NativeFFDepthPadVertexShaders[clip];
+    if (positionT)
+        desc.VertexShader = PositionTShader;
+    if (Shader3d) desc.VertexShader = Shader3d;
 #if CKRE_ENABLE_DIRECTX
-    if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC) {
+    if (!positionT && !Shader3d && m_FFJitFormat == SDL_GPU_SHADERFORMAT_DXBC) {
         desc.VertexShader = FFJitVertexShader(Variant, desc.VertexShader, nullptr);
         if (!desc.VertexShader)
             return 0;
@@ -535,6 +641,9 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     if (CreateProgram(&desc, &handle) != CK_OK)
         return 0;
     const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(handle);
+    program->VertexJit = Shader3d ? VertexKind :
+        positionT ? CKSdlGpuProgram::POSITIONT_VERTEX : CKSdlGpuProgram::PRECOMPILED_VERTEX;
+    program->UserClip = clip && program->VertexJit != CKSdlGpuProgram::PRECOMPILED_VERTEX;
     program->CompareSamplerCount = fallback->CompareSamplerCount;
     program->Fallback = std::move(fallback);
     return handle;
@@ -596,7 +705,10 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
         const CKDWORD precompiled = NativeFFProgram(
             variant, artifact, (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0);
         // As when a draw creates it, the program is then drawn precompiled.
-        const CKDWORD handle = precompiled ? BindFFJitProgram(Entry, variant, precompiled) : 0;
+        const CKDWORD handle = precompiled ? BindFFJitProgram(Entry, variant, precompiled,
+            record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_UNLIT ? CKSdlGpuProgram::UNLIT_VERTEX :
+            record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_LIT ? CKSdlGpuProgram::LIT_VERTEX :
+            CKSdlGpuProgram::PRECOMPILED_VERTEX) : 0;
         if (!handle) {
             Entry.State = FFJitProgram::REJECTED;
             break;
@@ -679,7 +791,9 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
             record.Variant = (CKBYTE)binding.Variant;
             const bool pad =
                 binding.Precompiled == m_NativeFFPrograms[binding.Variant][artifact][1];
-            const CKBYTE flags = pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0;
+            const CKBYTE flags = (CKBYTE)((pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0) |
+                (binding.VertexKind == CKSdlGpuProgram::UNLIT_VERTEX ? CKSDL_GPU_FF_JIT_PIPELINE_UNLIT : 0) |
+                (binding.VertexKind == CKSdlGpuProgram::LIT_VERTEX ? CKSDL_GPU_FF_JIT_PIPELINE_LIT : 0));
             // Pending and failed pipelines are recorded too.
             for (auto it = program->Pipelines.Begin(); it != program->Pipelines.End(); ++it) {
                 if (RecordPipeline(it.GetKey(), vertexFormats, flags, record))
@@ -775,11 +889,21 @@ CKSdlGpuRasterizerContext::CountFFJitProgramsForTests() const
             if (!program)
                 continue;
             ++counts.Programs;
+            const bool positionT = program->VertexJit == CKSdlGpuProgram::POSITIONT_VERTEX;
+            if (positionT) ++counts.PositionTPrograms;
+            const bool unlit = program->VertexJit == CKSdlGpuProgram::UNLIT_VERTEX;
+            if (unlit) ++counts.UnlitPrograms;
+            const bool lit = program->VertexJit == CKSdlGpuProgram::LIT_VERTEX;
+            if (lit) ++counts.LitPrograms;
             // Null entries are pipelines the worker has not created.
             for (auto pipeline = program->Pipelines.Begin();
                  pipeline != program->Pipelines.End(); ++pipeline) {
-                if ((*pipeline).Pipeline)
+                if ((*pipeline).Pipeline) {
                     ++counts.Pipelines;
+                    if (positionT) ++counts.PositionTPipelines;
+                    if (unlit) ++counts.UnlitPipelines;
+                    if (lit) ++counts.LitPipelines;
+                }
             }
         }
     }
