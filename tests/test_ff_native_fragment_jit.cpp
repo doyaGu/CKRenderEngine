@@ -2661,6 +2661,7 @@ int main(int argc, char **argv) {
     framework.Run("unlit draw eligibility", TestUnlitEligibility);
     framework.Run("unlit 3D specialization", TestUnlit);
     framework.Run("lit draw eligibility", TestLitEligibility);
+    framework.Run("spotlight inner cone intensity", TestSpotlightInnerCone);
     framework.Run("lit 3D specialization", TestLit);
     framework.Run("vertex user clipping", TestVertexClipping);
     return framework.ExitCode();

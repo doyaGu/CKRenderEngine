@@ -16,6 +16,50 @@ void TestLitEligibility() {
     }
 }
 
+void TestSpotlightInnerCone() {
+    // A white light with unit attenuation cannot amplify a 0.2 diffuse
+    // material inside its inner cone. This absolute expectation is independent
+    // of the scalar lighting implementation below and of hardware DX8 output.
+    for (CK_SHADER_FORMAT format : {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_FORMAT_DXIL})
+    for (unsigned inlineLight : {0u, 1u})
+    for (float theta : {0.34906585f, 0.6f})
+    for (float exponent : {0.0f, 1.0f, 2.0f}) {
+        CKFFNativeFragmentKey key;
+        SetSelectArg1(key.Program, 0, CKRST_TA_DIFFUSE);
+        CKJitVertexShader shader;
+        TestCheck(CKFFCompileNativeLitProgram(key, kLayouts[0], format, shader), "spotlight frontend compiles");
+        VertexInputs input = {};
+        for (unsigned matrix = 0; matrix < 8; ++matrix) for (unsigned c = 0; c < 4; ++c)
+            UnlitUniform(input, CKRST_BLOCK_MATRICES, matrix * 4 + c)[c] = 1;
+        input.Attributes[0][2] = 2;
+        input.Attributes[1][2] = -1;
+        float *diffuse = UnlitUniform(input, CKRST_BLOCK_DRAW_PARAMS, 0);
+        diffuse[0] = diffuse[1] = diffuse[2] = 0.2f; diffuse[3] = 1;
+        UnlitUniform(input, CKRST_BLOCK_DRAW_PARAMS, 6)[0] = 1;
+        UnlitUniform(input, CKRST_BLOCK_DRAW_PARAMS, 7)[3] = float(inlineLight);
+        float light[7][4] = {};
+        light[0][3] = 2; // spot at the origin
+        light[1][2] = 1; light[1][3] = 30;
+        light[2][0] = light[2][1] = light[2][2] = 1;
+        light[5][0] = 1; light[5][3] = exponent;
+        light[6][0] = std::cos(theta * 0.5f);
+        light[6][1] = std::cos(0.78539819f * 0.5f);
+        for (unsigned row = 0; row < 7; ++row)
+            std::memcpy(UnlitUniform(input, inlineLight ? CKRST_BLOCK_DRAW_PARAMS : CKRST_BLOCK_LIGHTS,
+                                    inlineLight ? 12 + row : row), light[row], 16);
+        XArray<Value> values;
+        Fragment unused = {};
+        ExecuteNodes(shader, unused, values, &input);
+        for (const auto &output : shader.Outputs) {
+            if (output.Location != 0 && output.Location != 2) continue;
+            for (unsigned c = 0; c < 3; ++c)
+                TestCheck(std::fabs(values[output.Value.Id].F[c] - 0.2f) < 0.00001f,
+                          "inner cone preserves diffuse intensity without amplification");
+            TestCheck(values[output.Value.Id].F[3] == 1, "spotlight preserves material alpha");
+        }
+    }
+}
+
 void TestLit() {
     Random random(0x92a1369u);
     unsigned saved = 0;
