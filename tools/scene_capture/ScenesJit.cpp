@@ -110,10 +110,57 @@ void MoveComposite3D(SceneContext &sc) {
     const VxVector eye(2.0f * std::sin(phase * 0.5f), 8, -17), target(0, 1, 1);
     sc.MainCamera->SetPosition(&eye); sc.MainCamera->LookAt(&target);
 }
+
+bool BuildDynamicLighting(SceneContext &sc) {
+    g_Lights.clear();
+    SceneSetBackgroundColor(sc, 0xff243040);
+    SceneSetAmbient(sc, 0xff282020);
+    CKMaterial *floor = SceneCreateMaterial(sc, "floor", VxColor(0.6f, 0.6f, 0.6f, 1.0f));
+    SceneCreateEntity(sc, "floor", SceneCreatePlaneMesh(sc, "floor", 26, 22, 8, 1, floor), VxVector(0, 0, 0));
+    for (unsigned i = 0; i < 4; ++i) {
+        char name[32]; snprintf(name, sizeof(name), "lit-sphere-%u", i);
+        CKMaterial *material = SceneCreateMaterial(sc, name, VxColor(0.35f + i * 0.15f, 0.6f, 0.75f, 1.0f));
+        if (!material) return false;
+        material->SetSpecular(VxColor(0.9f, 0.9f, 0.9f, 1.0f));
+        material->SetPower(i == 0 ? 0.0f : float(1 << (i + 2)));
+        if (i == 0) material->SetEmissive(VxColor(0.08f, 0.02f, 0.01f, 1.0f));
+        SceneCreateEntity(sc, name, SceneCreateSphereMesh(sc, name, 1.5f, 20, 28, material),
+                          VxVector(-6.0f + i * 4.0f, 1.5f, 0));
+    }
+    for (unsigned i = 0; i < 8; ++i) {
+        char name[32]; snprintf(name, sizeof(name), "light-%u", i);
+        const VXLIGHT_TYPE type = i == 0 ? VX_LIGHTDIREC : i % 2 ? VX_LIGHTPOINT : VX_LIGHTSPOT;
+        CKLight *light = SceneCreateLight(sc, name, type,
+            VxColor(0.1f + 0.1f * (i % 3), 0.1f + 0.12f * ((i + 1) % 3), 0.3f, 1.0f),
+            VxVector(float(i) - 4, 6, -3), VxVector(0, -1, 0.4f), 30);
+        if (!light) return false;
+        light->SetLinearAttenuation(0.04f);
+        light->SetQuadraticAttenuation(0.005f);
+        g_Lights.push_back(light);
+    }
+    sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(1, 9, -18), VxVector(0, 1, 0), 55);
+    return sc.MainCamera != NULL;
+}
+
+void MoveDynamicLighting(SceneContext &sc) {
+    // Checkpoints 1/5/30/120 exercise ambient only, the inline first light,
+    // all eight lights, and a changed subset. Motion is deterministic.
+    const unsigned count = sc.FrameIndex < 3 ? 0 : sc.FrameIndex < 15 ? 1 : sc.FrameIndex < 60 ? 8 : 3;
+    const float phase = float(sc.FrameIndex) * 0.02f;
+    for (unsigned i = 0; i < g_Lights.size(); ++i) {
+        CKLight *light = g_Lights[i];
+        light->Active(i < count);
+        const VxVector position(7 * std::sin(phase + i), 5.5f, -4 + 4 * std::cos(phase + i));
+        const VxVector target(float(i % 4) * 4 - 6, 0, 0);
+        light->SetPosition(&position);
+        light->LookAt(&target);
+    }
+}
 }
 
 const SceneDef g_ScenesJit[] = {
     {"composite_2d", "Animated cards, overlapping alpha panels and sprite text through CK2 scene traversal", BuildComposite2D, MoveComposite2D, NULL, false, 2, 1.0f, NULL},
     {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, false, 2, 1.0f, NULL},
+    {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, false, 2, 1.0f, NULL},
 };
 const int g_ScenesJitCount = sizeof(g_ScenesJit) / sizeof(g_ScenesJit[0]);
