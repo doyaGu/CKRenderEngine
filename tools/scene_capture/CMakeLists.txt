@@ -89,6 +89,7 @@ add_executable(ckre_scene_capture
         Scenes2D.cpp
         ScenesRtt.cpp
         ScenesStencil.cpp
+        ScenesJit.cpp
 )
 target_compile_features(ckre_scene_capture PRIVATE cxx_std_20)
 target_include_directories(ckre_scene_capture PRIVATE

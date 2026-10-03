@@ -25,7 +25,9 @@ set(_golden "${GOLDEN_ROOT}/${_runner}-${_backend}")
 set(_out "${OUT_DIR}/${_runner}-${_backend}")
 file(MAKE_DIRECTORY "${_out}")
 
-set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --frames 5)
+# Animated composites have deterministic checkpoint comparisons in scene_capture_jit.
+set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --frames 5
+    --skip composite_2d)
 if (SKIP)
     list(APPEND _common --skip "${SKIP}")
 endif ()

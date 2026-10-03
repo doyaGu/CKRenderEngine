@@ -15,7 +15,7 @@ set(_candidate "${OUT_DIR}/frame-5")
 file(REMOVE_RECURSE "${_baseline}" "${_candidate}")
 file(MAKE_DIRECTORY "${_baseline}" "${_candidate}")
 
-set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --skip dump_copy)
+set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --skip dump_copy,composite_2d)
 
 execute_process(
     COMMAND ${_common} --frames 1 --out "${_baseline}"

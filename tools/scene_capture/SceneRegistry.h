@@ -47,5 +47,7 @@ extern const SceneDef g_ScenesRtt[];
 extern const int g_ScenesRttCount;
 extern const SceneDef g_ScenesStencil[];
 extern const int g_ScenesStencilCount;
+extern const SceneDef g_ScenesJit[];
+extern const int g_ScenesJitCount;
 
 #endif // CKRE_SCENE_CAPTURE_SCENEREGISTRY_H

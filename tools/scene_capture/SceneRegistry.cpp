@@ -13,6 +13,7 @@ const std::vector<const SceneDef *> &AllScenes()
         for (int i = 0; i < g_Scenes2DCount; ++i) scenes.push_back(&g_Scenes2D[i]);
         for (int i = 0; i < g_ScenesRttCount; ++i) scenes.push_back(&g_ScenesRtt[i]);
         for (int i = 0; i < g_ScenesStencilCount; ++i) scenes.push_back(&g_ScenesStencil[i]);
+        for (int i = 0; i < g_ScenesJitCount; ++i) scenes.push_back(&g_ScenesJit[i]);
     }
     return scenes;
 }
