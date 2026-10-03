@@ -4463,6 +4463,7 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 #include "TestFFJitPipeline.inl"
 #include "TestFFJitPipelineCache.inl"
 #include "TestFFPositionTDepth.inl"
+#include "TestFFUnlitDepth.inl"
 #endif
 
 void CheckFullImageComparator()
@@ -4508,6 +4509,14 @@ void BackendRendersFixedFunctionSemantics()
 #ifdef CKRE_PIXEL_SDL_GPU
     if (EnvFlagEnabled("CKRE_FF_POSITIONT_DEPTH_ONLY")) {
         CheckPositionTJitDepth();
+        SDL_Quit();
+        return;
+    }
+#endif
+#ifdef CKRE_PIXEL_SDL_GPU
+    if (EnvFlagEnabled("CKRE_FF_UNLIT_DEPTH_ONLY")) {
+        CheckUnlitJitDepth();
+        CheckUnlitJitTransitions();
         SDL_Quit();
         return;
     }
@@ -4622,6 +4631,10 @@ void BackendRendersFixedFunctionSemantics()
 #ifdef CKRE_PIXEL_SDL_GPU
     if (opened)
         CheckPrewarmedFragmentPrograms(precompiled);
+    if (opened) {
+        CheckUnlitJitDepth();
+        CheckUnlitJitTransitions();
+    }
     if (opened) {
         CheckPositionTJitDepth();
     }
