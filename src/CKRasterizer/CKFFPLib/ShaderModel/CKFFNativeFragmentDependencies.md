@@ -31,6 +31,7 @@ must be rebuilt.
 | LOD bias: zero to nonzero | Switch when the sampling path uses explicit bias | The numeric bias remains a uniform; +0 and -0 share a key |
 | LOD bias: one nonzero value to another | Unchanged | Uniform and sampler descriptor update; crossing sign without crossing zero needs no new shader |
 | Native filter, wrap/clamp, anisotropy limit | Unchanged while the sampling path is unchanged | Sampler state; shader-emulated sampling also consumes metadata |
+| Cube extent, mip count and min/mag filter | Unchanged | Resource dimensions and sampler metadata select face-local filtering for a single mip with equal isotropic min/mag filters |
 | Border color | Unchanged | Shader sampler metadata; not part of SDL's native sampler cache key |
 | Border, mirror-once, explicit-gradient, minimum-mip/manual-anisotropy mode | Conditional sampling switches | Canonicalization depends on texture kind and sampling/comparison path; numeric filter/mip/anisotropy values remain runtime data |
 | Depth texture comparison | Conditional comparison function/resource count | Hardware comparison uses sampler state; manual comparison specializes the shader's comparison |
@@ -45,6 +46,15 @@ mirror-once flags; manual volume anisotropy retains different flags from the
 native 2D path. Hardware depth comparison can move a comparison function out of
 the shader key into the sampler. The canonicalizer is the executable authority
 for these distinctions.
+
+Cube sampling reads the bound resource's base extent and mip count, plus the
+sampler's min/mag metadata at runtime. With one mip and equal isotropic filters,
+it keeps the selected face's major direction component and clamps the other
+components to the outermost texel centers. This prevents seamless sampling
+from mixing neighboring faces without changing the selected mip or filter.
+Multiple mips, unequal min/mag filters and anisotropy retain native cube
+sampling; their face-edge behavior is not yet legacy-compatible. None of
+these numeric values is added to the shader key or uniform ABI.
 
 ## Executable checks
 
