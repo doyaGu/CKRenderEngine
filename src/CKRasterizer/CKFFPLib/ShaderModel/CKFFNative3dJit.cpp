@@ -69,6 +69,14 @@ bool CKFFNativeUnlitDraw(const CKFFConstantSet &constants) {
     return lightCount == -1.0f && SupportedDeformation(constants);
 }
 
+bool CKFFNativeLitDraw(const CKFFConstantSet &constants) {
+    const auto &bytes = constants[CKRST_BLOCK_DRAW_PARAMS].Bytes;
+    if (bytes.Size() < CKFF_DRAW_PARAM_VEC4_COUNT * 16) return false;
+    float lightCount;
+    std::memcpy(&lightCount, bytes.Begin() + CKFF_DRAW_PARAM_LIGHTING * 16, sizeof(float));
+    return SupportedDeformation(constants) && std::isfinite(lightCount) && lightCount >= 0 &&
+           lightCount <= CKFF_MAX_LIGHTS && std::floor(lightCount) == lightCount;
+}
 
 static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSamplerLayout layout,
                                   CK_SHADER_FORMAT referenceFormat, bool lighting, CKJitVertexShader &out, bool clipping) {
@@ -167,6 +175,71 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
     const CKJitValue lightFlags = uniform(rows.Draw, CKFF_DRAW_PARAM_LIGHT_FLAGS);
     const CKJitValue viewNormal = b.Select(b.Greater(c(lightFlags, 1), half), normalize(transformedNormal), transformedNormal);
     const CKJitValue params = uniform(rows.Draw, CKFF_DRAW_PARAM_MATERIAL_POWER);
+    if (lighting) {
+        const CKJitValue sources = uniform(rows.Draw, CKFF_DRAW_PARAM_MATERIAL_SOURCES);
+        const auto material = [&](unsigned channel) {
+            const CKJitValue source = b.FloatToInt(b.Add(c(sources, channel), half));
+            return b.Select(b.IntEqual(source, b.Int(1)), diffuse,
+                b.Select(b.IntEqual(source, b.Int(2)), specular, uniform(rows.Draw, channel)));
+        };
+        const CKJitValue matDiffuse = material(0), matAmbient = material(1);
+        const CKJitValue matSpecular = material(2), matEmissive = material(3);
+        const CKJitValue power = c(params, 0);
+        const CKJitValue lightState = uniform(rows.Draw, CKFF_DRAW_PARAM_LIGHTING);
+        CKJitValue accum[] = {b.Float4(0, 0, 0, 0), b.Float4(0, 0, 0, 0), b.Float3(0, 0, 0)};
+        // Constant row addresses keep the native uniform ABI. Inactive lights
+        // must not evaluate normalization/power expressions (including NaNs).
+        for (unsigned i = 0; i < CKFF_MAX_LIGHTS; ++i) {
+            b.If(b.Greater(c(lightState, 0), b.Float(float(i))));
+            const auto light = [&](unsigned field) {
+                CKJitValue value = uniform(rows.Lights, i * 7 + field);
+                return i == 0 ? b.Select(b.Greater(c(lightFlags, 3), half),
+                    uniform(rows.Draw, CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + field), value) : value;
+            };
+            const CKJitValue pos = light(0), dir = light(1), color = light(2), spec = light(3);
+            const CKJitValue ambient = light(4), attenuation = light(5), spot = light(6);
+            b.If(b.Less(c(pos, 3), half));
+            const CKJitValue directional = b.Neg(normalize(b.Swizzle(dir, "xyz")));
+            b.Else({directional, one});
+            const CKJitValue delta = b.Sub(b.Swizzle(pos, "xyz"), view);
+            const CKJitValue distance = b.Length(delta);
+            const CKJitValue local = b.Div(delta, b.Max(distance, b.Float(0.0001f)));
+            CKJitValue atten = b.Div(one, b.Max(b.Add(b.Add(c(attenuation, 0), b.Mul(c(attenuation, 1), distance)),
+                b.Mul(b.Mul(c(attenuation, 2), distance), distance)), b.Float(0.0001f)));
+            atten = b.Select(b.And(b.Greater(c(dir, 3), zero), b.Greater(distance, c(dir, 3))), zero, atten);
+            b.If(b.Greater(c(pos, 3), b.Float(1.5f)));
+            const CKJitValue rho = b.Dot(b.Neg(local), normalize(b.Swizzle(dir, "xyz")));
+            const CKJitValue cone = b.Saturate(b.Div(b.Sub(rho, c(spot, 1)),
+                b.Max(b.Sub(c(spot, 0), c(spot, 1)), b.Float(0.0001f))));
+            CKJitValue spotAtten = b.Exp2(b.Mul(b.Log2(cone), c(attenuation, 3)));
+            spotAtten = b.Select(b.LessEqual(rho, c(spot, 1)), zero, spotAtten);
+            spotAtten = b.Select(b.Greater(rho, c(spot, 0)), one, spotAtten);
+            b.Else({b.Mul(atten, spotAtten)});
+            atten = b.EndIf(atten);
+            CKJitValue resolved[2];
+            b.EndIf({local, atten}, resolved);
+            const CKJitValue toLight = resolved[0];
+            atten = resolved[1];
+            const CKJitValue nDotL = b.Max(b.Dot(viewNormal, normalize(toLight)), zero);
+            const CKJitValue nextAmbient = b.Add(accum[0], b.Mul(ambient, atten));
+            const CKJitValue nextDiffuse = b.Add(accum[1], b.Mul(b.Mul(color, nDotL), atten));
+            b.If(b.And(b.Greater(nDotL, zero), b.Greater(power, zero)));
+            const CKJitValue eye = b.Select(b.Greater(c(lightFlags, 0), half), normalize(view), b.Float3(0, 0, 1));
+            const CKJitValue halfVector = normalize(b.Sub(toLight, eye));
+            const CKJitValue nDotH = b.Max(b.Dot(viewNormal, halfVector), zero);
+            const CKJitValue highlight = b.Exp2(b.Mul(b.Log2(nDotH), power));
+            b.Else({b.Add(accum[2], b.Mul(b.Mul(b.Swizzle(spec, "xyz"), highlight), atten))});
+            const CKJitValue nextSpecular = b.EndIf(accum[2]);
+            b.Else({nextAmbient, nextDiffuse, nextSpecular});
+            b.EndIf({accum[0], accum[1], accum[2]}, accum);
+        }
+        CKJitValue lit = b.Add(matEmissive, b.Mul(matAmbient, b.Construct({b.Swizzle(lightState, "yzw"), one})));
+        lit = b.Add(lit, b.Mul(matAmbient, accum[0]));
+        lit = b.Add(lit, b.Mul(matDiffuse, accum[1]));
+        diffuse = b.Construct({b.Saturate(b.Swizzle(lit, "xyz")), c(matDiffuse, 3)});
+        const CKJitValue litSpecular = b.Construct({b.Saturate(b.Mul(b.Swizzle(matSpecular, "xyz"), accum[2])), c(specular, 3)});
+        specular = b.Select(b.Greater(c(uniform(rows.Draw, CKFF_DRAW_PARAM_ALPHA), 2), half), litSpecular, specular);
+    }
     const CKJitValue expansion = c(params, 3), clipW = c(clip, 3);
     const CKJitValue useWeight = b.Or(b.And(b.Greater(expansion, b.Float(1.5f)), b.Less(expansion, b.Float(2.5f))),
                                      b.Greater(expansion, b.Float(3.5f)));
@@ -241,4 +314,9 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
 bool CKFFCompileNativeUnlitProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
                                   CK_SHADER_FORMAT referenceFormat, CKJitVertexShader &out, bool clipping) {
     return CompileNative3dProgram(key, layout, referenceFormat, false, out, clipping);
+}
+
+bool CKFFCompileNativeLitProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
+                                CK_SHADER_FORMAT referenceFormat, CKJitVertexShader &out, bool clipping) {
+    return CompileNative3dProgram(key, layout, referenceFormat, true, out, clipping);
 }
