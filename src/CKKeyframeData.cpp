@@ -2627,6 +2627,20 @@ void RCKMorphController::RemoveKey(int index) {
     m_Keys = newKeys;
 }
 
+static int MorphWireSize(int keyCount, int vertexCount, CKBOOL normals) {
+    if (keyCount < 0 || vertexCount < 0)
+        return 0;
+    const int headerBytes = 3 * sizeof(int);
+    if (keyCount == 0)
+        return headerBytes;
+    const size_t maxKeyBytes = (INT_MAX - headerBytes) / keyCount;
+    const size_t vertexBytes = sizeof(VxVector) + (normals ? sizeof(VxCompressedVector) : 0);
+    if (maxKeyBytes < sizeof(float) || static_cast<size_t>(vertexCount) >
+        (maxKeyBytes - sizeof(float)) / vertexBytes)
+        return 0;
+    return headerBytes + keyCount * static_cast<int>(sizeof(float) + vertexCount * vertexBytes);
+}
+
 int RCKMorphController::DumpKeysTo(void *Buffer) {
     // 0x100505D9: normal presence is shared by all keys and follows the two
     // counts. Even an empty controller writes this complete three-DWORD header.
@@ -2732,49 +2746,62 @@ CKBOOL RCKMorphController::Compare(CKAnimController *control, float Threshold) {
 }
 
 CKBOOL RCKMorphController::Clone(CKAnimController *control) {
-    // The virtual Clone entry at 0x1005027A checks the type before releasing
-    // storage, and copies the new key count only after deleting the old keys.
+    // Native 0x1005027A releases destination storage first. Preserve valid deep
+    // copy semantics while making self-copy and allocation failure harmless.
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
+    if (control == this)
+        return TRUE;
+
     RCKMorphController *other = static_cast<RCKMorphController *>(control);
-
-    // Clean up existing data
-    for (int i = 0; i < m_NbKeys; ++i) {
-        delete[] m_Keys[i].PosArray;
-        delete[] m_Keys[i].NormArray;
-    }
-    delete[] m_Keys;
-    m_Keys = nullptr;
-
-    if (!CKAnimController::Clone(control))
+    if (!MorphWireSize(other->m_NbKeys, other->m_VertexCount, TRUE) ||
+        (other->m_NbKeys > 0 && !other->m_Keys) || static_cast<size_t>(other->m_NbKeys) >
+        static_cast<size_t>(-1) / sizeof(CKMorphKey))
         return FALSE;
-
-    m_VertexCount = other->m_VertexCount;
-
+    RCKMorphController replacement;
+    replacement.m_VertexCount = other->m_VertexCount;
     if (other->m_NbKeys > 0) {
-        m_Keys = new CKMorphKey[other->m_NbKeys];
-
+        replacement.m_Keys = new(std::nothrow) CKMorphKey[other->m_NbKeys];
+        if (!replacement.m_Keys)
+            return FALSE;
         for (int i = 0; i < other->m_NbKeys; ++i) {
-            m_Keys[i].TimeStep = other->m_Keys[i].TimeStep;
+            replacement.m_Keys[i].PosArray = nullptr;
+            replacement.m_Keys[i].NormArray = nullptr;
+        }
+        replacement.m_NbKeys = other->m_NbKeys;
+        for (int i = 0; i < other->m_NbKeys; ++i) {
+            CKMorphKey &key = replacement.m_Keys[i];
+            key.TimeStep = other->m_Keys[i].TimeStep;
 
             // Array presence is observable even with zero vertices (notably
             // the serialized normal flag), so retain zero-sized allocations.
             if (other->m_Keys[i].PosArray) {
-                m_Keys[i].PosArray = new VxVector[m_VertexCount];
-                memcpy(m_Keys[i].PosArray, other->m_Keys[i].PosArray, m_VertexCount * sizeof(VxVector));
-            } else {
-                m_Keys[i].PosArray = nullptr;
+                key.PosArray = new(std::nothrow) VxVector[replacement.m_VertexCount];
+                if (!key.PosArray)
+                    return FALSE;
+                if (replacement.m_VertexCount > 0)
+                    memcpy(key.PosArray, other->m_Keys[i].PosArray, replacement.m_VertexCount * sizeof(VxVector));
             }
 
             if (other->m_Keys[i].NormArray) {
-                m_Keys[i].NormArray = new VxCompressedVector[m_VertexCount];
-                memcpy(m_Keys[i].NormArray, other->m_Keys[i].NormArray, m_VertexCount * sizeof(VxCompressedVector));
-            } else {
-                m_Keys[i].NormArray = nullptr;
+                key.NormArray = new(std::nothrow) VxCompressedVector[replacement.m_VertexCount];
+                if (!key.NormArray)
+                    return FALSE;
+                if (replacement.m_VertexCount > 0)
+                    memcpy(key.NormArray, other->m_Keys[i].NormArray, replacement.m_VertexCount * sizeof(VxCompressedVector));
             }
         }
     }
+
+    CKMorphKey *oldKeys = m_Keys;
+    const int oldCount = m_NbKeys;
+    m_Keys = replacement.m_Keys;
+    m_NbKeys = replacement.m_NbKeys;
+    m_VertexCount = replacement.m_VertexCount;
+    m_Length = other->m_Length;
+    replacement.m_Keys = oldKeys;
+    replacement.m_NbKeys = oldCount;
 
     return TRUE;
 }

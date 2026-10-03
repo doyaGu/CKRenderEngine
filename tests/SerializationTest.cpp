@@ -1910,6 +1910,85 @@ void MorphCountResizePreservesStateOnAllocationFailure() {
     Check(failures > 0 && succeeded, "Morph allocation failure injection did not cover failure and success");
 }
 
+template<bool Normals, bool ZeroVertices>
+void MorphSelfClonePreservesOwnedState() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphSelfClone");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    if (!Normals) {
+        for (int i = 0; i < 2; ++i) {
+            CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(i));
+            delete[] key->NormArray; key->NormArray = nullptr;
+        }
+    }
+    if (ZeroVertices) controller->SetMorphVertexCount(0);
+    CKMorphKey *keys[2];
+    VxVector *positions[2];
+    VxCompressedVector *normals[2];
+    for (int i = 0; i < 2; ++i) {
+        keys[i] = static_cast<CKMorphKey *>(controller->GetKey(i));
+        positions[i] = keys[i]->PosArray; normals[i] = keys[i]->NormArray;
+    }
+    s_MorphArrayAllocationFailure = 0;
+    const CKBOOL cloned = controller->Clone(controller);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(cloned && noAllocation, "Morph self-Clone allocated or failed");
+    for (int i = 0; i < 2; ++i) Check(controller->GetKey(i) == keys[i] && keys[i]->PosArray == positions[i] && keys[i]->NormArray == normals[i],
+                                     "Morph self-Clone changed owned addresses");
+    const int vertices = ZeroVertices ? 0 : 3;
+    CheckResizedMorphKeys(*controller, vertices, vertices, Normals);
+    Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(saved != nullptr, "Self-cloned Morph Save failed");
+    RCKObjectAnimation reloaded(&context, "SelfCloneReloaded");
+    LoadChunk(reloaded, saved.get());
+    CheckResizedMorphKeys(*static_cast<RCKMorphController *>(reloaded.GetMorphController()), vertices, vertices, Normals);
+}
+
+template<bool Clone>
+void MorphReplacementPreservesStateOnAllocationFailure() {
+    WireWords expected = MorphWire<true>();
+    int failures = 0;
+    bool succeeded = false;
+    for (int failedAllocation = 0; failedAllocation < 16; ++failedAllocation) {
+        CKContext context(nullptr, 0, 0);
+        RCKObjectAnimation animation(&context, "MorphReplacementTarget"), sourceAnimation(&context, "MorphReplacementSource");
+        AddMorphRequestKeys(animation);
+        RCKMorphController *target = static_cast<RCKMorphController *>(animation.GetMorphController());
+        RCKMorphController *source = static_cast<RCKMorphController *>(sourceAnimation.CreateController(CKANIMATION_MORPH_CONTROL));
+        Check(source->ReadKeysFrom(expected.data()) == static_cast<int>(expected.size() * 4), "Morph source read failed");
+        sourceAnimation.SetLength(27.0f);
+        CKMorphKey *oldKey = static_cast<CKMorphKey *>(target->GetKey(0));
+        VxVector *oldPosition = oldKey->PosArray;
+        VxCompressedVector *oldNormal = oldKey->NormArray;
+        s_MorphArrayAllocationFailure = failedAllocation;
+        const int result = Clone ? target->Clone(source) : target->ReadKeysFrom(expected.data());
+        s_MorphArrayAllocationFailure = -1;
+        if (result) {
+            Check(result == (Clone ? TRUE : static_cast<int>(expected.size() * 4)), "Replacement returned an incorrect result");
+            Check(target->GetLength() == (Clone ? 27.0f : 10.0f), "Replacement changed the controller length contract");
+            WireWords output(expected.size(), 0u);
+            Check(target->DumpKeysTo(output.data()) == static_cast<int>(expected.size() * 4) && output == expected,
+                  "Replacement did not retain independent expected bytes");
+            Check(target->GetKey(0) != source->GetKey(0) &&
+                  static_cast<CKMorphKey *>(target->GetKey(0))->PosArray != static_cast<CKMorphKey *>(source->GetKey(0))->PosArray,
+                  "Morph replacement shared source storage");
+            succeeded = true;
+        } else {
+            ++failures;
+            Check(target->GetKey(0) == oldKey && oldKey->PosArray == oldPosition && oldKey->NormArray == oldNormal,
+                  "Failed replacement changed destination pointers");
+            CheckResizedMorphKeys(*target, 3, 3, true);
+        }
+        WireWords sourceOutput(expected.size(), 0u);
+        Check(source->DumpKeysTo(sourceOutput.data()) == static_cast<int>(expected.size() * 4) && sourceOutput == expected && source->GetLength() == 27.0f,
+              "Morph replacement changed source data");
+        if (succeeded) break;
+    }
+    Check(failures == 5 && succeeded, "Replacement did not cover every header/payload allocation failure");
+}
+
 template<int Topology>
 void LoadedMergedAnimationTerminatesCycles() {
     CKContext context(nullptr, 0, 0);
@@ -3436,6 +3515,11 @@ int main(int argc, char **argv) {
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
     };
     const Test tests[] = {
+        {"Morph self-Clone retains normal-bearing keys", MorphSelfClonePreservesOwnedState<true, false>},
+        {"Morph self-Clone retains position-only keys", MorphSelfClonePreservesOwnedState<false, false>},
+        {"Morph self-Clone retains zero-sized normal presence", MorphSelfClonePreservesOwnedState<true, true>},
+        {"Morph self-Clone retains zero-sized absent normals", MorphSelfClonePreservesOwnedState<false, true>},
+        {"Morph Clone allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<true>},
         {"Loaded Morph resize keeps normals and coherent storage", LoadedMorphCountResizesStorage<true>},
         {"Loaded Morph resize keeps absent normals and coherent storage", LoadedMorphCountResizesStorage<false>},
         {"Morph resize rejects negative/unrepresentable counts", MorphCountRejectsInvalidSizes},
