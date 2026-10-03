@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.16)
+project(d3d8_spot_probe LANGUAGES CXX)
+
+# Standalone diagnostic: the superproject does not require a legacy SDK.
+if(NOT WIN32)
+    message(FATAL_ERROR "This probe executes the Windows system D3D8 runtime")
+endif()
+find_path(D3D8_INCLUDE_DIR d3d8.h DOC "Directory containing legacy D3D8 headers")
+if(NOT D3D8_INCLUDE_DIR)
+    message(FATAL_ERROR "Set D3D8_INCLUDE_DIR to a directory containing d3d8.h and its dependencies")
+endif()
+add_executable(d3d8_spot_probe main.cpp)
+target_include_directories(d3d8_spot_probe PRIVATE "${D3D8_INCLUDE_DIR}")
+target_link_libraries(d3d8_spot_probe PRIVATE user32)
+target_compile_features(d3d8_spot_probe PRIVATE cxx_std_17)
