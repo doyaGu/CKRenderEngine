@@ -2631,6 +2631,8 @@ void TestEmission() {
 }
 
 
+#include "TestFFPositionTJit.inl"
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -2653,5 +2655,6 @@ int main(int argc, char **argv) {
     framework.Run("canonical keys", TestCanonicalKeys);
     framework.Run("state dependency boundaries", TestStateDependencies);
     framework.Run("emission", TestEmission);
+    framework.Run("POSITIONT specialization", TestPositionT);
     return framework.ExitCode();
 }
