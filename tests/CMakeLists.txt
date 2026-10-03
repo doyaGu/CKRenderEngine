@@ -309,6 +309,27 @@ ckre_add_engine_test(scene_graph_tests
     test_scene_graph.cpp
 )
 
+ckre_add_engine_test(serialization_tests
+    SerializationTest.cpp
+)
+
+# Optional integration with a locally built Grids plugin of the same architecture.
+# The regular serialization suite does not require the BuildingBlocks project.
+set(CKRE_GRID_TEST_PLUGIN "" CACHE FILEPATH "Grids plugin used by runtime grid serialization tests")
+if (CKRE_GRID_TEST_PLUGIN)
+    if (TARGET CK2Static)
+        message(FATAL_ERROR "Runtime Grids tests require shared CK2. Configure the superproject with CK2_BUILD_STATIC=OFF.")
+    endif ()
+    add_test(NAME grid_serialization_tests
+        COMMAND $<TARGET_FILE:serialization_tests> --grid-plugin "${CKRE_GRID_TEST_PLUGIN}")
+    set_tests_properties(grid_serialization_tests PROPERTIES TIMEOUT 60)
+endif ()
+
+# Asset corpus is supplied locally, never bundled or required by CTest.
+add_executable(serialization_corpus_tests SerializationCorpusTest.cpp)
+ckre_configure_test_target(serialization_corpus_tests)
+target_link_libraries(serialization_corpus_tests PRIVATE CK2_3DStatic)
+
 ckre_add_engine_test(ck2d_entity_tests
     test_ck2d_entity.cpp
 )
