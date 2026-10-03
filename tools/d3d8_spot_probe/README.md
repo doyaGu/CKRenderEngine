@@ -40,3 +40,20 @@ preserving a measurement. No Wine implementation code executes in this probe.
 
 For measured values, the ordinary 3D scene, and the decision to retain the
 bounded shader calculation, see [the DX8 comparison report](../../tests/FFJitDx8Oracle.md).
+
+## Silhouette coverage diagnostic
+
+`d3d8_spot_probe.exe --coverage` replays one unlit 3D triangle taken from the
+central sphere in `lighting_spotlight`, with its original world, view and
+projection matrices and a 640-by-480 viewport. It reports whether pixel
+`(311,188)` is covered under each vertex-processing mode. Software VP also
+exports its three screen-space positions using `ProcessVertices`; the fourth
+component is reciprocal homogeneous W, as required by XYZRHW.
+
+This mode returns 0 when the API calls succeed and 2 on an API or setup error.
+It reports coverage without asserting a universal hardware result. Unlike the
+default spotlight-intensity check, it is a numerical diagnostic, not a required
+lighting rule. The measured native software and hardware paths both cover the
+sample. The modern scene does not: a roughly 0.00003-pixel projection difference
+moves one vertex across an 8-bit subpixel rounding boundary. The report retains
+the exact coordinates and the resulting strict image-comparison failure.
