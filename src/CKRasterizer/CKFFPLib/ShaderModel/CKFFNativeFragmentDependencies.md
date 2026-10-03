@@ -31,7 +31,7 @@ must be rebuilt.
 | LOD bias: zero to nonzero | Switch when the sampling path uses explicit bias | The numeric bias remains a uniform; +0 and -0 share a key |
 | LOD bias: one nonzero value to another | Unchanged | Uniform and sampler descriptor update; crossing sign without crossing zero needs no new shader |
 | Native filter, wrap/clamp, anisotropy limit | Unchanged while the sampling path is unchanged | Sampler state; shader-emulated sampling also consumes metadata |
-| Cube extent, mip count and min/mag filter | Unchanged | Resource dimensions and sampler metadata select face-local filtering for a single mip with equal isotropic min/mag filters |
+| Cube extent, mip count, filters, minimum mip and anisotropy limit | Unchanged | Resource dimensions and sampler metadata control face-local taps and mip blending at runtime |
 | Border color | Unchanged | Shader sampler metadata; not part of SDL's native sampler cache key |
 | Border, mirror-once, explicit-gradient, minimum-mip/manual-anisotropy mode | Conditional sampling switches | Canonicalization depends on texture kind and sampling/comparison path; numeric filter/mip/anisotropy values remain runtime data |
 | Depth texture comparison | Conditional comparison function/resource count | Hardware comparison uses sampler state; manual comparison specializes the shader's comparison |
@@ -48,13 +48,25 @@ the shader key into the sampler. The canonicalizer is the executable authority
 for these distinctions.
 
 Cube sampling reads the bound resource's base extent and mip count, plus the
-sampler's min/mag metadata at runtime. With one mip and equal isotropic filters,
+sampler's filter metadata at runtime. With one mip and equal isotropic filters,
 it keeps the selected face's major direction component and clamps the other
 components to the outermost texel centers. This prevents seamless sampling
 from mixing neighboring faces without changing the selected mip or filter.
-Multiple mips, unequal min/mag filters and anisotropy retain native cube
-sampling; their face-edge behavior is not yet legacy-compatible. None of
-these numeric values is added to the shader key or uniform ABI.
+Multiple mips, unequal min/mag filters and anisotropy use explicit face-local
+texel taps. The original direction supplies LOD and projected derivatives;
+addressing cannot change the selected face or the footprint. Up to 16 taps
+along the longer projected gradient approximate the anisotropic footprint.
+Point/linear texel filters and nearest/linear mip filters use the same plan in
+precompiled HLSL and JIT. The actual cube face orientation is applied before
+texel selection, including its sign flips; reversing coordinates after taking
+floor would change nearest-filter ties.
+
+Sampler metadata's existing W word stores mip filter in bits 0-3, maximum
+anisotropy in bits 4-11, and, for cube resources only, minimum mip in bits 12-16.
+The other resource types retain their previous encoding. Uniform layout and
+shader keys are unchanged; these values remain runtime dependencies. This
+defines the implemented sampling rule, not bit-exact compatibility with every
+legacy driver's anisotropic kernel or cube boundary selection.
 
 ## Executable checks
 
