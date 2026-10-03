@@ -2,7 +2,8 @@
 import copy
 import unittest
 
-from scene_benchmark_jit import aggregate, distribution, mode_order, paired_foreground, summarize_profile
+from scene_benchmark_jit import (aggregate, aggregate_comparisons, distribution, mode_order,
+                                 paired_comparisons, paired_foreground, summarize_profile)
 
 
 class SceneBenchmarkTest(unittest.TestCase):
@@ -90,6 +91,36 @@ class SceneBenchmarkTest(unittest.TestCase):
         rows[3]["summary"]["allMeasuredFramesFocused"] = False
         rows.pop()
         self.assertEqual([r["repeat"] for r in paired_foreground(rows)], [1, 1, 1])
+
+    def test_paired_deltas_are_computed_before_aggregation(self):
+        rows = []
+        for repeat, (disabled, full) in enumerate(((10, 19), (20, 31), (30, 15)), 1):
+            for mode, value in (("off", disabled), ("fragment", disabled), ("on", full)):
+                rows.append(dict(driver="vulkan", scene="composite_2d", repeat=repeat,
+                    mode=mode, issues=[], summary=dict(allMeasuredFramesFocused=True,
+                        measuredRenderMilliseconds=dict(median=value, p95=value, p99=value))))
+        comparisons = paired_comparisons(rows)
+        self.assertEqual(len(comparisons), 27)
+        result = [r for r in aggregate_comparisons(comparisons)
+                  if r["baselineMode"] == "off" and r["mode"] == "on" and r["metric"] == "p99"][0]
+        # Median of paired differences is +9; subtracting group medians gives -1.
+        self.assertEqual(result["medianPairedDeltaMs"], 9)
+        self.assertEqual(result["medianPairedChangePercent"], 55)
+        self.assertEqual((result["higherRepetitions"], result["lowerRepetitions"]), (2, 1))
+        self.assertEqual((result["minimumPairedDeltaMs"], result["maximumPairedDeltaMs"]), (-15, 11))
+        rows[0]["summary"]["allMeasuredFramesFocused"] = False
+        self.assertEqual({r["repeat"] for r in paired_comparisons(rows)}, {2, 3})
+
+    def test_zero_baseline_keeps_absolute_delta_without_inventing_percentage(self):
+        rows = [dict(driver="vulkan", scene="composite_2d", repeat=1, mode=mode,
+            issues=[], summary=dict(allMeasuredFramesFocused=True,
+                measuredRenderMilliseconds=dict(median=value, p95=value, p99=value)))
+                for mode, value in (("off", 0), ("fragment", 1), ("on", 2))]
+        result = [r for r in aggregate_comparisons(paired_comparisons(rows))
+                  if r["baselineMode"] == "off" and r["mode"] == "on"][0]
+        self.assertEqual(result["medianPairedDeltaMs"], 2)
+        self.assertIsNone(result["medianPairedChangePercent"])
+        self.assertEqual(result["percentageRepetitions"], 0)
 
 
 if __name__ == "__main__":

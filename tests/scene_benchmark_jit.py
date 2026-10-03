@@ -176,13 +176,54 @@ def paired_foreground(records):
     return result
 
 
+def paired_comparisons(records):
+    """Subtract within each complete foreground triplet before summarizing."""
+    groups = {}
+    for row in paired_foreground(records):
+        groups.setdefault((row["driver"], row["scene"], row["repeat"]), {})[row["mode"]] = row["summary"]
+    result = []
+    for (driver, scene, repeat), modes in groups.items():
+        for baseline, mode in (("off", "fragment"), ("off", "on"), ("fragment", "on")):
+            for metric in ("median", "p95", "p99"):
+                reference = modes[baseline]["measuredRenderMilliseconds"][metric]
+                value = modes[mode]["measuredRenderMilliseconds"][metric]
+                delta = value - reference
+                result.append(dict(driver=driver, scene=scene, repeat=repeat,
+                    baselineMode=baseline, mode=mode, metric=metric,
+                    baselineMs=reference, variantMs=value, deltaMs=delta,
+                    changePercent=100 * delta / reference if reference else None))
+    return result
+
+
+def aggregate_comparisons(comparisons):
+    groups = {}
+    for row in comparisons:
+        key = tuple(row[k] for k in ("driver", "scene", "baselineMode", "mode", "metric"))
+        groups.setdefault(key, []).append(row)
+    result = []
+    for (driver, scene, baseline, mode, metric), rows in groups.items():
+        deltas = [r["deltaMs"] for r in rows]
+        percentages = [r["changePercent"] for r in rows if r["changePercent"] is not None]
+        result.append(dict(driver=driver, scene=scene, baselineMode=baseline, mode=mode,
+            metric=metric, repetitions=len(rows), medianPairedDeltaMs=statistics.median(deltas),
+            minimumPairedDeltaMs=min(deltas), maximumPairedDeltaMs=max(deltas),
+            higherRepetitions=sum(d > 0 for d in deltas), lowerRepetitions=sum(d < 0 for d in deltas),
+            equalRepetitions=sum(d == 0 for d in deltas), percentageRepetitions=len(percentages),
+            medianPairedChangePercent=statistics.median(percentages) if percentages else None))
+    return result
+
+
 def write_report(out, report):
     report["aggregates"] = aggregate(report["records"])
     report["foregroundAggregates"] = aggregate(report["records"], foreground_only=True)
     report["pairedForegroundAggregates"] = aggregate(paired_foreground(report["records"]))
+    report["pairedForegroundComparisons"] = paired_comparisons(report["records"])
+    report["pairedForegroundComparisonAggregates"] = aggregate_comparisons(report["pairedForegroundComparisons"])
     (out / "results.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     for key, filename in (("aggregates", "summary.csv"), ("foregroundAggregates", "foreground-summary.csv"),
-                          ("pairedForegroundAggregates", "paired-foreground-summary.csv")):
+                          ("pairedForegroundAggregates", "paired-foreground-summary.csv"),
+                          ("pairedForegroundComparisons", "paired-foreground-comparisons.csv"),
+                          ("pairedForegroundComparisonAggregates", "paired-foreground-deltas.csv")):
         if report[key]:
             with (out / filename).open("w", encoding="utf-8", newline="") as stream:
                 writer = csv.DictWriter(stream, fieldnames=list(report[key][0]))
