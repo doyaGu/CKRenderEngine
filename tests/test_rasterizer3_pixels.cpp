@@ -1004,6 +1004,14 @@ void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCo
                (unsigned)expected.Queued, (unsigned)expected.Ready, (unsigned)expected.Rejected,
                (unsigned)expected.Programs, (unsigned)expected.Pipelines,
                (unsigned)expected.Precompiled);
+    TestCheckf(counts.PositionTPrograms == expected.PositionTPrograms && counts.PositionTPipelines == expected.PositionTPipelines,
+               "%s: POSITIONT programs/pipelines=%u/%u, expected %u/%u", what,
+               (unsigned)counts.PositionTPrograms, (unsigned)counts.PositionTPipelines,
+               (unsigned)expected.PositionTPrograms, (unsigned)expected.PositionTPipelines);
+    TestCheck(counts.UnlitPrograms == expected.UnlitPrograms && counts.UnlitPipelines == expected.UnlitPipelines,
+              "unlit program and pipeline counts match");
+    TestCheck(counts.LitPrograms == expected.LitPrograms && counts.LitPipelines == expected.LitPipelines,
+              "lit program and pipeline counts match");
 }
 
 // The fragment programs of the artifacts are compiled in the background
@@ -4463,6 +4471,7 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 #include "TestFFJitPipeline.inl"
 #include "TestFFJitPipelineCache.inl"
 #include "TestFFPositionTDepth.inl"
+#include "TestFFDepthPadScene.inl"
 #include "TestFFUnlitDepth.inl"
 #endif
 
@@ -4507,16 +4516,19 @@ void BackendRendersFixedFunctionSemantics()
     TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
 
 #ifdef CKRE_PIXEL_SDL_GPU
-    if (EnvFlagEnabled("CKRE_FF_POSITIONT_DEPTH_ONLY")) {
-        CheckPositionTJitDepth();
+    if (EnvFlagEnabled("CKRE_FF_DEPTH_PAD_ONLY")) {
+        CheckDepthPadScene();
         SDL_Quit();
         return;
     }
-#endif
-#ifdef CKRE_PIXEL_SDL_GPU
     if (EnvFlagEnabled("CKRE_FF_UNLIT_DEPTH_ONLY")) {
         CheckUnlitJitDepth();
         CheckUnlitJitTransitions();
+        SDL_Quit();
+        return;
+    }
+    if (EnvFlagEnabled("CKRE_FF_POSITIONT_DEPTH_ONLY")) {
+        CheckPositionTJitDepth();
         SDL_Quit();
         return;
     }
@@ -4631,21 +4643,16 @@ void BackendRendersFixedFunctionSemantics()
 #ifdef CKRE_PIXEL_SDL_GPU
     if (opened)
         CheckPrewarmedFragmentPrograms(precompiled);
+    if (opened)
+        CheckFFJitCachePressure();
+    if (opened)
+        CheckFFJitPipelinePressure();
     if (opened) {
+        CheckDepthPadScene();
+        CheckFFJitPipelineCache();
+        CheckPositionTJitDepth();
         CheckUnlitJitDepth();
         CheckUnlitJitTransitions();
-    }
-    if (opened) {
-        CheckPositionTJitDepth();
-    }
-    if (opened) {
-        CheckFFJitPipelineCache();
-    }
-    if (opened) {
-        CheckFFJitPipelinePressure();
-    }
-    if (opened) {
-        CheckFFJitCachePressure();
     }
 #endif
 
