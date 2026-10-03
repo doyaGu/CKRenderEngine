@@ -16,6 +16,9 @@ struct CaptureOptions {
     std::string Rasterizer;
     int HoldMilliseconds = 0;
     int Frames = 1;
+    int FrameDelayMilliseconds = 0; // optional pacing for asynchronous shader/PSO compilation
+    std::vector<int> CaptureFrames; // one-based deterministic checkpoints
+    std::string CaptureFrameDirectory;
     int Width = 640;
     int Height = 480;
     bool NativeWindowHandle = false;

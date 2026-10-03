@@ -66,6 +66,8 @@ void PrintUsage()
            "  --hold-ms N               keep the presented frame visible for desktop inspection\n"
            "  --scene NAME|all          scene to render (default all; see --list-scenes)\n"
            "  --frames K                frames rendered before the capture (default 1)\n"
+           "  --frame-delay-ms N        delay between frames, 0..1000 ms (default 0; not profiling)\n"
+           "  --capture-frames A,B      also write <scene>.frame-N.png at these one-based frames\n"
            "  --size WxH                render size (default 640x480)\n"
            "  --out DIR                 output directory for <scene>.png (default .)\n"
            "  --caps-json FILE          write the driver's Vx3DCapsDesc / Vx2DCapsDesc as JSON\n"
@@ -119,6 +121,28 @@ bool ParseArgs(int argc, char **argv, Args &args)
         }
         else if (a == "--scene") { if (!value(args.Scene)) return false; }
         else if (a == "--frames") { if (!value(v)) return false; args.Capture.Frames = atoi(v.c_str()); }
+        else if (a == "--frame-delay-ms") {
+            if (!value(v)) return false;
+            char *end = NULL;
+            errno = 0;
+            const long delay = strtol(v.c_str(), &end, 10);
+            if (v.empty() || *end || errno == ERANGE || delay < 0 || delay > 1000) return false;
+            args.Capture.FrameDelayMilliseconds = (int)delay;
+        }
+        else if (a == "--capture-frames") {
+            if (!value(v) || v.empty()) return false;
+            const char *next = v.c_str();
+            while (*next) {
+                char *end = NULL;
+                errno = 0;
+                const long frame = strtol(next, &end, 10);
+                if (end == next || errno == ERANGE || frame < 1 || frame > 1000000 || (*end && *end != ',')) return false;
+                args.Capture.CaptureFrames.push_back((int)frame);
+                if (!*end) break;
+                next = end + 1;
+                if (!*next) return false;
+            }
+        }
         else if (a == "--size") {
             if (!value(v)) return false;
             if (sscanf(v.c_str(), "%dx%d", &args.Capture.Width, &args.Capture.Height) != 2 ||
@@ -177,6 +201,13 @@ bool ParseArgs(int argc, char **argv, Args &args)
         fprintf(stderr, "--driver and --rasterizer are mutually exclusive\n");
         return false;
     }
+    for (int frame : args.Capture.CaptureFrames) {
+        if (frame > args.Capture.Frames || !args.Capture.PresentLastFrame) {
+            fprintf(stderr, "--capture-frames requires presented frames within --frames\n");
+            return false;
+        }
+    }
+    args.Capture.CaptureFrameDirectory = args.OutDir;
     if (args.Capture.HoldMilliseconds && (args.Capture.HiddenWindow || !args.Capture.PresentLastFrame)) {
         fprintf(stderr, "--hold-ms requires a visible, presented window\n");
         return false;
@@ -190,6 +221,10 @@ bool ParseArgs(int argc, char **argv, Args &args)
         return false;
     }
     if (!args.Capture.ProfileJson.empty()) {
+        if (args.Capture.FrameDelayMilliseconds) {
+            fprintf(stderr, "--frame-delay-ms cannot be combined with profiling\n");
+            return false;
+        }
         if (args.Capture.HiddenWindow || !args.Capture.PresentLastFrame) {
             fprintf(stderr, "--profile-json requires a visible window presented on every frame\n");
             return false;
@@ -327,13 +362,14 @@ struct CompareSummary {
     int Failed = 0;
 };
 
-void CompareScene(const Args &args, const SceneDef &scene, CompareSummary &summary)
+void CompareSceneImage(const Args &args, const SceneDef &scene, CompareSummary &summary, const std::string &suffix)
 {
-    const std::string capturedPath = JoinPath(args.OutDir, std::string(scene.Name) + ".png");
-    const std::string referencePath = JoinPath(args.CompareDir, std::string(scene.Name) + ".png");
+    const std::string label = std::string(scene.Name) + suffix;
+    const std::string capturedPath = JoinPath(args.OutDir, label + ".png");
+    const std::string referencePath = JoinPath(args.CompareDir, label + ".png");
     if (!FileExists(referencePath)) {
         ++summary.Missing;
-        printf("[%s] no reference image (%s)%s\n", scene.Name, referencePath.c_str(),
+        printf("[%s] no reference image (%s)%s\n", label.c_str(), referencePath.c_str(),
                args.RequireAll ? " FAIL" : " skipped");
         if (args.RequireAll)
             ++summary.Failed;
@@ -342,12 +378,12 @@ void CompareScene(const Args &args, const SceneDef &scene, CompareSummary &summa
     RgbaImage captured, reference, mask;
     std::string error;
     if (!ReadPng(capturedPath, captured, error)) {
-        printf("[%s] cannot read %s: %s FAIL\n", scene.Name, capturedPath.c_str(), error.c_str());
+        printf("[%s] cannot read %s: %s FAIL\n", label.c_str(), capturedPath.c_str(), error.c_str());
         ++summary.Failed;
         return;
     }
     if (!ReadPng(referencePath, reference, error)) {
-        printf("[%s] cannot read %s: %s FAIL\n", scene.Name, referencePath.c_str(), error.c_str());
+        printf("[%s] cannot read %s: %s FAIL\n", label.c_str(), referencePath.c_str(), error.c_str());
         ++summary.Failed;
         return;
     }
@@ -363,21 +399,28 @@ void CompareScene(const Args &args, const SceneDef &scene, CompareSummary &summa
     const CompareResult result = CompareImages(captured, reference, threshold, maskPtr, &diff);
     ++summary.Compared;
     if (result.SizeMismatch) {
-        printf("[%s] size mismatch %dx%d vs %dx%d FAIL\n", scene.Name, captured.Width, captured.Height,
+        printf("[%s] size mismatch %dx%d vs %dx%d FAIL\n", label.c_str(), captured.Width, captured.Height,
                reference.Width, reference.Height);
         ++summary.Failed;
         return;
     }
-    const std::string diffPath = JoinPath(args.OutDir, std::string(scene.Name) + ".diff.png");
+    const std::string diffPath = JoinPath(args.OutDir, label + ".diff.png");
     WritePng(diffPath, diff, error);
     const bool pass = result.PassRatio() >= minPass;
-    printf("[%s] pass %.3f%% (threshold %d, min %.2f%%, max diff %d, masked %lld) %s\n", scene.Name,
+    printf("[%s] pass %.6f%% (threshold %d, min %.2f%%, max diff %d, failed pixels %lld, masked %lld) %s\n", label.c_str(),
            result.PassRatio() * 100.0, threshold, minPass * 100.0f, result.MaxChannelDiff,
-           result.MaskedPixels, pass ? "OK" : "FAIL");
+           result.ComparedPixels - result.PassingPixels, result.MaskedPixels, pass ? "OK" : "FAIL");
     if (pass)
         ++summary.Passed;
     else
         ++summary.Failed;
+}
+
+void CompareScene(const Args &args, const SceneDef &scene, CompareSummary &summary)
+{
+    CompareSceneImage(args, scene, summary, "");
+    for (int frame : args.Capture.CaptureFrames)
+        CompareSceneImage(args, scene, summary, ".frame-" + std::to_string(frame));
 }
 
 } // namespace

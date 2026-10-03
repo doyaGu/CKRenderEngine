@@ -435,6 +435,8 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
         if (m_Options.ProfileInteractiveStart && !WaitForProfileStart(scene)) return false;
     }
     for (int i = 0; i < frames; ++i) {
+        if (i != 0 && m_Options.FrameDelayMilliseconds)
+            SDL_Delay((Uint32)m_Options.FrameDelayMilliseconds);
         sc.FrameIndex = i;
         SDL_PumpEvents();
         if (scene.PreFrame)
@@ -477,6 +479,16 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
         if (!sc.Error.empty()) {
             Fail(sc.Error);
             return false;
+        }
+        if (std::find(m_Options.CaptureFrames.begin(), m_Options.CaptureFrames.end(), i + 1) != m_Options.CaptureFrames.end()) {
+            RgbaImage checkpoint;
+            std::string error;
+            const std::string path = m_Options.CaptureFrameDirectory + "/" + scene.Name +
+                ".frame-" + std::to_string(i + 1) + ".png";
+            if (!CaptureBackBuffer(checkpoint) || !WritePng(path, checkpoint, error)) {
+                if (!error.empty()) Fail(error);
+                return false;
+            }
         }
     }
     if (!CaptureBackBuffer(out))
