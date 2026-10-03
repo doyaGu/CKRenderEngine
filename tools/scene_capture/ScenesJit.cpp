@@ -65,9 +65,55 @@ void MoveComposite2D(SceneContext &sc) {
             0.55f + 0.3f * std::sin(phase + float(i))));
     }
 }
+
+bool BuildComposite3D(SceneContext &sc) {
+    g_Objects.clear();
+    SceneSetBackgroundColor(sc, 0xff284058);
+    SceneSetAmbient(sc, 0xff505050);
+    CKTexture *checker = SceneCreateCheckerTexture(sc, "checker", 128, 128, 16, 0xffc0b080, 0xff304858);
+    CKMaterial *ground = SceneCreateMaterial(sc, "ground", VxColor(1.0f, 1.0f, 1.0f, 1.0f), checker);
+    SceneCreateEntity(sc, "floor", SceneCreatePlaneMesh(sc, "floor", 30, 30, 8, 8, ground), VxVector(0, 0, 0));
+    for (unsigned i = 0; i < 12; ++i) {
+        char name[32]; snprintf(name, sizeof(name), "object-%u", i);
+        CKMaterial *material = SceneCreateMaterial(sc, name, VxColor(0.3f + 0.2f * (i % 3), 0.8f, 0.9f, 1.0f), checker);
+        CKMesh *mesh = i % 2 ? SceneCreateSphereMesh(sc, name, 1.2f, 12, 16, material)
+                            : SceneCreateBoxMesh(sc, name, VxVector(2, 2, 2), material);
+        if (!mesh) return false;
+        // Alternate genuine prelit and lit meshes in the same render list.
+        if (i % 3 != 0) mesh->SetLitMode(VX_PRELITMESH);
+        CK3dEntity *entity = SceneCreateEntity(sc, name, mesh, VxVector(0, 1.3f, 0));
+        if (!entity) return false;
+        g_Objects.push_back(entity);
+    }
+    CKMaterial *glass = Panel(sc, "glass", VxColor(0.3f, 0.75f, 1.0f, 0.3f));
+    glass->SetTwoSided(TRUE);
+    SceneCreateEntity(sc, "glass", SceneCreateQuadMesh(sc, "glass", 13, 4, glass), VxVector(0, 2.3f, -2));
+    SceneCreateLight(sc, "sun", VX_LIGHTDIREC, VxColor(0.8f, 0.8f, 1.0f, 1.0f), VxVector(0, 10, 0), VxVector(-0.5f, -1, 0.3f), 100);
+    SceneCreateLight(sc, "point", VX_LIGHTPOINT, VxColor(1.0f, 0.3f, 0.1f, 1.0f), VxVector(4, 6, -3), VxVector(0, -1, 0), 20);
+    sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(0, 8, -17), VxVector(0, 1, 1), 55);
+    SceneCreate2dQuad(sc, "HUD", VxRect(18, 18, 225, 46), Panel(sc, "HUD", VxColor(0.1f, 0.7f, 0.3f, 0.75f)), false);
+    return sc.MainCamera != NULL;
+}
+
+void MoveComposite3D(SceneContext &sc) {
+    const float phase = float(sc.FrameIndex) * 0.02f;
+    for (unsigned i = 0; i < g_Objects.size(); ++i) {
+        const float angle = phase + float(i) * 0.4f;
+        VxMatrix matrix; Vx3DMatrixIdentity(matrix);
+        matrix[0][0] = matrix[2][2] = std::cos(angle);
+        matrix[0][2] = std::sin(angle); matrix[2][0] = -std::sin(angle);
+        matrix[3][0] = -6.0f + float(i % 4) * 4.0f;
+        matrix[3][1] = 1.5f + 0.4f * std::sin(phase + float(i));
+        matrix[3][2] = -3.0f + float(i / 4) * 4.0f;
+        g_Objects[i]->SetWorldMatrix(matrix);
+    }
+    const VxVector eye(2.0f * std::sin(phase * 0.5f), 8, -17), target(0, 1, 1);
+    sc.MainCamera->SetPosition(&eye); sc.MainCamera->LookAt(&target);
+}
 }
 
 const SceneDef g_ScenesJit[] = {
     {"composite_2d", "Animated cards, overlapping alpha panels and sprite text through CK2 scene traversal", BuildComposite2D, MoveComposite2D, NULL, false, 2, 1.0f, NULL},
+    {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, false, 2, 1.0f, NULL},
 };
 const int g_ScenesJitCount = sizeof(g_ScenesJit) / sizeof(g_ScenesJit[0]);

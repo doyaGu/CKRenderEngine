@@ -27,7 +27,7 @@ file(MAKE_DIRECTORY "${_out}")
 
 # Animated composites have deterministic checkpoint comparisons in scene_capture_jit.
 set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --frames 5
-    --skip composite_2d)
+    --skip composite_2d,composite_3d)
 if (SKIP)
     list(APPEND _common --skip "${SKIP}")
 endif ()
