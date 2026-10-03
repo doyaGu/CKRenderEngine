@@ -2,7 +2,7 @@
 import copy
 import unittest
 
-from scene_benchmark_jit import aggregate, distribution, summarize_profile
+from scene_benchmark_jit import aggregate, distribution, paired_foreground, summarize_profile
 
 
 class SceneBenchmarkTest(unittest.TestCase):
@@ -69,6 +69,14 @@ class SceneBenchmarkTest(unittest.TestCase):
         result = aggregate([row, unfocused], foreground_only=True)
         self.assertEqual(result[0]["repetitions"], 1)
         self.assertEqual(result[0]["medianOfRunMediansMs"], 2.5)
+
+    def test_paired_foreground_requires_all_three_modes_in_the_same_run(self):
+        rows = [dict(driver="vulkan", scene="composite_2d", repeat=repeat, mode=mode,
+                     issues=[], summary=dict(allMeasuredFramesFocused=True))
+                for repeat in (1, 2, 3) for mode in ("off", "fragment", "on")]
+        rows[3]["summary"]["allMeasuredFramesFocused"] = False
+        rows.pop()
+        self.assertEqual([r["repeat"] for r in paired_foreground(rows)], [1, 1, 1])
 
 
 if __name__ == "__main__":

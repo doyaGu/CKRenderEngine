@@ -155,11 +155,26 @@ def aggregate(records, foreground_only=False):
     return result
 
 
+def paired_foreground(records):
+    """Compare modes from the same repetition, with no focus loss in any mode."""
+    groups = {}
+    for row in records:
+        groups.setdefault((row["driver"], row["scene"], row["repeat"]), []).append(row)
+    result = []
+    for rows in groups.values():
+        if len(rows) == 3 and {r["mode"] for r in rows} == set(MODES) and all(
+                not r["issues"] and r["summary"]["allMeasuredFramesFocused"] for r in rows):
+            result.extend(rows)
+    return result
+
+
 def write_report(out, report):
     report["aggregates"] = aggregate(report["records"])
     report["foregroundAggregates"] = aggregate(report["records"], foreground_only=True)
+    report["pairedForegroundAggregates"] = aggregate(paired_foreground(report["records"]))
     (out / "results.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    for key, filename in (("aggregates", "summary.csv"), ("foregroundAggregates", "foreground-summary.csv")):
+    for key, filename in (("aggregates", "summary.csv"), ("foregroundAggregates", "foreground-summary.csv"),
+                          ("pairedForegroundAggregates", "paired-foreground-summary.csv")):
         if report[key]:
             with (out / filename).open("w", encoding="utf-8", newline="") as stream:
                 writer = csv.DictWriter(stream, fieldnames=list(report[key][0]))
