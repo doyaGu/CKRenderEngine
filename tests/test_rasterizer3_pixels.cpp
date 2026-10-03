@@ -4459,6 +4459,7 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 
 #ifdef CKRE_PIXEL_SDL_GPU
 #include "TestFFJitReplay.inl"
+#include "TestFFJitCache.inl"
 #endif
 
 void CheckFullImageComparator()
@@ -4611,6 +4612,9 @@ void BackendRendersFixedFunctionSemantics()
 #ifdef CKRE_PIXEL_SDL_GPU
     if (opened)
         CheckPrewarmedFragmentPrograms(precompiled);
+    if (opened) {
+        CheckFFJitCachePressure();
+    }
 #endif
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -4623,6 +4627,9 @@ int main(int argc, char **argv)
 {
     TestFramework tests;
     tests.Run("full-image comparator detects color, alpha and coverage differences", &CheckFullImageComparator);
+#ifdef CKRE_PIXEL_SDL_GPU
+    tests.Run("JIT usage is bounded and decays after inactivity", &CheckFFJitUsage);
+#endif
     if (tests.ExitCode() != 0 || (argc > 1 && strcmp(argv[1], "--image-diff-only") == 0))
         return tests.ExitCode();
     const bool visible = argc > 1 && strcmp(argv[1], "--visible") == 0;
