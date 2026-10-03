@@ -50,6 +50,10 @@ bool SupportedDeformation(const CKFFConstantSet &constants) {
     float tween[4];
     std::memcpy(tween, draw + CKFF_DRAW_PARAM_TWEEN * 16, sizeof(tween));
     if (tween[1] == 0.0f) return true;
+    if (tween[1] == 1.0f)
+        return constants[CKRST_BLOCK_VERTEX_BLEND_MATRICES].Bytes.Size() >= CKFF_VERTEX_BLEND_MATRIX_COUNT * 64 &&
+               (tween[2] == 0.0f || tween[2] == 1.0f || tween[2] == 2.0f || tween[2] == 3.0f) &&
+               (tween[3] == 0.0f || tween[3] == 1.0f);
     // The resolver supplies a position/normal stream mask and no indices.
     // Finite factors are deliberately not clamped: extrapolation is legal.
     return tween[1] == 2.0f && std::isfinite(tween[0]) && tween[3] == 0.0f &&
@@ -117,10 +121,41 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
         interpolate(position, tangent), position);
     normal = b.Select(b.And(tweening, b.IntNotEqual(b.IntAnd(streams, b.Int(2)), b.Int(0))),
         interpolate(normal, b.Input({3, 3, CKJIT_INPUT_ATTRIBUTE})), normal);
-    const CKJitValue geometry[] = {transform(rows.Matrices, CKFF_MATRIX_MVP_OR_VIEWPROJ, position, true),
+    b.If(b.Equal(c(tween, 1), one));
+    const CKJitValue indices = b.Input({6, 4, CKJIT_INPUT_ATTRIBUTE, CKJIT_INPUT_UINT});
+    CKJitValue remaining = one, blendedPosition = b.Float4(0, 0, 0, 0), blendedNormal = b.Float3(0, 0, 0);
+    for (unsigned slot = 0; slot < CKFF_VERTEX_BLEND_MATRIX_COUNT; ++slot) {
+        b.If(b.IntGreaterEqual(streams, b.Int(slot)));
+        const CKJitValue explicitWeight = b.IntGreater(streams, b.Int(slot));
+        const CKJitValue influence = b.Select(explicitWeight, slot < 3 ? c(weight, slot) : zero, remaining);
+        const CKJitValue nextRemaining = b.Select(explicitWeight, b.Sub(remaining, influence), remaining);
+        const CKJitValue index = b.Select(b.Greater(c(tween, 3), half), c(indices, slot), b.Int(slot));
+        CKJitValue columns[4];
+        for (unsigned axis = 0; axis < 4; ++axis) {
+            columns[axis] = uniform(rows.Palette, 3 * 4 + axis);
+            for (int matrix = 2; matrix >= 0; --matrix)
+                columns[axis] = b.Select(matrix ? b.IntEqual(index, b.Int(matrix)) : b.IntLessEqual(index, b.Int(0)),
+                    uniform(rows.Palette, matrix * 4 + axis), columns[axis]);
+        }
+        const CKJitValue worldPosition = transformColumns(columns, position, true, false);
+        const CKJitValue worldNormal = b.Swizzle(transformColumns(columns, normal, false, false), "xyz");
+        const auto accumulate = [&](CKJitValue value, CKJitValue sum) {
+            return referenceFormat == CKRST_SHADER_FORMAT_DXIL ? b.Mad(value, influence, sum) : b.Add(b.Mul(value, influence), sum);
+        };
+        b.Else({nextRemaining, accumulate(worldPosition, blendedPosition), accumulate(worldNormal, blendedNormal)});
+        CKJitValue joined[3];
+        b.EndIf({remaining, blendedPosition, blendedNormal}, joined);
+        remaining = joined[0]; blendedPosition = joined[1]; blendedNormal = joined[2];
+    }
+    const CKJitValue blendedClip = transform(rows.Matrices, CKFF_MATRIX_MVP_OR_VIEWPROJ, blendedPosition, true, true);
+    const CKJitValue blendedView = b.Swizzle(transform(rows.Matrices, CKFF_MATRIX_MODELVIEW, blendedPosition, true, true), "xyz");
+    const CKJitValue blendedViewNormal = b.Swizzle(transform(rows.Matrices, CKFF_MATRIX_NORMAL, blendedNormal, false), "xyz");
+    b.Else({blendedClip, blendedView, blendedViewNormal, blendedPosition});
+    CKJitValue geometry[4];
+    b.EndIf({transform(rows.Matrices, CKFF_MATRIX_MVP_OR_VIEWPROJ, position, true),
         b.Swizzle(transform(rows.Matrices, CKFF_MATRIX_MODELVIEW, position, true), "xyz"),
         b.Swizzle(transform(rows.Matrices, CKFF_MATRIX_NORMAL, normal, false), "xyz"),
-        transform(rows.Matrices, CKFF_MATRIX_WORLD, position, true)};
+        transform(rows.Matrices, CKFF_MATRIX_WORLD, position, true)}, geometry);
     const CKJitValue clip = geometry[0], view = geometry[1], transformedNormal = geometry[2];
     CKJitValue distances[8];
     if (clipping) {

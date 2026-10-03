@@ -3,7 +3,7 @@
 
 #include "CKFFNativeFragmentJit.h"
 
-// Ordinary and tweened 3D vertices. Eligibility is checked
+// Ordinary, tweened and matrix-blended 3D vertices. Eligibility is checked
 // for every draw, before choosing a
 // program binding; these switches do not enter the fragment compilation key.
 bool CKFFNativeUnlitDraw(const CKFFConstantSet &constants);
