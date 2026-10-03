@@ -486,6 +486,26 @@ void CheckFFReplay(Backend &backend, const std::vector<FFReplayCase> &cases,
               "drained worker publishes every compilation and pipeline completion");
     RunFFReplay(ctx, cases, resources, images);
     const auto after = ctx->GetFFJitStats();
+    CKSdlGpuFFJitSnapshotV1 snapshot;
+    TestCheck(CKSdlGpuQueryFFJitSnapshotV1(ctx, sizeof(snapshot), &snapshot) == 1,
+              "live context exposes the optional JIT snapshot");
+#define CKSDL_GPU_CHECK_SNAPSHOT(Name) TestCheck(snapshot.Name == after.Name, "snapshot counter " #Name);
+    CKSDL_GPU_FF_JIT_SNAPSHOT_V1_FIELDS(CKSDL_GPU_CHECK_SNAPSHOT)
+#undef CKSDL_GPU_CHECK_SNAPSHOT
+    struct QueryFromWorker {
+        const CKRasterizerContext *Context;
+        static int Run(void *user) {
+            auto *query = static_cast<QueryFromWorker *>(user);
+            CKSdlGpuFFJitSnapshotV1 other;
+            other.Requests = 123;
+            return !CKSdlGpuQueryFFJitSnapshotV1(query->Context, sizeof(other), &other) && other.Requests == 123 ? 0 : 1;
+        }
+    } query = {ctx};
+    SDL_Thread *queryThread = SDL_CreateThread(QueryFromWorker::Run, "JitSnapshotThreadTest", &query);
+    int queryResult = -1;
+    TestCheck(queryThread != nullptr, "snapshot thread test starts");
+    if (queryThread) SDL_WaitThread(queryThread, &queryResult);
+    TestCheck(queryResult == 0, "JIT snapshot refuses access from a worker thread");
     CheckFFReplayImages("warm", cases, resources, images, reference);
     CheckFFJitStatistics(after);
     TestCheck(after.CompileQueued == before.CompileQueued && after.PipelineQueued == before.PipelineQueued &&
