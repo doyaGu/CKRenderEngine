@@ -1,5 +1,7 @@
 #include <cstdio>
 #include <cmath>
+#include <cfloat>
+#include <climits>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
@@ -1222,6 +1224,334 @@ void AnimationMissingSharedOwnerCreatesEmptyData() {
     VxVector actual;
     Check(owner.EvaluatePosition(0.0f, actual) && Equal(actual, oldPosition),
           "Missing shared reference changed the old owner's keys");
+}
+
+template<int Format, int Sources>
+void LoadedMergedAnimationHandlesMissingSources() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation owner(&context, "MergedOwner"), first(&context, "MergedFirst"),
+        second(&context, "MergedSecond"), loaded(&context, "MergedLoaded"), reloaded(&context, "MergedReloaded");
+    RCKObjectAnimation *sources[] = {&first, &second};
+    for (int i = 0; i < 2; ++i) {
+        VxVector position(i ? 10.0f : 2.0f, 0.0f, 0.0f);
+        VxVector scale(i ? 5.0f : 1.0f, 2.0f, 3.0f);
+        VxQuaternion rotation(0.0f, 0.0f, i ? 1.0f : 0.0f, i ? 0.0f : 1.0f);
+        sources[i]->AddPositionKey(0.0f, &position);
+        sources[i]->AddScaleKey(0.0f, &scale);
+        sources[i]->AddRotationKey(0.0f, &rotation);
+        sources[i]->AddScaleAxisKey(0.0f, &rotation);
+        RCKMorphController *morph = static_cast<RCKMorphController *>(sources[i]->CreateController(CKANIMATION_MORPH_CONTROL));
+        morph->SetMorphVertexCount(1);
+        CKMorphKey key;
+        key.TimeStep = 0.0f;
+        key.PosArray = &position;
+        key.NormArray = nullptr;
+        morph->AddKey(&key, FALSE);
+        sources[i]->SetLength(i ? 10.0f : 20.0f);
+    }
+    owner.SetLength(20.0f);
+    RCKObjectAnimation *source1 = (Sources & 1) ? &first : nullptr;
+    RCKObjectAnimation *source2 = (Sources & 2) ? &second : nullptr;
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, Format == 0 ? 0 : 10);
+    if (Format == 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMLENGTH);
+        chunk->WriteFloat(20.0f);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMMERGE);
+        chunk->WriteFloat(0.25f);
+        chunk->WriteInt(TRUE);
+        chunk->WriteObject(source1);
+        chunk->WriteObject(source2);
+    } else {
+        CKDWORD identifier = Format == 1 ? CK_STATESAVE_OBJANIMNEWDATA :
+            (Format == 2 ? CK_STATESAVE_OBJANIMCONTROLLERS : CK_STATESAVE_OBJANIMSHARED);
+        WriteAnimationStateBlock(chunk.get(), identifier, &owner, source1, source2, true, -99.0f);
+    }
+    LoadChunk(loaded, chunk.get());
+    Check(loaded.IsMerged() && loaded.GetMergeFactor() == 0.25f && loaded.GetLength() == 20.0f,
+          "Merged Load changed flags, factor or length");
+    Chunk saved(loaded.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    LoadChunk(reloaded, saved.get());
+    RCKObjectAnimation *targets[] = {&loaded, &reloaded};
+    const float factors[] = {0.0f, 0.25f, 1.0f};
+    for (int targetIndex = 0; targetIndex < 2; ++targetIndex) {
+        RCKObjectAnimation *target = targets[targetIndex];
+        for (int i = 0; i < 3; ++i) {
+            target->SetMergeFactor(factors[i]);
+            bool selected = i == 0 ? source1 != nullptr : (i == 2 ? source2 != nullptr : Sources != 0);
+            float x = i == 0 ? 2.0f : (i == 2 ? 10.0f : (Sources == 3 ? 4.0f : (source1 ? 2.0f : 10.0f)));
+            VxVector output(123.0f);
+            Check((target->EvaluatePosition(7.0f, output) != FALSE) == selected,
+                  "Merged position returned the wrong missing-source result");
+            if (selected) Check(Equal(output, VxVector(x, 0.0f, 0.0f)), "Merged position lost the available source");
+            VxQuaternion rotation(0.5f, 0.5f, 0.5f, 0.5f);
+            Check((target->EvaluateRotation(7.0f, rotation) != FALSE) == selected,
+                  "Merged rotation returned the wrong missing-source result");
+            float rotationFactor = Sources == 3 ? factors[i] : (source1 ? 0.0f : 1.0f);
+            const float angle = 1.57079632679f * rotationFactor;
+            if (selected) Check(rotation.x == 0.0f && rotation.y == 0.0f &&
+                                std::fabs(rotation.z - std::sin(angle)) < 5.0e-5f &&
+                                std::fabs(rotation.w - std::cos(angle)) < 5.0e-5f,
+                                "Merged rotation lost the available source or blend");
+            // Scale, scale-axis and mismatched/absent Morph use any available source,
+            // matching their existing behavior when a source lacks that controller.
+            Check((target->EvaluateScale(7.0f, output) != FALSE) == (Sources != 0), "Merged scale missing-source result changed");
+            if (Sources) {
+                float scaleX = Sources == 3 ? 1.0f + 4.0f * factors[i] : (source1 ? 1.0f : 5.0f);
+                Check(Equal(output, VxVector(scaleX, 2.0f, 3.0f)), "Merged scale lost the available source");
+            }
+            Check((target->EvaluateScaleAxis(7.0f, rotation) != FALSE) == (Sources != 0), "Merged scale-axis missing-source result changed");
+            if (Sources) Check(rotation.x == 0.0f && rotation.y == 0.0f &&
+                               std::fabs(rotation.z - std::sin(angle)) < 5.0e-5f &&
+                               std::fabs(rotation.w - std::cos(angle)) < 5.0e-5f,
+                               "Merged scale-axis lost the available source or blend");
+            output.Set(123.0f, 123.0f, 123.0f);
+            Check((target->EvaluateMorphTarget(7.0f, 1, &output, sizeof(output), nullptr) != FALSE) == (Sources != 0),
+                  "Merged Morph missing-source result changed");
+            if (Sources) {
+                float morphX = Sources == 3 ? 2.0f + 8.0f * factors[i] : (source1 ? 2.0f : 10.0f);
+                Check(Equal(output, VxVector(morphX, 0.0f, 0.0f)), "Merged Morph lost the available source");
+            } else {
+                Check(Equal(output, VxVector(123.0f)), "Failed merged Morph changed the output buffer");
+            }
+        }
+    }
+}
+
+void LoadMergedState(RCKObjectAnimation &target, RCKObjectAnimation *first,
+                     RCKObjectAnimation *second, float length = 20.0f) {
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMCONTROLLERS, nullptr,
+                             first, second, true, -99.0f, length);
+    LoadChunk(target, chunk.get());
+}
+
+void AddTimedAnimationKeys(RCKObjectAnimation &animation, float base, float span = 10.0f) {
+    RCKMorphController *morph = static_cast<RCKMorphController *>(animation.CreateController(CKANIMATION_MORPH_CONTROL));
+    morph->SetMorphVertexCount(1);
+    for (int i = 0; i < 2; ++i) {
+        VxVector value(base + 10.0f * i, 2.0f, 3.0f);
+        VxQuaternion rotation(0.0f, 0.0f, i ? 1.0f : 0.0f, i ? 0.0f : 1.0f);
+        animation.AddPositionKey(i ? span : 0.0f, &value);
+        animation.AddScaleKey(i ? span : 0.0f, &value);
+        animation.AddRotationKey(i ? span : 0.0f, &rotation);
+        animation.AddScaleAxisKey(i ? span : 0.0f, &rotation);
+        CKMorphKey *key = static_cast<CKMorphKey *>(morph->GetKey(morph->AddKey(i ? span : 0.0f, TRUE)));
+        key->PosArray[0] = value;
+        key->NormArray[0].xa = static_cast<short>(base * 100.0f);
+        key->NormArray[0].ya = 300;
+    }
+    animation.SetLength(span);
+}
+
+template<int Case>
+void MergedAnimationTimeMappingRemainsFinite() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "TimeFirst"), second(&context, "TimeSecond"),
+        merged(&context, "TimeMerged");
+    const float span = Case == 2 ? 2.0e-30f : (Case == 4 ? 10.0f : 1.0f);
+    AddTimedAnimationKeys(first, 2.0f, span);
+    AddTimedAnimationKeys(second, 10.0f, span);
+    const float length = Case == 0 ? 0.0f : (Case == 1 ? 1.0e-40f :
+        (Case == 2 ? 1.0e30f : (Case == 3 ? 20.0f : -20.0f)));
+    LoadMergedState(merged, &first, &second, length);
+    if (Case == 1) { first.SetLength(length); second.SetLength(length); }
+    if (Case == 2) { first.SetLength(length); second.SetLength(length); }
+    if (Case == 3) { first.SetLength(0.0f); second.SetLength(0.0f); }
+    const float expectedX = Case == 0 || Case == 3 ? 4.0f : 9.0f;
+    for (int pass = 0; pass < 2; ++pass) {
+        const float time = Case == 0 ? (pass ? 7.0f : 0.0f) :
+            (Case == 1 ? 0.5f : (Case == 2 ? 1.0e-30f : (Case == 3 ? 7.0f : -10.0f)));
+        VxVector output(123.0f);
+        Check(merged.EvaluatePosition(time, output) && std::fabs(output.x - expectedX) < 5.0e-5f,
+              "Merged position received invalid or prematurely rounded source time");
+        Check(merged.EvaluateScale(time, output) && std::fabs(output.x - expectedX) < 5.0e-5f,
+              "Merged scale received invalid source time");
+        VxQuaternion rotation;
+        const float expectedZ = Case == 0 || Case == 3 ? 0.0f : std::sqrt(0.5f);
+        const float expectedW = Case == 0 || Case == 3 ? 1.0f : std::sqrt(0.5f);
+        Check(merged.EvaluateRotation(time, rotation) && std::fabs(rotation.z - expectedZ) < 5.0e-5f &&
+              std::fabs(rotation.w - expectedW) < 5.0e-5f, "Merged rotation received invalid source time");
+        Check(merged.EvaluateScaleAxis(time, rotation) && std::fabs(rotation.z - expectedZ) < 5.0e-5f &&
+              std::fabs(rotation.w - expectedW) < 5.0e-5f, "Merged scale-axis received invalid source time");
+        Check(merged.EvaluateMorphTarget(time, 1, &output, sizeof(output), nullptr) &&
+              std::fabs(output.x - expectedX) < 5.0e-5f, "Merged Morph received invalid source time");
+        Chunk saved(merged.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        LoadChunk(merged, saved.get());
+    }
+}
+
+float FloatWithBits(CKDWORD bits) {
+    float value;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+void MergedAnimationRejectsNonfiniteTimeState() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "FiniteFirst"), second(&context, "FiniteSecond"), merged(&context, "NonfiniteMerged");
+    AddTimedAnimationKeys(first, 2.0f);
+    AddTimedAnimationKeys(second, 10.0f);
+    const CKDWORD bits[] = {0x7f800000u, 0xff800000u, 0x7fc00000u};
+    for (int field = 0; field < 4; ++field) {
+        for (int i = 0; i < 3; ++i) {
+            LoadMergedState(merged, &first, &second, field == 0 ? FloatWithBits(bits[i]) : 20.0f);
+            first.SetLength(field == 1 ? FloatWithBits(bits[i]) : 10.0f);
+            second.SetLength(field == 1 ? FloatWithBits(bits[i]) : 10.0f);
+            merged.SetMergeFactor(field == 2 ? FloatWithBits(bits[i]) : 0.25f);
+            const float time = field == 3 ? FloatWithBits(bits[i]) : 7.0f;
+            VxVector output(123.0f);
+            VxQuaternion rotation(0.5f, 0.5f, 0.5f, 0.5f);
+            Check(!merged.EvaluatePosition(time, output), "Merged position accepted nonfinite time state");
+            Check(!merged.EvaluateScale(time, output), "Merged scale accepted nonfinite time state");
+            Check(!merged.EvaluateRotation(time, rotation), "Merged rotation accepted nonfinite time state");
+            Check(!merged.EvaluateScaleAxis(time, rotation), "Merged scale-axis accepted nonfinite time state");
+            output.Set(123.0f, 123.0f, 123.0f);
+            Check(!merged.EvaluateMorphTarget(time, 1, &output, sizeof(output), nullptr) && Equal(output, VxVector(123.0f)),
+                  "Failed nonfinite merged Morph modified the output buffer");
+        }
+    }
+}
+
+template<int Disabled>
+void MergedMorphUsesOnlySuccessfulSources() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "FailMorphFirst"), second(&context, "FailMorphSecond"), merged(&context, "FailMorphMerged");
+    AddTimedAnimationKeys(first, 2.0f);
+    AddTimedAnimationKeys(second, 10.0f);
+    first.SetFlags((Disabled & 1) ? CK_OBJECTANIMATION_IGNOREMORPH : 0);
+    second.SetFlags((Disabled & 2) ? CK_OBJECTANIMATION_IGNOREMORPH : 0);
+    LoadMergedState(merged, &first, &second);
+    VxVector output(123.0f), expected;
+    VxCompressedVector normal, expectedNormal;
+    normal.xa = 111; normal.ya = 222;
+    if (Disabled != 3) {
+        RCKObjectAnimation &available = Disabled == 1 ? second : first;
+        Check(available.EvaluateMorphTarget(3.5f, 1, &expected, sizeof(expected), &expectedNormal), "Morph control source failed");
+    }
+    bool result = merged.EvaluateMorphTarget(7.0f, 1, &output, sizeof(output), &normal) != FALSE;
+    Check(result == (Disabled != 3), "Merged Morph ignored failed source results");
+    if (result) {
+        Check(Equal(output, expected) && !memcmp(&normal, &expectedNormal, sizeof(normal)), "Merged Morph blended unavailable source buffers");
+    } else {
+        Check(Equal(output, VxVector(123.0f)) && normal.xa == 111 && normal.ya == 222,
+              "Failed merged Morph changed caller buffers");
+    }
+}
+
+void MergedMorphSupportsOptionalOutputBuffers() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "OptionalFirst"), second(&context, "OptionalSecond"), merged(&context, "OptionalMerged");
+    AddTimedAnimationKeys(first, 2.0f);
+    AddTimedAnimationKeys(second, 10.0f);
+    LoadMergedState(merged, &first, &second);
+    VxCompressedVector expected, actual;
+    VxVector position;
+    Check(merged.EvaluateMorphTarget(7.0f, 1, &position, sizeof(position), &expected), "Optional Morph control evaluation failed");
+    Check(merged.EvaluateMorphTarget(7.0f, 1, nullptr, 0, &actual) && !memcmp(&actual, &expected, sizeof(actual)),
+          "Normals-only merged Morph failed");
+    Check(merged.EvaluateMorphTarget(7.0f, 1, nullptr, 0, nullptr), "Merged Morph rejected omitted outputs");
+    Check(merged.EvaluateMorphTarget(7.0f, 0, nullptr, 0, nullptr), "Merged Morph rejected a zero-vertex request");
+}
+
+void MergedMorphSubsetPreservesBufferBounds() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "SubsetFirst"), second(&context, "SubsetSecond"), merged(&context, "SubsetMerged");
+    RCKObjectAnimation *sources[] = {&first, &second};
+    for (int source = 0; source < 2; ++source) {
+        RCKMorphController *morph = static_cast<RCKMorphController *>(sources[source]->CreateController(CKANIMATION_MORPH_CONTROL));
+        morph->SetMorphVertexCount(3);
+        CKMorphKey *key = static_cast<CKMorphKey *>(morph->GetKey(morph->AddKey(0.0f, TRUE)));
+        for (int vertex = 0; vertex < 3; ++vertex) {
+            key->PosArray[vertex] = VxVector((source ? 10.0f : 2.0f) + vertex, 3.0f, 4.0f);
+            key->NormArray[vertex].xa = source ? 1000 : 200;
+            key->NormArray[vertex].ya = 300;
+        }
+        sources[source]->SetLength(10.0f);
+    }
+    LoadMergedState(merged, &first, &second);
+    struct StridedOutput { CKDWORD Before; VxVector Value; CKDWORD After; };
+    StridedOutput output[3];
+    VxCompressedVector normals[3];
+    for (int i = 0; i < 3; ++i) {
+        output[i].Before = output[i].After = 0x12345678u;
+        output[i].Value.Set(123.0f, 123.0f, 123.0f);
+        normals[i].xa = 111; normals[i].ya = 222;
+    }
+    Check(merged.EvaluateMorphTarget(7.0f, 2, &output[0].Value, sizeof(output[0]), normals), "Merged Morph subset failed");
+    for (int i = 0; i < 3; ++i) {
+        Check(output[i].Before == 0x12345678u && output[i].After == 0x12345678u, "Merged Morph changed stride padding");
+        if (i < 2) {
+            Check(Equal(output[i].Value, VxVector(4.0f + i, 3.0f, 4.0f)) && normals[i].xa == 400 && normals[i].ya == 300,
+                  "Merged Morph subset changed positions or packed normals");
+        } else {
+            Check(Equal(output[i].Value, VxVector(123.0f)) && normals[i].xa == 111 && normals[i].ya == 222,
+                  "Merged Morph overwrote the unrequested tail");
+        }
+    }
+    StridedOutput before[3];
+    VxCompressedVector normalsBefore[3];
+    memcpy(before, output, sizeof(output)); memcpy(normalsBefore, normals, sizeof(normals));
+    const int invalidCounts[] = {-1, 4, INT_MAX};
+    for (int i = 0; i < 3; ++i) {
+        Check(!merged.EvaluateMorphTarget(7.0f, invalidCounts[i], &output[0].Value, sizeof(output[0]), normals),
+              "Merged Morph accepted an invalid vertex request");
+        Check(!memcmp(before, output, sizeof(output)) && !memcmp(normalsBefore, normals, sizeof(normals)),
+              "Invalid merged Morph request modified caller buffers");
+    }
+}
+
+void MergedMorphPreservesAbsentKeyPayloads() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "PartialFirst"), second(&context, "PartialSecond"), merged(&context, "PartialMerged");
+    AddTimedAnimationKeys(first, 2.0f); AddTimedAnimationKeys(second, 10.0f);
+    CKMorphKey *key = static_cast<CKMorphKey *>(first.GetMorphController()->GetKey(1));
+    delete[] key->PosArray; key->PosArray = nullptr;
+    delete[] key->NormArray; key->NormArray = nullptr;
+    second.SetFlags(CK_OBJECTANIMATION_IGNOREMORPH);
+    LoadMergedState(merged, &first, &second);
+    VxVector output(123.0f);
+    VxCompressedVector normal; normal.xa = 111; normal.ya = 222;
+    Check(merged.EvaluateMorphTarget(7.0f, 1, &output, sizeof(output), &normal) && Equal(output, VxVector(123.0f)) &&
+          normal.xa == 111 && normal.ya == 222, "Merged Morph changed an output omitted by the available key");
+}
+
+template<int Topology>
+void LoadedMergedAnimationTerminatesCycles() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation leaf(&context, "GraphLeaf"), root(&context, "GraphRoot"), peer(&context, "GraphPeer"), other(&context, "GraphOther");
+    AddTimedAnimationKeys(leaf, 2.0f);
+    if (Topology == 0) {
+        LoadMergedState(root, &root, nullptr);
+    } else if (Topology == 1 || Topology == 2) {
+        LoadMergedState(root, &peer, Topology == 2 ? &leaf : nullptr);
+        LoadMergedState(peer, &root, nullptr);
+    } else {
+        // A shared descendant is a valid DAG, not a cycle.
+        LoadMergedState(peer, &leaf, nullptr);
+        LoadMergedState(other, &leaf, nullptr);
+        LoadMergedState(root, &peer, &other);
+    }
+    const bool available = Topology >= 2;
+    for (int pass = 0; pass < 2; ++pass) {
+        Check((root.HasPositionInfo() != FALSE) == available && (root.HasScaleInfo() != FALSE) == available &&
+              (root.HasRotationInfo() != FALSE) == available && (root.HasScaleAxisInfo() != FALSE) == available &&
+              (root.HasMorphInfo() != FALSE) == available && (root.HasMorphNormalInfo() != FALSE) == available,
+              "Merged graph queries did not ignore only cyclic branches");
+        Check(root.GetMorphVertexCount() == (available ? 1 : 0), "Merged graph Morph count lost available data");
+        VxVector output(123.0f);
+        VxQuaternion rotation;
+        Check((root.EvaluatePosition(7.0f, output) != FALSE) == available, "Merged graph position result changed");
+        if (available) Check(std::fabs(output.x - 5.5f) < 5.0e-5f, "Merged graph changed source time or valid DAG output");
+        Check((root.EvaluateScale(7.0f, output) != FALSE) == available, "Merged graph scale result changed");
+        Check((root.EvaluateRotation(7.0f, rotation) != FALSE) == available, "Merged graph rotation result changed");
+        Check((root.EvaluateScaleAxis(7.0f, rotation) != FALSE) == available, "Merged graph scale-axis result changed");
+        Check((root.EvaluateMorphTarget(7.0f, 1, &output, sizeof(output), nullptr) != FALSE) == available,
+              "Merged graph Morph result changed");
+        if (available) Check(std::fabs(output.x - 9.0f) < 5.0e-5f,
+                             "Merged graph changed the legacy unscaled Morph fallback time");
+        Chunk saved(root.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        LoadChunk(root, saved.get());
+    }
 }
 
 template<int Version, bool EmptyRotation>
@@ -2657,6 +2987,22 @@ int main(int argc, char **argv) {
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
     };
     const Test tests[] = {
+        {"Zero-length merged animation freezes at source time zero", MergedAnimationTimeMappingRemainsFinite<0>},
+        {"Merged time mapping avoids intermediate overflow", MergedAnimationTimeMappingRemainsFinite<1>},
+        {"Merged time mapping avoids intermediate underflow", MergedAnimationTimeMappingRemainsFinite<2>},
+        {"Zero-duration merged sources stay at time zero", MergedAnimationTimeMappingRemainsFinite<3>},
+        {"Merged time mapping retains signed finite durations", MergedAnimationTimeMappingRemainsFinite<4>},
+        {"Merged animation rejects nonfinite time state", MergedAnimationRejectsNonfiniteTimeState},
+        {"Merged Morph first source failure", MergedMorphUsesOnlySuccessfulSources<1>},
+        {"Merged Morph second source failure", MergedMorphUsesOnlySuccessfulSources<2>},
+        {"Merged Morph both source failures", MergedMorphUsesOnlySuccessfulSources<3>},
+        {"Merged Morph optional output buffers", MergedMorphSupportsOptionalOutputBuffers},
+        {"Merged Morph subset and invalid count bounds", MergedMorphSubsetPreservesBufferBounds},
+        {"Merged Morph absent key payloads preserve outputs", MergedMorphPreservesAbsentKeyPayloads},
+        {"Merged self-reference terminates", LoadedMergedAnimationTerminatesCycles<0>},
+        {"Merged two-object cycle terminates", LoadedMergedAnimationTerminatesCycles<1>},
+        {"Merged cyclic branch retains available source", LoadedMergedAnimationTerminatesCycles<2>},
+        {"Merged shared descendant remains a valid DAG", LoadedMergedAnimationTerminatesCycles<3>},
         {"Keyed full file collects children and merge state", FullFileKeyedAnimationCollectsChildren<false>},
         {"Compressed keyed file collects children and merge state", FullFileKeyedAnimationCollectsChildren<true>},
         {"Keyed merge queries, propagation and selective state", KeyedAnimationMergeStateAndSelectiveSnapshots},
@@ -2667,6 +3013,22 @@ int main(int argc, char **argv) {
         {"Animation shared block wins over full/snapshot", AnimationCombinedBlocksRespectPrecedence<true, false>},
         {"Animation shared block wins in reverse order", AnimationCombinedBlocksRespectPrecedence<true, true>},
         {"Animation missing shared owner", AnimationMissingSharedOwnerCreatesEmptyData},
+        {"Legacy merged no sources", LoadedMergedAnimationHandlesMissingSources<0, 0>},
+        {"Legacy merged first source", LoadedMergedAnimationHandlesMissingSources<0, 1>},
+        {"Legacy merged second source", LoadedMergedAnimationHandlesMissingSources<0, 2>},
+        {"Legacy merged both sources", LoadedMergedAnimationHandlesMissingSources<0, 3>},
+        {"Snapshot merged no sources", LoadedMergedAnimationHandlesMissingSources<1, 0>},
+        {"Snapshot merged first source", LoadedMergedAnimationHandlesMissingSources<1, 1>},
+        {"Snapshot merged second source", LoadedMergedAnimationHandlesMissingSources<1, 2>},
+        {"Snapshot merged both sources", LoadedMergedAnimationHandlesMissingSources<1, 3>},
+        {"Controller merged no sources", LoadedMergedAnimationHandlesMissingSources<2, 0>},
+        {"Controller merged first source", LoadedMergedAnimationHandlesMissingSources<2, 1>},
+        {"Controller merged second source", LoadedMergedAnimationHandlesMissingSources<2, 2>},
+        {"Controller merged both sources", LoadedMergedAnimationHandlesMissingSources<2, 3>},
+        {"Shared merged no sources", LoadedMergedAnimationHandlesMissingSources<3, 0>},
+        {"Shared merged first source", LoadedMergedAnimationHandlesMissingSources<3, 1>},
+        {"Shared merged second source", LoadedMergedAnimationHandlesMissingSources<3, 2>},
+        {"Shared merged both sources", LoadedMergedAnimationHandlesMissingSources<3, 3>},
         {"Full file managers omit first", FileSavePreservesSparseManagerChunks<0, false>},
         {"Full file managers omit middle", FileSavePreservesSparseManagerChunks<1, false>},
         {"Full file managers omit last", FileSavePreservesSparseManagerChunks<2, false>},

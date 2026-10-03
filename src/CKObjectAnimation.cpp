@@ -11,6 +11,67 @@
 #include "RCK3dEntity.h"
 #include "RCKMesh.h"
 
+#include <cmath>
+#include <cfloat>
+#include <climits>
+#include <cstring>
+
+namespace {
+
+// Track the active recursion path, rather than all previously visited nodes:
+// shared descendants in a valid merge DAG must remain available.
+class MergedAnimationVisit {
+public:
+    explicit MergedAnimationVisit(const RCKObjectAnimation *animation)
+        : m_Animation(animation), m_Previous(s_Current), m_Entered(FALSE) {
+        for (MergedAnimationVisit *visit = s_Current; visit; visit = visit->m_Previous) {
+            if (visit->m_Animation == animation)
+                return;
+        }
+        s_Current = this;
+        m_Entered = TRUE;
+    }
+
+    ~MergedAnimationVisit() {
+        if (m_Entered)
+            s_Current = m_Previous;
+    }
+
+    CKBOOL Entered() const { return m_Entered; }
+
+private:
+    MergedAnimationVisit(const MergedAnimationVisit &) = delete;
+    MergedAnimationVisit &operator=(const MergedAnimationVisit &) = delete;
+    const RCKObjectAnimation *m_Animation;
+    MergedAnimationVisit *m_Previous;
+    CKBOOL m_Entered;
+    static thread_local MergedAnimationVisit *s_Current;
+};
+
+thread_local MergedAnimationVisit *MergedAnimationVisit::s_Current = nullptr;
+
+CKBOOL ValidMergedTime(float time, float length, float factor) {
+    return std::isfinite(time) && std::isfinite(length) && std::isfinite(factor);
+}
+
+CKBOOL MergedSourceTime(float time, float length, RCKObjectAnimation *source, float &result) {
+    if (!source)
+        return FALSE;
+    const float sourceLength = source->GetLength();
+    if (!std::isfinite(sourceLength))
+        return FALSE;
+    // A zero-duration animation has no advancing phase. Wide intermediates
+    // also avoid overflow/underflow in a ratio whose final result is finite.
+    const double mapped = length == 0.0f || sourceLength == 0.0f ? 0.0 :
+        static_cast<double>(time) * sourceLength / length;
+    if (mapped > FLT_MAX || mapped < -FLT_MAX)
+        return FALSE;
+    result = static_cast<float>(mapped);
+    return TRUE;
+}
+
+} // namespace
+
 CK_CLASSID RCKObjectAnimation::m_ClassID = CKCID_OBJECTANIMATION;
 
 //=============================================================================
@@ -965,25 +1026,42 @@ CKBOOL RCKObjectAnimation::EvaluatePosition(float Time, VxVector &Pos) {
 
     // Check for merged animation (flag 0x80)
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
+        if (!ValidMergedTime(Time, GetLength(), m_MergeFactor))
+            return FALSE;
         if (m_MergeFactor == 0.0f) {
             // Use only first animation
-            float normalizedTime = Time / m_KeyframeData->m_Length;
-            float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
+            if (!m_Anim1) {
+                Pos.Set(0.0f, 0.0f, 0.0f);
+                return FALSE;
+            }
+            float anim1Time;
+            if (!MergedSourceTime(Time, GetLength(), m_Anim1, anim1Time))
+                return FALSE;
             return m_Anim1->EvaluatePosition(anim1Time, Pos);
         } else if (m_MergeFactor == 1.0f) {
             // Use only second animation
-            float normalizedTime = Time / m_KeyframeData->m_Length;
-            float anim2Time = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+            if (!m_Anim2) {
+                Pos.Set(0.0f, 0.0f, 0.0f);
+                return FALSE;
+            }
+            float anim2Time;
+            if (!MergedSourceTime(Time, GetLength(), m_Anim2, anim2Time))
+                return FALSE;
             return m_Anim2->EvaluatePosition(anim2Time, Pos);
         } else {
             // Blend between both animations
             VxVector pos2;
-            float normalizedTime = Time / m_KeyframeData->m_Length;
-            float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
-            float anim2Time = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+            float anim1Time = 0.0f, anim2Time = 0.0f;
+            CKBOOL source1 = MergedSourceTime(Time, GetLength(), m_Anim1, anim1Time);
+            CKBOOL source2 = MergedSourceTime(Time, GetLength(), m_Anim2, anim2Time);
 
-            CKBOOL res1 = m_Anim1->EvaluatePosition(anim1Time, Pos);
-            CKBOOL res2 = m_Anim2->EvaluatePosition(anim2Time, pos2);
+            // Missing file references behave like sources without this controller.
+            if (!m_Anim1) Pos.Set(0.0f, 0.0f, 0.0f);
+            CKBOOL res1 = source1 ? m_Anim1->EvaluatePosition(anim1Time, Pos) : FALSE;
+            CKBOOL res2 = source2 ? m_Anim2->EvaluatePosition(anim2Time, pos2) : FALSE;
 
             if (res1 && res2) {
                 // Interpolate: Pos = Pos * (1 - factor) + pos2 * factor
@@ -1018,13 +1096,19 @@ CKBOOL RCKObjectAnimation::EvaluateScale(float Time, VxVector &Scl) {
 
     // Check for merged animation (flag 0x80)
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
+        if (!ValidMergedTime(Time, GetLength(), m_MergeFactor))
+            return FALSE;
         VxVector scale2;
-        float normalizedTime = Time / m_KeyframeData->m_Length;
-        float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
-        float anim2Time = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+        float anim1Time = 0.0f, anim2Time = 0.0f;
+        CKBOOL source1 = MergedSourceTime(Time, GetLength(), m_Anim1, anim1Time);
+        CKBOOL source2 = MergedSourceTime(Time, GetLength(), m_Anim2, anim2Time);
 
-        CKBOOL res1 = m_Anim1->EvaluateScale(anim1Time, Scl);
-        CKBOOL res2 = m_Anim2->EvaluateScale(anim2Time, scale2);
+        if (!m_Anim1) Scl.Set(1.0f, 1.0f, 1.0f);
+        CKBOOL res1 = source1 ? m_Anim1->EvaluateScale(anim1Time, Scl) : FALSE;
+        CKBOOL res2 = source2 ? m_Anim2->EvaluateScale(anim2Time, scale2) : FALSE;
 
         if (res1 && res2) {
             // Interpolate: Scl = Scl * (1 - factor) + scale2 * factor
@@ -1058,25 +1142,40 @@ CKBOOL RCKObjectAnimation::EvaluateRotation(float Time, VxQuaternion &Rot) {
 
     // Check for merged animation (flag 0x80)
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
+        if (!ValidMergedTime(Time, GetLength(), m_MergeFactor))
+            return FALSE;
         if (m_MergeFactor == 0.0f) {
             // Use only first animation
-            float normalizedTime = Time / m_KeyframeData->m_Length;
-            float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
+            if (!m_Anim1) {
+                Rot = VxQuaternion();
+                return FALSE;
+            }
+            float anim1Time;
+            if (!MergedSourceTime(Time, GetLength(), m_Anim1, anim1Time))
+                return FALSE;
             return m_Anim1->EvaluateRotation(anim1Time, Rot);
         } else if (m_MergeFactor == 1.0f) {
             // Use only second animation
-            float normalizedTime = Time / m_KeyframeData->m_Length;
-            float anim2Time = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+            if (!m_Anim2) {
+                Rot = VxQuaternion();
+                return FALSE;
+            }
+            float anim2Time;
+            if (!MergedSourceTime(Time, GetLength(), m_Anim2, anim2Time))
+                return FALSE;
             return m_Anim2->EvaluateRotation(anim2Time, Rot);
         } else {
             // Blend between both animations using Slerp
             VxQuaternion rot1, rot2;
-            float normalizedTime = Time / m_KeyframeData->m_Length;
-            float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
-            float anim2Time = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+            float anim1Time = 0.0f, anim2Time = 0.0f;
+            CKBOOL source1 = MergedSourceTime(Time, GetLength(), m_Anim1, anim1Time);
+            CKBOOL source2 = MergedSourceTime(Time, GetLength(), m_Anim2, anim2Time);
 
-            CKBOOL res1 = m_Anim1->EvaluateRotation(anim1Time, rot1);
-            CKBOOL res2 = m_Anim2->EvaluateRotation(anim2Time, rot2);
+            CKBOOL res1 = source1 ? m_Anim1->EvaluateRotation(anim1Time, rot1) : FALSE;
+            CKBOOL res2 = source2 ? m_Anim2->EvaluateRotation(anim2Time, rot2) : FALSE;
 
             if (res1 && res2) {
                 // Slerp interpolation
@@ -1110,13 +1209,18 @@ CKBOOL RCKObjectAnimation::EvaluateScaleAxis(float Time, VxQuaternion &ScaleAxis
 
     // Check for merged animation (flag 0x80)
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
+        if (!ValidMergedTime(Time, GetLength(), m_MergeFactor))
+            return FALSE;
         VxQuaternion axis1, axis2;
-        float normalizedTime = Time / m_KeyframeData->m_Length;
-        float anim1Time = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
-        float anim2Time = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
+        float anim1Time = 0.0f, anim2Time = 0.0f;
+        CKBOOL source1 = MergedSourceTime(Time, GetLength(), m_Anim1, anim1Time);
+        CKBOOL source2 = MergedSourceTime(Time, GetLength(), m_Anim2, anim2Time);
 
-        CKBOOL res1 = m_Anim1->EvaluateScaleAxis(anim1Time, axis1);
-        CKBOOL res2 = m_Anim2->EvaluateScaleAxis(anim2Time, axis2);
+        CKBOOL res1 = source1 ? m_Anim1->EvaluateScaleAxis(anim1Time, axis1) : FALSE;
+        CKBOOL res2 = source2 ? m_Anim2->EvaluateScaleAxis(anim2Time, axis2) : FALSE;
 
         if (res1 && res2) {
             // Slerp interpolation
@@ -1158,74 +1262,98 @@ CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVe
         return FALSE;
     }
 
+    MergedAnimationVisit visit(this);
+    if (!visit.Entered() || !ValidMergedTime(Time, GetLength(), m_MergeFactor) || VertexCount < 0)
+        return FALSE;
+
     // Merged animation - blend morph data from both sub-animations
-    int vertCount1 = m_Anim1->GetMorphVertexCount();
-    int vertCount2 = m_Anim2->GetMorphVertexCount();
+    int vertCount1 = m_Anim1 ? m_Anim1->GetMorphVertexCount() : 0;
+    int vertCount2 = m_Anim2 ? m_Anim2->GetMorphVertexCount() : 0;
 
     // If vertex counts don't match, use whichever animation has morph data
-    if (!vertCount1 || vertCount1 != vertCount2) {
-        if (vertCount1)
+    if (vertCount1 <= 0 || vertCount1 != vertCount2) {
+        if (vertCount1 > 0 && VertexCount <= vertCount1)
             return m_Anim1->EvaluateMorphTarget(Time, VertexCount, Vertices, VStride, Normals);
-        if (vertCount2)
+        if (vertCount1 <= 0 && vertCount2 > 0 && VertexCount <= vertCount2)
             return m_Anim2->EvaluateMorphTarget(Time, VertexCount, Vertices, VStride, Normals);
         return FALSE;
     }
 
+    if (VertexCount > vertCount1)
+        return FALSE;
+    float time1 = 0.0f, time2 = 0.0f;
+    CKBOOL source1 = MergedSourceTime(Time, GetLength(), m_Anim1, time1);
+    CKBOOL source2 = MergedSourceTime(Time, GetLength(), m_Anim2, time2);
+    if (!source1 && !source2)
+        return FALSE;
+    if (VertexCount == 0) {
+        CKBOOL res1 = source1 ? m_Anim1->EvaluateMorphTarget(time1, 0, nullptr, 0, nullptr) : FALSE;
+        CKBOOL res2 = source2 ? m_Anim2->EvaluateMorphTarget(time2, 0, nullptr, 0, nullptr) : FALSE;
+        return res1 || res2;
+    }
+
     // Allocate temporary buffers for blending
-    // Need space for 2 vertex arrays + 2 normal arrays (if needed)
-    int bufferSize = vertCount1 * sizeof(VxVector) * 2;
-    if (Normals)
-        bufferSize += vertCount1 * sizeof(VxCompressedVector) * 2;
+    // Keep all output private until at least one source succeeds.
+    const int bytesPerVertex = 2 * (sizeof(VxVector) + (Normals ? sizeof(VxCompressedVector) : 0));
+    if (VertexCount > INT_MAX / bytesPerVertex)
+        return FALSE;
+    int bufferSize = VertexCount * bytesPerVertex;
     CKMemoryPool pool(m_Context, bufferSize);
     VxVector *tempVerts1 = (VxVector *) pool.Mem();
-    VxVector *tempVerts2 = tempVerts1 + vertCount1;
-    VxCompressedVector *tempNorms = (VxCompressedVector *) (tempVerts2 + vertCount1);
+    if (!tempVerts1)
+        return FALSE;
+    VxVector *tempVerts2 = tempVerts1 + VertexCount;
+    VxCompressedVector *tempNorms = (VxCompressedVector *) (tempVerts2 + VertexCount);
 
     // Check if both animations have normal data
     CKBOOL hasNorm1 = FALSE, hasNorm2 = FALSE;
     if (Normals) {
-        hasNorm1 = m_Anim1->HasMorphNormalInfo();
-        hasNorm2 = m_Anim2->HasMorphNormalInfo();
+        hasNorm1 = source1 && m_Anim1->HasMorphNormalInfo();
+        hasNorm2 = source2 && m_Anim2->HasMorphNormalInfo();
     }
 
-    VxCompressedVector *normPtr2 = hasNorm2 ? tempNorms + vertCount1 : nullptr;
-
-    // Scale time to each animation's length
-    float normalizedTime = Time / m_KeyframeData->m_Length;
-    float time1 = normalizedTime * m_Anim1->m_KeyframeData->m_Length;
-    float time2 = normalizedTime * m_Anim2->m_KeyframeData->m_Length;
-
-    // Evaluate both animations
-    if (hasNorm1) {
-        // The first source writes directly to the caller, also when the
-        // second source has no normals and the blend below is skipped.
-        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, Normals);
-        m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, normPtr2);
-    } else if (hasNorm2) {
-        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, nullptr);
-        m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, Normals);
-    } else {
-        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, nullptr);
-        m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, nullptr);
+    VxCompressedVector *normPtr1 = hasNorm1 ? tempNorms : nullptr;
+    VxCompressedVector *normPtr2 = hasNorm2 ? tempNorms + VertexCount : nullptr;
+    // Legacy keys can omit a payload while Evaluate still succeeds without
+    // writing that output. Preserve the caller's existing value in that case.
+    for (int i = 0; i < VertexCount; ++i) {
+        if (Vertices) {
+            const VxVector *value = (const VxVector *) ((const char *) Vertices + (size_t)i * VStride);
+            memcpy(tempVerts1 + i, value, sizeof(VxVector));
+            memcpy(tempVerts2 + i, value, sizeof(VxVector));
+        }
+        if (normPtr1) memcpy(normPtr1 + i, Normals + i, sizeof(VxCompressedVector));
+        if (normPtr2) memcpy(normPtr2 + i, Normals + i, sizeof(VxCompressedVector));
     }
+    CKBOOL res1 = source1 ? m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, sizeof(VxVector), normPtr1) : FALSE;
+    CKBOOL res2 = source2 ? m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, sizeof(VxVector), normPtr2) : FALSE;
+    if (!res1 && !res2)
+        return FALSE;
 
     // Blend vertices: result = v1 * (1 - factor) + v2 * factor
     float factor = m_MergeFactor;
     float invFactor = 1.0f - factor;
 
     VxVector *outVert = Vertices;
-    for (int i = 0; i < VertexCount; ++i) {
-        outVert->x = tempVerts1[i].x * invFactor + tempVerts2[i].x * factor;
-        outVert->y = tempVerts1[i].y * invFactor + tempVerts2[i].y * factor;
-        outVert->z = tempVerts1[i].z * invFactor + tempVerts2[i].z * factor;
+    for (int i = 0; Vertices && i < VertexCount; ++i) {
+        if (res1 && res2) {
+            outVert->x = tempVerts1[i].x * invFactor + tempVerts2[i].x * factor;
+            outVert->y = tempVerts1[i].y * invFactor + tempVerts2[i].y * factor;
+            outVert->z = tempVerts1[i].z * invFactor + tempVerts2[i].z * factor;
+        } else {
+            memcpy(outVert, (res1 ? tempVerts1 : tempVerts2) + i, sizeof(VxVector));
+        }
         outVert = (VxVector *) ((char *) outVert + VStride);
     }
 
     // Blend normals if both have normal info
-    if (hasNorm1 && hasNorm2 && Normals) {
-        for (int i = 0; i < VertexCount; ++i) {
-            Normals[i].Slerp(factor, Normals[i], normPtr2[i]);
-        }
+    for (int i = 0; Normals && i < VertexCount; ++i) {
+        if (res1 && hasNorm1 && res2 && hasNorm2)
+            Normals[i].Slerp(factor, normPtr1[i], normPtr2[i]);
+        else if (res1 && hasNorm1)
+            memcpy(Normals + i, normPtr1 + i, sizeof(VxCompressedVector));
+        else if (res2 && hasNorm2)
+            memcpy(Normals + i, normPtr2 + i, sizeof(VxCompressedVector));
     }
 
     return TRUE;
@@ -1261,6 +1389,9 @@ CKBOOL RCKObjectAnimation::EvaluateKeys(float step, VxQuaternion *rot, VxVector 
 CKBOOL RCKObjectAnimation::HasMorphNormalInfo() {
     // Check for merged animation
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasMorphNormalInfo())
             return TRUE;
@@ -1283,6 +1414,9 @@ CKBOOL RCKObjectAnimation::HasMorphNormalInfo() {
 
 CKBOOL RCKObjectAnimation::HasMorphInfo() {
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasMorphInfo())
             return TRUE;
@@ -1295,6 +1429,9 @@ CKBOOL RCKObjectAnimation::HasMorphInfo() {
 
 CKBOOL RCKObjectAnimation::HasScaleInfo() {
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasScaleInfo())
             return TRUE;
@@ -1307,6 +1444,9 @@ CKBOOL RCKObjectAnimation::HasScaleInfo() {
 
 CKBOOL RCKObjectAnimation::HasPositionInfo() {
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasPositionInfo())
             return TRUE;
@@ -1319,6 +1459,9 @@ CKBOOL RCKObjectAnimation::HasPositionInfo() {
 
 CKBOOL RCKObjectAnimation::HasRotationInfo() {
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasRotationInfo())
             return TRUE;
@@ -1331,6 +1474,9 @@ CKBOOL RCKObjectAnimation::HasRotationInfo() {
 
 CKBOOL RCKObjectAnimation::HasScaleAxisInfo() {
     if (IsMerged()) {
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return FALSE;
         // Merged animation - check both sub-animations
         if (m_Anim1 && m_Anim1->HasScaleAxisInfo())
             return TRUE;
@@ -1871,8 +2017,11 @@ int RCKObjectAnimation::GetMorphVertexCount() {
     // Check for merged animation (flag 0x80)
     if (IsMerged()) {
         // Return max vertex count from both sub-animations
-        int count1 = m_Anim1->GetMorphVertexCount();
-        int count2 = m_Anim2->GetMorphVertexCount();
+        MergedAnimationVisit visit(this);
+        if (!visit.Entered())
+            return 0;
+        int count1 = m_Anim1 ? m_Anim1->GetMorphVertexCount() : 0;
+        int count2 = m_Anim2 ? m_Anim2->GetMorphVertexCount() : 0;
         return (count1 > count2) ? count1 : count2;
     }
 
