@@ -1285,6 +1285,85 @@ void KeyedAnimationSnapshotRestoresSubanimationAndRootTransfer() {
     Check(!(animation.GetFlags() & CKANIMATION_SUBANIMSSORTED),"Keyed snapshot kept stale sorting state");
 }
 
+void KeyedAnimationMergeStateAndSelectiveSnapshots() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "MergeStateFirst"), second(&context, "MergeStateSecond");
+    RCKKeyedAnimation animation(&context, "MergeState"), loaded(&context, "MergeStateLoaded");
+    animation.AddAnimation(&first);
+    animation.AddAnimation(&second);
+    Check(!animation.IsMerged() && animation.GetMergeFactor() == 0.5f,
+          "New keyed animation API does not expose its default merge state");
+    Chunk chunk = NewChunk(CKCID_KEYEDANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_KEYEDANIMMERGE);
+    chunk->WriteInt(TRUE);
+    chunk->WriteFloat(0.25f);
+    LoadChunk(animation, chunk.get());
+    CKAnimation *api = &animation;
+    Check(api->IsMerged() && api->GetMergeFactor() == 0.25f,
+          "Keyed animation API does not expose the loaded merge state");
+    Check(first.GetMergeFactor() == 0.5f && second.GetMergeFactor() == 0.5f,
+          "Keyed Load must restore its own factor without overwriting child factors");
+    const float factors[] = {-0.25f, 0.0f, 0.75f, 1.25f};
+    for (int i = 0; i < 4; ++i) {
+        api->SetMergeFactor(factors[i]);
+        Check(api->GetMergeFactor() == factors[i] && first.GetMergeFactor() == factors[i] &&
+              second.GetMergeFactor() == factors[i], "Keyed factor change did not reach all subanimations");
+    }
+    animation.SetLength(47.0f);
+    Chunk saved(animation.Save(nullptr, CK_STATESAVE_KEYEDANIMMERGE), &DeleteCKStateChunk);
+    saved->StartRead();
+    Check(saved->SeekIdentifier(CK_STATESAVE_KEYEDANIMMERGE) && saved->ReadInt() == TRUE &&
+          saved->ReadFloat() == 1.25f, "Selective merge snapshot wrote the wrong merge fields");
+    Check(!saved->SeekIdentifier(CK_STATESAVE_KEYEDANIMANIMLIST) &&
+          !saved->SeekIdentifier(CK_STATESAVE_KEYEDANIMSUBANIMS), "Merge-only save included unrequested children");
+    loaded.SetLength(13.0f);
+    LoadChunk(loaded, saved.get());
+    Check(loaded.IsMerged() && loaded.GetMergeFactor() == 1.25f && loaded.GetLength() == 13.0f,
+          "Merge-only Load changed absent length or lost merge state");
+    Chunk lengthOnly(animation.Save(nullptr, CK_STATESAVE_ANIMATIONLENGTH), &DeleteCKStateChunk);
+    LoadChunk(loaded, lengthOnly.get());
+    Check(loaded.IsMerged() && loaded.GetMergeFactor() == 1.25f && loaded.GetLength() == 47.0f,
+          "Length-only Load overwrote absent merge state");
+}
+
+template<bool FileLoad>
+void KeyedAnimationMultipleSnapshotsSkipMissingObjects() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation first(&context, "MultiFirst"), second(&context, "MultiSecond");
+    RCKKeyedAnimation animation(&context, "MultipleSnapshots");
+    VxVector firstPosition(1.0f, 2.0f, 3.0f), secondPosition(4.0f, 5.0f, 6.0f), changed(9.0f);
+    first.AddPositionKey(0.0f, &firstPosition);
+    second.AddPositionKey(0.0f, &secondPosition);
+    Chunk firstSaved(first.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Chunk secondSaved(second.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    first.ClearAll();
+    second.ClearAll();
+    first.AddPositionKey(0.0f, &changed);
+    second.AddPositionKey(0.0f, &changed);
+    Chunk chunk = NewChunk(CKCID_KEYEDANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_KEYEDANIMANIMLIST);
+    XObjectPointerArray objects;
+    objects.PushBack(&second);
+    objects.PushBack(&first);
+    objects.Save(chunk.get());
+    chunk->WriteIdentifier(CK_STATESAVE_KEYEDANIMSUBANIMS);
+    chunk->WriteDword(3);
+    chunk->WriteObject(&first); chunk->WriteSubChunk(firstSaved.get());
+    chunk->WriteObject(nullptr); chunk->WriteSubChunk(firstSaved.get());
+    chunk->WriteObject(&second); chunk->WriteSubChunk(secondSaved.get());
+    CKFile file(&context);
+    chunk->CloseChunk();
+    chunk->StartRead();
+    Check(animation.Load(chunk.get(), FileLoad ? &file : nullptr) == CK_OK, "Multiple snapshot Load failed");
+    Check(animation.GetAnimationCount() == 2 && animation.GetAnimation(0) == &second && animation.GetAnimation(1) == &first,
+          "Multiple snapshot changed the explicit child list order");
+    VxVector actual;
+    Check(first.EvaluatePosition(0.0f, actual) && Equal(actual, FileLoad ? changed : firstPosition),
+          "Multiple snapshot restored the wrong first child");
+    Check(second.EvaluatePosition(0.0f, actual) && Equal(actual, FileLoad ? changed : secondPosition),
+          "Missing snapshot object prevented the following child's restoration");
+}
+
 class CharacterStateProbe : public RCKCharacter {
 public:
     explicit CharacterStateProbe(CKContext *context) : RCKCharacter(context,"SnapshotCharacter") {}
@@ -1635,6 +1714,54 @@ void FullFileSharedAnimationControllers() {
     }
     Check(animations[0]->GetPositionController() == animations[1]->GetPositionController(),
           "Full file duplicated or disconnected shared controllers");
+}
+
+template<bool Compressed>
+void FullFileKeyedAnimationCollectsChildren() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    RCKKeyedAnimation animation(&source, "KeyedFile");
+    RCKObjectAnimation first(&source, "KeyedFileFirst"), second(&source, "KeyedFileSecond");
+    VxVector firstPosition(2.0f, -3.0f, 4.0f), secondPosition(10.0f, 5.0f, 12.0f);
+    first.AddPositionKey(0.0f, &firstPosition);
+    second.AddPositionKey(0.0f, &secondPosition);
+    animation.AddAnimation(&second);
+    animation.AddAnimation(&first);
+    Chunk mergeState = NewChunk(CKCID_KEYEDANIMATION);
+    mergeState->WriteIdentifier(CK_STATESAVE_KEYEDANIMMERGE);
+    mergeState->WriteInt(TRUE);
+    mergeState->WriteFloat(0.25f);
+    LoadChunk(animation, mergeState.get());
+    animation.SetLength(20.0f);
+    animation.SetMergeFactor(0.75f);
+    for (int i = 0; i < 7; ++i) destination.CreateObject(CKCID_OBJECT, nullptr);
+    TemporarySerializationFile temporary;
+    source.SetFileWriteMode(Compressed ? CKFILE_WHOLECOMPRESSED : CKFILE_UNCOMPRESSED);
+    CKFile saved(&source), loaded(&destination);
+    Check(saved.StartSave(temporary.Path) == CK_OK, "Keyed file StartSave failed");
+    saved.SaveObject(&animation); // PreSave must collect both children itself.
+    Check(saved.EndSave() == CK_OK, "Keyed file EndSave failed");
+    Check(loaded.Load(temporary.Path, nullptr) == CK_OK, "Keyed full-file Load failed");
+    Check(loaded.m_FileObjects.Size() == 3, "Keyed PreSave failed to collect both children");
+    RCKKeyedAnimation *newAnimation = nullptr;
+    RCKObjectAnimation *newFirst = nullptr, *newSecond = nullptr;
+    for (int i = 0; i < loaded.m_FileObjects.Size(); ++i) {
+        CKFileObject &entry = loaded.m_FileObjects[i];
+        Check(entry.CreatedObject != entry.Object, "Keyed file fixture did not exercise ID remapping");
+        if (entry.Object == animation.GetID()) newAnimation = static_cast<RCKKeyedAnimation *>(entry.ObjPtr);
+        if (entry.Object == first.GetID()) newFirst = static_cast<RCKObjectAnimation *>(entry.ObjPtr);
+        if (entry.Object == second.GetID()) newSecond = static_cast<RCKObjectAnimation *>(entry.ObjPtr);
+    }
+    Check(newAnimation && newFirst && newSecond, "Keyed full file lost an object");
+    Check(newAnimation->IsMerged() && newAnimation->GetMergeFactor() == 0.75f && newAnimation->GetLength() == 20.0f,
+          "Keyed full file lost merge state or length");
+    Check(newAnimation->GetAnimationCount() == 2 && newAnimation->GetAnimation(0) == newSecond &&
+          newAnimation->GetAnimation(1) == newFirst, "Keyed full file lost child order or remapped references");
+    VxVector actual;
+    Check(newFirst->EvaluatePosition(7.0f, actual) && Equal(actual, firstPosition), "Keyed full file lost first child's keys");
+    Check(newSecond->EvaluatePosition(7.0f, actual) && Equal(actual, secondPosition), "Keyed full file lost second child's keys");
+    newAnimation->SetMergeFactor(0.125f);
+    Check(newFirst->GetMergeFactor() == 0.125f && newSecond->GetMergeFactor() == 0.125f,
+          "Reloaded keyed animation does not propagate factor changes to remapped children");
 }
 
 template<bool MergedFirst, bool Compressed>
@@ -2446,6 +2573,11 @@ int main(int argc, char **argv) {
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
     };
     const Test tests[] = {
+        {"Keyed full file collects children and merge state", FullFileKeyedAnimationCollectsChildren<false>},
+        {"Compressed keyed file collects children and merge state", FullFileKeyedAnimationCollectsChildren<true>},
+        {"Keyed merge queries, propagation and selective state", KeyedAnimationMergeStateAndSelectiveSnapshots},
+        {"Keyed multiple snapshots with missing object", KeyedAnimationMultipleSnapshotsSkipMissingObjects<false>},
+        {"Keyed file Load skips embedded snapshots", KeyedAnimationMultipleSnapshotsSkipMissingObjects<true>},
         {"Full file managers omit first", FileSavePreservesSparseManagerChunks<0, false>},
         {"Full file managers omit middle", FileSavePreservesSparseManagerChunks<1, false>},
         {"Full file managers omit last", FileSavePreservesSparseManagerChunks<2, false>},

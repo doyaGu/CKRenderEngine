@@ -35,6 +35,9 @@ public:
 
     // Override CKAnimation methods with RCKKeyedAnimation-specific implementations
     void CenterAnimation(float frame) override;
+    float GetMergeFactor() override;
+    void SetMergeFactor(float factor) override;
+    CKBOOL IsMerged() override;
     CKAnimation *CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic = FALSE) override;
     float CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) override;
 

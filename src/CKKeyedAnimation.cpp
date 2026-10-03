@@ -299,6 +299,24 @@ void RCKKeyedAnimation::CenterAnimation(float frame) {
     }
 }
 
+// CK2_3D.dll 0x1004A320, 0x10048538 and 0x1004859B.
+float RCKKeyedAnimation::GetMergeFactor() {
+    return m_MergeFactor;
+}
+
+void RCKKeyedAnimation::SetMergeFactor(float factor) {
+    m_MergeFactor = factor;
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(*it);
+        if (animation)
+            animation->SetMergeFactor(factor);
+    }
+}
+
+CKBOOL RCKKeyedAnimation::IsMerged() {
+    return m_Merged;
+}
+
 CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic) {
     if (!anim2)
         return nullptr;
