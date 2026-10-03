@@ -4462,6 +4462,7 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 #include "TestFFJitCache.inl"
 #include "TestFFJitPipeline.inl"
 #include "TestFFJitPipelineCache.inl"
+#include "TestFFPositionTDepth.inl"
 #endif
 
 void CheckFullImageComparator()
@@ -4504,6 +4505,13 @@ void BackendRendersFixedFunctionSemantics()
 
     TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
 
+#ifdef CKRE_PIXEL_SDL_GPU
+    if (EnvFlagEnabled("CKRE_FF_POSITIONT_DEPTH_ONLY")) {
+        CheckPositionTJitDepth();
+        SDL_Quit();
+        return;
+    }
+#endif
     Samples samples;
 #ifdef CKRE_PIXEL_SDL_GPU
     Samples precompiled;
@@ -4614,6 +4622,9 @@ void BackendRendersFixedFunctionSemantics()
 #ifdef CKRE_PIXEL_SDL_GPU
     if (opened)
         CheckPrewarmedFragmentPrograms(precompiled);
+    if (opened) {
+        CheckPositionTJitDepth();
+    }
     if (opened) {
         CheckFFJitPipelineCache();
     }
