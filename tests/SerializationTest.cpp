@@ -1140,6 +1140,90 @@ void AnimationLoadRestoresSharedOwnership() {
           "Reloaded animation saved the wrong shared/full representation");
 }
 
+// CK2_3D.dll 0x10058C51: shared data wins over controllers, which win
+// over the legacy snapshot, regardless of identifier order in the chunk.
+void WriteAnimationStateBlock(CKStateChunk *chunk, CKDWORD identifier,
+                             RCKObjectAnimation *owner, RCKObjectAnimation *first,
+                             RCKObjectAnimation *second, bool merged, float position, float length = 20.0f) {
+    chunk->WriteIdentifier(identifier);
+    if (identifier == CK_STATESAVE_OBJANIMSHARED) chunk->WriteObject(owner);
+    for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+    if (identifier == CK_STATESAVE_OBJANIMNEWDATA) {
+        chunk->WriteInt(0); // morph vertices
+        chunk->WriteInt(0); // morph keys
+    }
+    chunk->WriteDword(merged ? CK_OBJECTANIMATION_MERGED : 0);
+    chunk->WriteObject(nullptr);
+    if (identifier != CK_STATESAVE_OBJANIMSHARED) chunk->WriteFloat(length);
+    if (merged) {
+        chunk->WriteFloat(0.25f);
+        chunk->WriteObject(first);
+        chunk->WriteObject(second);
+    }
+    if (identifier == CK_STATESAVE_OBJANIMSHARED) return;
+    if (identifier == CK_STATESAVE_OBJANIMCONTROLLERS) {
+        chunk->WriteDword(CKANIMATION_LINPOS_CONTROL);
+        chunk->WriteDword(5);
+    } else {
+        chunk->WriteDword(16);
+    }
+    chunk->WriteDword(1);
+    chunk->WriteFloat(0.0f);
+    chunk->WriteFloat(position);
+    chunk->WriteFloat(0.0f);
+    chunk->WriteFloat(0.0f);
+    if (identifier == CK_STATESAVE_OBJANIMCONTROLLERS) {
+        chunk->WriteDword(0);
+    } else {
+        for (int i = 0; i < 6; ++i) chunk->WriteDword(0);
+    }
+}
+
+template<bool WithShared, bool ReverseOrder>
+void AnimationCombinedBlocksRespectPrecedence() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation owner(&context, "CombinedOwner"), loaded(&context, "CombinedLoaded");
+    VxVector sharedPosition(7.0f, 0.0f, 0.0f), oldPosition(-9.0f, 0.0f, 0.0f);
+    owner.AddPositionKey(0.0f, &sharedPosition);
+    owner.SetLength(31.0f);
+    loaded.AddPositionKey(0.0f, &oldPosition);
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    const CKDWORD identifiers[] = {CK_STATESAVE_OBJANIMNEWDATA,
+        CK_STATESAVE_OBJANIMCONTROLLERS, CK_STATESAVE_OBJANIMSHARED};
+    const int count = WithShared ? 3 : 2;
+    for (int i = 0; i < count; ++i) {
+        CKDWORD identifier = identifiers[ReverseOrder ? count - i - 1 : i];
+        WriteAnimationStateBlock(chunk.get(), identifier, &owner, nullptr, nullptr,
+                                 false, identifier == CK_STATESAVE_OBJANIMCONTROLLERS ? 3.0f : 5.0f);
+    }
+    LoadChunk(loaded, chunk.get());
+    VxVector actual;
+    Check(loaded.EvaluatePosition(0.0f, actual) &&
+          Equal(actual, VxVector(WithShared ? 7.0f : 3.0f, 0.0f, 0.0f)),
+          "Combined animation blocks used the wrong first-load data");
+    Check(loaded.Shared() == (WithShared ? &owner : &loaded), "Combined blocks lost shared ownership");
+    Check(loaded.GetLength() == (WithShared ? 31.0f : 20.0f), "Combined blocks selected the wrong length");
+}
+
+void AnimationMissingSharedOwnerCreatesEmptyData() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation owner(&context, "MissingOwnerOld"), loaded(&context, "MissingOwnerLoaded");
+    VxVector oldPosition(8.0f, 0.0f, 0.0f);
+    owner.AddPositionKey(0.0f, &oldPosition);
+    loaded.ShareDataFrom(&owner);
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMCONTROLLERS, nullptr,
+                             nullptr, nullptr, false, 3.0f);
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMSHARED, nullptr,
+                             nullptr, nullptr, false, 0.0f);
+    LoadChunk(loaded, chunk.get());
+    Check(loaded.Shared() == &loaded && !loaded.GetPositionController() && loaded.GetLength() == 100.0f,
+          "Missing shared owner must create empty data without falling back to the full block");
+    VxVector actual;
+    Check(owner.EvaluatePosition(0.0f, actual) && Equal(actual, oldPosition),
+          "Missing shared reference changed the old owner's keys");
+}
+
 template<int Version, bool EmptyRotation>
 void LegacyObjectTransformBlocksPreserveKeysAndReferences() {
     CKContext context(nullptr,0,0);
@@ -2578,6 +2662,11 @@ int main(int argc, char **argv) {
         {"Keyed merge queries, propagation and selective state", KeyedAnimationMergeStateAndSelectiveSnapshots},
         {"Keyed multiple snapshots with missing object", KeyedAnimationMultipleSnapshotsSkipMissingObjects<false>},
         {"Keyed file Load skips embedded snapshots", KeyedAnimationMultipleSnapshotsSkipMissingObjects<true>},
+        {"Animation full block wins over snapshot", AnimationCombinedBlocksRespectPrecedence<false, false>},
+        {"Animation full block wins in reverse order", AnimationCombinedBlocksRespectPrecedence<false, true>},
+        {"Animation shared block wins over full/snapshot", AnimationCombinedBlocksRespectPrecedence<true, false>},
+        {"Animation shared block wins in reverse order", AnimationCombinedBlocksRespectPrecedence<true, true>},
+        {"Animation missing shared owner", AnimationMissingSharedOwnerCreatesEmptyData},
         {"Full file managers omit first", FileSavePreservesSparseManagerChunks<0, false>},
         {"Full file managers omit middle", FileSavePreservesSparseManagerChunks<1, false>},
         {"Full file managers omit last", FileSavePreservesSparseManagerChunks<2, false>},
