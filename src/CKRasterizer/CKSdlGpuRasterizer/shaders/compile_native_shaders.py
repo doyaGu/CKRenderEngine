@@ -262,7 +262,9 @@ def make_source(shader_name: str, source: str, clipping: bool,
                        f"#define CKFF_HARDWARE_SAMPLING {int(shader_name.endswith('_native'))}",
                        f"#define CKFF_DEPTH_COMPARE_SAMPLER_COUNT {compare_count}",
                        f"#define CKFF_NATIVE_SAMPLER_LAYOUT {sampler_layout}",
-                       HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8"),
+                       HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8") +
+                       ("\n" + HERE.joinpath("dxbc_vertex_math.hlsli").read_text(encoding="utf-8")
+                        if source == "vs_ff_3d" else ""),
                        uniform_declaration(source), *declarations,
                        source_body(SHARED / f"{source}.sc"), *entry])
 
@@ -588,6 +590,7 @@ def main() -> None:
             assembly = args.work_dir / f"{format_}_{name}.asm"
             if format_ == "dxbc":
                 command = [args.fxc, "/nologo", "/T", "vs_5_1", "/E", "main", "/O3",
+                           "/D", "CKFF_NATIVE_DXBC=1",
                            "/Fo", str(output), "/Fc", str(assembly), str(hlsl)]
             else:
                 optimization = "-O3"
