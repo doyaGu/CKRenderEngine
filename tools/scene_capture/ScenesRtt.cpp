@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <vector>
+#include <cmath>
 
 #include "SceneUtil.h"
 #include "ImageIO.h"
@@ -15,6 +16,7 @@ struct RttState {
     CKTexture *Target = NULL;
     CKCamera *RttCamera = NULL;
     CK3dEntity *Spinner = NULL;
+    CKMaterial *Mirror = NULL;
     bool Cube = false;
 };
 RttState g_Rtt;
@@ -127,7 +129,8 @@ bool BuildRttCubeImpl(SceneContext &sc, bool solidFaces)
         return false;
     if (sc.Verbose)
         printf("rtt_cube: selected texgen=%u\n", (unsigned)mode);
-    SceneCreateEntity(sc, "cubesphere", SceneCreateSphereMesh(sc, "cubesphere", 3.0f, 24, 32, mirror), VxVector(100.0f, 0.0f, 0.0f));
+    g_Rtt.Mirror = mirror;
+    g_Rtt.Spinner = SceneCreateEntity(sc, "cubesphere", SceneCreateSphereMesh(sc, "cubesphere", 3.0f, 24, 32, mirror), VxVector(100.0f, 0.0f, 0.0f));
     SceneCreateLight(sc, "sun2", VX_LIGHTDIREC, VxColor(1.0f, 1.0f, 1.0f, 1.0f), VxVector(100.0f, 10.0f, -5.0f), VxVector(0.0f, -1.0f, 0.5f), 100.0f);
     sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(100.0f, 2.0f, -10.0f), VxVector(100.0f, 0.0f, 0.0f), 50.0f);
     return sc.MainCamera != NULL && g_Rtt.Target != NULL;
@@ -135,6 +138,57 @@ bool BuildRttCubeImpl(SceneContext &sc, bool solidFaces)
 
 bool BuildRttCube(SceneContext &sc) { return BuildRttCubeImpl(sc, false); }
 bool BuildCubeFaceFilter(SceneContext &sc) { return BuildRttCubeImpl(sc, true); }
+
+bool BuildCubeFilterDynamic(SceneContext &sc)
+{
+    return BuildCubeFaceFilter(sc) && g_Rtt.Target->UseMipmap(TRUE);
+}
+
+bool BuildCubeMipDynamic(SceneContext &sc)
+{
+    if (!BuildCubeFilterDynamic(sc))
+        return false;
+    // Fine checks disappear in distant mips; the border stays the face color.
+    for (int face = 0; face < 6; ++face) {
+        CKBYTE *pixels = g_Rtt.Target->LockSurfacePtr(face);
+        if (!pixels)
+            return false;
+        for (int y = 4; y < 124; ++y) for (int x = 4; x < 124; ++x) {
+            if ((x ^ y) & 1)
+                reinterpret_cast<CKDWORD *>(pixels)[y * 128 + x] = 0xFF000000;
+        }
+        g_Rtt.Target->ReleaseSurfacePtr(face);
+    }
+    return true;
+}
+
+void MoveCubeFilter(SceneContext &sc)
+{
+    // Each checkpoint exercises a distinct sampler state, including both
+    // mixed min/mag directions. Motion is deterministic between checkpoints.
+    const int phase = sc.FrameIndex < 4 ? 0 : sc.FrameIndex < 29 ? 1 : sc.FrameIndex < 59 ? 2 : sc.FrameIndex < 89 ? 3 : 4;
+    const VXTEXTURE_FILTERMODE minFilters[] = {VXTEXTUREFILTER_MIPNEAREST, VXTEXTUREFILTER_LINEARMIPLINEAR,
+        VXTEXTUREFILTER_MIPNEAREST, VXTEXTUREFILTER_LINEARMIPLINEAR, VXTEXTUREFILTER_ANISOTROPIC};
+    const VXTEXTURE_FILTERMODE magFilters[] = {VXTEXTUREFILTER_NEAREST, VXTEXTUREFILTER_NEAREST,
+        VXTEXTUREFILTER_LINEAR, VXTEXTUREFILTER_LINEAR, VXTEXTUREFILTER_LINEAR};
+    g_Rtt.Mirror->SetTextureMinMode(minFilters[phase]);
+    g_Rtt.Mirror->SetTextureMagMode(magFilters[phase]);
+    sc.RenderContext->SetTextureStageState(CKRST_TSS_MAXANISOTROPY, phase == 4 ? 8 : 1);
+    const float angle = float(sc.FrameIndex) * 0.027f;
+    const float distance = 12.0f + 5.0f * std::sin(angle);
+    const VxVector target(100, 0, 0);
+    const VxVector eye(100.0f + 2.0f * std::sin(angle * 0.7f), 2.0f, -distance);
+    sc.MainCamera->SetPosition(&eye);
+    sc.MainCamera->LookAt(&target);
+    VxMatrix matrix; Vx3DMatrixIdentity(matrix);
+    matrix[0][0] = matrix[2][2] = std::cos(angle);
+    matrix[0][2] = std::sin(angle); matrix[2][0] = -std::sin(angle);
+    matrix[3][0] = 100.0f;
+    g_Rtt.Spinner->SetWorldMatrix(matrix);
+    if (sc.FrameIndex == 0 || sc.FrameIndex == 4 || sc.FrameIndex == 29 || sc.FrameIndex == 59 || sc.FrameIndex == 89)
+        printf("cube_filter: phase=%d min=%d mag=%d anisotropy=%d mips=%d\n", phase,
+               int(minFilters[phase]), int(magFilters[phase]), phase == 4 ? 8 : 1, g_Rtt.Target->GetMipmapCount());
+}
 
 bool ValidateCubeFaceFilter(SceneContext &sc, const RgbaImage &image)
 {
@@ -348,6 +402,8 @@ const SceneDef g_ScenesRtt[] = {
     {"rtt_2d", "TextureRender into a 2D texture shown on a quad", BuildRtt2D, RttPreFrame, NULL, true, 6, 0.97f, NULL},
     {"rtt_cube", "TextureRender into six cube faces sampled with reflection texgen", BuildRttCube, RttPreFrame, NULL, true, 8, 0.95f, NULL},
     {"cube_face_filter", "Six solid cube faces reflected by a 3D sphere with face-local linear filtering", BuildCubeFaceFilter, NULL, NULL, true, 2, 1.0f, NULL, 0, ValidateCubeFaceFilter},
+    {"cube_filter_dynamic", "Moving reflective sphere with mip and min/mag/anisotropic filter transitions", BuildCubeFilterDynamic, MoveCubeFilter, NULL, true, 2, 1.0f, NULL, 90, ValidateCubeFaceFilter, true},
+    {"cube_mip_dynamic", "Moving reflective sphere with fine checks, mip transitions and changing filters", BuildCubeMipDynamic, MoveCubeFilter, NULL, true, 2, 1.0f, NULL, 90},
     {"dump_copy", "DumpToMemory of a region, CopyToVideo into another region next frame", BuildDumpCopy, NULL, DumpCopyPostFrame, true, 4, 0.98f, NULL, 2, ValidateDumpCopy},
 };
 const int g_ScenesRttCount = (int)(sizeof(g_ScenesRtt) / sizeof(g_ScenesRtt[0]));
