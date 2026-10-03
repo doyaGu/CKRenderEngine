@@ -1,5 +1,6 @@
 #include "CKJitBuilder.h"
 #include "TestTriangleMultiset.h"
+#include "TestShaderJitVertex.h"
 
 #include <cfenv>
 #include <cstring>
@@ -477,6 +478,46 @@ int FindOp(const CKJitFragmentShader &shader, CKJitOp op) {
             return i;
     }
     return -1;
+}
+
+void TestMad() {
+    for (uint32_t width = 1; width <= 4; ++width) for (unsigned vectorOperand = 0; vectorOperand < 3; ++vectorOperand) {
+        CKJitBuilder b(0);
+        const CKJitValue position = b.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
+        const CKJitValue vector = b.Input({1, (uint8_t)width, CKJIT_INPUT_ATTRIBUTE});
+        const CKJitValue scalar = b.Component(position, 0);
+        CKJitValue operands[] = {scalar, scalar, scalar};
+        operands[vectorOperand] = vector;
+        const CKJitValue mad = b.Mad(operands[0], operands[1], operands[2]);
+        TestCheck(IsOp(b, mad, CKJIT_OP_MAD) && b.Node(mad).Type == CKJitFloatType(width),
+                  "MAD broadcasts scalars in each operand position");
+        TestCheck(Same(mad, b.Mad(operands[0], operands[1], operands[2])), "MAD reuses identical nodes");
+        CKJitVertexShader shader;
+        TestCheck(b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, mad}, {1, CKJIT_INPUT_SMOOTH, scalar}}, shader),
+                  "MAD operand widths verify after broadcasting");
+        CKJitVertexShader corrupt = shader;
+        corrupt.Nodes[corrupt.Outputs[0].Value.Id].OperandCount = 2;
+        TestCheck(!CKJitVerify(corrupt), "MAD requires its addend");
+        corrupt = shader;
+        corrupt.Nodes[corrupt.Outputs[0].Value.Id].Type = CKJitIntType(width);
+        TestCheck(!CKJitVerify(corrupt), "MAD is floating point only");
+        if (width > 1) {
+            corrupt = shader;
+            corrupt.Nodes[corrupt.Outputs[0].Value.Id].Operands[2] = corrupt.Outputs[1].Value.Id;
+            TestCheck(!CKJitVerify(corrupt), "raw MAD operands require equal widths");
+        }
+    }
+    CKJitBuilder constants(0);
+    TestCheck(IsOp(constants, constants.Mad(constants.Float(1), constants.Float(2), constants.Float(3)), CKJIT_OP_MAD),
+              "native MAD rounding is not folded on the host");
+    for (unsigned bad = 0; bad < 4; ++bad) {
+        CKJitBuilder b(0);
+        CKJitValue operands[] = {b.Float2(1, 2), b.Float(3), b.Float(4)};
+        if (bad < 3) operands[bad] = b.Int(1);
+        else operands[2] = b.Float3(1, 2, 3);
+        TestCheck(!b.Mad(operands[0], operands[1], operands[2]).IsValid() && b.Failed(),
+                  "MAD rejects integer operands and mismatched vectors");
+    }
 }
 
 template <typename Corrupt>
@@ -1393,12 +1434,132 @@ void TestUniformity() {
               "implicit-LOD samples do not run for a varying count");
 }
 
+void TestVertexShaders() {
+    for (unsigned i = 0; i < sizeof(kVertexCases) / sizeof(kVertexCases[0]); ++i) {
+        CKJitVertexShader shader;
+        TestCheck(BuildVertexCase(i, shader) && CKJitVerify(shader), kVertexCases[i]);
+        TestCheck(std::strstr(CKJitDump(shader).CStr(), "position %") != nullptr, "vertex dumps name position");
+    }
+
+    CKJitBuilder clipBuilder(1);
+    const CKJitValue clipPosition = clipBuilder.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
+    const CKJitValue distance = clipBuilder.Dot(clipPosition, clipBuilder.Uniform(0));
+    CKJitVertexShader clipShader;
+    TestCheck(clipBuilder.FinishVertex(clipPosition, {}, clipShader, {distance}), "clip-only dependencies survive DCE");
+    TestCheck(clipShader.ClipDistances.Size() == 1 && clipShader.Node(clipShader.ClipDistances[0]).Op == CKJIT_OP_DOT,
+              "clip output retains its scalar expression");
+    TestCheck(std::strstr(CKJitDump(clipShader).CStr(), "clipdistance 0 %") != nullptr, "dump identifies clip distances");
+    CKJitVertexShader badClip = clipShader;
+    badClip.ClipDistances[0] = badClip.Position;
+    TestCheck(!CKJitVerify(badClip), "raw clip distances must be scalar floats");
+    badClip.ClipDistances[0].Id = badClip.Nodes.Size();
+    TestCheck(!CKJitVerify(badClip), "raw clip references must exist");
+    badClip = clipShader;
+    while (badClip.ClipDistances.Size() < 9) badClip.ClipDistances.PushBack(clipShader.ClipDistances[0]);
+    TestCheck(!CKJitVerify(badClip), "raw clip arrays are limited to eight");
+    TestCheck(!clipBuilder.FinishVertex(clipPosition, {}, clipShader, {clipPosition}), "builder rejects vector clip outputs");
+    TestCheck(!clipBuilder.FinishVertex(clipPosition, {}, clipShader, {clipBuilder.Int(1)}), "builder rejects integer distances");
+    TestCheck(!clipBuilder.FinishVertex(clipPosition, nullptr, 0, clipShader, nullptr, 1), "missing clip array fails");
+    CKJitValue nine[9]; for (auto &value : nine) value = distance;
+    TestCheck(!clipBuilder.FinishVertex(clipPosition, nullptr, 0, clipShader, nine, 9), "builder limits clip count");
+    clipBuilder.If(clipBuilder.Less(distance, clipBuilder.Float(0)));
+    const CKJitValue inner = clipBuilder.Mul(distance, clipBuilder.Float(2));
+    clipBuilder.Else({inner});
+    const CKJitValue outer = clipBuilder.EndIf(distance);
+    TestCheck(!clipBuilder.FinishVertex(clipPosition, {}, clipShader, {inner}), "clip output cannot escape its arm");
+    TestCheck(clipBuilder.FinishVertex(clipPosition, {}, clipShader, {outer}), "joined clip distance is valid");
+    TestCheck(clipBuilder.FinishVertex(clipPosition, {}, clipShader) && clipShader.ClipDistances.Size() == 0,
+              "reusing a shader clears its previous clip interface");
+
+    CKJitBuilder typed(0);
+    const CKJitValue uintInput = typed.Input({6, 4, CKJIT_INPUT_ATTRIBUTE, CKJIT_INPUT_UINT});
+    CKJitVertexShader uintShader;
+    TestCheck(typed.FinishVertex(typed.IntToFloat(uintInput), {}, uintShader), "uint attribute enters signed integer IR");
+    CKJitVertexShader wrongScalar = uintShader;
+    wrongScalar.Inputs[0].Scalar = CKJIT_INPUT_FLOAT;
+    TestCheck(!CKJitVerify(wrongScalar), "input declaration and node scalar types must agree");
+    wrongScalar.Inputs[0].Scalar = CKJitInputScalar(2);
+    TestCheck(!CKJitVerify(wrongScalar), "unknown input scalar is rejected");
+    TestCheck(!typed.Input({6, 4, CKJIT_INPUT_ATTRIBUTE}).IsValid(), "same location cannot change scalar type");
+    CKJitBuilder badScalar(0);
+    TestCheck(!badScalar.Input({1, 4, CKJIT_INPUT_FLAT, CKJIT_INPUT_UINT}).IsValid(), "uint fragment inputs are unsupported");
+
+    CKJitBuilder b(4);
+    const CKJitValue position = b.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
+    const CKJitValue color = b.Mul(position, b.Uniform(1));
+    b.Mul(position, b.Float(17.0f)); // unreachable
+    CKJitVertexShader shader;
+    TestCheck(b.FinishVertex(position, {{0, CKJIT_INPUT_FLAT, color}}, shader), "vertex outputs finish");
+    TestCheck(shader.Nodes.Size() == 3 && shader.Node(shader.Outputs[0].Value).Op == CKJIT_OP_MUL,
+              "DCE keeps varying-only dependencies and removes unused arithmetic");
+    TestCheck(std::strstr(CKJitDump(shader).CStr(), "output location0 flat %") != nullptr,
+              "vertex dumps include the varying contract");
+    CKJitFragmentShader fragment;
+    TestCheck(!b.Finish(position, CKJitValue(), fragment), "fragment programs reject vertex attributes");
+    TestCheck(!b.FinishVertex(b.Swizzle(position, "xyz"), {}, shader), "position must have four components");
+    TestCheck(!b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, b.Int(1)}}, shader), "varyings must be floats");
+    TestCheck(!b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, CKJitValue()}}, shader), "invalid outputs fail");
+    TestCheck(!b.FinishVertex(position, nullptr, 1, shader), "missing declarations fail");
+    TestCheck(!b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, color}, {0, CKJIT_INPUT_FLAT, color}}, shader),
+              "varying output locations are unique");
+    TestCheck(!b.FinishVertex(position, {{0, CKJIT_INPUT_ATTRIBUTE, color}}, shader), "outputs specify interpolation");
+
+    TestCheck(b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, color}}, shader), "valid shader rebuilds");
+    CKJitVertexShader corrupted = shader;
+    corrupted.Position = CKJitValue();
+    TestCheck(!CKJitVerify(corrupted), "raw vertex programs require a position");
+    corrupted = shader;
+    corrupted.Outputs[0].Value.Id = (uint32_t)corrupted.Nodes.Size();
+    TestCheck(!CKJitVerify(corrupted), "raw vertex output references are checked");
+    corrupted = shader;
+    corrupted.Inputs.PushBack(corrupted.Inputs[0]);
+    TestCheck(!CKJitVerify(corrupted), "raw vertex input locations are unique");
+    corrupted = shader;
+    corrupted.Inputs[0].Kind = CKJIT_INPUT_FRAG_COORD;
+    TestCheck(!CKJitVerify(corrupted), "FragCoord is not a vertex attribute");
+
+    CKJitBuilder scoped(0);
+    const CKJitValue input = scoped.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
+    scoped.If(scoped.Less(scoped.Component(input, 0), scoped.Float(0.5f)));
+    const CKJitValue arm = scoped.Mul(input, scoped.Float(0.25f));
+    scoped.Else({arm});
+    const CKJitValue joined = scoped.EndIf(input);
+    TestCheck(!scoped.FinishVertex(input, {{0, CKJIT_INPUT_SMOOTH, arm}}, shader), "arm values cannot escape to outputs");
+    TestCheck(scoped.FinishVertex(input, {{0, CKJIT_INPUT_SMOOTH, joined}}, shader), "joined values can be outputs");
+    for (int i = 0; i < shader.Nodes.Size(); ++i) {
+        if (shader.Nodes[i].Op == CKJIT_OP_MUL) {
+            corrupted = shader;
+            corrupted.Outputs[0].Value.Id = (uint32_t)i;
+            TestCheck(!CKJitVerify(corrupted), "raw outputs cannot escape an arm either");
+        }
+    }
+
+    // Stage restrictions apply even in uniform flow, but dead operations do
+    // not prevent finishing a program that never uses them.
+    for (unsigned op = 0; op < 5; ++op) {
+        CKJitBuilder quad(0);
+        const CKJitValue p = quad.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
+        const CKJitValue uv = quad.Swizzle(p, "xy");
+        CKJitValue result;
+        switch (op) {
+        case 0: result = quad.Ddx(p); break;
+        case 1: result = quad.Ddy(p); break;
+        case 2: result = quad.Sample(0, CKJIT_SAMPLER_2D, uv, quad.Float(0.0f)); break;
+        case 3: result = quad.CalcLod(0, CKJIT_SAMPLER_2D, uv); break;
+        default: result = quad.SampleCmp(0, uv, quad.Float(0.5f)); break;
+        }
+        TestCheck(!quad.FinishVertex(p, {{0, CKJIT_INPUT_SMOOTH, result}}, shader), "vertex QUAD operations fail");
+        TestCheck(quad.FinishVertex(p, {}, shader) && shader.SamplerCount == 0, "dead QUAD operations are removed");
+    }
+}
+
 } // namespace
 
 int main() {
     TestFramework framework;
     framework.Run("hash consing", TestHashConsing);
     framework.Run("constant folding", TestConstantFolding);
+    framework.Run("native multiply-add", TestMad);
     framework.Run("rounding environment", TestRoundingEnvironment);
     framework.Run("algebraic identities", TestAlgebraicIdentities);
     framework.Run("swizzles", TestSwizzles);
@@ -1419,5 +1580,6 @@ int main() {
     framework.Run("if regions", TestIfRegions);
     framework.Run("loops", TestLoops);
     framework.Run("uniformity", TestUniformity);
+    framework.Run("vertex shaders", TestVertexShaders);
     return framework.ExitCode();
 }
