@@ -1927,6 +1927,31 @@ void MorphReadRejectsInvalidHeaderOrTimes() {
     CheckResizedMorphKeys(*controller, 3, 3, true);
 }
 
+template<int InvalidKind>
+void MorphDumpRejectsInconsistentState() {
+    // This test-only subtype can exercise size arithmetic without allocating
+    // enormous arrays. Query rejection precedes any attempt to write output.
+    struct MorphSizeProbe : RCKMorphController {
+        void SetRawVertexCount(int count) { m_VertexCount = count; }
+    };
+    MorphSizeProbe controller;
+    WireWords input = MorphWire<true>();
+    Check(controller.ReadKeysFrom(input.data()) == static_cast<int>(input.size() * 4), "Morph dump fixture read failed");
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller.GetKey(0));
+    CKMorphKey *last = static_cast<CKMorphKey *>(controller.GetKey(1));
+    if (InvalidKind == 0) controller.SetRawVertexCount(INT_MAX);
+    if (InvalidKind == 1) { delete[] first->PosArray; first->PosArray = nullptr; }
+    if (InvalidKind == 2) { delete[] first->NormArray; first->NormArray = nullptr; }
+    if (InvalidKind == 3) { delete[] last->NormArray; last->NormArray = nullptr; }
+    if (InvalidKind == 4) first->TimeStep = FloatWithBits(0x7FC00000u);
+    if (InvalidKind == 5) last->TimeStep = -1.0f;
+    Check(controller.DumpKeysTo(nullptr) == 0, "Morph size query accepted inconsistent or unrepresentable state");
+    CKDWORD output[40];
+    for (int i = 0; i < 40; ++i) output[i] = 0x12345678u;
+    Check(controller.DumpKeysTo(output) == 0, "Morph dump wrote invalid state");
+    for (int i = 0; i < 40; ++i) Check(output[i] == 0x12345678u, "Rejected Morph dump changed caller bytes");
+}
+
 template<bool Normals, bool ZeroVertices>
 void MorphSelfClonePreservesOwnedState() {
     CKContext context(nullptr, 0, 0);
@@ -2004,6 +2029,36 @@ void MorphReplacementPreservesStateOnAllocationFailure() {
         if (succeeded) break;
     }
     Check(failures == 5 && succeeded, "Replacement did not cover every header/payload allocation failure");
+}
+
+void MorphReadAndDumpAcceptUnalignedBuffers() {
+    WireWords expected = MorphWire<true>();
+    std::vector<unsigned char> input(expected.size() * 4 + 2, 0xCD);
+    std::vector<unsigned char> output(input.size(), 0xCD);
+    memcpy(input.data() + 1, expected.data(), expected.size() * 4);
+    RCKMorphController controller;
+    Check(controller.ReadKeysFrom(input.data() + 1) == static_cast<int>(expected.size() * 4) &&
+          controller.DumpKeysTo(output.data() + 1) == static_cast<int>(expected.size() * 4), "Unaligned Morph buffer failed");
+    Check(input == output && output.front() == 0xCD && output.back() == 0xCD, "Unaligned Morph bytes/guards changed");
+}
+
+void MorphSaveRejectsIncompletePayloads() {
+    for (int kind = 0; kind < 5; ++kind) {
+        CKContext context(nullptr, 0, 0);
+        RCKObjectAnimation animation(&context, "MorphBadSave");
+        AddMorphRequestKeys(animation);
+        CKMorphController *controller = animation.GetMorphController();
+        CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
+        CKMorphKey *last = static_cast<CKMorphKey *>(controller->GetKey(1));
+        if (kind == 0) { delete[] first->PosArray; first->PosArray = nullptr; }
+        if (kind == 1) { delete[] first->NormArray; first->NormArray = nullptr; }
+        if (kind == 2) { delete[] last->NormArray; last->NormArray = nullptr; }
+        if (kind == 3) first->TimeStep = FloatWithBits(0x7FC00000u);
+        if (kind == 4) last->TimeStep = -1.0f;
+        Check(controller->DumpKeysTo(nullptr) == 0, "Invalid Save fixture unexpectedly serialized");
+        Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        Check(!saved, "Save silently omitted an invalid Morph controller");
+    }
 }
 
 template<int InvalidKind>
@@ -3551,12 +3606,20 @@ int main(int argc, char **argv) {
         {"Morph self-Clone retains zero-sized absent normals", MorphSelfClonePreservesOwnedState<false, true>},
         {"Morph Clone allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<true>},
         {"Morph Read allocation failures preserve destination/source", MorphReplacementPreservesStateOnAllocationFailure<false>},
+        {"Morph read/dump retain bytes in unaligned buffers", MorphReadAndDumpAcceptUnalignedBuffers},
+        {"Morph Save reports incomplete payload rejection", MorphSaveRejectsIncompletePayloads},
         {"Morph read rejects huge payload sizes", MorphReadRejectsOverflowAndUnorderedTimes<0>},
         {"Morph read rejects huge zero-vertex key counts", MorphReadRejectsOverflowAndUnorderedTimes<1>},
         {"Morph read rejects descending key times", MorphReadRejectsOverflowAndUnorderedTimes<2>},
         {"Morph read rejects negative key count atomically", MorphReadRejectsInvalidHeaderOrTimes<0>},
         {"Morph read rejects negative vertex count atomically", MorphReadRejectsInvalidHeaderOrTimes<1>},
         {"Morph read rejects nonfinite key times atomically", MorphReadRejectsInvalidHeaderOrTimes<2>},
+        {"Morph dump rejects byte-size overflow", MorphDumpRejectsInconsistentState<0>},
+        {"Morph dump rejects missing positions", MorphDumpRejectsInconsistentState<1>},
+        {"Morph dump rejects first-only missing normals", MorphDumpRejectsInconsistentState<2>},
+        {"Morph dump rejects later missing normals", MorphDumpRejectsInconsistentState<3>},
+        {"Morph dump rejects nonfinite key times", MorphDumpRejectsInconsistentState<4>},
+        {"Morph dump rejects descending key times", MorphDumpRejectsInconsistentState<5>},
         {"Loaded Morph resize keeps normals and coherent storage", LoadedMorphCountResizesStorage<true>},
         {"Loaded Morph resize keeps absent normals and coherent storage", LoadedMorphCountResizesStorage<false>},
         {"Morph resize rejects negative/unrepresentable counts", MorphCountRejectsInvalidSizes},

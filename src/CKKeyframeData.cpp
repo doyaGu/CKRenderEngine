@@ -2644,24 +2644,35 @@ static int MorphWireSize(int keyCount, int vertexCount, CKBOOL normals) {
 int RCKMorphController::DumpKeysTo(void *Buffer) {
     // 0x100505D9: normal presence is shared by all keys and follows the two
     // counts. Even an empty controller writes this complete three-DWORD header.
+    if (m_NbKeys < 0 || (m_NbKeys > 0 && !m_Keys))
+        return 0;
     const CKBOOL hasNormals = m_NbKeys > 0 && m_Keys[0].NormArray != nullptr;
-    const int size = sizeof(int) * 3 + m_NbKeys * (sizeof(float) +
-        m_VertexCount * (sizeof(VxVector) + (hasNormals ? sizeof(VxCompressedVector) : 0)));
+    const int size = MorphWireSize(m_NbKeys, m_VertexCount, hasNormals);
+    if (!size)
+        return 0;
+    // The wire format has one normal-presence flag for the whole controller.
+    // Reject incomplete payloads before either querying or writing any bytes.
+    for (int i = 0; i < m_NbKeys; ++i) {
+        if ((m_VertexCount > 0 && !m_Keys[i].PosArray) ||
+            (m_Keys[i].NormArray != nullptr) != (hasNormals != FALSE) ||
+            !std::isfinite(m_Keys[i].TimeStep) || (i > 0 && m_Keys[i].TimeStep < m_Keys[i - 1].TimeStep))
+            return 0;
+    }
 
     if (Buffer) {
         char *buf = static_cast<char *>(Buffer);
 
-        *reinterpret_cast<int *>(buf) = m_NbKeys;
+        memcpy(buf, &m_NbKeys, sizeof(int));
         buf += sizeof(int);
 
-        *reinterpret_cast<int *>(buf) = m_VertexCount;
+        memcpy(buf, &m_VertexCount, sizeof(int));
         buf += sizeof(int);
 
-        *reinterpret_cast<CKBOOL *>(buf) = hasNormals;
+        memcpy(buf, &hasNormals, sizeof(CKBOOL));
         buf += sizeof(CKBOOL);
 
         for (int i = 0; i < m_NbKeys; ++i) {
-            *reinterpret_cast<float *>(buf) = m_Keys[i].TimeStep;
+            memcpy(buf, &m_Keys[i].TimeStep, sizeof(float));
             buf += sizeof(float);
 
             if (m_VertexCount > 0) {

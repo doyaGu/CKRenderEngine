@@ -285,14 +285,20 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
             // Morph controller
             if (m_KeyframeData->m_MorphController) {
                 CKMorphController *ctrl = reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
-                int size = ctrl->DumpKeysTo(nullptr) >> 2;
-                if (size > 0) {
-                    chunk->WriteDword(ctrl->m_Type);
-                    chunk->WriteDword(size);
-                    void *buffer = chunk->LockWriteBuffer(size);
-                    ctrl->DumpKeysTo(buffer);
-                    chunk->Skip(size);
+                const int bytes = ctrl->DumpKeysTo(nullptr);
+                if (bytes <= 0 || (bytes & 3)) {
+                    DeleteCKStateChunk(chunk);
+                    return nullptr;
                 }
+                const int size = bytes / 4;
+                chunk->WriteDword(ctrl->m_Type);
+                chunk->WriteDword(size);
+                void *buffer = chunk->LockWriteBuffer(size);
+                if (!buffer || ctrl->DumpKeysTo(buffer) != bytes) {
+                    DeleteCKStateChunk(chunk);
+                    return nullptr;
+                }
+                chunk->Skip(size);
             }
         }
 
