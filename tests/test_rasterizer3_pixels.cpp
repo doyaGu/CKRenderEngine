@@ -1220,6 +1220,41 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
     SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", directory, 1);
 
     CKSdlGpuRasterizerContext::FFJitCounts saved;
+    Pixels litReference, litActual, blendReference, blendActual, clipReference, clipActual;
+    auto drawLit = [](CKRasterizerContext *ctx, Pixels &image, bool matrixBlend = false, bool clipping = false) {
+        SetDiffuseState(ctx);
+        VxPlane plane; plane.m_Normal = VxVector(1, 0, 0); plane.m_D = 0.1f;
+        TestCheck(ctx->SetUserClipPlane(5, plane), "set clipped lit manifest plane");
+        ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, clipping ? 32 : 0);
+        ctx->SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+        ctx->SetRenderState(VXRENDERSTATE_AMBIENT, 0xff204080u);
+        ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+        ctx->SetRenderState(VXRENDERSTATE_TWEENFACTOR, FloatBits(0.35f));
+        VxVector tween[3];
+        for (unsigned i = 0; i < 3; ++i) tween[i] = kCenterTriangle[i] * 0.7f;
+        VxVector normals[3] = {VxVector(0, 0, 1), VxVector(0, 0, 1), VxVector(0, 0, 1)};
+        VxDrawPrimitiveData data = {};
+        data.VertexCount = 3;
+        data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_DIFFUSE | CKRST_DP_TWEEN;
+        data.TweenPositionPtr = tween; data.TweenPositionStride = sizeof(VxVector);
+        data.TweenNormalPtr = normals; data.TweenNormalStride = sizeof(VxVector);
+        data.PositionPtr = const_cast<VxVector *>(kCenterTriangle); data.PositionStride = sizeof(VxVector);
+        data.NormalPtr = normals; data.NormalStride = sizeof(VxVector);
+        data.ColorPtr = const_cast<CKDWORD *>(kWhite); data.ColorStride = sizeof(CKDWORD);
+        struct BlendVertex { VxVector Position; float Weights[3]; CKDWORD Indices; } blended[3];
+        if (matrixBlend) {
+            ctx->SetRenderState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_3WEIGHTS);
+            ctx->SetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE, TRUE);
+            for (unsigned i = 0; i < 3; ++i) blended[i] = {kCenterTriangle[i], {0.2f, 0.3f, 0.1f}, 0x00010203u};
+            data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_LIGHT | CKRST_DP_DIFFUSE | CKRST_DP_WEIGHTS3 | CKRST_DP_MATRIXPAL;
+            data.PositionPtr = blended; data.PositionStride = sizeof(BlendVertex);
+            data.TweenPositionPtr = data.TweenNormalPtr = nullptr;
+        }
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH, NULL, [&]() {
+            TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &data), "lit manifest draw");
+        }, image);
+        ctx->SetRenderState(VXRENDERSTATE_CLIPPLANEENABLE, 0);
+    };
     Backend backend;
     if (OpenBackend(backend, kWidth, kHeight)) {
         CKSdlGpuRasterizerContext *context =
@@ -1227,13 +1262,33 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
         Samples samples;
         for (int run = 0; run < 2; ++run) {
             RunPixelCases(backend.Context, "saved", samples);
+            drawLit(backend.Context, run == 0 ? litReference : litActual);
+            drawLit(backend.Context, run == 0 ? blendReference : blendActual, true);
+            drawLit(backend.Context, run == 0 ? clipReference : clipActual, true, true);
             TestCheck(context->FinishBackgroundWorkForTests(30000),
                       "background compilation finishes");
         }
+        CheckMatchingImage("saved lit binding", litActual, litReference, 1);
+        CheckMatchingImage("saved indexed blend binding", blendActual, blendReference, 1);
+        CheckMatchingImage("saved clipped blend binding", clipActual, clipReference, 1);
         saved = context->CountFFJitProgramsForTests();
         TestCheck(saved.Ready != 0 && saved.Programs != 0 && saved.Pipelines != 0 &&
                       saved.Shaders == 0 && saved.Precompiled != 0,
                   "the saving run draws precompiled, then compiles programs and pipelines");
+        const char *vertex = GetEnvValue("CKRE_SDL_GPU_FF_VERTEX_JIT");
+        const bool vertexEnabled = !vertex || strcmp(vertex, "0") != 0;
+        TestCheck(vertexEnabled ? saved.UnlitPipelines > 0 : saved.UnlitPrograms == 0,
+                  "manifest run selects generated unlit 3D pipelines when enabled");
+        TestCheck(vertexEnabled ? saved.LitPipelines > 0 : saved.LitPrograms == 0,
+                  "manifest run selects generated lit 3D pipelines when enabled");
+        TestCheck(vertexEnabled ? context->GetFFJitStats().TweenReady > 0 : context->GetFFJitStats().TweenReady == 0,
+                  "manifest run executes generated tween vertices when enabled");
+        TestCheck(vertexEnabled ? context->GetFFJitStats().MatrixBlendReady > 0 : context->GetFFJitStats().MatrixBlendReady == 0,
+                  "manifest run executes generated matrix-blended vertices when enabled");
+        TestCheck(vertexEnabled ? context->GetFFJitStats().ClipReady > 0 : context->GetFFJitStats().ClipReady == 0,
+                  "manifest run executes generated user clipping when enabled");
+        TestCheck(vertexEnabled ? saved.PositionTPipelines > 0 : saved.PositionTPrograms == 0,
+                  "manifest records generated POSITIONT pipelines only when enabled");
     }
     CloseBackend(backend);
     int files = 0;
@@ -1248,8 +1303,16 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
                   "the worker creates the precompiled shaders of the manifest");
         CheckFFJitCounts("prewarmed before drawing", context->CountFFJitProgramsForTests(),
                          saved);
+        TestCheck(context->GetFFJitStats().VertexCompileFailed == 0,
+                  "prewarming reconstructs the POSITIONT companion shaders");
         Samples samples;
         RunPixelCases(backend.Context, "prewarmed", samples);
+        drawLit(backend.Context, litActual);
+        drawLit(backend.Context, blendActual, true);
+        drawLit(backend.Context, clipActual, true, true);
+        CheckMatchingImage("prewarmed indexed blend binding", blendActual, blendReference, 1);
+        CheckMatchingImage("prewarmed clipped blend binding", clipActual, clipReference, 1);
+        CheckMatchingImage("prewarmed lit binding", litActual, litReference, 1);
         TestCheck(context->FinishBackgroundWorkForTests(30000),
                   "background compilation finishes");
         CheckFFJitCounts("prewarmed after drawing", context->CountFFJitProgramsForTests(),
