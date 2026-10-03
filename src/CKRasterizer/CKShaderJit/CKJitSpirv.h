@@ -13,4 +13,10 @@
 bool CKJitEmitSpirv(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout,
                     XArray<uint32_t> &words);
 
+// Vertex attributes and varyings use their locations; Position is BuiltIn
+// Position. Optional clip distances form one BuiltIn ClipDistance array.
+// No clip-space conversion is implicit in the backend.
+bool CKJitEmitSpirv(const CKJitVertexShader &shader, const CKJitResourceLayout &layout,
+                    XArray<uint32_t> &words);
+
 #endif // CKJITSPIRV_H

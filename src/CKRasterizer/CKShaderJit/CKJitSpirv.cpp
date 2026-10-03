@@ -55,6 +55,7 @@ enum {
     SpvOpImageQueryLevels = 106,
     SpvOpConvertFToS = 110,
     SpvOpConvertSToF = 111,
+    SpvOpBitcast = 124,
     SpvOpFNegate = 127,
     SpvOpIAdd = 128,
     SpvOpFAdd = 129,
@@ -94,9 +95,11 @@ enum {
     SpvOpReturn = 253,
 
     SpvCapabilityShader = 1,
+    SpvCapabilityClipDistance = 32,
     SpvCapabilityImageQuery = 50,
     SpvAddressingModelLogical = 0,
     SpvMemoryModelGLSL450 = 1,
+    SpvExecutionModelVertex = 0,
     SpvExecutionModelFragment = 4,
     SpvExecutionModeOriginUpperLeft = 7,
 
@@ -108,6 +111,8 @@ enum {
     SpvDecorationBinding = 33,
     SpvDecorationDescriptorSet = 34,
     SpvDecorationOffset = 35,
+    SpvBuiltInPosition = 0,
+    SpvBuiltInClipDistance = 3,
     SpvBuiltInFragCoord = 15,
 
     SpvStorageClassUniformConstant = 0,
@@ -173,7 +178,8 @@ void AppendString(XArray<uint32_t> &words, const char *text) {
 
 class SpirvEmitter {
 public:
-    SpirvEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout);
+    SpirvEmitter(const CKJitShader &shader, const CKJitResourceLayout &layout, CKJitValue primary,
+                 CKJitValue discard, const CKJitVertexShader *vertex = nullptr);
 
     void Emit(XArray<uint32_t> &words);
 
@@ -219,6 +225,11 @@ private:
     uint32_t FloatType(uint32_t components) { return TypeOf(CKJitFloatType(components)); }
     uint32_t BoolType(uint32_t components) { return TypeOf(CKJitBoolType(components)); }
     uint32_t IntType() { return TypeOf(CKJIT_TYPE_INT); }
+    uint32_t InputType(const CKJitInput &input) {
+        if (input.Scalar == CKJIT_INPUT_FLOAT) return FloatType(input.Components);
+        const uint32_t scalar = DeclareType(SpvOpTypeInt, {32, 0});
+        return input.Components == 1 ? scalar : DeclareType(SpvOpTypeVector, {scalar, input.Components});
+    }
     uint32_t PointerType(uint32_t storage, uint32_t type) { return DeclareType(SpvOpTypePointer, {storage, type}); }
     uint32_t Constant(CKJitType type, const uint32_t *bits);
     uint32_t ConstantSplat(CKJitType type, uint32_t bits);
@@ -249,14 +260,18 @@ private:
     uint32_t Modulo(const CKJitNode &node, uint32_t a, uint32_t b);
     uint32_t ShiftCount(uint32_t node);
 
-    const CKJitFragmentShader &m_Shader;
+    const CKJitShader &m_Shader;
     const CKJitResourceLayout &m_Layout;
+    CKJitValue m_Primary;
+    CKJitValue m_Discard;
+    const CKJitVertexShader *m_Vertex;
     SpirvSection m_Annotations;
     SpirvSection m_Globals; // types, constants and variables
     SpirvSection m_Body;
     XSHashTable<uint32_t, Declaration, DeclarationHash, DeclarationEqual> m_Declarations;
     XArray<uint32_t> m_Values;    // SPIR-V id of every node; a marker's is the block it ends
     XArray<uint32_t> m_Inputs;    // variable of every shader input
+    XArray<uint32_t> m_Outputs;   // variables of the vertex varyings
     XArray<uint32_t> m_Interface; // entry point interface: inputs and output
     XArray<Region> m_Regions;     // enclosing the node being translated, innermost last
     XArray<uint32_t> m_Patches;   // in m_Body: where loop header phis take the nexts
@@ -267,6 +282,7 @@ private:
     uint32_t m_Main;
     uint32_t m_GlslImport;
     uint32_t m_Output;
+    uint32_t m_ClipOutput = 0, m_ClipType = 0;
     uint32_t m_UniformBlocks[CKJIT_MAX_UNIFORM_BUFFERS]; // declared on first read
     bool m_ImageQuery; // a size, level or LOD query needs the capability
 };
@@ -283,8 +299,10 @@ int SpirvEmitter::DeclarationEqual::operator()(const Declaration &a, const Decla
     return std::memcmp(&a, &b, sizeof(a)) == 0;
 }
 
-SpirvEmitter::SpirvEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_Bound(1), m_Block(0), m_Output(0),
+SpirvEmitter::SpirvEmitter(const CKJitShader &shader, const CKJitResourceLayout &layout, CKJitValue primary,
+                           CKJitValue discard, const CKJitVertexShader *vertex)
+    : m_Shader(shader), m_Layout(layout), m_Primary(primary), m_Discard(discard), m_Vertex(vertex),
+      m_Bound(1), m_Block(0), m_Output(0),
       m_ImageQuery(false) {
     std::memset(m_UniformBlocks, 0, sizeof(m_UniformBlocks));
     std::memset(m_SampledImages, 0, sizeof(m_SampledImages));
@@ -360,7 +378,7 @@ uint32_t SpirvEmitter::FloatSplat(float value, CKJitType type) {
 
 uint32_t SpirvEmitter::Op(uint32_t opcode, uint32_t type, const uint32_t *operands, uint32_t count) {
     const uint32_t id = NewId();
-    uint32_t words[8];
+    uint32_t words[10]; // result type/id plus up to eight clip-array constituents
     words[0] = type;
     words[1] = id;
     for (uint32_t i = 0; i < count; ++i)
@@ -389,7 +407,7 @@ uint32_t SpirvEmitter::Enter(uint32_t label) {
 void SpirvEmitter::DeclareInterface() {
     for (int i = 0; i < m_Shader.Inputs.Size(); ++i) {
         const CKJitInput &input = m_Shader.Inputs[i];
-        const uint32_t variable = Variable(SpvStorageClassInput, FloatType(input.Components));
+        const uint32_t variable = Variable(SpvStorageClassInput, InputType(input));
         if (input.Kind == CKJIT_INPUT_FRAG_COORD) {
             Decorate(variable, SpvDecorationBuiltIn, SpvBuiltInFragCoord);
         } else {
@@ -401,8 +419,28 @@ void SpirvEmitter::DeclareInterface() {
         m_Interface.PushBack(variable);
     }
     m_Output = Variable(SpvStorageClassOutput, FloatType(4));
-    Decorate(m_Output, SpvDecorationLocation, 0);
+    if (m_Vertex)
+        Decorate(m_Output, SpvDecorationBuiltIn, SpvBuiltInPosition);
+    else
+        Decorate(m_Output, SpvDecorationLocation, 0);
     m_Interface.PushBack(m_Output);
+    if (m_Vertex) {
+        if (m_Vertex->ClipDistances.Size()) {
+            m_ClipType = DeclareType(SpvOpTypeArray, {FloatType(1), IntConstant(m_Vertex->ClipDistances.Size())});
+            m_ClipOutput = Variable(SpvStorageClassOutput, m_ClipType);
+            Decorate(m_ClipOutput, SpvDecorationBuiltIn, SpvBuiltInClipDistance);
+            m_Interface.PushBack(m_ClipOutput);
+        }
+        for (int i = 0; i < m_Vertex->Outputs.Size(); ++i) {
+            const CKJitVertexOutput &output = m_Vertex->Outputs[i];
+            const uint32_t variable = Variable(SpvStorageClassOutput, TypeOf(m_Shader.Node(output.Value).Type));
+            Decorate(variable, SpvDecorationLocation, output.Location);
+            if (output.Kind == CKJIT_INPUT_FLAT)
+                m_Annotations.Emit(SpvOpDecorate, {variable, SpvDecorationFlat});
+            m_Outputs.PushBack(variable);
+            m_Interface.PushBack(variable);
+        }
+    }
 }
 
 // struct { float4 rows[UniformVec4Counts[buffer]]; }, declared when first
@@ -632,7 +670,11 @@ uint32_t SpirvEmitter::Translate(uint32_t index) {
     const uint32_t b = node.OperandCount > 1 ? Value(node.Operands[1]) : 0;
     switch (node.Op) {
     case CKJIT_OP_CONSTANT: return Constant(node.Type, node.Imm);
-    case CKJIT_OP_INPUT: return Op(SpvOpLoad, type, {m_Inputs[(int)node.Imm[0]]});
+    case CKJIT_OP_INPUT: {
+        const CKJitInput &input = m_Shader.Inputs[(int)node.Imm[0]];
+        const uint32_t value = Op(SpvOpLoad, InputType(input), {m_Inputs[(int)node.Imm[0]]});
+        return input.Scalar == CKJIT_INPUT_UINT ? Op(SpvOpBitcast, type, {value}) : value;
+    }
     case CKJIT_OP_UNIFORM: {
         const uint32_t row = Op(SpvOpAccessChain, PointerType(SpvStorageClassUniform, type),
                                 {UniformBlock(node.Imm[1]), IntConstant(0), IntConstant((int32_t)node.Imm[0])});
@@ -742,16 +784,25 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
 
     // Every value is computed before the discard, so no implicit-LOD sample,
     // LOD query or derivative runs after a quad neighbour was killed.
-    if (m_Shader.Discard.IsValid()) {
+    if (m_Discard.IsValid()) {
         const uint32_t kill = NewId();
         const uint32_t merge = NewId();
         m_Body.Emit(SpvOpSelectionMerge, {merge, SpvSelectionControlNone});
-        m_Body.Emit(SpvOpBranchConditional, {Value(m_Shader.Discard.Id), kill, merge});
+        m_Body.Emit(SpvOpBranchConditional, {Value(m_Discard.Id), kill, merge});
         Enter(kill);
         m_Body.Emit(SpvOpKill, {});
         Enter(merge);
     }
-    m_Body.Emit(SpvOpStore, {m_Output, Value(m_Shader.Color.Id)});
+    m_Body.Emit(SpvOpStore, {m_Output, Value(m_Primary.Id)});
+    for (int i = 0; i < m_Outputs.Size(); ++i)
+        m_Body.Emit(SpvOpStore, {m_Outputs[i], Value(m_Vertex->Outputs[i].Value.Id)});
+    if (m_ClipOutput) {
+        uint32_t distances[8];
+        for (int i = 0; i < m_Vertex->ClipDistances.Size(); ++i)
+            distances[i] = Value(m_Vertex->ClipDistances[i].Id);
+        const uint32_t array = Op(SpvOpCompositeConstruct, m_ClipType, distances, m_Vertex->ClipDistances.Size());
+        m_Body.Emit(SpvOpStore, {m_ClipOutput, array});
+    }
     m_Body.Emit(SpvOpReturn, {});
     m_Body.Emit(SpvOpFunctionEnd, {});
 
@@ -759,6 +810,8 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
     XArray<uint32_t> operands;
     SpirvSection preamble;
     preamble.Emit(SpvOpCapability, {SpvCapabilityShader});
+    if (m_ClipOutput)
+        preamble.Emit(SpvOpCapability, {SpvCapabilityClipDistance});
     if (m_ImageQuery)
         preamble.Emit(SpvOpCapability, {SpvCapabilityImageQuery});
     operands.PushBack(m_GlslImport);
@@ -766,12 +819,13 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
     preamble.Emit(SpvOpExtInstImport, operands.Begin(), (uint32_t)operands.Size());
     preamble.Emit(SpvOpMemoryModel, {SpvAddressingModelLogical, SpvMemoryModelGLSL450});
     operands.Clear();
-    operands.PushBack(SpvExecutionModelFragment);
+    operands.PushBack(m_Vertex ? SpvExecutionModelVertex : SpvExecutionModelFragment);
     operands.PushBack(m_Main);
     AppendString(operands, "main");
     operands += m_Interface;
     preamble.Emit(SpvOpEntryPoint, operands.Begin(), (uint32_t)operands.Size());
-    preamble.Emit(SpvOpExecutionMode, {m_Main, SpvExecutionModeOriginUpperLeft});
+    if (!m_Vertex)
+        preamble.Emit(SpvOpExecutionMode, {m_Main, SpvExecutionModeOriginUpperLeft});
 
     words.Clear();
     words.PushBack(SpvMagicNumber);
@@ -790,7 +844,15 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
 bool CKJitEmitSpirv(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout, XArray<uint32_t> &words) {
     if (!CKJitVerify(shader))
         return false;
-    SpirvEmitter emitter(shader, layout);
+    SpirvEmitter emitter(shader, layout, shader.Color, shader.Discard);
+    emitter.Emit(words);
+    return true;
+}
+
+bool CKJitEmitSpirv(const CKJitVertexShader &shader, const CKJitResourceLayout &layout, XArray<uint32_t> &words) {
+    if (!CKJitVerify(shader))
+        return false;
+    SpirvEmitter emitter(shader, layout, shader.Position, CKJitValue(), &shader);
     emitter.Emit(words);
     return true;
 }
