@@ -22,6 +22,8 @@
 #include <deque>
 
 #include "../Native/CKSdlGpuInternal.h"
+#include "../Native/CKSdlGpuFFJitStats.h"
+#include "../Native/CKSdlGpuFFJitUsage.h"
 #include "../Native/CKSdlGpuWorker.h"
 
 class CKSdlGpuRasterizerContext;
@@ -92,6 +94,7 @@ public:
         const CKSdlGpuReadbackTicket &Ticket) const;
     uint64_t GetDrawApproximationMask() const;
     const CKSdlGpuSubmissionStats &GetSubmissionStats() const;
+    CKSdlGpuFFJitStats GetFFJitStats() const { return m_FFJitStats; }
 
     // --- Lifecycle ---
     CKBOOL Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height,
@@ -196,6 +199,7 @@ public:
     CKBOOL FinishBackgroundWorkForTests(Sint32 TimeoutMs);
     struct FFJitCounts {
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
+        CKDWORD Candidates = 0, DrawKeys = 0;
         // Precompiled shaders the worker has created for the manifest.
         CKDWORD Shaders = 0;
         // The pipelines of precompiled programs.
@@ -281,8 +285,9 @@ private:
         SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples,
         const CKSdlGpuProgram **Owner = nullptr);
     // Queues the worker's creation of the pipeline of a program for a draw,
-    // unless the program has or awaits it already. The programs are the
-    // specialized ones, and the precompiled ones the manifest prewarms.
+    // unless the program has or awaits it already, or the outstanding job
+    // budget is full. Deferred requests leave no entry and can retry. The
+    // programs are specialized ones, and precompiled ones the manifest prewarms.
     void QueuePipeline(const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
                        SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples,
                        CKSdlGpuJobPriority Priority);
@@ -397,8 +402,8 @@ private:
     // Fragment programs compiled at runtime (CKSdlGpuRasterizerFFJit.cpp).
     // A draw names the key of its fragment program and of the draw state the
     // shader of its artifact branches on. The draws of keys that compile
-    // alike share one entry, whose shader the worker compiles and creates
-    // once. They bind the entry's programs at once and draw with the
+    // alike share one resident entry, whose shader the worker compiles and
+    // creates. They bind the entry's programs at once and draw with the
     // precompiled pipelines until the worker has created the programs' own,
     // right after the shader. The manifest of the device queues the
     // programs and pipelines of earlier runs at idle priority before any
@@ -432,8 +437,8 @@ private:
             CKDWORD Program;
         };
         XArray<Binding> Programs;
-        // Orders the manifest: the programs draws used, by first use, then
-        // the loaded ones no draw used, in their earlier order.
+        CKSdlGpuFFJitUsage Usage;
+        // Deterministic tie break, including the order of unused manifest keys.
         CKDWORD Rank = 0;
         // A loaded program's compilation, promoted when a draw uses it.
         CKSdlGpuJob *IdleJob = nullptr;
@@ -454,10 +459,13 @@ private:
                                 const CKSdlGpuFFFragmentArtifactKey &Artifact,
                                 CKFFProgramVariant Variant,
                                 CKDWORD Precompiled);
-    // The entry of a draw key no draw had, -1 past the entry limit.
+    // The entry of a new draw key, or -1 while admission is deferred. Deferred
+    // keys are retried: neither queue pressure nor capacity is a rejection.
     int AddFFJitDrawKey(const FFJitKey &DrawKey, CKFFNativeFragmentKey Fragment,
                         CKFFSamplerLayout Layout);
     int AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank);
+    int AdmitFFJitProgram(const FFJitKey &Key);
+    void ReleaseFFJitProgram(FFJitProgram &Entry);
     // Queues the compilation of a new entry and registers its shader. False
     // when the entry is rejected.
     bool SubmitFFJitProgram(FFJitProgram &Entry, const CKFFNativeFragmentKey &Fragment,
@@ -512,16 +520,24 @@ private:
         CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
     // INVALID when every program draws with the precompiled shaders.
     SDL_GPUShaderFormat m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    CKSdlGpuFFJitStats m_FFJitStats;
     // The job creating the precompiled shaders of the manifest, which
     // compilations run after.
     ShaderJob *m_FFShaderJob = nullptr;
     CKDWORD m_FFWorkerShaders = 0;
-    // Entries by creation, and the index of each canonical key's entry.
+    // Resident slots, and the index of each canonical key's entry. Cold slots
+    // can be reused once their shader compilation has finished.
     XClassArray<FFJitProgram> m_FFJitPrograms;
     XSHashTable<int, FFJitKey, FFJitKeyHash> m_FFJitKeys;
-    // The entry index of every draw key drawn, so that a draw canonicalizes
-    // only a key it has not drawn before.
+    // Recently admitted draw keys avoid repeated canonicalization. Slot reuse
+    // invalidates this index; deferred keys are deliberately not remembered.
     XSHashTable<int, FFJitKey, FFJitKeyHash> m_FFJitDrawKeys;
+    // Bounded FIFO of exact canonical keys seen on resident-cache misses.
+    // Resident entries keep their own usage. Candidate history may expire.
+    XSHashTable<CKSdlGpuFFJitUsage, FFJitKey, FFJitKeyHash> m_FFJitCandidates;
+    XArray<FFJitKey> m_FFJitCandidateOrder;
+    unsigned m_FFJitCandidateCursor = 0;
+    uint64_t m_FFJitClock = 0;
     // DXBC programs cannot use the DXIL vertex shaders.
     CKDWORD m_FFJitVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     CKDWORD m_FFJitDepthPadVertexShaders[2] = {};

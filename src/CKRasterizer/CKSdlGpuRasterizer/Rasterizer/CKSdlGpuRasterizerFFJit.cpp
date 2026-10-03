@@ -20,11 +20,12 @@
 // pipelines, at idle priority.
 
 namespace {
-// Bounds the shaders and programs one device keeps. Later fragment programs
-// draw with the precompiled artifacts.
+// Bounds resident keys and outstanding compilations (including finished jobs
+// not yet collected). Draws deferred by either bound keep their fallback.
 const int kFFJitProgramLimit = 256;
-// A manifest loads half of them, so every run can compile its own.
-const CKDWORD kFFJitLoadedProgramLimit = kFFJitProgramLimit / 2;
+const uint64_t kFFJitCompileLimit = 64;
+// Leave half the compilation budget available for this run's working set.
+const CKDWORD kFFJitLoadedProgramLimit = kFFJitCompileLimit / 2;
 // Ranks the loaded programs no draw has used after the used ones.
 const CKDWORD kFFJitLoadedRank = 0x80000000u;
 // Bounds the draw keys remembered. Draw keys only name entries, so a full
@@ -42,6 +43,7 @@ bool FFJitEmit(const CKJitFragmentShader &program, SDL_GPUShaderFormat format, X
 #endif
     return format == SDL_GPU_SHADERFORMAT_SPIRV && CKJitEmitSpirv(program, kFFJitResources, code);
 }
+
 
 bool ValidStencilOps(CKDWORD ops)
 {
@@ -103,7 +105,7 @@ bool RecordPipeline(const CKSdlGpuPipelineKey &pipeline,
 }
 }
 
-// Compiles one fragment program and creates its shader on the worker.
+// Compiles a fragment program and its optional vertex companions on the worker.
 class CKSdlGpuRasterizerContext::FFJitJob : public CKSdlGpuJob {
 public:
     FFJitJob(CKSdlGpuRasterizerContext &context, const FFJitKey &key,
@@ -124,6 +126,11 @@ public:
     ~FFJitJob() override { Shader->Job = nullptr; }
 
     void Run() override {
+        const Uint64 start = SDL_GetTicksNS();
+        Compile();
+        ElapsedNs = SDL_GetTicksNS() - start;
+    }
+    void Compile() {
         CKRE_PROFILE_SCOPE("CKRE.SDL.FFJitCompile");
         if (!Described)
             return;
@@ -145,6 +152,11 @@ public:
                          SDL_GetError());
     }
     void Complete() override {
+        CKSdlGpuFFJitStats &stats = Context.m_FFJitStats;
+        ++stats.CompileCompleted;
+        if (!Shader->Shader) ++stats.CompileFailed;
+        stats.CompileNs += ElapsedNs;
+        stats.CompileMaxNs = std::max(stats.CompileMaxNs, ElapsedNs);
         Context.CompleteFFJitProgram(Key, Shader);
     }
 
@@ -159,14 +171,17 @@ private:
     SDL_GPUDevice *Device;
     SDL_GPUShaderFormat Format;
     bool Described = false;
+    uint64_t ElapsedNs = 0;
 };
 
 void CKSdlGpuRasterizerContext::InitFFJit()
 {
     m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
+    m_FFJitStats = {};
     m_FFJitManifest = "";
     m_FFJitIdentity = 0;
     m_FFJitUses = 0;
+    m_FFJitClock = 0;
     m_FFWorkerShaders = 0;
     // CKRE_SDL_GPU_FF_JIT=0 draws every program with the precompiled shaders.
     const char *setting = SDL_getenv("CKRE_SDL_GPU_FF_JIT");
@@ -312,6 +327,74 @@ int CKSdlGpuRasterizerContext::AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank
     return index;
 }
 
+void CKSdlGpuRasterizerContext::ReleaseFFJitProgram(FFJitProgram &entry)
+{
+    // Queued draw packets retain their program. Removing public handles only
+    // drops cache ownership; pipeline jobs also retain their shader inputs.
+    for (int b = 0; b < entry.Programs.Size(); ++b)
+        DestroyObject(entry.Programs[b].Program, CKRST_OBJ_PROGRAM);
+    if (entry.PixelShader)
+        DestroyObject(entry.PixelShader, CKRST_OBJ_SHADER);
+}
+
+int CKSdlGpuRasterizerContext::AdmitFFJitProgram(const FFJitKey &key)
+{
+    CKSdlGpuFFJitUsage *candidate = m_FFJitCandidates.FindPtr(key);
+    if (!candidate) {
+        if (m_FFJitCandidateOrder.Size() == kFFJitDrawKeyLimit) {
+            m_FFJitCandidates.Remove(m_FFJitCandidateOrder[m_FFJitCandidateCursor]);
+            m_FFJitCandidateOrder[m_FFJitCandidateCursor] = key;
+            m_FFJitCandidateCursor = (m_FFJitCandidateCursor + 1) % kFFJitDrawKeyLimit;
+        } else {
+            m_FFJitCandidateOrder.PushBack(key);
+        }
+        m_FFJitCandidates.Insert(key, CKSdlGpuFFJitUsage(), FALSE);
+        candidate = m_FFJitCandidates.FindPtr(key);
+    }
+    candidate->Touch(m_FFJitClock);
+    const uint64_t pending = m_FFJitStats.CompileQueued - m_FFJitStats.CompileCompleted;
+    if (pending >= kFFJitCompileLimit) {
+        ++m_FFJitStats.QueueDeferred;
+        return -1;
+    }
+    if (m_FFJitPrograms.Size() < kFFJitProgramLimit)
+        return AddFFJitProgram(key, ++m_FFJitUses);
+    // Most pressure misses are one-offs; avoid scanning the resident cache.
+    if (candidate->Hits < 2) {
+        ++m_FFJitStats.Capacity;
+        return -1;
+    }
+
+    int victim = -1;
+    for (int i = 0; i < m_FFJitPrograms.Size(); ++i) {
+        const FFJitProgram &entry = m_FFJitPrograms[i];
+        // Never churn pending work or let a one-off evict a resident program.
+        if (entry.State == FFJitProgram::QUEUED ||
+            entry.Usage.Score(m_FFJitClock) > candidate->Hits)
+            continue;
+        if (victim < 0 || entry.Usage.Score(m_FFJitClock) < m_FFJitPrograms[victim].Usage.Score(m_FFJitClock) ||
+            (entry.Usage.Score(m_FFJitClock) == m_FFJitPrograms[victim].Usage.Score(m_FFJitClock) &&
+             entry.Usage.Last < m_FFJitPrograms[victim].Usage.Last))
+            victim = i;
+    }
+    if (victim < 0) {
+        ++m_FFJitStats.Capacity;
+        return -1;
+    }
+    FFJitProgram &entry = m_FFJitPrograms[victim];
+    m_FFJitKeys.Remove(entry.Key);
+    ReleaseFFJitProgram(entry);
+    entry = FFJitProgram();
+    entry.Key = key;
+    entry.Rank = ++m_FFJitUses;
+    // Draw-key entries contain slot indices. No alias may keep the victim's
+    // index after this slot is reused for another canonical key.
+    m_FFJitDrawKeys.Clear();
+    m_FFJitKeys.Insert(key, victim, FALSE);
+    ++m_FFJitStats.Evictions;
+    return victim;
+}
+
 bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
     FFJitProgram &Entry,
     const CKFFNativeFragmentKey &Fragment,
@@ -324,6 +407,9 @@ bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
     // manifest, so that the pipelines waiting for them find those too. A
     // draw waiting for one promotes that job as well.
     if (SubmitJob(job, Priority, m_FFShaderJob)) {
+        ++m_FFJitStats.CompileQueued;
+        m_FFJitStats.CompilePendingPeak = std::max(m_FFJitStats.CompilePendingPeak,
+            m_FFJitStats.CompileQueued - m_FFJitStats.CompileCompleted);
         Entry.PixelShader = ShaderObjects.Add(shader);
         if (m_FFShaderJob && Priority == CKSDLGPU_JOB_NORMAL)
             Worker.Promote(job);
@@ -349,14 +435,18 @@ int CKSdlGpuRasterizerContext::AddFFJitDrawKey(
     const FFJitKey key = MakeFFJitKey(Fragment, Layout);
     const int *found = m_FFJitKeys.FindPtr(key);
     int index = found ? *found : -1;
-    if (!found && m_FFJitPrograms.Size() < kFFJitProgramLimit) {
+    if (!found) {
         // Never compile while drawing. A program the worker cannot take
         // keeps its precompiled shader.
-        index = AddFFJitProgram(key, ++m_FFJitUses);
-        SubmitFFJitProgram(m_FFJitPrograms[index], Fragment, Layout, CKSDLGPU_JOB_NORMAL);
-        CKRE_PROFILE_VALUE("CKRE.SDL.FFJitCompiles", 1);
+        index = AdmitFFJitProgram(key);
+        if (index >= 0) {
+            SubmitFFJitProgram(m_FFJitPrograms[index], Fragment, Layout, CKSDLGPU_JOB_NORMAL);
+            CKRE_PROFILE_VALUE("CKRE.SDL.FFJitCompiles", 1);
+        }
     }
-    m_FFJitDrawKeys.Insert(DrawKey, index, FALSE);
+    // Do not memoize a deferred key as permanently precompiled.
+    if (index >= 0)
+        m_FFJitDrawKeys.Insert(DrawKey, index, FALSE);
     return index;
 }
 
@@ -367,8 +457,12 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
     CKFFProgramVariant Variant,
     CKDWORD Precompiled)
 {
-    if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_INVALID || !Constants)
+    ++m_FFJitStats.Requests;
+    ++m_FFJitClock;
+    if (m_FFJitFormat == SDL_GPU_SHADERFORMAT_INVALID || !Constants) {
+        ++m_FFJitStats.Unavailable;
         return Precompiled;
+    }
     // A draw computes its key, canonicalizing it only when it is new.
     const CKFFNativeFragmentKey fragment = CKFFNativeFragmentDrawKey(
         FragmentProgram, *Constants, Artifact.UsesShaderSampling != FALSE,
@@ -376,19 +470,25 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveFFJitProgram(
     const FFJitKey drawKey = MakeFFJitKey(fragment, Artifact.SamplerLayout);
     const int *found = m_FFJitDrawKeys.FindPtr(drawKey);
     const int index = found ? *found : AddFFJitDrawKey(drawKey, fragment, Artifact.SamplerLayout);
-    if (index < 0)
+    if (index < 0) {
         return Precompiled;
+    }
     FFJitProgram &entry = m_FFJitPrograms[index];
+    entry.Usage.Touch(m_FFJitClock);
     if (entry.Rank & kFFJitLoadedRank)
         entry.Rank = ++m_FFJitUses;
-    if (entry.State == FFJitProgram::REJECTED)
+    if (entry.State == FFJitProgram::REJECTED) {
+        ++m_FFJitStats.Rejected;
         return Precompiled;
+    }
     // A draw now waits for a program loaded at idle priority.
     if (entry.IdleJob) {
         Worker.Promote(entry.IdleJob);
         entry.IdleJob = nullptr;
     }
     const CKDWORD program = BindFFJitProgram(entry, Variant, Precompiled);
+    if (program) ++m_FFJitStats.Specialized;
+    else ++m_FFJitStats.Rejected;
     return program ? program : Precompiled;
 }
 
@@ -546,7 +646,12 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
             ranked.PushBack(&m_FFJitPrograms[i]);
     }
     std::sort(ranked.Begin(), ranked.End(),
-              [](const FFJitProgram *a, const FFJitProgram *b) { return a->Rank < b->Rank; });
+              [this](const FFJitProgram *a, const FFJitProgram *b) {
+                  const unsigned x = a->Usage.Score(m_FFJitClock), y = b->Usage.Score(m_FFJitClock);
+                  if (x != y) return x > y;
+                  if (a->Usage.Last != b->Usage.Last) return a->Usage.Last > b->Usage.Last;
+                  return a->Rank < b->Rank;
+              });
     CKSdlGpuFFJitManifest manifest;
     for (int i = 0; i < ranked.Size() &&
                     manifest.Programs.Size() < CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS; ++i) {
@@ -574,7 +679,7 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
             record.Variant = (CKBYTE)binding.Variant;
             const bool pad =
                 binding.Precompiled == m_NativeFFPrograms[binding.Variant][artifact][1];
-            const CKBYTE flags = (CKBYTE)(pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0);
+            const CKBYTE flags = pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0;
             // Pending and failed pipelines are recorded too.
             for (auto it = program->Pipelines.Begin(); it != program->Pipelines.End(); ++it) {
                 if (RecordPipeline(it.GetKey(), vertexFormats, flags, record))
@@ -609,16 +714,29 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
 
 void CKSdlGpuRasterizerContext::ClearFFJitPrograms()
 {
+    const char *report = SDL_getenv("CKRE_SDL_GPU_FF_JIT_STATS");
+    if (report && SDL_strcmp(report, "1") == 0 && m_FFJitStats.Requests) {
+        const auto &s = m_FFJitStats;
+        SDL_Log("FFJIT_STATS requests=%llu selected=%llu ready=%llu positiont=%llu unlit=%llu lit=%llu tween=%llu blend=%llu clip=%llu pad=%llu "
+                "compile_queued=%llu compile_completed=%llu compile_failed=%llu vertex_failed=%llu "
+                "pipeline_failed=%llu",
+                (unsigned long long)s.Requests, (unsigned long long)s.PipelineSelections,
+                (unsigned long long)s.PipelineReady, (unsigned long long)s.PositionTReady,
+                (unsigned long long)s.UnlitReady, (unsigned long long)s.LitReady, (unsigned long long)s.TweenReady,
+                (unsigned long long)s.MatrixBlendReady, (unsigned long long)s.ClipReady, (unsigned long long)s.DepthPadReady,
+                (unsigned long long)s.CompileQueued,
+                (unsigned long long)s.CompileCompleted, (unsigned long long)s.CompileFailed,
+                (unsigned long long)s.VertexCompileFailed, (unsigned long long)s.PipelineBuildFailed);
+    }
     for (int i = 0; i < m_FFJitPrograms.Size(); ++i) {
-        const FFJitProgram &entry = m_FFJitPrograms[i];
-        for (int b = 0; b < entry.Programs.Size(); ++b)
-            DestroyObject(entry.Programs[b].Program, CKRST_OBJ_PROGRAM);
-        if (entry.PixelShader)
-            DestroyObject(entry.PixelShader, CKRST_OBJ_SHADER);
+        ReleaseFFJitProgram(m_FFJitPrograms[i]);
     }
     m_FFJitPrograms.Clear();
     m_FFJitKeys.Clear();
     m_FFJitDrawKeys.Clear();
+    m_FFJitCandidates.Clear();
+    m_FFJitCandidateOrder.Clear();
+    m_FFJitCandidateCursor = 0;
     // The job keeps the shaders it creates until it is deleted.
     m_FFShaderJob = nullptr;
     for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {
@@ -637,6 +755,8 @@ CKSdlGpuRasterizerContext::FFJitCounts
 CKSdlGpuRasterizerContext::CountFFJitProgramsForTests() const
 {
     FFJitCounts counts;
+    counts.Candidates = m_FFJitCandidates.Size();
+    counts.DrawKeys = m_FFJitDrawKeys.Size();
     for (int i = 0; i < m_FFJitPrograms.Size(); ++i) {
         const FFJitProgram &entry = m_FFJitPrograms[i];
         if (entry.State == FFJitProgram::QUEUED) {

@@ -24,6 +24,8 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Rasterizer/CKSdlGpuShaders.cpp
 )
 set(CKSDL_GPU_RASTERIZER_HEADERS
+    Native/CKSdlGpuFFJitStats.h
+    Native/CKSdlGpuFFJitUsage.h
     Native/CKSdlGpuInternal.h
     Native/CKSdlGpuNativeShaders.h
     Native/CKSdlGpuShaderJob.h
