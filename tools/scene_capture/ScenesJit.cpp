@@ -37,11 +37,16 @@ bool BuildComposite2D(SceneContext &sc) {
         CKMaterial *material = Panel(sc, name, VxColor(0.3f + 0.15f * (i % 4), 0.65f, 1.0f, 0.85f), icons);
         CK2dEntity *entity = SceneCreate2dQuad(sc, name, VxRect(0, 0, 100, 85), material, false);
         if (!material || !entity) return false;
+        // Equal ZOrder entries have no stable order across the original and
+        // current runtime's sorts. Define the intended alpha composition.
+        entity->SetZOrder(int(i) + 1);
         g_Cards.push_back(entity); g_CardMaterials.push_back(material);
     }
     // The overlay crosses several moving, partially transparent cards.
-    SceneCreate2dQuad(sc, "overlay", VxRect(12, float(sc.Height - 115), float(sc.Width - 12), float(sc.Height - 12)),
+    CK2dEntity *overlay = SceneCreate2dQuad(sc, "overlay", VxRect(12, float(sc.Height - 115), float(sc.Width - 12), float(sc.Height - 12)),
         Panel(sc, "overlay", VxColor(0.08f, 0.12f, 0.2f, 0.65f)), false);
+    if (!overlay) return false;
+    overlay->SetZOrder(13);
     CKSpriteText *text = static_cast<CKSpriteText *>(sc.Context->CreateObject(CKCID_SPRITETEXT, (CKSTRING)"caption", CK_OBJECTCREATION_NONAMECHECK));
     if (!text || !text->Create(550, 48, 32, 0)) return false;
     text->SetDesiredVideoFormat(_32_ARGB8888);
@@ -52,6 +57,7 @@ bool BuildComposite2D(SceneContext &sc) {
     text->SetHomogeneousCoordinates(FALSE);
     text->SetPosition(Vx2DVector(24.0f, float(sc.Height - 80)));
     SceneAddRenderObject(sc, text);
+    text->SetZOrder(14);
     return true;
 }
 
