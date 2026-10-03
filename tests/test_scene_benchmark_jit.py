@@ -3,7 +3,8 @@ import copy
 import unittest
 
 from scene_benchmark_jit import (aggregate, aggregate_comparisons, distribution, mode_order,
-                                 paired_comparisons, paired_foreground, summarize_profile)
+                                 paired_comparisons, paired_foreground, summarize_profile,
+                                 SNAPSHOT_FIELDS, summarize_jit_interval)
 
 
 class SceneBenchmarkTest(unittest.TestCase):
@@ -121,6 +122,104 @@ class SceneBenchmarkTest(unittest.TestCase):
         self.assertEqual(result["medianPairedDeltaMs"], 2)
         self.assertIsNone(result["medianPairedChangePercent"])
         self.assertEqual(result["percentageRepetitions"], 0)
+
+    def add_snapshots(self):
+        before = dict.fromkeys(SNAPSHOT_FIELDS, 0)
+        before.update(Requests=20, Specialized=20, PipelineSelections=20, PipelineReady=20,
+                      PositionTReady=20, CompileQueued=3, CompileCompleted=3,
+                      VertexCompileCompleted=18, PipelineQueued=6, PipelineCompleted=6, SynchronousRequests=2)
+        after = dict(before, Requests=60, Specialized=60, PipelineSelections=60, PipelineReady=60, PositionTReady=60)
+        self.profile["jitInterval"] = dict(schemaVersion=1, firstFrame=2, endFrameExclusive=6,
+                                           before=before, after=after)
+        return before, after
+
+    def test_snapshots_prove_the_measured_interval_without_changing_cold_counters(self):
+        self.add_snapshots()
+        result = summarize_profile(self.profile, self.stats, "on", "composite_2d", 2, 4, require_steady=True)
+        self.assertTrue(result["measuredJit"]["steady"])
+        self.assertEqual(result["measuredReadySelectionsLowerBound"], 40)
+        self.assertEqual(result["measuredVertexSelectionsLowerBounds"]["positiont"], 40)
+        self.assertEqual(result["measuredJit"]["delta"]["CompileCompleted"], 0)
+
+    def test_missing_snapshots_are_unknown_and_fail_strict_measurement(self):
+        self.profile["jitInterval"] = None
+        self.assertIsNone(summarize_jit_interval(self.profile, "on", "composite_2d", 40))
+        with self.assertRaisesRegex(ValueError, "requires boundary snapshots"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40, True)
+
+    def test_jobs_pending_at_measurement_start_cannot_be_hidden_by_teardown(self):
+        before, after = self.add_snapshots()
+        before["CompileQueued"] += 1
+        after["CompileQueued"] += 1
+        after["CompileCompleted"] += 1
+        result = summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+        self.assertEqual(result["pendingBefore"]["shader"], 1)
+        self.assertFalse(result["noShaderCompilation"])
+        with self.assertRaisesRegex(ValueError, "not steady"):
+            summarize_profile(self.profile, self.stats, "on", "composite_2d", 2, 4, require_steady=True)
+
+    def test_late_shader_pipeline_or_synchronous_creation_fails_strict_measurement(self):
+        for counters in (("CompileQueued", "CompileCompleted", "VertexCompileCompleted"),
+                         ("PipelineQueued", "PipelineCompleted"), ("SynchronousRequests",)):
+            with self.subTest(counters=counters):
+                _, after = self.add_snapshots()
+                for counter in counters:
+                    after[counter] += 1
+                with self.assertRaisesRegex(ValueError, "not steady"):
+                    summarize_jit_interval(self.profile, "on", "composite_2d", 40, True)
+
+    def test_fallback_inside_measurement_is_reported_and_rejected_in_strict_mode(self):
+        _, after = self.add_snapshots()
+        after["PipelineReady"] -= 1
+        after["PositionTReady"] -= 1
+        after["ShaderPending"] += 1
+        result = summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+        self.assertEqual(result["fallbackSelections"], 1)
+        self.assertFalse(result["allMeasuredDrawsUsedJit"])
+        with self.assertRaisesRegex(ValueError, "not steady"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40, True)
+
+    def test_invalid_snapshot_boundary_or_decreasing_counter_is_rejected(self):
+        self.add_snapshots()
+        self.profile["jitInterval"]["firstFrame"] = 3
+        with self.assertRaisesRegex(ValueError, "boundaries"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+        _, after = self.add_snapshots()
+        after["Evictions"] = -1
+        with self.assertRaisesRegex(ValueError, "counter"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+        before, _ = self.add_snapshots()
+        before["Evictions"] = 1
+        with self.assertRaisesRegex(ValueError, "decreased"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+
+    def test_disabled_modes_and_required_vertices_are_checked_at_boundaries(self):
+        _, after = self.add_snapshots()
+        with self.assertRaisesRegex(ValueError, "disabled vertex"):
+            summarize_jit_interval(self.profile, "fragment", "composite_2d", 40)
+        after["PositionTReady"] = 20
+        with self.assertRaisesRegex(ValueError, "generated vertices absent"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+
+    def test_steady_disabled_run_does_not_claim_jit_draws(self):
+        before, after = self.add_snapshots()
+        for snapshot, requests in ((before, 20), (after, 60)):
+            snapshot.update(dict.fromkeys(SNAPSHOT_FIELDS, 0))
+            snapshot.update(Requests=requests, Unavailable=requests, SynchronousRequests=2)
+        result = summarize_jit_interval(self.profile, "off", "composite_2d", 40, True)
+        self.assertTrue(result["steady"])
+        self.assertIsNone(result["allMeasuredDrawsUsedJit"])
+        self.assertEqual(result["delta"]["PipelineReady"], 0)
+
+    def test_inconsistent_snapshot_accounting_and_failures_are_rejected(self):
+        _, after = self.add_snapshots()
+        after["PipelineSelections"] -= 1
+        with self.assertRaisesRegex(ValueError, "inconsistent"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40)
+        _, after = self.add_snapshots()
+        after["CompileFailed"] = 1
+        with self.assertRaisesRegex(ValueError, "failure"):
+            summarize_jit_interval(self.profile, "on", "composite_2d", 40)
 
 
 if __name__ == "__main__":

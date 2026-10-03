@@ -19,6 +19,13 @@ import time
 
 MODES = ("off", "fragment", "on")
 VERTEX_FIELDS = ("positiont", "unlit", "lit", "tween", "blend", "clip", "pad")
+SNAPSHOT_FIELDS = (
+    "Requests", "Specialized", "Unavailable", "Capacity", "Rejected", "QueueDeferred",
+    "CompileQueued", "CompileCompleted", "CompileFailed", "VertexCompileCompleted", "VertexCompileFailed",
+    "PipelineSelections", "PipelineReady", "PositionTReady", "UnlitReady", "LitReady", "TweenReady",
+    "MatrixBlendReady", "ClipReady", "DepthPadReady", "ShaderPending", "PipelinePending",
+    "PipelineDeferred", "PipelineFailed", "PipelineQueued", "PipelineCompleted", "PipelineBuildFailed",
+    "SynchronousRequests", "Evictions", "PipelineEvictions")
 
 
 def mode_order(repeat):
@@ -39,7 +46,61 @@ def distribution(values):
                 minimum=ordered[0], maximum=ordered[-1])
 
 
-def summarize_profile(profile, stats, mode, scene, warmup, measured):
+def summarize_jit_interval(profile, mode, scene, measured_draws, require_steady=False):
+    interval = profile.get("jitInterval")
+    if interval is None:
+        if require_steady:
+            raise ValueError("steady JIT measurement requires boundary snapshots")
+        return None
+    if (interval["schemaVersion"] != 1 or interval["firstFrame"] != profile["warmupFrames"] or
+            interval["endFrameExclusive"] != len(profile["frames"])):
+        raise ValueError("invalid JIT snapshot boundaries or schema")
+    before, after = interval["before"], interval["after"]
+    for snapshot in (before, after):
+        if any(type(snapshot[k]) is not int or not 0 <= snapshot[k] < 2**64 for k in SNAPSHOT_FIELDS):
+            raise ValueError("invalid JIT snapshot counter")
+        if (snapshot["CompileCompleted"] > snapshot["CompileQueued"] or
+                snapshot["PipelineCompleted"] > snapshot["PipelineQueued"] or
+                snapshot["Requests"] != sum(snapshot[k] for k in
+                    ("Specialized", "Unavailable", "Capacity", "Rejected", "QueueDeferred")) or
+                snapshot["PipelineSelections"] != sum(snapshot[k] for k in
+                    ("PipelineReady", "ShaderPending", "PipelinePending", "PipelineDeferred", "PipelineFailed"))):
+            raise ValueError("inconsistent JIT snapshot outcomes")
+        if any(snapshot[k] for k in ("CompileFailed", "VertexCompileFailed", "PipelineBuildFailed", "PipelineFailed")):
+            raise ValueError("JIT snapshot reports a shader or pipeline failure")
+    delta = {k: after[k] - before[k] for k in SNAPSHOT_FIELDS}
+    if any(v < 0 for v in delta.values()):
+        raise ValueError("JIT snapshot counters decreased during measurement")
+    vertices = ("PositionTReady", "UnlitReady", "LitReady", "TweenReady", "MatrixBlendReady", "ClipReady", "DepthPadReady")
+    if mode != "on" and any(after[k] for k in vertices):
+        raise ValueError("disabled vertex JIT appears in boundary snapshots")
+    if mode == "off" and (after["PipelineSelections"] or after["CompileQueued"]):
+        raise ValueError("disabled JIT appears in boundary snapshots")
+    if mode != "off" and not delta["PipelineReady"]:
+        raise ValueError("no ready JIT selections between measurement boundaries")
+    required = ("PositionTReady",) if scene == "composite_2d" else ("UnlitReady", "LitReady")
+    if mode == "on" and any(not delta[k] for k in required):
+        raise ValueError("required generated vertices absent between measurement boundaries")
+    pending_before = dict(shader=before["CompileQueued"] - before["CompileCompleted"],
+                          pipeline=before["PipelineQueued"] - before["PipelineCompleted"])
+    pending_after = dict(shader=after["CompileQueued"] - after["CompileCompleted"],
+                         pipeline=after["PipelineQueued"] - after["PipelineCompleted"])
+    no_compile = not pending_before["shader"] and not any(delta[k] for k in
+        ("CompileQueued", "CompileCompleted", "VertexCompileCompleted"))
+    no_pipeline = not pending_before["pipeline"] and not any(delta[k] for k in
+        ("PipelineQueued", "PipelineCompleted", "SynchronousRequests"))
+    fallback = sum(delta[k] for k in ("ShaderPending", "PipelinePending", "PipelineDeferred", "PipelineFailed"))
+    all_jit = delta["PipelineReady"] == measured_draws if mode != "off" else None
+    steady = bool(no_compile and no_pipeline and not fallback and (mode == "off" or all_jit))
+    result = dict(delta=delta, pendingBefore=pending_before, pendingAfter=pending_after,
+        noShaderCompilation=no_compile, noPipelineCreation=no_pipeline,
+        fallbackSelections=fallback, allMeasuredDrawsUsedJit=all_jit, steady=steady)
+    if require_steady and not steady:
+        raise ValueError("measurement is not steady: pending/new compilation, pipeline creation, or non-JIT draws")
+    return result
+
+
+def summarize_profile(profile, stats, mode, scene, warmup, measured, require_steady=False):
     frames = profile["frames"]
     if len(frames) != warmup + measured or profile["warmupFrames"] != warmup:
         raise ValueError("incomplete frame profile")
@@ -62,26 +123,36 @@ def summarize_profile(profile, stats, mode, scene, warmup, measured):
     if mode != "on" and any(stats.get(k, 0) for k in VERTEX_FIELDS):
         raise ValueError("disabled vertex JIT was used")
     warmup_draws = sum(f["rasterizerStats"]["drawCalls"] for f in frames[:warmup])
+    measured_draws = sum(f["rasterizerStats"]["drawCalls"] for f in frames[warmup:])
+    measured_jit = summarize_jit_interval(profile, mode, scene, measured_draws, require_steady)
     # Even if every warmup draw used JIT, excess ready selections necessarily
     # happened in the measured interval. This does not prove zero late jobs.
     ready_lower_bound = max(0, stats.get("ready", 0) - warmup_draws)
+    if measured_jit is not None:
+        ready_lower_bound = measured_jit["delta"]["PipelineReady"]
     if mode != "off" and not ready_lower_bound:
         raise ValueError("no proof of JIT execution inside the measured interval")
     required = ("positiont",) if scene == "composite_2d" else ("unlit", "lit")
     vertex_lower_bounds = {k: max(0, stats.get(k, 0) - warmup_draws) for k in VERTEX_FIELDS}
+    if measured_jit is not None:
+        vertex_lower_bounds = dict(zip(VERTEX_FIELDS, (measured_jit["delta"][k] for k in
+            ("PositionTReady", "UnlitReady", "LitReady", "TweenReady", "MatrixBlendReady", "ClipReady", "DepthPadReady"))))
     if mode == "on" and any(not vertex_lower_bounds[k] for k in required):
         raise ValueError("no proof of required generated vertices inside the measured interval")
-    return dict(
+    result = dict(
         coldStartMilliseconds=profile["coldStartMilliseconds"],
         initial120RenderMilliseconds=distribution([f["renderMilliseconds"] for f in frames[:120]]),
         measuredRenderMilliseconds=distribution([f["renderMilliseconds"] for f in frames[warmup:]]),
-        measuredDrawCalls=sum(f["rasterizerStats"]["drawCalls"] for f in frames[warmup:]),
+        measuredDrawCalls=measured_draws,
         measuredPrimitives=sum(f["rasterizerStats"]["primitives"] for f in frames[warmup:]),
         measuredReadySelectionsLowerBound=ready_lower_bound,
         measuredVertexSelectionsLowerBounds=vertex_lower_bounds,
         allMeasuredFramesFocused=profile["allMeasuredFramesFocused"],
         timingScope=profile["timingScope"], driverName=profile["driverName"],
         driverDescription=profile["driverDescription"], jit=stats)
+    if "jitInterval" in profile or require_steady:
+        result["measuredJit"] = measured_jit
+    return result
 
 
 class ProcessMemory:
@@ -243,6 +314,8 @@ def main():
     parser.add_argument("--measured", type=int, default=12000)
     parser.add_argument("--size", default="1280x720")
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--require-steady-jit", action="store_true",
+                        help="require boundary snapshots proving no measured compilation, pipeline creation or fallback")
     args = parser.parse_args()
     if min(args.repeats, args.warmup, args.measured, args.timeout) < 1:
         parser.error("counts and timeout must be positive")
@@ -320,7 +393,8 @@ def main():
                         if os.name == "nt" and (not row["processMemory"] or
                                 row["processMemory"]["processId"] != profile["processId"]):
                             raise ValueError("memory samples do not identify the profiled renderer")
-                        row["summary"] = summarize_profile(profile, stats, mode, scene, args.warmup, args.measured)
+                        row["summary"] = summarize_profile(profile, stats, mode, scene, args.warmup, args.measured,
+                                                           args.require_steady_jit)
                         differences = re.findall(r"max diff (\d+)", text)
                         if compare and len(differences) != 1:
                             raise ValueError("missing final-image comparison")
@@ -335,9 +409,10 @@ def main():
                     records.append(row)
                     report = dict(schemaVersion=1, records=records, aggregates=aggregate(records),
                                   complete=False, expectedRuns=args.repeats * len(args.drivers.split(",")) * len(args.scenes.split(",")) * 3,
+                                  requireSteadyJit=args.require_steady_jit,
                                   gpuTimings=None, gpuMemory=None,
                                   notes=["Render CPU wall time includes presentation/backpressure; no GPU timestamps.",
-                                         "Fixed warmup window; no per-frame JIT counters to prove zero late compilation.",
+                                         "Boundary JIT snapshots, when available, verify the measured interval; no per-frame localization.",
                                          "Fresh process and disabled JIT manifest; OS/driver caches are not cleared.",
                                          "Process memory includes engine, assets and drivers; it is not JIT/GPU memory."])
                     write_report(out, report)
