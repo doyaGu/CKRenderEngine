@@ -26,7 +26,7 @@ struct SceneDef {
     bool (*Build)(SceneContext &sc);        // called once before the first frame
     void (*PreFrame)(SceneContext &sc);     // optional, outside Render (RTT passes, uploads)
     void (*PostFrame)(SceneContext &sc);    // optional, outside Render after the frame
-    bool HasOracle;                         // the original DX8 rasterizer can render it
+    bool HasOracle;                         // original DX8 can capture it; not a conformance verdict
     int Threshold;                          // suggested per-channel oracle threshold (0..255)
     float MinPass;                          // suggested oracle pass ratio (0..1)
     const char *IniOverrides;               // CK2_3D.ini <Render> lines, or NULL (present_* scenes)

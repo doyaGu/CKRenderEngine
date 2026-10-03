@@ -419,9 +419,9 @@ bool BuildClipScene(SceneContext &sc) {
 }
 
 const SceneDef g_ScenesJit[] = {
-    {"composite_2d", "Animated cards, overlapping alpha panels and sprite text through CK2 scene traversal", BuildComposite2D, MoveComposite2D, NULL, false, 2, 1.0f, NULL},
-    {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, false, 2, 1.0f, NULL},
-    {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, false, 2, 1.0f, NULL},
+    {"composite_2d", "Animated cards, overlapping alpha panels and sprite text through CK2 scene traversal", BuildComposite2D, MoveComposite2D, NULL, true, 2, 1.0f, NULL},
+    {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, true, 2, 1.0f, NULL},
+    {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, true, 2, 1.0f, NULL},
     {"lighting_attenuation", "Lit spheres with 0/1/8/3 point lights and changing legacy attenuation/range", BuildAttenuationLighting, MoveAttenuationLighting, NULL, true, 2, 1.0f, NULL},
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
     {"tween_3d", "Six textured lit/prelit morphs with position/normal streams, fog and depth occlusion", BuildTweenScene, NULL, NULL, false, 2, 1.0f, NULL},
