@@ -2630,12 +2630,10 @@ void TestEmission() {
     }
 }
 
-
 #include "TestFFPositionTJit.inl"
-
 #include "TestFFUnlitJit.inl"
-
 #include "TestFFLitJit.inl"
+#include "TestFFClipJit.inl"
 
 } // namespace
 
@@ -2664,5 +2662,6 @@ int main(int argc, char **argv) {
     framework.Run("unlit 3D specialization", TestUnlit);
     framework.Run("lit draw eligibility", TestLitEligibility);
     framework.Run("lit 3D specialization", TestLit);
+    framework.Run("vertex user clipping", TestVertexClipping);
     return framework.ExitCode();
 }
