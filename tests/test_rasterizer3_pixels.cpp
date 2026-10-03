@@ -4460,6 +4460,7 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 #ifdef CKRE_PIXEL_SDL_GPU
 #include "TestFFJitReplay.inl"
 #include "TestFFJitCache.inl"
+#include "TestFFJitPipeline.inl"
 #endif
 
 void CheckFullImageComparator()
@@ -4612,6 +4613,9 @@ void BackendRendersFixedFunctionSemantics()
 #ifdef CKRE_PIXEL_SDL_GPU
     if (opened)
         CheckPrewarmedFragmentPrograms(precompiled);
+    if (opened) {
+        CheckFFJitPipelinePressure();
+    }
     if (opened) {
         CheckFFJitCachePressure();
     }
