@@ -26,6 +26,8 @@
 // constants, bump matrices and luminance, LOD bias values, texture factor,
 // alpha reference, fog parameters, sampler metadata), so one compiled key
 // serves every draw it names.
+// CKFFNativeFragmentDependencies.md records the conditional state dependencies
+// and the CPU/GPU regressions that check program and pipeline reuse.
 
 enum {
     CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT = 5,
