@@ -502,6 +502,33 @@ int main()
         check(data.Size() == header + 3 * programSize + 7 * pipelineSize &&
               CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) &&
               same(manifest, decoded), "FF JIT manifests round trip");
+        for (CKBYTE variant : {CKBYTE(CKFF_PROGRAM_3D), CKBYTE(CKFF_PROGRAM_3D_CLIP)})
+        for (CKBYTE kind : {CKBYTE(CKSDL_GPU_FF_JIT_PIPELINE_UNLIT), CKBYTE(CKSDL_GPU_FF_JIT_PIPELINE_LIT)}) {
+            CKSdlGpuFFJitManifest unlit = manifest;
+            unlit.Pipelines[0].Variant = variant;
+            unlit.Pipelines[0].Flags = kind;
+            XArray<CKBYTE> unlitData;
+            CKSdlGpuEncodeFFJitManifest(identity, unlit, unlitData);
+            check(CKSdlGpuDecodeFFJitManifest(identity, unlitData.Begin(), unlitData.Size(), decoded) && same(unlit, decoded),
+                  "lit and unlit 3D pipeline bindings round trip");
+            for (unsigned invalid : {0u, 1u, 2u, 3u, 4u}) {
+                CKSdlGpuFFJitManifest badUnlit = unlit;
+                if (invalid == 0) badUnlit.Pipelines[0].Variant = CKFF_PROGRAM_POSITIONT;
+                if (invalid == 1) badUnlit.Pipelines[0].Flags |= CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED;
+                if (invalid == 2) badUnlit.Pipelines[0].Flags |= CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD;
+                if (invalid == 3) badUnlit.Pipelines[0].Flags |= CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT;
+                if (invalid == 4) badUnlit.Pipelines[0].Variant = CKFF_PROGRAM_POSITIONT_CLIP;
+                CKSdlGpuEncodeFFJitManifest(identity, badUnlit, unlitData);
+                check(!CKSdlGpuDecodeFFJitManifest(identity, unlitData.Begin(), unlitData.Size(), decoded) && empty(decoded),
+                      "3D binding rejects conflicting kinds, POSITIONT variants and precompiled pipelines");
+            }
+        }
+        XArray<CKBYTE> oldRevision = data;
+        const CKDWORD oldVersion = 6;
+        std::memcpy(oldRevision.Begin() + 4, &oldVersion, sizeof(oldVersion));
+        reseal(oldRevision);
+        check(!CKSdlGpuDecodeFFJitManifest(identity, oldRevision.Begin(), oldRevision.Size(), decoded),
+              "older manifests without vertex binding semantics are rejected");
         XArray<CKBYTE> emptyData;
         CKSdlGpuEncodeFFJitManifest(identity, CKSdlGpuFFJitManifest(), emptyData);
         check(CKSdlGpuDecodeFFJitManifest(identity, emptyData.Begin(), emptyData.Size(), decoded) &&
@@ -548,7 +575,7 @@ int main()
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
         malformed = manifest;
-        malformed.Pipelines[6].Flags = CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED << 1;
+        malformed.Pipelines[6].Flags = CKSDL_GPU_FF_JIT_PIPELINE_LIT << 1;
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         rejected = rejected && !CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded);
         // The writer leaves out pipelines of programs it does not have.

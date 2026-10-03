@@ -15,7 +15,7 @@
 namespace {
 const CKDWORD kMagic = 0x4A464B43u; // "CKFJ"
 // Revision of the file layout and of the record fields.
-const CKDWORD kVersion = 4;
+const CKDWORD kVersion = 7;
 const size_t kProgramSize = sizeof(CKSdlGpuFFJitProgramRecord);
 const size_t kPipelineSize = sizeof(CKSdlGpuFFJitPipelineRecord);
 static_assert(kProgramSize == sizeof(CKDWORD) * (CKFF_FRAGMENT_PROGRAM_LANE_COUNT +
@@ -29,7 +29,7 @@ static_assert(SDL_GPU_TEXTUREFORMAT_ASTC_12x12_FLOAT < 256 && SDL_GPU_SAMPLECOUN
               "texture formats and sample counts are stored as bytes");
 const CKDWORD kPipelineFlags =
     CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_CLIP | CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD |
-    CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED;
+    CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED | CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT;
 // The switches of switch word 0, of every stage for the per-stage ones.
 const CKDWORD kSwitchMask = CKFF_NATIVE_FRAGMENT_AFFINE | CKFF_NATIVE_FRAGMENT_LINE |
     CKFF_NATIVE_FRAGMENT_SHADER_SAMPLING | CKFF_NATIVE_FRAGMENT_COMPARISONS |
@@ -90,7 +90,12 @@ bool ValidPipeline(const CKSdlGpuFFJitPipelineRecord &record, CKDWORD programs)
     const CKDWORD limit = Precompiled(record) ? (CKDWORD)CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT
                                               : programs;
     return record.Program < limit && record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
-           (record.Flags & ~kPipelineFlags) == 0;
+           (record.Flags & ~kPipelineFlags) == 0 &&
+           (record.Flags & (CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT)) !=
+               (CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT) &&
+           (!(record.Flags & (CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT)) ||
+            ((record.Variant == CKFF_PROGRAM_3D || record.Variant == CKFF_PROGRAM_3D_CLIP) && !Precompiled(record) &&
+             !(record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD)));
 }
 
 // The encoder keeps the pipelines of the programs it keeps, and those of

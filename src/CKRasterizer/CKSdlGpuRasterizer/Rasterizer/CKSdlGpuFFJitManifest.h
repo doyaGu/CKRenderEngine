@@ -30,6 +30,10 @@ enum CKSdlGpuFFJitPipelineFlags {
     // A pipeline of a precompiled program, which draws used before their
     // programs were compiled. Program indexes the precompiled artifacts.
     CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED = 4,
+    // Uses the unlit 3D vertex companion for the recorded ordinary or clipped variant.
+    CKSDL_GPU_FF_JIT_PIPELINE_UNLIT = 8,
+    // Uses the lit 3D vertex companion for the recorded ordinary or clipped variant; exclusive with UNLIT.
+    CKSDL_GPU_FF_JIT_PIPELINE_LIT = 16,
 };
 
 // A pipeline a program was drawn with.
