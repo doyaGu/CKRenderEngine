@@ -16,12 +16,11 @@
 #include <array>
 
 // CKSdlGpuRasterizerContext runtime compilation of fixed-function fragment
-// programs. A precompiled artifact decodes the fragment program and the draw
-// state per fragment; the compiled program has both constant and keeps the
-// artifact's interface, so it replaces the precompiled program in the same
-// draws and falls back to it for every pipeline the worker has not created
-// yet. The manifest of an earlier run queues its programs, then their
-// pipelines, at idle priority.
+// programs and eligible vertex companions. A precompiled artifact decodes the
+// fragment program and draw state; generated shaders keep the artifact's
+// interface, so they replace the precompiled program in the same draws and fall
+// back to it for every pipeline the worker has not created yet. The manifest of
+// an earlier run queues its programs, then their pipelines, at idle priority.
 
 namespace {
 // Bounds resident keys and outstanding compilations (including finished jobs
