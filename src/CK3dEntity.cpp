@@ -107,6 +107,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
 
         XObjectPointerArray tempAnims;
         tempAnims.Load(m_Context, chunk);
+        m_ObjectAnimations->Clear();
 
         CKObject *lastAnim = nullptr;
         for (CKObject **it = tempAnims.Begin(); it != tempAnims.End(); ++it) {
@@ -243,49 +244,49 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
                 m_SceneGraphNode->SetPriority(priority, FALSE);
             }
         }
-    }
-
-    // Based on IDA: separate chunks for parent (0x8000), flags (0x10000), matrix (0x20000)
-    if (chunk->SeekIdentifier(CK_STATESAVE_PARENT)) {
-        CK3dEntity *parent = (CK3dEntity *) chunk->ReadObject(m_Context);
-        if (parent) {
+    } else {
+        // Legacy identifiers are an alternative to the combined entity block.
+        if (chunk->SeekIdentifier(CK_STATESAVE_PARENT)) {
+            CK3dEntity *parent = (CK3dEntity *) chunk->ReadObject(m_Context);
             SetParent(parent, TRUE);
-        }
-    }
-
-    if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYFLAGS)) {
-        CKDWORD flags = chunk->ReadDword();
-        SetFlags(flags);
-
-        const CKDWORD moveableFlagsRaw = chunk->ReadDword();
-        CKDWORD moveableFlags = moveableFlagsRaw & ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_USERBOX);
-        moveableFlags &= ~(VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT);
-        moveableFlags &= ~0xFF00;
-
-        if (preservedFlags) {
-            moveableFlags |= VX_MOVEABLE_WORLDALIGNED;
-        }
-        SetMoveableFlags(moveableFlags);
-    }
-
-    if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYMATRIX)) {
-        chunk->Skip(1); // IDA shows a padding byte consumed before the matrix
-        chunk->ReadMatrix(worldMatrix);
-
-        // Recompute handedness flag based on loaded matrix
-        VxVector row0(worldMatrix[0][0], worldMatrix[0][1], worldMatrix[0][2]);
-        VxVector row1(worldMatrix[1][0], worldMatrix[1][1], worldMatrix[1][2]);
-        VxVector row2(worldMatrix[2][0], worldMatrix[2][1], worldMatrix[2][2]);
-        VxVector cross = CrossProduct(row0, row1);
-        float dot = DotProduct(cross, row2);
-
-        CKDWORD moveableFlags = GetMoveableFlags();
-        if (dot < 0.0f) {
-            moveableFlags |= VX_MOVEABLE_INDIRECTMATRIX;
         } else {
-            moveableFlags &= ~VX_MOVEABLE_INDIRECTMATRIX;
+            SetParent(nullptr, TRUE);
         }
-        SetMoveableFlags(moveableFlags);
+
+        if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYFLAGS)) {
+            CKDWORD flags = chunk->ReadDword();
+            SetFlags(flags);
+
+            const CKDWORD moveableFlagsRaw = chunk->ReadDword();
+            CKDWORD moveableFlags = moveableFlagsRaw & ~(VX_MOVEABLE_UPTODATE | VX_MOVEABLE_USERBOX);
+            moveableFlags &= ~(VX_MOVEABLE_INVERSEWORLDMATVALID | VX_MOVEABLE_DONTUPDATEFROMPARENT);
+            moveableFlags &= ~0xFF00;
+
+            if (preservedFlags) {
+                moveableFlags |= VX_MOVEABLE_WORLDALIGNED;
+            }
+            SetMoveableFlags(moveableFlags);
+        }
+
+        if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYMATRIX)) {
+            chunk->Skip(1); // Legacy matrix buffer size, in bytes.
+            chunk->ReadMatrix(worldMatrix);
+
+            // Recompute handedness flag based on loaded matrix
+            VxVector row0(worldMatrix[0][0], worldMatrix[0][1], worldMatrix[0][2]);
+            VxVector row1(worldMatrix[1][0], worldMatrix[1][1], worldMatrix[1][2]);
+            VxVector row2(worldMatrix[2][0], worldMatrix[2][1], worldMatrix[2][2]);
+            VxVector cross = CrossProduct(row0, row1);
+            float dot = DotProduct(cross, row2);
+
+            CKDWORD moveableFlags = GetMoveableFlags();
+            if (dot < 0.0f) {
+                moveableFlags |= VX_MOVEABLE_INDIRECTMATRIX;
+            } else {
+                moveableFlags &= ~VX_MOVEABLE_INDIRECTMATRIX;
+            }
+            SetMoveableFlags(moveableFlags);
+        }
     }
 
     // Set world matrix respecting file/context rules from original implementation (IDA: 0x1000AE7C..0x1000AF11)
@@ -309,11 +310,7 @@ CKERROR RCK3dEntity::Load(CKStateChunk *chunk, CKFile *file) {
     // Based on IDA: checks for chunk, calls CreateSkin(), reads bone/vertex data
     if (chunk->SeekIdentifier(CK_STATESAVE_3DENTITYSKINDATA)) {
         // IDA: `if (SeekIdentifier && CreateSkin())`
-        if (!m_Skin) {
-            CreateSkin();
-        }
-
-        if (m_Skin) {
+        if (CreateSkin()) {
             const int dataVersion = chunk->GetDataVersion();
 
             // IDA: if (DataVersion < 6) Skip(1)
@@ -613,6 +610,8 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
     // Save skin data (chunk 0x200000)
     // Based on IDA: checks m_Skin, writes bone/vertex data
     if (m_Skin) {
+        // 0x1000A2B2 invalidates the derived weighted point lists before Save.
+        m_Skin->ClearBonePointLists();
         chunk->WriteIdentifier(CK_STATESAVE_3DENTITYSKINDATA);
 
         // Write object initialization matrix
@@ -630,8 +629,7 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
 
         for (int i = 0; i < boneCount; i++) {
             CKSkinBoneData *boneData = m_Skin->GetBoneData(i);
-            // Flags are unknown in current implementation; write zero to preserve layout
-            chunk->WriteDword(0);
+            chunk->WriteDword(boneData ? static_cast<RCKSkinBoneData *>(boneData)->GetFlags() : 0);
 
             VxMatrix boneMatrix;
             if (boneData) {
@@ -669,9 +667,8 @@ CKStateChunk *RCK3dEntity::Save(CKFile *file, CKDWORD flags) {
 
         // Write normal data if present (chunk 0x1000)
         int normalCount = m_Skin->GetNormalCount();
-        if (normalCount > 0 && normalCount == m_Skin->GetVertexCount()) {
+        if (normalCount > 0) {
             chunk->WriteIdentifier(CK_STATESAVE_3DENTITYSKINDATANORMALS);
-            chunk->WriteInt(normalCount);
 
             for (int i = 0; i < normalCount; i++) {
                 VxVector &normal = m_Skin->GetNormal(i);

@@ -102,31 +102,29 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
     } else {
-        // Legacy format (version < 5): 0x01000000 holds 6 VxVectors
-        // v5[0..2]: Used for building rotation flags (non-zero = flag set)
-        // v5[3..5]: Min, Max, Damping vectors
-        // NOTE: The flag calculation uses (base << (i - 1)) which is UB for i=0,
-        // but MSVC produces a right shift, resulting in unusual flag mappings.
-        // We match this behavior exactly for binary compatibility.
+        // Legacy data starts with nine integer booleans, followed by three vectors.
+        // 0x1000EB98 uses SHL r32, CL: x86 masks (i - 1) to five bits.
         if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTROTJOINT)) {
-            VxVector v5[6];
-            memset(v5, 0, sizeof(v5));
-            chunk->ReadAndFillBuffer_LEndian(v5);
+            struct LegacyRotationJoint {
+                CKDWORD flags[3][3];
+                VxVector minimum, maximum, damping;
+            } legacy = {};
+            static_assert(sizeof(LegacyRotationJoint) == 72, "Legacy rotation joint layout");
+            chunk->ReadAndFillBuffer_LEndian(&legacy);
 
-            // IDA: Min = v5[3], Max = v5[4], Damping = v5[5]
-            m_RotationJoint.m_Damping = v5[5];
-            m_RotationJoint.m_Max = v5[4];
-            m_RotationJoint.m_Min = v5[3];
+            m_RotationJoint.m_Damping = legacy.damping;
+            m_RotationJoint.m_Max = legacy.maximum;
+            m_RotationJoint.m_Min = legacy.minimum;
             m_RotationJoint.m_Flags = 0;
 
-            // Build flags from v5[0], v5[1], v5[2]
             for (int i = 0; i < 3; ++i) {
-                if (*(&v5[0].x + i) != 0.0f)
-                    m_RotationJoint.m_Flags |= (1 << (i - 1));
-                if (*(&v5[1].x + i) != 0.0f)
-                    m_RotationJoint.m_Flags |= (16 << (i - 1));
-                if (*(&v5[2].x + i) != 0.0f)
-                    m_RotationJoint.m_Flags |= (256 << (i - 1));
+                const unsigned int shift = static_cast<unsigned int>(i - 1) & 31;
+                if (legacy.flags[0][i])
+                    m_RotationJoint.m_Flags |= CKDWORD(1) << shift;
+                if (legacy.flags[1][i])
+                    m_RotationJoint.m_Flags |= CKDWORD(16) << shift;
+                if (legacy.flags[2][i])
+                    m_RotationJoint.m_Flags |= CKDWORD(256) << shift;
             }
         }
 
