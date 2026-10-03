@@ -102,6 +102,14 @@ void CloseRasterizer(CKRasterizer *rasterizer)
 
 } // namespace
 
+extern "C" int CKSdlGpuQueryFFJitSnapshotV1(const CKRasterizerContext *context, uint32_t size,
+                               CKSdlGpuFFJitSnapshotV1 *snapshot)
+{
+    if (!context || !snapshot || size != sizeof(*snapshot)) return 0;
+    const auto *sdl = dynamic_cast<const CKSdlGpuRasterizerContext *>(context);
+    return sdl && sdl->CopyFFJitSnapshot(*snapshot) ? 1 : 0;
+}
+
 #ifdef CK_LIB
 void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info)
 #else

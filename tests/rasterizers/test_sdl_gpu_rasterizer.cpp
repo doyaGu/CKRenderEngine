@@ -18,6 +18,16 @@ int main()
 {
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
+    {
+        CKSdlGpuRasterizerContext context;
+        CKSdlGpuFFJitSnapshotV1 snapshot;
+        snapshot.Requests = 123;
+        check(!CKSdlGpuQueryFFJitSnapshotV1(nullptr, sizeof(snapshot), &snapshot) &&
+              !CKSdlGpuQueryFFJitSnapshotV1(&context, sizeof(snapshot), nullptr) &&
+              !CKSdlGpuQueryFFJitSnapshotV1(&context, sizeof(snapshot) - 1, &snapshot) &&
+              !CKSdlGpuQueryFFJitSnapshotV1(&context, sizeof(snapshot), &snapshot) && snapshot.Requests == 123,
+              "unavailable JIT snapshots reject invalid queries without overwriting output");
+    }
     check(CKSdlGpuTextureFormat(_16_RGB565) == SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM &&
           CKSdlGpuTextureFormat(_16_ARGB1555) == SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM &&
           CKSdlGpuTextureFormat(_DXT1) == SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM &&

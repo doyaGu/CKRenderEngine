@@ -23,6 +23,7 @@
 
 #include "../Native/CKSdlGpuInternal.h"
 #include "../Native/CKSdlGpuFFJitStats.h"
+#include "../Native/CKSdlGpuFFJitSnapshot.h"
 #include "../Native/CKSdlGpuFFJitUsage.h"
 #include "../Native/CKSdlGpuWorker.h"
 
@@ -95,6 +96,13 @@ public:
     uint64_t GetDrawApproximationMask() const;
     const CKSdlGpuSubmissionStats &GetSubmissionStats() const;
     CKSdlGpuFFJitStats GetFFJitStats() const { return m_FFJitStats; }
+    bool CopyFFJitSnapshot(CKSdlGpuFFJitSnapshotV1 &snapshot) const {
+        if (!Ready()) return false;
+#define CKSDL_GPU_COPY_SNAPSHOT(Name) snapshot.Name = m_FFJitStats.Name;
+        CKSDL_GPU_FF_JIT_SNAPSHOT_V1_FIELDS(CKSDL_GPU_COPY_SNAPSHOT)
+#undef CKSDL_GPU_COPY_SNAPSHOT
+        return true;
+    }
 
     // --- Lifecycle ---
     CKBOOL Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height,

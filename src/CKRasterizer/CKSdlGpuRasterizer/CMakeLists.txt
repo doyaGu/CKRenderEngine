@@ -25,6 +25,7 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
 )
 set(CKSDL_GPU_RASTERIZER_HEADERS
     Native/CKSdlGpuFFJitStats.h
+    Native/CKSdlGpuFFJitSnapshot.h
     Native/CKSdlGpuFFJitUsage.h
     Native/CKSdlGpuInternal.h
     Native/CKSdlGpuNativeShaders.h
