@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#include <cstring>
 
 namespace {
 void Check(HRESULT result, const char *call) {
@@ -19,7 +20,9 @@ void Check(HRESULT result, const char *call) {
 #define CHECK_D3D(call) Check(call, #call)
 }
 
-int main() {
+int main(int argc, char **argv) {
+    const bool coverage = argc == 2 && std::strcmp(argv[1], "--coverage") == 0;
+    if (argc != 1 && !coverage) { std::fprintf(stderr, "Usage: d3d8_spot_probe [--coverage]\n"); return 2; }
     HMODULE module = LoadLibraryExW(L"d3d8.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!module) { std::fprintf(stderr, "Cannot load system d3d8.dll\n"); return 2; }
     wchar_t path[MAX_PATH] = {};
@@ -45,7 +48,8 @@ int main() {
     for (bool software : {false, true}) {
         D3DPRESENT_PARAMETERS pp = {};
         pp.Windowed = TRUE; pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-        pp.BackBufferWidth = pp.BackBufferHeight = 64; pp.BackBufferFormat = mode.Format;
+        pp.BackBufferWidth = coverage ? 640 : 64;
+        pp.BackBufferHeight = coverage ? 480 : 64; pp.BackBufferFormat = mode.Format;
         pp.hDeviceWindow = window; pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
         IDirect3DDevice8 *device = NULL;
         CHECK_D3D(d3d->CreateDevice(0, D3DDEVTYPE_HAL, window, D3DCREATE_FPU_PRESERVE |
@@ -65,6 +69,58 @@ int main() {
         CHECK_D3D(device->SetRenderState(D3DRS_ZENABLE, FALSE));
         CHECK_D3D(device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1));
         CHECK_D3D(device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE));
+        if (coverage) {
+            // A silhouette triangle from the procedural spotlight scene.
+            // The two paths receive identical matrices and unlit vertices.
+            const D3DMATRIX world = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0.800000012f,0,1};
+            const D3DMATRIX view = {1.00000012f,-1.66666689e-6f,-3.33333361e-7f,0,
+                -4.45299861e-7f,0.832050323f,-0.554700196f,0,
+                -1.49871721e-6f,0.554700196f,0.832050383f,0,
+                -2.16333119e-5f,0,21.6333084f,1};
+            const D3DMATRIX proj = {2.41421342f,0,0,0, 0,3.21895123f,0,0,
+                0,0,1.00050032f,1, 0,0,-0.100050032f,0};
+            CHECK_D3D(device->SetTransform(D3DTS_WORLD, &world));
+            CHECK_D3D(device->SetTransform(D3DTS_VIEW, &view));
+            CHECK_D3D(device->SetTransform(D3DTS_PROJECTION, &proj));
+            CHECK_D3D(device->SetRenderState(D3DRS_LIGHTING, FALSE));
+            struct CoverageVertex { float x, y, z; DWORD color; };
+            const CoverageVertex triangle[] = {
+                {-0.204024419f,0.647213638f,0.423660964f,0xffffffff},
+                {-0.293182582f,0.647213638f,0.367639154f,0xffffffff},
+                {-0.35269919f,0.565685451f,0.442270607f,0xffffffff}};
+            CHECK_D3D(device->SetVertexShader(D3DFVF_XYZ | D3DFVF_DIFFUSE));
+            CHECK_D3D(device->Clear(0, NULL, D3DCLEAR_TARGET, 0, 1, 0));
+            CHECK_D3D(device->BeginScene());
+            CHECK_D3D(device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, triangle, sizeof(CoverageVertex)));
+            CHECK_D3D(device->EndScene());
+            IDirect3DSurface8 *surface = NULL;
+            CHECK_D3D(device->GetRenderTarget(&surface));
+            D3DLOCKED_RECT rect = {};
+            CHECK_D3D(surface->LockRect(&rect, NULL, D3DLOCK_READONLY));
+            const DWORD pixel = *reinterpret_cast<const DWORD *>(static_cast<const char *>(rect.pBits) + 188 * rect.Pitch + 311 * 4);
+            CHECK_D3D(surface->UnlockRect()); surface->Release();
+            std::printf("coverage vp=%s pixel=311,188 rgb=%06lx\n", software ? "software" : "hardware", pixel & 0xffffff);
+            if (software) {
+                IDirect3DVertexBuffer8 *source = NULL, *transformed = NULL;
+                struct ScreenVertex { float x, y, z, rhw; DWORD color; };
+                CHECK_D3D(device->CreateVertexBuffer(sizeof(triangle), 0, D3DFVF_XYZ | D3DFVF_DIFFUSE, D3DPOOL_SYSTEMMEM, &source));
+                CHECK_D3D(device->CreateVertexBuffer(3 * sizeof(ScreenVertex), 0, D3DFVF_XYZRHW | D3DFVF_DIFFUSE, D3DPOOL_SYSTEMMEM, &transformed));
+                BYTE *mapped = NULL;
+                CHECK_D3D(source->Lock(0, 0, &mapped, 0));
+                std::memcpy(mapped, triangle, sizeof(triangle));
+                CHECK_D3D(source->Unlock());
+                CHECK_D3D(device->SetStreamSource(0, source, sizeof(CoverageVertex)));
+                CHECK_D3D(device->ProcessVertices(0, 0, 3, transformed, 0));
+                CHECK_D3D(transformed->Lock(0, 0, &mapped, D3DLOCK_READONLY));
+                for (unsigned i = 0; i < 3; ++i) {
+                    const ScreenVertex &v = reinterpret_cast<const ScreenVertex *>(mapped)[i];
+                    std::printf("screen vertex=%u xyzrhw=%.9g,%.9g,%.9g,%.9g\n", i, v.x, v.y, v.z, v.rhw);
+                }
+                CHECK_D3D(transformed->Unlock()); transformed->Release(); source->Release();
+            }
+            device->Release();
+            continue;
+        }
         D3DMATERIAL8 material = {};
         material.Diffuse = {0.2f, 0.2f, 0.2f, 1};
         CHECK_D3D(device->SetMaterial(&material));
