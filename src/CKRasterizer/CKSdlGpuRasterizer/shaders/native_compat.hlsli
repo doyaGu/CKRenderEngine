@@ -92,8 +92,8 @@
 #endif
 #define SAMPLERCUBE(name, slot) CK_COMBINED TextureCube<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
 #define SAMPLER3D(name, slot) CK_COMBINED Texture3D<float4> name : register(t##slot, space2); CK_COMBINED SamplerState name##Sampler : register(s##slot, space2); static const uint name##Slot = slot
-#define textureCube(name, uv) name.Sample(name##Sampler, uv)
-#define textureCubeBias(name, uv, bias) name.SampleBias(name##Sampler, uv, bias)
+#define textureCube(name, uv) ckSampleCubeBias(name, name##Sampler, name##Slot, uv, 0.0)
+#define textureCubeBias(name, uv, bias) ckSampleCubeBias(name, name##Sampler, name##Slot, uv, bias)
 #if CKFF_HARDWARE_SAMPLING
 #define texture3D(name, uv) name.Sample(name##Sampler, uv)
 #define texture3DBias(name, uv, bias, minMip) name.SampleBias(name##Sampler, uv, bias)

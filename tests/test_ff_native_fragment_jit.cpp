@@ -611,6 +611,19 @@ struct Reference {
     Float4 SampleSlot(int slot, CKJitSamplerDim dim, const Float4 &coord, float lodBias) const {
         const float c[3] = {coord.x, coord.y, coord.z};
         float texel[4];
+        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
+        if (dim == CKJIT_SAMPLER_CUBE && F.Textures[slot].Levels == 1 && info.y == info.z && info.y != 7.0f) {
+            const float ax = std::fabs(c[0]), ay = std::fabs(c[1]), az = std::fabs(c[2]);
+            const int axis = ax > ay && ax > az ? 0 : ay > az ? 1 : 2;
+            const float major = std::fmax(std::fmax(ax, ay), az);
+            const float limit = major * (1.0f - 1.0f / (float)F.Textures[slot].Size[0]);
+            float at[3];
+            for (int i = 0; i < 3; ++i) {
+                at[i] = i == axis ? c[i] : std::fmin(std::fmax(c[i], -limit), limit);
+            }
+            TexelHash(CKJIT_OP_SAMPLE, (uint32_t)slot, dim).Add(at, 3).Add(&lodBias, 1).Color(texel);
+            return {texel[0], texel[1], texel[2], texel[3]};
+        }
         TexelHash(CKJIT_OP_SAMPLE, (uint32_t)slot, dim).Add(c, CoordinateCount(dim)).Add(&lodBias, 1).Color(texel);
         return {texel[0], texel[1], texel[2], texel[3]};
     }
@@ -2516,9 +2529,11 @@ void TestSpecialization() {
             for (int n = 0; n < shader.Nodes.Size(); ++n) {
                 const CKJitNode &node = shader.Nodes[n];
                 if (node.Op == CKJIT_OP_UNIFORM) {
-                    TestCheck(sampled && variant == 2 &&
-                                  Natives().Row(node.Imm[1], node.Imm[0]) == ROW_BUMP_ENV + c.Stage * 2 + 1,
-                              "a texture stage reads only its LOD bias, and only if it has one");
+                    const uint32_t row = Natives().Row(node.Imm[1], node.Imm[0]);
+                    const bool bias = variant == 2 && row == ROW_BUMP_ENV + c.Stage * 2 + 1;
+                    const bool cubeFilter = c.Dim == CKJIT_SAMPLER_CUBE && row == ROW_SAMPLER_INFO + c.Slot;
+                    TestCheck(sampled && (bias || cubeFilter),
+                              "a texture stage reads its LOD bias and cube filter metadata only when used");
                 }
                 if (node.Op != CKJIT_OP_SAMPLE)
                     continue;
@@ -2526,7 +2541,8 @@ void TestSpecialization() {
                 TestCheck(node.Imm[0] == (uint32_t)c.Slot && node.Imm[1] == c.Dim,
                           "the stage samples the texture register of the native shader");
             }
-            TestCheck(samples == (sampled ? 1 : 0), "a stage samples once, or not at all without a texture");
+            TestCheck(samples == (sampled ? (c.Dim == CKJIT_SAMPLER_CUBE ? 2 : 1) : 0),
+                      "a stage has one sample per selected path, or none without a texture");
         }
     }
 

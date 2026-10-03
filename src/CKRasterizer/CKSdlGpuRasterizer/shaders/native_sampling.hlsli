@@ -1,7 +1,7 @@
 // SDL has no native border address mode. Loads evaluate the border per tap,
 // including bilinear/trilinear footprints that straddle an edge. Other axes
-// retain their own wrap/mirror/clamp mode. Cube directions have no outside
-// domain and use the native seamless cube sampler.
+// retain their own wrap/mirror/clamp mode. Cube directions are handled by
+// native_cube_sampling.hlsli.
 int ckAddress(int index, int extent, uint mode, inout bool outside)
 {
     if (mode == 4) outside = outside || index < 0 || index >= extent;

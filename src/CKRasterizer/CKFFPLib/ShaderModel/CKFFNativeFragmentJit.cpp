@@ -444,6 +444,7 @@ private:
     CKJitValue SampleTexture(CKDWORD stage);
     CKJitValue ShaderSample2D(CKDWORD stage, uint32_t slot, CKJitValue coordinate, CKJitValue lodBias);
     CKJitValue ShaderSample3D(CKDWORD stage, uint32_t slot, CKJitValue coordinate, CKJitValue lodBias);
+    CKJitValue SampleCube(uint32_t slot, CKJitValue direction, CKJitValue lodBias);
     ShaderSampler Sampler(CKDWORD stage, uint32_t slot, CKJitSamplerDim dim);
     CKJitValue MirrorOnce(CKJitValue coordinate, CKDWORD sampling);
     FilterTaps PlanTaps2D(CKJitValue info, CKJitValue size, CKJitValue dx, CKJitValue dy, CKJitValue implicitLod,
@@ -702,7 +703,9 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
                                                             : CKJIT_SAMPLER_2D;
     const uint32_t slot =
         CKFFSamplerSlot(type, SamplerIndex(m_Program, stage, m_Layout, m_Comparisons), m_Layout);
-    if (dim == CKJIT_SAMPLER_CUBE || !shaderSampling) {
+    if (dim == CKJIT_SAMPLER_CUBE)
+        return SampleCube(slot, SampleCoordinate(stage, 3), lodBias);
+    if (!shaderSampling) {
         const CKJitValue color = m_B.Sample(slot, dim, SampleCoordinate(stage, dim == CKJIT_SAMPLER_2D ? 2 : 3), lodBias);
         return type == CKFF_SAMPLER_DEPTH ? m_B.Swizzle(color, "xxxx") : color;
     }
@@ -718,6 +721,33 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
         return color;
     return func != 0 ? m_B.Splat(CompareDepth(m_B.Component(color, 0), m_B.Component(coordinate, 2), func), 4)
                      : m_B.Swizzle(color, "xxxx");
+}
+
+// Single-level cube filtering with equal isotropic min/mag filters, matching
+// native_cube_sampling.hlsli. Other footprints keep the native sampling path.
+CKJitValue NativeFragmentCompiler::SampleCube(uint32_t slot, CKJitValue direction, CKJitValue lodBias) {
+    const CKJitValue info = Uniform(m_Rows.SamplerInfo, slot);
+    const CKJitValue nativeFilter = m_B.Or(
+        m_B.Equal(m_B.Component(info, 1), m_B.Float(float(VXTEXTUREFILTER_ANISOTROPIC))),
+        m_B.NotEqual(m_B.Component(info, 1), m_B.Component(info, 2)));
+    const CKJitValue native = m_B.Or(nativeFilter,
+        m_B.IntNotEqual(m_B.TextureLevels(slot, CKJIT_SAMPLER_CUBE), m_B.Int(1)));
+    m_B.If(native);
+    const CKJitValue ordinary = m_B.Sample(slot, CKJIT_SAMPLER_CUBE, direction, lodBias);
+    m_B.Else({ordinary});
+    const CKJitValue axes = m_B.Abs(direction);
+    const CKJitValue ax = m_B.Component(axes, 0), ay = m_B.Component(axes, 1), az = m_B.Component(axes, 2);
+    const CKJitValue x = m_B.And(m_B.Greater(ax, ay), m_B.Greater(ax, az));
+    const CKJitValue y = m_B.And(m_B.Not(x), m_B.Greater(ay, az));
+    const CKJitValue major = m_B.Max(m_B.Max(ax, ay), az);
+    const CKJitValue size = m_B.IntToFloat(m_B.Component(m_B.TextureSize(slot, CKJIT_SAMPLER_CUBE, m_B.Int(0)), 0));
+    const CKJitValue limit = m_B.Mul(major, m_B.Sub(m_B.Float(1.0f), m_B.Div(m_B.Float(1.0f), size)));
+    const CKJitValue inside = m_B.Min(m_B.Max(direction, m_B.Neg(limit)), limit);
+    const CKJitValue at = m_B.Construct({
+        m_B.Select(x, m_B.Component(direction, 0), m_B.Component(inside, 0)),
+        m_B.Select(y, m_B.Component(direction, 1), m_B.Component(inside, 1)),
+        m_B.Select(m_B.And(m_B.Not(x), m_B.Not(y)), m_B.Component(direction, 2), m_B.Component(inside, 2))});
+    return m_B.EndIf(m_B.Sample(slot, CKJIT_SAMPLER_CUBE, at, lodBias));
 }
 
 // Samples a 2D texture as native_sampling.hlsli: mirror-once folds the

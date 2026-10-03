@@ -117,6 +117,14 @@ struct CKFFTextureCube
 {
     uint Index;
 
+    void GetDimensions(uint mip, out uint width, out uint height, out uint levels)
+    {
+        width = 0; height = 0; levels = 0;
+#define CKFF_METHOD(_texture, _sampler) _texture.GetDimensions(mip, width, height, levels)
+        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+#undef CKFF_METHOD
+    }
+
     float4 SampleBias(CKFFSampler state, float3 uv, float bias)
     {
         float4 result = 0.0;

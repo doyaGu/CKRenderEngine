@@ -119,6 +119,7 @@ def source_body(path: Path) -> str:
                     # Native sampling takes handles of the resources the
                     # layout declares.
                     for helper in ("sampler_handles.hlsli",
+                                   "native_cube_sampling.hlsli",
                                    "native_sampling.hlsli",
                                    "depth_compare_sampling.hlsli"):
                         result.append(HERE.joinpath(helper).read_text(
