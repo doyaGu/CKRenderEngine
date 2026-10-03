@@ -619,6 +619,7 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         if (!uniforms.MarkDataChanged(metadata + first, last - first)) return CKERR_INVALIDPARAMETER;
     }
     std::unique_ptr<CKFFProgramLayout> drawUniforms;
+    draw.DepthPad = hasDepthPad && draw.Program->VertexJit == CKSdlGpuProgram::POSITIONT_VERTEX;
     if (hasDepthPad) {
         // Depth-border padding changes texture coordinates for this draw only.
         // Keep the program layout immutable so ordinary draws can continue to

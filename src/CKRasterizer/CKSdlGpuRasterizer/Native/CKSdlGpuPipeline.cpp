@@ -261,6 +261,7 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
             if (program->VertexJit == CKSdlGpuProgram::LIT_VERTEX) ++m_FFJitStats.LitReady;
             if (draw.Tween) ++m_FFJitStats.TweenReady;
             if (draw.MatrixBlend) ++m_FFJitStats.MatrixBlendReady;
+            if (draw.DepthPad) ++m_FFJitStats.DepthPadReady;
             if (program->UserClip) ++m_FFJitStats.ClipReady;
             if (owner) *owner = program;
             return UsePipeline(*found);

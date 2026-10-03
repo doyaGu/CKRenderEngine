@@ -143,6 +143,11 @@ public:
                 Vertex[clip]->Desc.Stage = CKRST_SHADER_VERTEX;
                 Vertex[clip]->Desc.SamplerCount = 0;
                 Vertex[clip]->Desc.UniformBufferCount = CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS;
+                if (Fragment.Switches[0] & CKFF_NATIVE_FRAGMENT_COMPARISONS) {
+                    DepthPad[clip] = std::make_shared<CKSdlGpuShader>();
+                    DepthPad[clip]->Job = this;
+                    DepthPad[clip]->Desc = Vertex[clip]->Desc;
+                }
                 Unlit[clip] = std::make_shared<CKSdlGpuShader>();
                 Unlit[clip]->Job = this;
                 Unlit[clip]->Desc = Vertex[clip]->Desc;
@@ -157,6 +162,7 @@ public:
         Shader->Job = nullptr;
         for (unsigned clip = 0; clip < 2; ++clip) {
             if (Vertex[clip]) Vertex[clip]->Job = nullptr;
+            if (DepthPad[clip]) DepthPad[clip]->Job = nullptr;
             if (Unlit[clip]) Unlit[clip]->Job = nullptr;
             if (Lit[clip]) Lit[clip]->Job = nullptr;
         }
@@ -168,12 +174,13 @@ public:
         Compile();
         for (unsigned clip = 0; clip < 2; ++clip) {
             if (Vertex[clip]) CompileVertex(Vertex[clip], CKSdlGpuProgram::POSITIONT_VERTEX, clip != 0);
+            if (DepthPad[clip]) CompileVertex(DepthPad[clip], CKSdlGpuProgram::POSITIONT_VERTEX, clip != 0, true);
             if (Unlit[clip]) CompileVertex(Unlit[clip], CKSdlGpuProgram::UNLIT_VERTEX, clip != 0);
             if (Lit[clip]) CompileVertex(Lit[clip], CKSdlGpuProgram::LIT_VERTEX, clip != 0);
         }
         ElapsedNs = SDL_GetTicksNS() - start;
     }
-    void CompileVertex(const std::shared_ptr<CKSdlGpuShader> &vertex, CKSdlGpuProgram::VertexJitKind kind, bool clipping) {
+    void CompileVertex(const std::shared_ptr<CKSdlGpuShader> &vertex, CKSdlGpuProgram::VertexJitKind kind, bool clipping, bool depthPad = false) {
         CKJitVertexShader program;
         XArray<uint32_t> code;
         const CK_SHADER_FORMAT reference = Format == SDL_GPU_SHADERFORMAT_DXBC
@@ -181,7 +188,7 @@ public:
         const char *name = kind == CKSdlGpuProgram::POSITIONT_VERTEX ? "POSITIONT" :
             kind == CKSdlGpuProgram::LIT_VERTEX ? "lit 3D" : "unlit 3D";
         const bool compiled = kind == CKSdlGpuProgram::POSITIONT_VERTEX
-            ? CKFFCompileNativePositionTProgram(Fragment, Layout, reference, program, clipping)
+            ? CKFFCompileNativePositionTProgram(Fragment, Layout, reference, program, clipping, depthPad)
             : kind == CKSdlGpuProgram::LIT_VERTEX
                 ? CKFFCompileNativeLitProgram(Fragment, Layout, reference, program, clipping)
                 : CKFFCompileNativeUnlitProgram(Fragment, Layout, reference, program, clipping);
@@ -221,7 +228,7 @@ public:
         ++stats.CompileCompleted;
         if (!Shader->Shader) ++stats.CompileFailed;
         for (unsigned clip = 0; clip < 2; ++clip) {
-            for (const auto &vertex : {Vertex[clip], Unlit[clip], Lit[clip]}) {
+            for (const auto &vertex : {Vertex[clip], DepthPad[clip], Unlit[clip], Lit[clip]}) {
                 if (!vertex) continue;
                 ++stats.VertexCompileCompleted;
                 if (!vertex->Shader) ++stats.VertexCompileFailed;
@@ -234,7 +241,7 @@ public:
 
     // Programs take the shader before it is created.
     std::shared_ptr<CKSdlGpuShader> Shader;
-    std::shared_ptr<CKSdlGpuShader> Vertex[2], Unlit[2], Lit[2];
+    std::shared_ptr<CKSdlGpuShader> Vertex[2], DepthPad[2], Unlit[2], Lit[2];
 
 private:
     CKSdlGpuRasterizerContext &Context;
@@ -412,6 +419,7 @@ void CKSdlGpuRasterizerContext::ReleaseFFJitProgram(FFJitProgram &entry)
         DestroyObject(entry.PixelShader, CKRST_OBJ_SHADER);
     for (unsigned clip = 0; clip < 2; ++clip) {
         if (entry.PositionTShader[clip]) DestroyObject(entry.PositionTShader[clip], CKRST_OBJ_SHADER);
+        if (entry.DepthPadShader[clip]) DestroyObject(entry.DepthPadShader[clip], CKRST_OBJ_SHADER);
         if (entry.UnlitShader[clip]) DestroyObject(entry.UnlitShader[clip], CKRST_OBJ_SHADER);
         if (entry.LitShader[clip]) DestroyObject(entry.LitShader[clip], CKRST_OBJ_SHADER);
     }
@@ -484,6 +492,7 @@ bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
     FFJitJob *job = new FFJitJob(*this, Entry.Key, Fragment, Layout);
     const std::shared_ptr<CKSdlGpuShader> shader = job->Shader;
     const auto vertex = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->Vertex[0], job->Vertex[1]};
+    const auto depthPad = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->DepthPad[0], job->DepthPad[1]};
     const auto unlit = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->Unlit[0], job->Unlit[1]};
     const auto lit = std::array<std::shared_ptr<CKSdlGpuShader>, 2>{job->Lit[0], job->Lit[1]};
     // Compilations run after the job creating the precompiled shaders of the
@@ -496,6 +505,7 @@ bool CKSdlGpuRasterizerContext::SubmitFFJitProgram(
         Entry.PixelShader = ShaderObjects.Add(shader);
         for (unsigned clip = 0; clip < 2; ++clip) {
             if (vertex[clip]) Entry.PositionTShader[clip] = ShaderObjects.Add(vertex[clip]);
+            if (depthPad[clip]) Entry.DepthPadShader[clip] = ShaderObjects.Add(depthPad[clip]);
             if (unlit[clip]) Entry.UnlitShader[clip] = ShaderObjects.Add(unlit[clip]);
             if (lit[clip]) Entry.LitShader[clip] = ShaderObjects.Add(lit[clip]);
         }
@@ -602,7 +612,7 @@ CKDWORD CKSdlGpuRasterizerContext::BindFFJitProgram(
     }
     const FFJitProgram::Binding binding = {
         Precompiled, Variant, CreateFFJitProgram(Entry.PixelShader, Variant, Precompiled, Entry.PositionTShader[clip],
-                                                shader3d, VertexKind), VertexKind};
+                                                Entry.DepthPadShader[clip], shader3d, VertexKind), VertexKind};
     // The entry's draws are then drawn precompiled.
     if (!binding.Program) {
         Entry.State = FFJitProgram::REJECTED;
@@ -615,7 +625,7 @@ CKDWORD CKSdlGpuRasterizerContext::BindFFJitProgram(
 CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     CKDWORD PixelShader,
     CKFFProgramVariant Variant,
-    CKDWORD Precompiled, CKDWORD PositionTShader, CKDWORD Shader3d, CKSdlGpuProgram::VertexJitKind VertexKind)
+    CKDWORD Precompiled, CKDWORD PositionTShader, CKDWORD DepthPadShader, CKDWORD Shader3d, CKSdlGpuProgram::VertexJitKind VertexKind)
 {
     std::shared_ptr<CKSdlGpuProgram> fallback = Programs.Get(Precompiled);
     if (!fallback)
@@ -625,8 +635,9 @@ CKDWORD CKSdlGpuRasterizerContext::CreateFFJitProgram(
     CKFFProgramDesc desc = fallback->Interface;
     desc.PixelShader = PixelShader;
     const unsigned clip = Variant == CKFF_PROGRAM_3D_CLIP || Variant == CKFF_PROGRAM_POSITIONT_CLIP;
-    const bool positionT = PositionTShader && (Variant == CKFF_PROGRAM_POSITIONT || Variant == CKFF_PROGRAM_POSITIONT_CLIP) &&
-        desc.VertexShader != m_NativeFFDepthPadVertexShaders[clip];
+    if (desc.VertexShader && desc.VertexShader == m_NativeFFDepthPadVertexShaders[clip])
+        PositionTShader = DepthPadShader;
+    const bool positionT = PositionTShader && (Variant == CKFF_PROGRAM_POSITIONT || Variant == CKFF_PROGRAM_POSITIONT_CLIP);
     if (positionT)
         desc.VertexShader = PositionTShader;
     if (Shader3d) desc.VertexShader = Shader3d;

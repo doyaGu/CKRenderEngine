@@ -420,7 +420,7 @@ struct CKSdlGpuDraw {
     unsigned VertexOffset = 0, VertexOffset1 = 0, IndexOffset = 0;
     bool Index32 = false;
     bool DitherEnable = false;
-    bool Tween = false, MatrixBlend = false;
+    bool Tween = false, MatrixBlend = false, DepthPad = false;
     CKDWORD ColorTargetFormat = 0;
     // Ordinary Release draws keep this empty; diagnostics and profiling copy
     // the caller's label into the queued packet.

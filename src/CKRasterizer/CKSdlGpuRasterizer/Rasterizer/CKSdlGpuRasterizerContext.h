@@ -443,6 +443,7 @@ private:
         // Registered when the entry is queued, before the worker creates it.
         CKDWORD PixelShader = 0;
         CKDWORD PositionTShader[2] = {};
+        CKDWORD DepthPadShader[2] = {};
         CKDWORD UnlitShader[2] = {};
         CKDWORD LitShader[2] = {};
         // A program of the shader for the draws of each precompiled program
@@ -493,7 +494,7 @@ private:
                              CKDWORD Precompiled, CKSdlGpuProgram::VertexJitKind VertexKind = CKSdlGpuProgram::PRECOMPILED_VERTEX);
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
                                CKFFProgramVariant Variant,
-                               CKDWORD Precompiled, CKDWORD PositionTShader, CKDWORD Shader3d,
+                               CKDWORD Precompiled, CKDWORD PositionTShader, CKDWORD DepthPadShader, CKDWORD Shader3d,
                                CKSdlGpuProgram::VertexJitKind VertexKind);
     // The DXBC vertex shader of a variant, padding depth if the fallback's
     // shader does. Created on first use, by Job when given.
