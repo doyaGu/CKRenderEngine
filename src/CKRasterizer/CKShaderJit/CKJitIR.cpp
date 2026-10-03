@@ -95,7 +95,7 @@ bool CheckTypes(const CKJitFragmentShader &shader, const CKJitNode &node) {
         }
         return node.Type != CKJIT_TYPE_VOID && width == CKJitComponentCount(node.Type);
     }
-    case CKJIT_OP_ADD: case CKJIT_OP_SUB: case CKJIT_OP_MUL: case CKJIT_OP_DIV:
+    case CKJIT_OP_ADD: case CKJIT_OP_SUB: case CKJIT_OP_MUL: case CKJIT_OP_MAD: case CKJIT_OP_DIV:
     case CKJIT_OP_MIN: case CKJIT_OP_MAX: case CKJIT_OP_NEG: case CKJIT_OP_ABS:
     case CKJIT_OP_SATURATE: case CKJIT_OP_FLOOR: case CKJIT_OP_CEIL: case CKJIT_OP_ROUND_EVEN:
     case CKJIT_OP_EXP2: case CKJIT_OP_LOG2: case CKJIT_OP_SQRT: case CKJIT_OP_DDX: case CKJIT_OP_DDY:

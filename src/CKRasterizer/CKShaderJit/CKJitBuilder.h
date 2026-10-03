@@ -54,6 +54,7 @@ public:
     CKJitValue Add(CKJitValue a, CKJitValue b);
     CKJitValue Sub(CKJitValue a, CKJitValue b);
     CKJitValue Mul(CKJitValue a, CKJitValue b);
+    CKJitValue Mad(CKJitValue a, CKJitValue b, CKJitValue c); // native a * b + c
     CKJitValue Div(CKJitValue a, CKJitValue b);
     CKJitValue Min(CKJitValue a, CKJitValue b);
     CKJitValue Max(CKJitValue a, CKJitValue b);

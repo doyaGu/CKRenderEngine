@@ -677,6 +677,11 @@ CKJitValue CKJitBuilder::FloatUnary(CKJitOp op, CKJitValue x) {
 CKJitValue CKJitBuilder::Add(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_ADD, a, b); }
 CKJitValue CKJitBuilder::Sub(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_SUB, a, b); }
 CKJitValue CKJitBuilder::Mul(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_MUL, a, b); }
+CKJitValue CKJitBuilder::Mad(CKJitValue a, CKJitValue b, CKJitValue c) {
+    if (!Operands(CKJIT_TYPE_FLOAT, a, b) || !Operands(CKJIT_TYPE_FLOAT, a, c) || !Unify(a, b))
+        return Fail();
+    return Emit(CKJIT_OP_MAD, TypeOf(a), {a, b, c});
+}
 CKJitValue CKJitBuilder::Div(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_DIV, a, b); }
 CKJitValue CKJitBuilder::Min(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_MIN, a, b); }
 CKJitValue CKJitBuilder::Max(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_MAX, a, b); }

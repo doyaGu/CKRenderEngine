@@ -31,6 +31,9 @@ CKJIT_OP(CONSTRUCT,  4, CKJIT_OPFLAG_VARIADIC)
 CKJIT_OP(ADD,        2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(SUB,        2, 0)
 CKJIT_OP(MUL,        2, CKJIT_OPFLAG_COMMUTATIVE)
+// MAD(a,b,c) preserves a native multiply-add. It may round differently from
+// separate MUL/ADD and is never folded or reassociated by the builder.
+CKJIT_OP(MAD,        3, 0)
 CKJIT_OP(DIV,        2, 0)
 CKJIT_OP(MIN,        2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(MAX,        2, CKJIT_OPFLAG_COMMUTATIVE)

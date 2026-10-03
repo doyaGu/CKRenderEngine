@@ -38,6 +38,7 @@ enum : uint32_t {
     DxbcOpLog = 47,
     DxbcOpLoop = 48,
     DxbcOpLt = 49,
+    DxbcOpMad = 50,
     DxbcOpMin = 51,
     DxbcOpMax = 52,
     DxbcOpMov = 54,
@@ -1078,6 +1079,13 @@ void DxbcEmitter::Translate(uint32_t index) {
     case CKJIT_OP_ADD: Binary(DxbcOpAdd, dest, a, b); break;
     case CKJIT_OP_SUB: Binary(DxbcOpAdd, dest, a, Negated(b)); break;
     case CKJIT_OP_MUL: Binary(DxbcOpMul, dest, a, b); break;
+    case CKJIT_OP_MAD:
+        m_Code.Open(DxbcOpMad);
+        Dest(dest);
+        for (uint32_t i = 0; i < 3; ++i)
+            Source(m_Values[(int)node.Operands[i]], ComponentWise(dest));
+        m_Code.Close();
+        break;
     case CKJIT_OP_DIV: Binary(DxbcOpDiv, dest, a, b); break;
     case CKJIT_OP_MIN: Binary(DxbcOpMin, dest, a, b); break;
     case CKJIT_OP_MAX: Binary(DxbcOpMax, dest, a, b); break;
