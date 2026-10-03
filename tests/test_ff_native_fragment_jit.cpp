@@ -2635,6 +2635,8 @@ void TestEmission() {
 
 #include "TestFFUnlitJit.inl"
 
+#include "TestFFLitJit.inl"
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -2660,5 +2662,7 @@ int main(int argc, char **argv) {
     framework.Run("POSITIONT specialization", TestPositionT);
     framework.Run("unlit draw eligibility", TestUnlitEligibility);
     framework.Run("unlit 3D specialization", TestUnlit);
+    framework.Run("lit draw eligibility", TestLitEligibility);
+    framework.Run("lit 3D specialization", TestLit);
     return framework.ExitCode();
 }
