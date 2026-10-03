@@ -11,6 +11,7 @@
 #include "CKRasterizer.h"
 #ifdef CKRE_PIXEL_SDL_GPU
 #include "CKSdlGpuRasterizerContext.h"
+#include "CKFFNativeFragmentJit.h"
 #else
 #include "CKBgfxRasterizerContext.h"
 #endif
@@ -23,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <vector>
 
 // Static plugin entry; both executables run the same public rasterizer cases.
@@ -4392,6 +4394,10 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 
 // ---------------------------------------------------------------------------
 
+#ifdef CKRE_PIXEL_SDL_GPU
+#include "TestFFJitReplay.inl"
+#endif
+
 void CheckFullImageComparator()
 {
     const CKBYTE clear[4] = {0x13, 0x07, 0x0d, 0};
@@ -4433,6 +4439,34 @@ void BackendRendersFixedFunctionSemantics()
     TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
 
     Samples samples;
+#ifdef CKRE_PIXEL_SDL_GPU
+    Samples precompiled;
+    auto replayCases = MakeFFReplayCases();
+    const auto replayTextures = MakeFFReplayTextures();
+    if (const char *selected = GetEnvValue("CKRE_FF_JIT_REPLAY_CASE")) {
+        replayCases.erase(std::remove_if(replayCases.begin(), replayCases.end(),
+            [&](const FFReplayCase &fixture) { return strcmp(fixture.Name, selected) != 0; }), replayCases.end());
+        TestCheck(!replayCases.empty(), "named replay case exists");
+    }
+    FFReplayImages replayReference;
+    const char *jitSetting = SDL_getenv("CKRE_SDL_GPU_FF_JIT");
+    const bool hadJitSetting = jitSetting != nullptr;
+    const std::string savedJitSetting = jitSetting ? jitSetting : "";
+    SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT", "0", 1);
+    Backend reference;
+    if (OpenBackend(reference, kWidth, kHeight)) {
+        RunPixelCases(reference.Context, "reference", precompiled);
+        auto *ctx = static_cast<CKSdlGpuRasterizerContext *>(reference.Context);
+        RunFFReplay(ctx, replayCases, replayTextures, replayReference);
+        const auto stats = ctx->GetFFJitStats();
+        CheckFFJitStatistics(stats);
+        TestCheck(stats.Requests > 0 && stats.Requests == stats.Unavailable && stats.CompileQueued == 0 &&
+                      stats.PipelineSelections == 0, "reference context runs exclusively precompiled programs");
+    }
+    CloseBackend(reference);
+    if (hadJitSetting) SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT", savedJitSetting.c_str(), 1);
+    else SDL_unsetenv_unsafe("CKRE_SDL_GPU_FF_JIT");
+#endif
     Backend backend;
     const CKBOOL opened = OpenBackend(backend, kWidth, kHeight);
     if (opened) {
@@ -4458,7 +4492,9 @@ void BackendRendersFixedFunctionSemantics()
         CheckTypedPersistentBufferUpdates(backend);
         RunPixelCases(backend.Context, "uber", samples);
 #ifdef CKRE_PIXEL_SDL_GPU
-        CheckCompiledFragmentPrograms(backend, samples);
+        CheckMatchingSamples("cold", samples, precompiled);
+        CheckCompiledFragmentPrograms(backend, precompiled);
+        CheckFFReplay(backend, replayCases, replayTextures, replayReference);
         CheckCompiledProgramDepthInvariance(backend);
 #endif
         CheckCompiled(backend, "wide sampler layout", CheckWideSamplerLayouts);
@@ -4511,7 +4547,7 @@ void BackendRendersFixedFunctionSemantics()
     CloseBackend(backend);
 #ifdef CKRE_PIXEL_SDL_GPU
     if (opened)
-        CheckPrewarmedFragmentPrograms(samples);
+        CheckPrewarmedFragmentPrograms(precompiled);
 #endif
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
