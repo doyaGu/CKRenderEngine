@@ -84,7 +84,8 @@ def main():
                 if mode == "on" and scene in ("composite_3d", "opaque_lit", "lighting_dynamic",
                                              "lighting_attenuation", "lighting_spotlight", "tween_3d",
                                              "skinning_3d", "material_channels", "fog_linear", "fog_exp",
-                                             "fog_exp2", "texgen_envmap") and not stats.get("lit", 0):
+                                             "fog_exp2", "texgen_envmap", "rtt_2d", "rtt_cube",
+                                             "cube_face_filter") and not stats.get("lit", 0):
                     issues.append("no generated lit vertex draw")
                 if mode == "on" and scene == "tween_3d":
                     if not stats.get("tween", 0) or not stats.get("unlit", 0):

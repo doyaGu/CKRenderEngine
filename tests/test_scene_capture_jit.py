@@ -102,7 +102,7 @@ class SceneCaptureReferenceTest(unittest.TestCase):
 
     def test_lit_scene_parity_requires_generated_lighting(self):
         for scene in ("lighting_spotlight", "material_channels", "fog_linear", "fog_exp",
-                      "fog_exp2", "texgen_envmap"):
+                      "fog_exp2", "texgen_envmap", "rtt_2d", "rtt_cube", "cube_face_filter"):
             for draws in (0, 1):
                 with self.subTest(scene=scene, lit_draws=draws):
                     code, _, rows, _, _ = self.run_capture(scene=scene, lit_draws=draws)
