@@ -101,9 +101,14 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
     if (m_KeyframeData && m_KeyframeData->m_ObjectAnimation && m_KeyframeData->m_ObjectAnimation != this) {
         CKObjectAnimation *owner = m_KeyframeData->m_ObjectAnimation;
         if (file) {
-            // Only reference shared data if the owner object is actually part of the file save set.
-            if (file->IsObjectToBeSaved(owner->GetID()))
-                sharedAnim = static_cast<RCKObjectAnimation *>(owner);
+            // 0x100586B5 only references an owner already serialized by CKFile.
+            // Otherwise this object must write the controllers and become owner.
+            for (const CKFileObject &entry : file->m_FileObjects) {
+                if (entry.ObjPtr == owner && entry.Data) {
+                    sharedAnim = static_cast<RCKObjectAnimation *>(owner);
+                    break;
+                }
+            }
         } else {
             sharedAnim = static_cast<RCKObjectAnimation *>(owner);
         }
@@ -278,6 +283,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
         } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS)) {
             // Full keyframe data format
             ResetKeyframeData();
+            m_KeyframeData->m_ObjectAnimation = this;
 
             rootPos.x = chunk->ReadFloat();
             rootPos.y = chunk->ReadFloat();
@@ -313,6 +319,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
         } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMNEWDATA)) {
             // Legacy/new snapshot format (identifier 0x1000) as implemented by CK2_3D.dll
             ResetKeyframeData();
+            m_KeyframeData->m_ObjectAnimation = this;
 
             rootPos.x = chunk->ReadFloat();
             rootPos.y = chunk->ReadFloat();
@@ -494,7 +501,9 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
                     if (count <= 0)
                         continue;
 
-                    CKBYTE *tmp = new CKBYTE[(size_t)count * 8];
+                    // Native sub_10013360 zeroes both DWORDs in every entry.
+                    // The payload fills only part of this conversion array.
+                    CKBYTE *tmp = new CKBYTE[(size_t)count * 8]();
                     chunk->ReadAndFillBuffer_LEndian((int)sizeBytes, tmp);
 
                     key->NormArray = new VxCompressedVector[count];
@@ -790,6 +799,12 @@ CKAnimController *RCKObjectAnimation::CreateController(CKANIMATION_CONTROLLER Co
     if (!m_KeyframeData)
         return nullptr;
 
+    // Validate the complete type before replacing a category's existing keys.
+    // 0x1004A922 leaves existing controllers untouched for unsupported types.
+    CKAnimController *ctrl = m_KeyframeData->CreateController(ControlType);
+    if (!ctrl)
+        return nullptr;
+
     // Get the base controller type (mask out specific type to get category)
     CKDWORD baseType = ControlType & CKANIMATION_CONTROLLER_MASK;
 
@@ -826,13 +841,9 @@ CKAnimController *RCKObjectAnimation::CreateController(CKANIMATION_CONTROLLER Co
         }
         break;
     default:
+        delete ctrl;
         return nullptr;
     }
-
-    // Create new controller and assign to appropriate slot
-    CKAnimController *ctrl = m_KeyframeData->CreateController(ControlType);
-    if (!ctrl)
-        return nullptr;
 
     // Assign to the appropriate controller slot
     switch (baseType) {
@@ -1177,7 +1188,6 @@ CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVe
         hasNorm2 = m_Anim2->HasMorphNormalInfo();
     }
 
-    VxCompressedVector *normPtr1 = hasNorm1 ? tempNorms : nullptr;
     VxCompressedVector *normPtr2 = hasNorm2 ? tempNorms + vertCount1 : nullptr;
 
     // Scale time to each animation's length
@@ -1187,10 +1197,12 @@ CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVe
 
     // Evaluate both animations
     if (hasNorm1) {
-        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, normPtr1);
+        // The first source writes directly to the caller, also when the
+        // second source has no normals and the blend below is skipped.
+        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, Normals);
         m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, normPtr2);
     } else if (hasNorm2) {
-        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, normPtr1);
+        m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, nullptr);
         m_Anim2->EvaluateMorphTarget(time2, VertexCount, tempVerts2, 12, Normals);
     } else {
         m_Anim1->EvaluateMorphTarget(time1, VertexCount, tempVerts1, 12, nullptr);
@@ -1212,9 +1224,7 @@ CKBOOL RCKObjectAnimation::EvaluateMorphTarget(float Time, int VertexCount, VxVe
     // Blend normals if both have normal info
     if (hasNorm1 && hasNorm2 && Normals) {
         for (int i = 0; i < VertexCount; ++i) {
-            // Interpolate compressed normals using their xa/ya fields
-            Normals[i].xa = (short) ((float) normPtr1[i].xa * invFactor + (float) normPtr2[i].xa * factor);
-            Normals[i].ya = (short) ((float) normPtr1[i].ya * invFactor + (float) normPtr2[i].ya * factor);
+            Normals[i].Slerp(factor, Normals[i], normPtr2[i]);
         }
     }
 
@@ -1541,16 +1551,8 @@ void RCKObjectAnimation::Clear() {
 
 void RCKObjectAnimation::ClearAll() {
     Clear();
-    // Also clear keyframe data if we own it
-    if (m_KeyframeData && m_KeyframeData->m_ObjectAnimation == this) {
-        // Clear all controllers
-        m_KeyframeData->m_PositionController = 0;
-        m_KeyframeData->m_RotationController = 0;
-        m_KeyframeData->m_ScaleController = 0;
-        m_KeyframeData->m_ScaleAxisController = 0;
-        m_KeyframeData->m_MorphController = nullptr;
-        m_KeyframeData->m_Length = 0.0f;
-    }
+    // 0x10056BCD clears the shared data even when called through an alias.
+    ResetKeyframeData();
 }
 
 //=============================================================================
@@ -1608,8 +1610,8 @@ CKObjectAnimation *RCKObjectAnimation::CreateMergedAnimation(CKObjectAnimation *
 //=============================================================================
 
 void RCKObjectAnimation::SetLength(float nbframe) {
-    if (m_KeyframeData)
-        m_KeyframeData->m_Length = nbframe;
+    // 0x10056CBF also updates all existing controllers through 0x1004A5B2.
+    SetKeyframeLength(nbframe);
 }
 
 float RCKObjectAnimation::GetLength() {
@@ -2173,12 +2175,14 @@ void RCKObjectAnimation::Clone(CKObjectAnimation *anim) {
     }
 }
 
-// Ensure keyframe data is exclusive to this animation and clear controllers
+// Clear controllers and length in the current, possibly shared, keyframe data.
 void RCKObjectAnimation::ResetKeyframeData() {
     // Strictly matches original CK2_3D.dll behavior (sub_1004A48A):
     // delete all controllers, set pointers to null, set length to 0.
-    if (!m_KeyframeData)
+    if (!m_KeyframeData) {
         m_KeyframeData = new CKKeyframeData();
+        m_KeyframeData->m_ObjectAnimation = this;
+    }
 
     delete m_KeyframeData->m_PositionController;
     m_KeyframeData->m_PositionController = nullptr;
@@ -2196,7 +2200,7 @@ void RCKObjectAnimation::ResetKeyframeData() {
     m_KeyframeData->m_MorphController = nullptr;
 
     m_KeyframeData->m_Length = 0.0f;
-    m_KeyframeData->m_ObjectAnimation = this;
+    // The helper preserves ownership. Only the v1+ full-data Load paths claim it.
 }
 
 void RCKObjectAnimation::SetKeyframeLength(float length) {

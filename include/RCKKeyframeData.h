@@ -240,7 +240,7 @@ public:
     void ComputeBezierPts(int index);
 
 protected:
-    // Helper to compute distance between two keys
+    // Time separation between keys, including a wrap through m_Length.
     float ComputeKeyDistance(int key1, int key2);
 
     CKBezierPositionKey *m_Keys;

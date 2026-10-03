@@ -10,30 +10,111 @@
 // Helper functions for TCB spline interpolation
 //===================================================================
 
-// Applies ease-in and ease-out parameters to the interpolation parameter
-static float ApplyEaseParameters(float t, float easeTo, float easeFrom) {
-    // Clamp input
-    if (t <= 0.0f) return 0.0f;
-    if (t >= 1.0f) return 1.0f;
-
-    // Standard hermite ease function
-    float easeTotal = easeTo + easeFrom;
+// 0x10050AB1 remaps normalized segment time with quadratic ends and a
+// linear middle. Arguments are the left key's easefrom and right key's easeto.
+static float ApplyEaseParameters(float t, float easeFrom, float easeTo) {
+    const float easeTotal = easeFrom + easeTo;
+    if (t == 0.0f || t == 1.0f || easeTotal == 0.0f)
+        return t;
     if (easeTotal > 1.0f) {
-        easeTo /= easeTotal;
-        easeFrom /= easeTotal;
+        const float inverseTotal = 1.0f / easeTotal;
+        easeFrom *= inverseTotal;
+        easeTo *= inverseTotal;
     }
 
-    // Apply ease parameters using Hermite blending
-    float t2 = t * t;
-    float t3 = t2 * t;
+    const float scale = 1.0f / (2.0f - easeFrom - easeTo);
+    if (t < easeFrom)
+        return (scale / easeFrom) * t * t;
+    if (t < 1.0f - easeTo)
+        return (2.0f * t - easeFrom) * scale;
+    const float remaining = 1.0f - t;
+    return 1.0f - (scale / easeTo) * remaining * remaining;
+}
 
-    // Hermite basis functions modified by ease parameters
-    float h1 = 2.0f * t3 - 3.0f * t2 + 1.0f;
-    float h2 = -2.0f * t3 + 3.0f * t2;
-    float h3 = t3 - 2.0f * t2 + t;
-    float h4 = t3 - t2;
+struct TCBTimeWeights {
+    float previous = 1.0f;
+    float next = 1.0f;
+};
 
-    return h1 * 0.0f + h2 * 1.0f + h3 * (1.0f - easeFrom) + h4 * easeTo;
+static TCBTimeWeights ComputeTCBTimeWeights(float previousTime, float time, float nextTime, float continuity) {
+    const float scale = 2.0f / (nextTime - previousTime);
+    TCBTimeWeights weights;
+    weights.previous = (time - previousTime) * scale;
+    weights.next = (nextTime - time) * scale;
+    const float magnitude = std::fabs(continuity);
+    weights.previous = weights.previous + magnitude - magnitude * weights.previous;
+    weights.next = weights.next + magnitude - magnitude * weights.next;
+    return weights;
+}
+
+struct TCBCoefficients {
+    float incomingPrevious, incomingNext, outgoingPrevious, outgoingNext;
+};
+
+static TCBCoefficients ComputeTCBCoefficients(float tension, float continuity, float bias, TCBTimeWeights weights) {
+    const float halfTension = (1.0f - tension) * 0.5f;
+    const float continuityMinus = 1.0f - continuity;
+    const float continuityPlus = 2.0f - continuityMinus;
+    const float biasMinus = 1.0f - bias;
+    const float biasPlus = 2.0f - biasMinus;
+    const float minus = halfTension * continuityMinus;
+    const float plus = halfTension * continuityPlus;
+    return {minus * biasPlus * weights.previous, plus * biasMinus * weights.previous,
+            plus * biasPlus * weights.next, minus * biasMinus * weights.next};
+}
+
+// 0x10050BA1, 0x10050E2E, 0x10050EC3 and 0x10050F98. Position and
+// scale share this implementation in the original DLL as well.
+static void ComputeTCBVectorTangents(const CKTCBPositionKey *keys, int count, VxVector *tangents) {
+    if (count == 2) {
+        const VxVector delta = keys[1].Pos - keys[0].Pos;
+        tangents[1] = (1.0f - keys[0].tension) * delta;
+        tangents[2] = (1.0f - keys[1].tension) * delta;
+        return;
+    }
+    for (int i = 1; i < count - 1; ++i) {
+        const auto &key = keys[i];
+        const auto weights = ComputeTCBTimeWeights(keys[i - 1].TimeStep, key.TimeStep, keys[i + 1].TimeStep, key.continuity);
+        const auto factors = ComputeTCBCoefficients(key.tension, key.continuity, key.bias, weights);
+        const VxVector previous = key.Pos - keys[i - 1].Pos;
+        const VxVector next = keys[i + 1].Pos - key.Pos;
+        tangents[2 * i] = factors.incomingPrevious * previous + factors.incomingNext * next;
+        tangents[2 * i + 1] = factors.outgoingPrevious * previous + factors.outgoingNext * next;
+    }
+    tangents[1] = ((keys[1].Pos - keys[0].Pos) * 3.0f - tangents[2]) * ((1.0f - keys[0].tension) * 0.5f);
+    // The original last endpoint uses the previous INCOMING tangent and a
+    // negative multiplier. Preserve this asymmetric rule (runtime verified).
+    tangents[2 * (count - 1)] = ((keys[count - 2].Pos - keys[count - 1].Pos) * 3.0f - tangents[2 * (count - 2)]) *
+                              (-(1.0f - keys[count - 1].tension) * 0.5f);
+}
+
+// 0x10051040: logarithmic quaternion differences with hemisphere correction,
+// followed by weighted exponentials relative to the current key.
+static void ComputeTCBQuaternionTangents(const CKTCBRotationKey *keys, int count, VxQuaternion *tangents) {
+    for (int i = 0; i < count; ++i) {
+        const auto &key = keys[i];
+        VxQuaternion previous, next;
+        if (i > 0) {
+            VxQuaternion neighbor = keys[i - 1].Rot;
+            if (DotProduct(neighbor, key.Rot) < 0.0f) neighbor = -neighbor;
+            previous = LnDif(neighbor, key.Rot);
+        }
+        if (i + 1 < count) {
+            VxQuaternion neighbor = keys[i + 1].Rot;
+            if (DotProduct(neighbor, key.Rot) < 0.0f) neighbor = -neighbor;
+            next = LnDif(key.Rot, neighbor);
+        }
+        if (i == 0) previous = next;
+        if (i + 1 == count) next = previous;
+        TCBTimeWeights weights;
+        if (i > 0 && i + 1 < count)
+            weights = ComputeTCBTimeWeights(keys[i - 1].TimeStep, key.TimeStep, keys[i + 1].TimeStep, key.continuity);
+        const auto factors = ComputeTCBCoefficients(key.tension, key.continuity, key.bias, weights);
+        const VxQuaternion incoming = 0.5f * ((1.0f - factors.incomingPrevious) * previous - factors.incomingNext * next);
+        const VxQuaternion outgoing = 0.5f * (factors.outgoingPrevious * previous + (factors.outgoingNext - 1.0f) * next);
+        tangents[2 * i] = key.Rot * Exp(incoming);
+        tangents[2 * i + 1] = key.Rot * Exp(outgoing);
+    }
 }
 
 //===================================================================
@@ -62,12 +143,15 @@ CKAnimController *CKKeyframeData::CreateController(CKANIMATION_CONTROLLER type) 
     CKAnimController *controller = nullptr;
 
     switch (type) {
+    case CKANIMATION_CONTROLLER_POS:
     case CKANIMATION_LINPOS_CONTROL:
         controller = new RCKLinearPositionController();
         break;
+    case CKANIMATION_CONTROLLER_ROT:
     case CKANIMATION_LINROT_CONTROL:
         controller = new RCKLinearRotationController();
         break;
+    case CKANIMATION_CONTROLLER_SCL:
     case CKANIMATION_LINSCL_CONTROL:
         controller = new RCKLinearScaleController();
         break;
@@ -92,6 +176,7 @@ CKAnimController *CKKeyframeData::CreateController(CKANIMATION_CONTROLLER type) 
     case CKANIMATION_BEZIERSCL_CONTROL:
         controller = new RCKBezierScaleController();
         break;
+    case CKANIMATION_CONTROLLER_MORPH:
     case CKANIMATION_MORPH_CONTROL:
         controller = new RCKMorphController();
         break;
@@ -137,12 +222,12 @@ CKBOOL RCKLinearPositionController::Evaluate(float TimeStep, void *res) {
         return TRUE;
     }
 
-    // Binary search for the interval containing TimeStep
+    // 0x1004B8DF selects the segment ending at an exact interior key.
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -281,6 +366,9 @@ CKBOOL RCKLinearPositionController::Compare(CKAnimController *control, float Thr
 }
 
 CKBOOL RCKLinearPositionController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -328,12 +416,13 @@ CKBOOL RCKLinearRotationController::Evaluate(float TimeStep, void *res) {
         return TRUE;
     }
 
-    // Binary search
+    // 0x1004C150 uses the preceding segment at exact interior keys. Slerp
+    // can return the opposite quaternion sign from the stored right key.
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -460,6 +549,9 @@ CKBOOL RCKLinearRotationController::Compare(CKAnimController *control, float Thr
 }
 
 CKBOOL RCKLinearRotationController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -509,7 +601,7 @@ CKBOOL RCKLinearScaleController::Evaluate(float TimeStep, void *res) {
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -640,6 +732,9 @@ CKBOOL RCKLinearScaleController::Compare(CKAnimController *control, float Thresh
 }
 
 CKBOOL RCKLinearScaleController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -689,7 +784,7 @@ CKBOOL RCKLinearScaleAxisController::Evaluate(float TimeStep, void *res) {
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -815,6 +910,9 @@ CKBOOL RCKLinearScaleAxisController::Compare(CKAnimController *control, float Th
 }
 
 CKBOOL RCKLinearScaleAxisController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -846,55 +944,12 @@ RCKTCBPositionController::~RCKTCBPositionController() {
 }
 
 void RCKTCBPositionController::ComputeTangents() {
-    if (m_NbKeys < 2) {
-        delete[] m_Tangents;
-        m_Tangents = nullptr;
-        return;
-    }
-
-    // Allocate tangent arrays: 2 tangents per key (incoming and outgoing)
     delete[] m_Tangents;
+    m_Tangents = nullptr;
+    if (m_NbKeys < 2)
+        return;
     m_Tangents = new VxVector[m_NbKeys * 2];
-
-    for (int i = 0; i < m_NbKeys; ++i) {
-        VxVector &tanIn = m_Tangents[i * 2];
-        VxVector &tanOut = m_Tangents[i * 2 + 1];
-
-        float tension = m_Keys[i].tension;
-        float continuity = m_Keys[i].continuity;
-        float bias = m_Keys[i].bias;
-
-        // Compute adjustment factors based on TCB parameters
-        float factorIn1 = ((1.0f - tension) * (1.0f + continuity) * (1.0f + bias)) / 2.0f;
-        float factorIn2 = ((1.0f - tension) * (1.0f - continuity) * (1.0f - bias)) / 2.0f;
-        float factorOut1 = ((1.0f - tension) * (1.0f - continuity) * (1.0f + bias)) / 2.0f;
-        float factorOut2 = ((1.0f - tension) * (1.0f + continuity) * (1.0f - bias)) / 2.0f;
-
-        VxVector dp, dn;
-        if (i == 0) {
-            // First key: use forward difference
-            dp = m_Keys[1].Pos - m_Keys[0].Pos;
-            dn = dp;
-        } else if (i == m_NbKeys - 1) {
-            // Last key: use backward difference
-            dp = m_Keys[m_NbKeys - 1].Pos - m_Keys[m_NbKeys - 2].Pos;
-            dn = dp;
-        } else {
-            // Interior key: use both differences
-            dp = m_Keys[i].Pos - m_Keys[i - 1].Pos;
-            dn = m_Keys[i + 1].Pos - m_Keys[i].Pos;
-        }
-
-        // Compute incoming tangent
-        tanIn.x = factorIn1 * dp.x + factorIn2 * dn.x;
-        tanIn.y = factorIn1 * dp.y + factorIn2 * dn.y;
-        tanIn.z = factorIn1 * dp.z + factorIn2 * dn.z;
-
-        // Compute outgoing tangent
-        tanOut.x = factorOut1 * dp.x + factorOut2 * dn.x;
-        tanOut.y = factorOut1 * dp.y + factorOut2 * dn.y;
-        tanOut.z = factorOut1 * dp.z + factorOut2 * dn.z;
-    }
+    ComputeTCBVectorTangents(m_Keys, m_NbKeys, m_Tangents);
 }
 
 CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
@@ -924,7 +979,7 @@ CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -936,7 +991,7 @@ CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
     float t = (TimeStep - t1) / (t2 - t1);
 
     // Apply ease parameters
-    t = ApplyEaseParameters(t, m_Keys[low].easeto, m_Keys[high].easefrom);
+    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
     // Hermite basis functions
     float t2_val = t * t;
@@ -1084,6 +1139,9 @@ CKBOOL RCKTCBPositionController::Compare(CKAnimController *control, float Thresh
 }
 
 CKBOOL RCKTCBPositionController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -1117,50 +1175,12 @@ RCKTCBRotationController::~RCKTCBRotationController() {
 }
 
 void RCKTCBRotationController::ComputeTangents() {
-    if (m_NbKeys < 2) {
-        delete[] m_Tangents;
-        m_Tangents = nullptr;
-        return;
-    }
-
-    // Allocate tangent arrays
     delete[] m_Tangents;
+    m_Tangents = nullptr;
+    if (m_NbKeys < 2)
+        return;
     m_Tangents = new VxQuaternion[m_NbKeys * 2];
-
-    for (int i = 0; i < m_NbKeys; ++i) {
-        VxQuaternion &tanIn = m_Tangents[i * 2];
-        VxQuaternion &tanOut = m_Tangents[i * 2 + 1];
-
-        float tension = m_Keys[i].tension;
-        float continuity = m_Keys[i].continuity;
-        float bias = m_Keys[i].bias;
-
-        // Get quaternion difference between keys
-        VxQuaternion qPrev, qCurr, qNext;
-        qCurr = m_Keys[i].Rot;
-
-        if (i == 0) {
-            qPrev = qCurr;
-            qNext = m_Keys[1].Rot;
-        } else if (i == m_NbKeys - 1) {
-            qPrev = m_Keys[m_NbKeys - 2].Rot;
-            qNext = qCurr;
-        } else {
-            qPrev = m_Keys[i - 1].Rot;
-            qNext = m_Keys[i + 1].Rot;
-        }
-
-        // For quaternion TCB, use logarithmic representation
-        // Simplified implementation: linear blend of quaternions
-        float factorIn = (1.0f - tension) * 0.5f;
-        float factorOut = (1.0f - tension) * 0.5f;
-
-        // Compute incoming tangent quaternion
-        tanIn = Slerp(0.5f, qPrev, qNext);
-
-        // Compute outgoing tangent quaternion
-        tanOut = Slerp(0.5f, qPrev, qNext);
-    }
+    ComputeTCBQuaternionTangents(m_Keys, m_NbKeys, m_Tangents);
 }
 
 CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
@@ -1182,11 +1202,13 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
         return TRUE;
     }
 
+    // At an interior key, the original evaluates the segment ending there.
+    // Slerp can preserve a different quaternion sign on the adjacent segment.
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -1197,7 +1219,7 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
     float t = (TimeStep - t1) / (t2 - t1);
 
     // Apply ease parameters
-    t = ApplyEaseParameters(t, m_Keys[low].easeto, m_Keys[high].easefrom);
+    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
     // Use Squad (spherical quadrangle) interpolation for smooth rotation
     VxQuaternion &q1 = m_Keys[low].Rot;
@@ -1332,6 +1354,9 @@ CKBOOL RCKTCBRotationController::Compare(CKAnimController *control, float Thresh
 }
 
 CKBOOL RCKTCBRotationController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -1365,48 +1390,12 @@ RCKTCBScaleController::~RCKTCBScaleController() {
 }
 
 void RCKTCBScaleController::ComputeTangents() {
-    if (m_NbKeys < 2) {
-        delete[] m_Tangents;
-        m_Tangents = nullptr;
-        return;
-    }
-
     delete[] m_Tangents;
+    m_Tangents = nullptr;
+    if (m_NbKeys < 2)
+        return;
     m_Tangents = new VxVector[m_NbKeys * 2];
-
-    for (int i = 0; i < m_NbKeys; ++i) {
-        VxVector &tanIn = m_Tangents[i * 2];
-        VxVector &tanOut = m_Tangents[i * 2 + 1];
-
-        float tension = m_Keys[i].tension;
-        float continuity = m_Keys[i].continuity;
-        float bias = m_Keys[i].bias;
-
-        float factorIn1 = ((1.0f - tension) * (1.0f + continuity) * (1.0f + bias)) / 2.0f;
-        float factorIn2 = ((1.0f - tension) * (1.0f - continuity) * (1.0f - bias)) / 2.0f;
-        float factorOut1 = ((1.0f - tension) * (1.0f - continuity) * (1.0f + bias)) / 2.0f;
-        float factorOut2 = ((1.0f - tension) * (1.0f + continuity) * (1.0f - bias)) / 2.0f;
-
-        VxVector dp, dn;
-        if (i == 0) {
-            dp = m_Keys[1].Pos - m_Keys[0].Pos;
-            dn = dp;
-        } else if (i == m_NbKeys - 1) {
-            dp = m_Keys[m_NbKeys - 1].Pos - m_Keys[m_NbKeys - 2].Pos;
-            dn = dp;
-        } else {
-            dp = m_Keys[i].Pos - m_Keys[i - 1].Pos;
-            dn = m_Keys[i + 1].Pos - m_Keys[i].Pos;
-        }
-
-        tanIn.x = factorIn1 * dp.x + factorIn2 * dn.x;
-        tanIn.y = factorIn1 * dp.y + factorIn2 * dn.y;
-        tanIn.z = factorIn1 * dp.z + factorIn2 * dn.z;
-
-        tanOut.x = factorOut1 * dp.x + factorOut2 * dn.x;
-        tanOut.y = factorOut1 * dp.y + factorOut2 * dn.y;
-        tanOut.z = factorOut1 * dp.z + factorOut2 * dn.z;
-    }
+    ComputeTCBVectorTangents(m_Keys, m_NbKeys, m_Tangents);
 }
 
 CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
@@ -1432,7 +1421,7 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -1442,7 +1431,7 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
     float t2 = m_Keys[high].TimeStep;
     float t = (TimeStep - t1) / (t2 - t1);
 
-    t = ApplyEaseParameters(t, m_Keys[low].easeto, m_Keys[high].easefrom);
+    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
     float t2_val = t * t;
     float t3 = t2_val * t;
@@ -1588,6 +1577,9 @@ CKBOOL RCKTCBScaleController::Compare(CKAnimController *control, float Threshold
 }
 
 CKBOOL RCKTCBScaleController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -1621,36 +1613,12 @@ RCKTCBScaleAxisController::~RCKTCBScaleAxisController() {
 }
 
 void RCKTCBScaleAxisController::ComputeTangents() {
-    if (m_NbKeys < 2) {
-        delete[] m_Tangents;
-        m_Tangents = nullptr;
-        return;
-    }
-
     delete[] m_Tangents;
+    m_Tangents = nullptr;
+    if (m_NbKeys < 2)
+        return;
     m_Tangents = new VxQuaternion[m_NbKeys * 2];
-
-    for (int i = 0; i < m_NbKeys; ++i) {
-        VxQuaternion &tanIn = m_Tangents[i * 2];
-        VxQuaternion &tanOut = m_Tangents[i * 2 + 1];
-
-        VxQuaternion qPrev, qCurr, qNext;
-        qCurr = m_Keys[i].Rot;
-
-        if (i == 0) {
-            qPrev = qCurr;
-            qNext = m_Keys[1].Rot;
-        } else if (i == m_NbKeys - 1) {
-            qPrev = m_Keys[m_NbKeys - 2].Rot;
-            qNext = qCurr;
-        } else {
-            qPrev = m_Keys[i - 1].Rot;
-            qNext = m_Keys[i + 1].Rot;
-        }
-
-        tanIn = Slerp(0.5f, qPrev, qNext);
-        tanOut = Slerp(0.5f, qPrev, qNext);
-    }
+    ComputeTCBQuaternionTangents(m_Keys, m_NbKeys, m_Tangents);
 }
 
 CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
@@ -1672,11 +1640,13 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
         return TRUE;
     }
 
+    // At an interior key, the original evaluates the segment ending there.
+    // Slerp can preserve a different quaternion sign on the adjacent segment.
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -1686,7 +1656,7 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
     float t2 = m_Keys[high].TimeStep;
     float t = (TimeStep - t1) / (t2 - t1);
 
-    t = ApplyEaseParameters(t, m_Keys[low].easeto, m_Keys[high].easefrom);
+    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
     VxQuaternion &q1 = m_Keys[low].Rot;
     VxQuaternion &q2 = m_Keys[high].Rot;
@@ -1820,6 +1790,9 @@ CKBOOL RCKTCBScaleAxisController::Compare(CKAnimController *control, float Thres
 }
 
 CKBOOL RCKTCBScaleAxisController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -1842,6 +1815,155 @@ CKBOOL RCKTCBScaleAxisController::Clone(CKAnimController *control) {
 // RCKBezierPositionController Implementation
 //===================================================================
 
+// 0x1004DFE5 measures time, including the wrap interval at either endpoint.
+static float BezierKeyTimeSpan(const CKBezierPositionKey *keys, float length, int first, int second) {
+    return second <= first ? keys[second].TimeStep + length - keys[first].TimeStep
+                           : keys[second].TimeStep - keys[first].TimeStep;
+}
+
+// 0x1004E300 and 0x1004E5BD extrapolate endpoint derivatives. These helpers
+// also serve linear keys whose neighboring tangent is not linear.
+static void ComputeBezierForward(CKBezierPositionKey *keys, int count, float length, int index) {
+    auto &key = keys[index];
+    if (count == 1) {
+        key.In = key.Out = VxVector(0, 0, 0);
+        return;
+    }
+    float span = BezierKeyTimeSpan(keys, length, index, index + 1);
+    if (span == 0.0f) span = 1.0f;
+    const VxVector delta = keys[index + 1].Pos - key.Pos;
+    if (index == count - 2) {
+        key.Out = delta / span;
+    } else {
+        float nextSpan = BezierKeyTimeSpan(keys, length, index + 1, index + 2);
+        if (nextSpan == 0.0f) nextSpan = 1.0f;
+        const float ratio = span / (span + nextSpan);
+        key.Out = ((ratio + 1.0f) / span) * delta -
+                  (ratio / nextSpan) * (keys[index + 2].Pos - keys[index + 1].Pos);
+    }
+    if (index == 0) key.In = VxVector(0, 0, 0);
+}
+
+static void ComputeBezierBackward(CKBezierPositionKey *keys, int count, float length, int index) {
+    auto &key = keys[index];
+    if (count == 1) {
+        key.In = key.Out = VxVector(0, 0, 0);
+        return;
+    }
+    float span = BezierKeyTimeSpan(keys, length, index - 1, index);
+    if (span == 0.0f) span = 1.0f;
+    const VxVector delta = key.Pos - keys[index - 1].Pos;
+    if (index == 1) {
+        key.In = -delta / span;
+    } else {
+        float previousSpan = BezierKeyTimeSpan(keys, length, index - 2, index - 1);
+        if (previousSpan == 0.0f) previousSpan = 1.0f;
+        const float ratio = previousSpan / (previousSpan + span);
+        key.In = -(((ratio - 1.0f) / previousSpan) * (keys[index - 1].Pos - keys[index - 2].Pos) +
+                   ((2.0f - ratio) / span) * delta);
+    }
+    if (index == count - 1) key.Out = VxVector(0, 0, 0);
+}
+
+// 0x1004E891 only computes sides marked AutoSmooth. If the opposite side has
+// another mode, smoothing follows that side's already computed derivative.
+static void ComputeBezierSmooth(CKBezierPositionKey *keys, int count, float length, int index) {
+    auto &key = keys[index];
+    const auto inMode = key.Flags.GetInTangentMode();
+    const auto outMode = key.Flags.GetOutTangentMode();
+    const bool smoothIn = inMode == BEZIER_KEY_AUTOSMOOTH;
+    const bool smoothOut = outMode == BEZIER_KEY_AUTOSMOOTH;
+    if (!smoothIn && !smoothOut) return;
+    const int previous = (index + count - 1) % count;
+    const int next = (index + 1) % count;
+    const float previousSpan = BezierKeyTimeSpan(keys, length, previous, index);
+    const float nextSpan = BezierKeyTimeSpan(keys, length, index, next);
+    if (previousSpan == 0.0f || nextSpan == 0.0f || index == 0 || index == count - 1) {
+        if (smoothOut) {
+            if (index == 0) ComputeBezierForward(keys, count, length, index);
+            else key.Out = VxVector(0, 0, 0);
+        }
+        if (smoothIn) {
+            if (index == count - 1) ComputeBezierBackward(keys, count, length, index);
+            else key.In = VxVector(0, 0, 0);
+        }
+    } else if (smoothIn && smoothOut) {
+        const float ratio = previousSpan / (previousSpan + nextSpan);
+        const VxVector tangent = ((1.0f - ratio) / previousSpan) * (key.Pos - keys[previous].Pos) +
+                                 (ratio / nextSpan) * (keys[next].Pos - key.Pos);
+        key.In = -tangent;
+        key.Out = tangent;
+    } else {
+        const auto otherMode = smoothIn ? outMode : inMode;
+        VxVector &tangent = smoothIn ? key.In : key.Out;
+        switch (otherMode) {
+        case BEZIER_KEY_LINEAR:
+        case BEZIER_KEY_FAST:
+        case BEZIER_KEY_SLOW:
+        case BEZIER_KEY_TANGENTS:
+            tangent = -(smoothIn ? key.Out : key.In);
+            break;
+        case BEZIER_KEY_STEP:
+            tangent = VxVector(0, 0, 0);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+// 0x1004ED59 is shared by position and scale. Mode dispatch precedes the
+// AutoSmooth pass for each key, preserving the original endpoint side effects.
+static void ComputeBezierTangents(CKBezierPositionKey *keys, int count, float length) {
+    for (int i = 0; i < count; ++i) {
+        auto &key = keys[i];
+        const auto inMode = key.Flags.GetInTangentMode();
+        const auto outMode = key.Flags.GetOutTangentMode();
+        const int previous = (i + count - 1) % count;
+        const int next = (i + 1) % count;
+        switch (inMode) {
+        case BEZIER_KEY_LINEAR:
+        case BEZIER_KEY_FAST:
+            if (inMode == BEZIER_KEY_FAST || i == 0 || keys[previous].Flags.GetOutTangentMode() == BEZIER_KEY_LINEAR) {
+                float span = BezierKeyTimeSpan(keys, length, previous, i);
+                if (span == 0.0f) span = 1.0f;
+                const float scale = (inMode == BEZIER_KEY_FAST ? 2.0f : 1.0f) / span;
+                key.In = scale * (keys[previous].Pos - key.Pos);
+            } else {
+                ComputeBezierBackward(keys, count, length, i);
+            }
+            break;
+        case BEZIER_KEY_STEP:
+        case BEZIER_KEY_SLOW:
+            key.In = VxVector(0, 0, 0);
+            break;
+        default:
+            break;
+        }
+        switch (outMode) {
+        case BEZIER_KEY_LINEAR:
+        case BEZIER_KEY_FAST:
+            if (outMode == BEZIER_KEY_FAST || i == count - 1 || keys[next].Flags.GetInTangentMode() == BEZIER_KEY_LINEAR) {
+                float span = BezierKeyTimeSpan(keys, length, i, next);
+                if (span == 0.0f) span = 1.0f;
+                const float scale = (outMode == BEZIER_KEY_FAST ? 2.0f : 1.0f) / span;
+                key.Out = scale * (keys[next].Pos - key.Pos);
+            } else {
+                ComputeBezierForward(keys, count, length, i);
+            }
+            break;
+        case BEZIER_KEY_STEP:
+        case BEZIER_KEY_SLOW:
+            key.Out = VxVector(0, 0, 0);
+            break;
+        default:
+            break;
+        }
+        if (inMode == BEZIER_KEY_AUTOSMOOTH || outMode == BEZIER_KEY_AUTOSMOOTH)
+            ComputeBezierSmooth(keys, count, length, i);
+    }
+}
+
 RCKBezierPositionController::RCKBezierPositionController()
     : CKAnimController(CKANIMATION_BEZIERPOS_CONTROL), m_Keys(nullptr), m_TangentsComputed(FALSE) {
     m_Length = 0.0f;
@@ -1854,119 +1976,18 @@ RCKBezierPositionController::~RCKBezierPositionController() {
 float RCKBezierPositionController::ComputeKeyDistance(int key1, int key2) {
     if (key1 < 0 || key1 >= m_NbKeys || key2 < 0 || key2 >= m_NbKeys)
         return 0.0f;
-
-    VxVector diff = m_Keys[key2].Pos - m_Keys[key1].Pos;
-    return sqrtf(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+    return BezierKeyTimeSpan(m_Keys, m_Length, key1, key2);
 }
 
 void RCKBezierPositionController::ComputeBezierPts() {
-    for (int i = 0; i < m_NbKeys; ++i) {
-        ComputeBezierPts(i);
-    }
+    ComputeBezierTangents(m_Keys, m_NbKeys, m_Length);
     m_TangentsComputed = TRUE;
 }
 
 void RCKBezierPositionController::ComputeBezierPts(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
-
-    CKBezierPositionKey &key = m_Keys[index];
-    CKBEZIERKEY_FLAGS inMode = key.Flags.GetInTangentMode();
-    CKBEZIERKEY_FLAGS outMode = key.Flags.GetOutTangentMode();
-
-    int prevIdx = (index + m_NbKeys - 1) % m_NbKeys;
-    int nextIdx = (index + 1) % m_NbKeys;
-
-    // Only compute if this is an interior key or we have enough keys
-    if (m_NbKeys == 1) {
-        key.In = VxVector(0, 0, 0);
-        key.Out = VxVector(0, 0, 0);
-        return;
-    }
-
-    // Compute incoming tangent based on mode
-    if (inMode != BEZIER_KEY_TANGENTS) {
-        if (inMode == BEZIER_KEY_LINEAR) {
-            // Linear: tangent points directly to previous key
-            if (index > 0)
-                key.In = VxVector(0, 0, 0);
-        } else if (inMode == BEZIER_KEY_STEP) {
-            key.In = VxVector(0, 0, 0);
-        } else if (inMode == BEZIER_KEY_FAST) {
-            // Fast: 2 * (next - prev)
-            if (index > 0 && index < m_NbKeys - 1) {
-                VxVector diff = m_Keys[nextIdx].Pos - m_Keys[prevIdx].Pos;
-                key.In = diff * -1.0f; // Negate for incoming
-            }
-        } else if (inMode == BEZIER_KEY_SLOW) {
-            key.In = VxVector(0, 0, 0);
-        } else // BEZIER_KEY_AUTOSMOOTH
-        {
-            // Smooth tangent: average of neighboring segments
-            if (index == 0 || index == m_NbKeys - 1) {
-                key.In = VxVector(0, 0, 0);
-            } else {
-                float dist1 = ComputeKeyDistance(prevIdx, index);
-                float dist2 = ComputeKeyDistance(index, nextIdx);
-
-                if (dist1 == 0.0f) dist1 = 1.0f;
-                if (dist2 == 0.0f) dist2 = 1.0f;
-
-                float ratio = dist1 / (dist1 + dist2);
-
-                VxVector d1 = m_Keys[index].Pos - m_Keys[prevIdx].Pos;
-                VxVector d2 = m_Keys[nextIdx].Pos - m_Keys[index].Pos;
-
-                // Catmull-Rom style tangent
-                VxVector tangent;
-                tangent.x = (ratio / dist1) * d1.x - ((1.0f - ratio) / dist2) * d2.x;
-                tangent.y = (ratio / dist1) * d1.y - ((1.0f - ratio) / dist2) * d2.y;
-                tangent.z = (ratio / dist1) * d1.z - ((1.0f - ratio) / dist2) * d2.z;
-
-                key.In = tangent;
-            }
-        }
-    }
-
-    // Compute outgoing tangent based on mode
-    if (outMode != BEZIER_KEY_TANGENTS) {
-        if (outMode == BEZIER_KEY_LINEAR) {
-            if (index < m_NbKeys - 1)
-                key.Out = VxVector(0, 0, 0);
-        } else if (outMode == BEZIER_KEY_STEP) {
-            key.Out = VxVector(0, 0, 0);
-        } else if (outMode == BEZIER_KEY_FAST) {
-            if (index > 0 && index < m_NbKeys - 1) {
-                VxVector diff = m_Keys[nextIdx].Pos - m_Keys[prevIdx].Pos;
-                key.Out = diff;
-            }
-        } else if (outMode == BEZIER_KEY_SLOW) {
-            key.Out = VxVector(0, 0, 0);
-        } else // BEZIER_KEY_AUTOSMOOTH
-        {
-            if (index == 0 || index == m_NbKeys - 1) {
-                key.Out = VxVector(0, 0, 0);
-            } else {
-                float dist1 = ComputeKeyDistance(prevIdx, index);
-                float dist2 = ComputeKeyDistance(index, nextIdx);
-
-                if (dist1 == 0.0f) dist1 = 1.0f;
-                if (dist2 == 0.0f) dist2 = 1.0f;
-
-                float ratio = dist1 / (dist1 + dist2);
-
-                VxVector d1 = m_Keys[index].Pos - m_Keys[prevIdx].Pos;
-                VxVector d2 = m_Keys[nextIdx].Pos - m_Keys[index].Pos;
-
-                VxVector tangent;
-                tangent.x = ((1.0f - ratio) / dist1) * d1.x + (ratio / dist2) * d2.x;
-                tangent.y = ((1.0f - ratio) / dist1) * d1.y + (ratio / dist2) * d2.y;
-                tangent.z = ((1.0f - ratio) / dist1) * d1.z + (ratio / dist2) * d2.z;
-
-                key.Out = tangent;
-            }
-        }
-    }
+    ComputeBezierSmooth(m_Keys, m_NbKeys, m_Length, index);
 }
 
 CKBOOL RCKBezierPositionController::Evaluate(float TimeStep, void *res) {
@@ -1993,7 +2014,7 @@ CKBOOL RCKBezierPositionController::Evaluate(float TimeStep, void *res) {
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -2003,14 +2024,18 @@ CKBOOL RCKBezierPositionController::Evaluate(float TimeStep, void *res) {
     float t2_time = m_Keys[high].TimeStep;
     float t = (TimeStep - t1) / (t2_time - t1);
 
-    // Cubic Bezier interpolation
-    // B(t) = (1-t)^3 * P0 + 3(1-t)^2 * t * P1 + 3(1-t) * t^2 * P2 + t^3 * P3
-    // where P0 = key[low].Pos, P1 = P0 + Out, P2 = P3 + In, P3 = key[high].Pos
+    if (m_Keys[low].Flags.GetOutTangentMode() == BEZIER_KEY_STEP ||
+        m_Keys[high].Flags.GetInTangentMode() == BEZIER_KEY_STEP) {
+        *result = t == 1.0f ? m_Keys[high].Pos : m_Keys[low].Pos;
+        return TRUE;
+    }
 
+    // Stored tangents are derivatives. The original constant is 0x3EAAAAAA.
+    const float handleScale = (t2_time - t1) * 0.33333331f;
     VxVector &p0 = m_Keys[low].Pos;
     VxVector &p3 = m_Keys[high].Pos;
-    VxVector p1 = p0 + m_Keys[low].Out;
-    VxVector p2 = p3 + m_Keys[high].In;
+    VxVector p1 = p0 + m_Keys[low].Out * handleScale;
+    VxVector p2 = p3 + m_Keys[high].In * handleScale;
 
     float omt = 1.0f - t;
     float omt2 = omt * omt;
@@ -2092,35 +2117,58 @@ void RCKBezierPositionController::RemoveKey(int index) {
     m_TangentsComputed = FALSE;
 }
 
-int RCKBezierPositionController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKBezierPositionKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKBezierPositionKey));
+// Position and scale share these routines in the original DLL (0x1004F4BE,
+// 0x1004F65A). Each key has a 20-byte prefix and only explicit tangent vectors.
+static int DumpBezierKeys(CKBezierPositionKey *keys, int count, void *buffer) {
+    int size = sizeof(int);
+    char *bytes = static_cast<char *>(buffer);
+    if (bytes) memcpy(bytes, &count, sizeof(count));
+    for (int i = 0; i < count; ++i) {
+        if (bytes) memcpy(bytes + size, &keys[i], 20);
+        size += 20;
+        if (keys[i].Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) {
+            if (bytes) memcpy(bytes + size, &keys[i].In, sizeof(VxVector));
+            size += sizeof(VxVector);
+        }
+        if (keys[i].Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) {
+            if (bytes) memcpy(bytes + size, &keys[i].Out, sizeof(VxVector));
+            size += sizeof(VxVector);
+        }
     }
-
     return size;
+}
+
+static int ReadBezierKeys(CKBezierPositionKey *&keys, int &count, void *buffer) {
+    const char *bytes = static_cast<const char *>(buffer);
+    delete[] keys;
+    keys = nullptr;
+    memcpy(&count, bytes, sizeof(count));
+    int size = sizeof(int);
+    if (count > 0) keys = new CKBezierPositionKey[count];
+    for (int i = 0; i < count; ++i) {
+        memcpy(&keys[i], bytes + size, 20);
+        size += 20;
+        if (keys[i].Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) {
+            memcpy(&keys[i].In, bytes + size, sizeof(VxVector));
+            size += sizeof(VxVector);
+        }
+        if (keys[i].Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) {
+            memcpy(&keys[i].Out, bytes + size, sizeof(VxVector));
+            size += sizeof(VxVector);
+        }
+    }
+    return size;
+}
+
+int RCKBezierPositionController::DumpKeysTo(void *Buffer) {
+    return DumpBezierKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKBezierPositionController::ReadKeysFrom(void *Buffer) {
     if (!Buffer)
         return 0;
-
-    delete[] m_Keys;
-    m_Keys = nullptr;
     m_TangentsComputed = FALSE;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKBezierPositionKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKBezierPositionKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKBezierPositionKey);
+    return ReadBezierKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 CKBOOL RCKBezierPositionController::Compare(CKAnimController *control, float Threshold) {
@@ -2140,6 +2188,9 @@ CKBOOL RCKBezierPositionController::Compare(CKAnimController *control, float Thr
 }
 
 CKBOOL RCKBezierPositionController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -2173,79 +2224,18 @@ RCKBezierScaleController::~RCKBezierScaleController() {
 float RCKBezierScaleController::ComputeKeyDistance(int key1, int key2) {
     if (key1 < 0 || key1 >= m_NbKeys || key2 < 0 || key2 >= m_NbKeys)
         return 0.0f;
-
-    VxVector diff = m_Keys[key2].Pos - m_Keys[key1].Pos;
-    return sqrtf(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z);
+    return BezierKeyTimeSpan(m_Keys, m_Length, key1, key2);
 }
 
 void RCKBezierScaleController::ComputeBezierPts() {
-    for (int i = 0; i < m_NbKeys; ++i) {
-        ComputeBezierPts(i);
-    }
+    ComputeBezierTangents(m_Keys, m_NbKeys, m_Length);
     m_TangentsComputed = TRUE;
 }
 
 void RCKBezierScaleController::ComputeBezierPts(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
-
-    CKBezierScaleKey &key = m_Keys[index];
-    CKBEZIERKEY_FLAGS inMode = key.Flags.GetInTangentMode();
-    CKBEZIERKEY_FLAGS outMode = key.Flags.GetOutTangentMode();
-
-    int prevIdx = (index + m_NbKeys - 1) % m_NbKeys;
-    int nextIdx = (index + 1) % m_NbKeys;
-
-    if (m_NbKeys == 1) {
-        key.In = VxVector(0, 0, 0);
-        key.Out = VxVector(0, 0, 0);
-        return;
-    }
-
-    // Compute tangents similar to position controller
-    if (inMode != BEZIER_KEY_TANGENTS) {
-        if (index == 0 || index == m_NbKeys - 1 || inMode == BEZIER_KEY_LINEAR ||
-            inMode == BEZIER_KEY_STEP || inMode == BEZIER_KEY_SLOW) {
-            key.In = VxVector(0, 0, 0);
-        } else {
-            float dist1 = ComputeKeyDistance(prevIdx, index);
-            float dist2 = ComputeKeyDistance(index, nextIdx);
-            if (dist1 == 0.0f) dist1 = 1.0f;
-            if (dist2 == 0.0f) dist2 = 1.0f;
-
-            float ratio = dist1 / (dist1 + dist2);
-            VxVector d1 = m_Keys[index].Pos - m_Keys[prevIdx].Pos;
-            VxVector d2 = m_Keys[nextIdx].Pos - m_Keys[index].Pos;
-
-            VxVector tangent;
-            tangent.x = (ratio / dist1) * d1.x - ((1.0f - ratio) / dist2) * d2.x;
-            tangent.y = (ratio / dist1) * d1.y - ((1.0f - ratio) / dist2) * d2.y;
-            tangent.z = (ratio / dist1) * d1.z - ((1.0f - ratio) / dist2) * d2.z;
-            key.In = tangent;
-        }
-    }
-
-    if (outMode != BEZIER_KEY_TANGENTS) {
-        if (index == 0 || index == m_NbKeys - 1 || outMode == BEZIER_KEY_LINEAR ||
-            outMode == BEZIER_KEY_STEP || outMode == BEZIER_KEY_SLOW) {
-            key.Out = VxVector(0, 0, 0);
-        } else {
-            float dist1 = ComputeKeyDistance(prevIdx, index);
-            float dist2 = ComputeKeyDistance(index, nextIdx);
-            if (dist1 == 0.0f) dist1 = 1.0f;
-            if (dist2 == 0.0f) dist2 = 1.0f;
-
-            float ratio = dist1 / (dist1 + dist2);
-            VxVector d1 = m_Keys[index].Pos - m_Keys[prevIdx].Pos;
-            VxVector d2 = m_Keys[nextIdx].Pos - m_Keys[index].Pos;
-
-            VxVector tangent;
-            tangent.x = ((1.0f - ratio) / dist1) * d1.x + (ratio / dist2) * d2.x;
-            tangent.y = ((1.0f - ratio) / dist1) * d1.y + (ratio / dist2) * d2.y;
-            tangent.z = ((1.0f - ratio) / dist1) * d1.z + (ratio / dist2) * d2.z;
-            key.Out = tangent;
-        }
-    }
+    ComputeBezierSmooth(m_Keys, m_NbKeys, m_Length, index);
 }
 
 CKBOOL RCKBezierScaleController::Evaluate(float TimeStep, void *res) {
@@ -2271,7 +2261,7 @@ CKBOOL RCKBezierScaleController::Evaluate(float TimeStep, void *res) {
     int high = m_NbKeys - 1;
     while (low < high - 1) {
         int mid = (low + high) >> 1;
-        if (m_Keys[mid].TimeStep <= TimeStep)
+        if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
@@ -2281,10 +2271,18 @@ CKBOOL RCKBezierScaleController::Evaluate(float TimeStep, void *res) {
     float t2_time = m_Keys[high].TimeStep;
     float t = (TimeStep - t1) / (t2_time - t1);
 
+    if (m_Keys[low].Flags.GetOutTangentMode() == BEZIER_KEY_STEP ||
+        m_Keys[high].Flags.GetInTangentMode() == BEZIER_KEY_STEP) {
+        *result = t == 1.0f ? m_Keys[high].Pos : m_Keys[low].Pos;
+        return TRUE;
+    }
+
+    // Stored tangents are derivatives. The original constant is 0x3EAAAAAA.
+    const float handleScale = (t2_time - t1) * 0.33333331f;
     VxVector &p0 = m_Keys[low].Pos;
     VxVector &p3 = m_Keys[high].Pos;
-    VxVector p1 = p0 + m_Keys[low].Out;
-    VxVector p2 = p3 + m_Keys[high].In;
+    VxVector p1 = p0 + m_Keys[low].Out * handleScale;
+    VxVector p2 = p3 + m_Keys[high].In * handleScale;
 
     float omt = 1.0f - t;
     float omt2 = omt * omt;
@@ -2367,34 +2365,15 @@ void RCKBezierScaleController::RemoveKey(int index) {
 }
 
 int RCKBezierScaleController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKBezierScaleKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKBezierScaleKey));
-    }
-
-    return size;
+    return DumpBezierKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKBezierScaleController::ReadKeysFrom(void *Buffer) {
     if (!Buffer)
         return 0;
 
-    delete[] m_Keys;
-    m_Keys = nullptr;
     m_TangentsComputed = FALSE;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKBezierScaleKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKBezierScaleKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKBezierScaleKey);
+    return ReadBezierKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 CKBOOL RCKBezierScaleController::Compare(CKAnimController *control, float Threshold) {
@@ -2414,6 +2393,9 @@ CKBOOL RCKBezierScaleController::Compare(CKAnimController *control, float Thresh
 }
 
 CKBOOL RCKBezierScaleController::Clone(CKAnimController *control) {
+    if (!control || control->GetType() != m_Type)
+        return FALSE;
+
     if (!CKAnimController::Clone(control))
         return FALSE;
 
@@ -2456,7 +2438,7 @@ CKBOOL RCKMorphController::Evaluate(float TimeStep, void *res) {
 
 CKBOOL RCKMorphController::Evaluate(float TimeStep, int VertexCount, void *VertexPtr,
                                     CKDWORD VertexStride, VxCompressedVector *NormalPtr) {
-    if (m_NbKeys <= 0 || VertexCount <= 0)
+    if (m_NbKeys <= 0 || VertexCount < 0)
         return FALSE;
 
     // Find the key index
@@ -2531,19 +2513,10 @@ CKBOOL RCKMorphController::Evaluate(float TimeStep, int VertexCount, void *Verte
     }
 
     if (NormalPtr && key1.NormArray && key2.NormArray) {
-        // Interpolate compressed normals
+        // CK2_3D.dll 0x10051510 wraps the angular component and uses a
+        // 16-bit fixed-point coefficient, including its rounding behavior.
         for (int i = 0; i < VertexCount; ++i) {
-            // Simple interpolation of compressed normal components
-            VxCompressedVector &n1 = key1.NormArray[i];
-            VxCompressedVector &n2 = key2.NormArray[i];
-
-            // Decompress, interpolate, and recompress
-            // This is a simplified version - the original may use more sophisticated interpolation
-            int xa = (int) (n1.xa + (n2.xa - n1.xa) * t);
-            int ya = (int) (n1.ya + (n2.ya - n1.ya) * t);
-
-            NormalPtr[i].xa = (short) xa;
-            NormalPtr[i].ya = (short) ya;
+            NormalPtr[i].Slerp(t, key1.NormArray[i], key2.NormArray[i]);
         }
     }
 
@@ -2556,16 +2529,6 @@ int RCKMorphController::AddKey(float TimeStep, CKBOOL AllocateNormals) {
     newKey.PosArray = nullptr;
     newKey.NormArray = nullptr;
 
-    if (m_VertexCount > 0) {
-        newKey.PosArray = new VxVector[m_VertexCount];
-        memset(newKey.PosArray, 0, m_VertexCount * sizeof(VxVector));
-
-        if (AllocateNormals) {
-            newKey.NormArray = new VxCompressedVector[m_VertexCount];
-            memset(newKey.NormArray, 0, m_VertexCount * sizeof(VxCompressedVector));
-        }
-    }
-
     return AddKey(&newKey, AllocateNormals);
 }
 
@@ -2573,16 +2536,14 @@ int RCKMorphController::AddKey(CKKey *key, CKBOOL AllocateNormals) {
     if (!key)
         return -1;
 
-    CKMorphKey *morphKey = static_cast<CKMorphKey *>(key);
-    float time = morphKey->TimeStep;
+    const CKMorphKey source = *static_cast<CKMorphKey *>(key);
+    const float time = source.TimeStep;
 
     int insertIdx = m_NbKeys;
     for (int i = 0; i < m_NbKeys; ++i) {
         if (m_Keys[i].TimeStep == time) {
-            // Replace existing key
-            delete[] m_Keys[i].PosArray;
-            delete[] m_Keys[i].NormArray;
-            m_Keys[i] = *morphKey;
+            // 0x1004F9FD returns the existing index without changing the key,
+            // even when the caller requests a different normal allocation.
             return i;
         }
         if (m_Keys[i].TimeStep > time) {
@@ -2603,7 +2564,16 @@ int RCKMorphController::AddKey(CKKey *key, CKBOOL AllocateNormals) {
     }
 
     m_Keys = newKeys;
-    m_Keys[insertIdx] = *morphKey;
+    CKMorphKey &inserted = m_Keys[insertIdx];
+    inserted.TimeStep = time;
+    // The controller owns independent arrays. Source normals imply storage
+    // even when AllocateNormals is false; zero-sized arrays retain presence.
+    inserted.PosArray = new VxVector[m_VertexCount];
+    inserted.NormArray = (AllocateNormals || source.NormArray) ? new VxCompressedVector[m_VertexCount] : nullptr;
+    if (source.PosArray && m_VertexCount > 0)
+        memcpy(inserted.PosArray, source.PosArray, m_VertexCount * sizeof(VxVector));
+    if (source.NormArray && m_VertexCount > 0)
+        memcpy(inserted.NormArray, source.NormArray, m_VertexCount * sizeof(VxCompressedVector));
 
     return insertIdx;
 }
@@ -2641,17 +2611,11 @@ void RCKMorphController::RemoveKey(int index) {
 }
 
 int RCKMorphController::DumpKeysTo(void *Buffer) {
-    // Calculate size: count + vertex count + key data
-    int size = sizeof(int) * 2; // m_NbKeys + m_VertexCount
-
-    for (int i = 0; i < m_NbKeys; ++i) {
-        size += sizeof(float);  // TimeStep
-        size += sizeof(CKBOOL); // has normals flag
-        if (m_Keys[i].PosArray)
-            size += m_VertexCount * sizeof(VxVector);
-        if (m_Keys[i].NormArray)
-            size += m_VertexCount * sizeof(VxCompressedVector);
-    }
+    // 0x100505D9: normal presence is shared by all keys and follows the two
+    // counts. Even an empty controller writes this complete three-DWORD header.
+    const CKBOOL hasNormals = m_NbKeys > 0 && m_Keys[0].NormArray != nullptr;
+    const int size = sizeof(int) * 3 + m_NbKeys * (sizeof(float) +
+        m_VertexCount * (sizeof(VxVector) + (hasNormals ? sizeof(VxCompressedVector) : 0)));
 
     if (Buffer) {
         char *buf = static_cast<char *>(Buffer);
@@ -2662,20 +2626,19 @@ int RCKMorphController::DumpKeysTo(void *Buffer) {
         *reinterpret_cast<int *>(buf) = m_VertexCount;
         buf += sizeof(int);
 
+        *reinterpret_cast<CKBOOL *>(buf) = hasNormals;
+        buf += sizeof(CKBOOL);
+
         for (int i = 0; i < m_NbKeys; ++i) {
             *reinterpret_cast<float *>(buf) = m_Keys[i].TimeStep;
             buf += sizeof(float);
 
-            CKBOOL hasNormals = (m_Keys[i].NormArray != nullptr);
-            *reinterpret_cast<CKBOOL *>(buf) = hasNormals;
-            buf += sizeof(CKBOOL);
-
-            if (m_Keys[i].PosArray) {
+            if (m_VertexCount > 0) {
                 memcpy(buf, m_Keys[i].PosArray, m_VertexCount * sizeof(VxVector));
                 buf += m_VertexCount * sizeof(VxVector);
             }
 
-            if (hasNormals && m_Keys[i].NormArray) {
+            if (hasNormals && m_VertexCount > 0) {
                 memcpy(buf, m_Keys[i].NormArray, m_VertexCount * sizeof(VxCompressedVector));
                 buf += m_VertexCount * sizeof(VxCompressedVector);
             }
@@ -2706,15 +2669,15 @@ int RCKMorphController::ReadKeysFrom(void *Buffer) {
     m_VertexCount = *reinterpret_cast<int *>(buf);
     buf += sizeof(int);
 
+    const CKBOOL hasNormals = *reinterpret_cast<CKBOOL *>(buf);
+    buf += sizeof(CKBOOL);
+
     if (m_NbKeys > 0) {
         m_Keys = new CKMorphKey[m_NbKeys];
 
         for (int i = 0; i < m_NbKeys; ++i) {
             m_Keys[i].TimeStep = *reinterpret_cast<float *>(buf);
             buf += sizeof(float);
-
-            CKBOOL hasNormals = *reinterpret_cast<CKBOOL *>(buf);
-            buf += sizeof(CKBOOL);
 
             m_Keys[i].PosArray = new VxVector[m_VertexCount];
             memcpy(m_Keys[i].PosArray, buf, m_VertexCount * sizeof(VxVector));
@@ -2752,7 +2715,9 @@ CKBOOL RCKMorphController::Compare(CKAnimController *control, float Threshold) {
 }
 
 CKBOOL RCKMorphController::Clone(CKAnimController *control) {
-    if (!CKAnimController::Clone(control))
+    // The virtual Clone entry at 0x1005027A checks the type before releasing
+    // storage, and copies the new key count only after deleting the old keys.
+    if (!control || control->GetType() != m_Type)
         return FALSE;
 
     RCKMorphController *other = static_cast<RCKMorphController *>(control);
@@ -2765,6 +2730,9 @@ CKBOOL RCKMorphController::Clone(CKAnimController *control) {
     delete[] m_Keys;
     m_Keys = nullptr;
 
+    if (!CKAnimController::Clone(control))
+        return FALSE;
+
     m_VertexCount = other->m_VertexCount;
 
     if (other->m_NbKeys > 0) {
@@ -2773,14 +2741,16 @@ CKBOOL RCKMorphController::Clone(CKAnimController *control) {
         for (int i = 0; i < other->m_NbKeys; ++i) {
             m_Keys[i].TimeStep = other->m_Keys[i].TimeStep;
 
-            if (other->m_Keys[i].PosArray && m_VertexCount > 0) {
+            // Array presence is observable even with zero vertices (notably
+            // the serialized normal flag), so retain zero-sized allocations.
+            if (other->m_Keys[i].PosArray) {
                 m_Keys[i].PosArray = new VxVector[m_VertexCount];
                 memcpy(m_Keys[i].PosArray, other->m_Keys[i].PosArray, m_VertexCount * sizeof(VxVector));
             } else {
                 m_Keys[i].PosArray = nullptr;
             }
 
-            if (other->m_Keys[i].NormArray && m_VertexCount > 0) {
+            if (other->m_Keys[i].NormArray) {
                 m_Keys[i].NormArray = new VxCompressedVector[m_VertexCount];
                 memcpy(m_Keys[i].NormArray, other->m_Keys[i].NormArray, m_VertexCount * sizeof(VxCompressedVector));
             } else {
@@ -2793,38 +2763,7 @@ CKBOOL RCKMorphController::Clone(CKAnimController *control) {
 }
 
 void RCKMorphController::SetMorphVertexCount(int count) {
-    if (count == m_VertexCount)
-        return;
-
-    // Resize all existing keys
-    for (int i = 0; i < m_NbKeys; ++i) {
-        VxVector *newPosArray = nullptr;
-        VxCompressedVector *newNormArray = nullptr;
-
-        if (count > 0) {
-            newPosArray = new VxVector[count];
-            memset(newPosArray, 0, count * sizeof(VxVector));
-
-            if (m_Keys[i].PosArray && m_VertexCount > 0) {
-                int copyCount = (count < m_VertexCount) ? count : m_VertexCount;
-                memcpy(newPosArray, m_Keys[i].PosArray, copyCount * sizeof(VxVector));
-            }
-
-            if (m_Keys[i].NormArray && m_VertexCount > 0) {
-                newNormArray = new VxCompressedVector[count];
-                memset(newNormArray, 0, count * sizeof(VxCompressedVector));
-
-                int copyCount = (count < m_VertexCount) ? count : m_VertexCount;
-                memcpy(newNormArray, m_Keys[i].NormArray, copyCount * sizeof(VxCompressedVector));
-            }
-        }
-
-        delete[] m_Keys[i].PosArray;
-        delete[] m_Keys[i].NormArray;
-
-        m_Keys[i].PosArray = newPosArray;
-        m_Keys[i].NormArray = newNormArray;
-    }
-
+    // 0x10052560 only updates the count. Existing key buffers remain owned by
+    // the controller at their original sizes; callers prepare matching data.
     m_VertexCount = count;
 }
