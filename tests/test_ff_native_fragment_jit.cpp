@@ -1,4 +1,7 @@
 #include "CKFFNativeFragmentJit.h"
+#include "CKFFNativePositionTJit.h"
+#include "CKFFNative3dJit.h"
+#include <limits>
 #include "CKFFShaderInterface.h"
 #include "CKFFStageState.h"
 #include "CKFFStateDesc.h"
@@ -276,9 +279,14 @@ int32_t Truncate(float x) {
 // Runs a shader for a fragment. Regions and loops run as structured control
 // flow: an IF skips the arm it does not take, and a loop's body runs again
 // from its ENDLOOP.
-Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
+struct VertexInputs {
+    float Attributes[16][4];
+    float Uniforms[3][128][4];
+};
+
+void ExecuteNodes(const CKJitShader &shader, const Fragment &fragment, XArray<Value> &values,
+                  const VertexInputs *vertex = nullptr) {
     const int count = shader.Nodes.Size();
-    XArray<Value> values;
     values.Resize(count);
     // The ELSE of an IF, the ENDIF of an ELSE and the ENDLOOP of a LOOP; the
     // arm an IF takes, or a loop's iterations and the iteration it runs.
@@ -326,12 +334,25 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
             break;
         case CKJIT_OP_INPUT: {
             const CKJitInput &input = shader.Inputs[(int)node.Imm[0]];
+            if (vertex) {
+                TestCheck(input.Kind == CKJIT_INPUT_ATTRIBUTE && input.Location < 16, "native vertex attributes");
+                if (input.Scalar == CKJIT_INPUT_UINT)
+                    std::memcpy(out.I, vertex->Attributes[input.Location], input.Components * sizeof(uint32_t));
+                else
+                    std::memcpy(out.F, vertex->Attributes[input.Location], input.Components * sizeof(float));
+                break;
+            }
             const uint32_t reg = input.Kind == CKJIT_INPUT_FRAG_COORD ? REG_POSITION : input.Location + 1;
             TestCheck(reg < REG_COUNT, "inputs are native shader registers");
             std::memcpy(out.F, fragment.Registers[reg], input.Components * sizeof(float));
             break;
         }
         case CKJIT_OP_UNIFORM: {
+            if (vertex) {
+                TestCheck(node.Imm[1] < 3 && node.Imm[0] < 128, "native vertex uniform rows");
+                std::memcpy(out.F, vertex->Uniforms[node.Imm[1]][node.Imm[0]], sizeof(out.F));
+                break;
+            }
             const uint32_t row = Natives().Row(node.Imm[1], node.Imm[0]);
             TestCheck(row < ROW_COUNT, "uniforms are native constant buffer rows");
             if (row < ROW_COUNT)
@@ -360,6 +381,10 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
         case CKJIT_OP_ADD: for (uint32_t i = 0; i < width; ++i) out.F[i] = a.F[i] + b.F[i]; break;
         case CKJIT_OP_SUB: for (uint32_t i = 0; i < width; ++i) out.F[i] = a.F[i] - b.F[i]; break;
         case CKJIT_OP_MUL: for (uint32_t i = 0; i < width; ++i) out.F[i] = a.F[i] * b.F[i]; break;
+        case CKJIT_OP_MAD:
+            for (uint32_t i = 0; i < width; ++i)
+                out.F[i] = std::fma(a.F[i], b.F[i], values[(int)node.Operands[2]].F[i]);
+            break;
         case CKJIT_OP_DIV: for (uint32_t i = 0; i < width; ++i) out.F[i] = a.F[i] / b.F[i]; break;
         case CKJIT_OP_MIN: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::fmin(a.F[i], b.F[i]); break;
         case CKJIT_OP_MAX: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::fmax(a.F[i], b.F[i]); break;
@@ -531,6 +556,11 @@ Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
         }
     }
 
+}
+
+Outcome Execute(const CKJitFragmentShader &shader, const Fragment &fragment) {
+    XArray<Value> values;
+    ExecuteNodes(shader, fragment, values);
     Outcome outcome;
     std::memcpy(outcome.Color, values[(int)shader.Color.Id].F, sizeof(outcome.Color));
     outcome.Discard = shader.Discard.IsValid() && values[(int)shader.Discard.Id].B[0];
@@ -2537,6 +2567,7 @@ void TestEmission() {
         }
     }
 }
+
 
 } // namespace
 
