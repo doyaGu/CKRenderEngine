@@ -899,7 +899,7 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
             int slot = chunk->ReadInt();
             SetCurrentSlot(slot);
         }
-        int size = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_USERMIPMAP);
+        int size = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_TEXVIDEOFORMAT);
         if (size > 0) {
             CKBOOL useMipMap = chunk->ReadInt();
             UseMipmap(useMipMap);
@@ -909,7 +909,7 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
                 m_DesiredVideoFormat = VxImageDesc2PixelFormat(desc);
             }
         }
-        if (chunk->SeekIdentifier(CK_STATESAVE_TEXSYSTEMCACHING)) {
+        if (chunk->SeekIdentifier(CK_STATESAVE_TEXSAVEFORMAT)) {
             m_SaveOptions = static_cast<CK_BITMAP_SAVEOPTIONS>(chunk->ReadDword());
             CKBitmapProperties *format = nullptr;
             chunk->ReadBuffer((void **) &format);

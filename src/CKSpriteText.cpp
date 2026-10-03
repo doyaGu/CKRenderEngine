@@ -215,7 +215,7 @@ void RCKSpriteText::Redraw() {
 // Save: 0x100621ff
 CKStateChunk *RCKSpriteText::Save(CKFile *file, CKDWORD flags) {
     CKStateChunk *chunk = CreateCKStateChunk(CKCID_SPRITETEXT, file);
-    CKStateChunk *parentChunk = RCKSprite::Save(file, flags);
+    CKStateChunk *parentChunk = RCK2dEntity::Save(file, flags);
 
     chunk->StartWrite();
     chunk->AddChunkAndDelete(parentChunk);
@@ -226,7 +226,15 @@ CKStateChunk *RCKSpriteText::Save(CKFile *file, CKDWORD flags) {
 
     // Write font info
     VXFONTINFO fontInfo;
-    VxGetFontInfo(m_Font, fontInfo);
+    if (!VxGetFontInfo(m_Font, fontInfo)) {
+        // A new sprite or an unavailable platform font has no queryable handle.
+        // Preserve its requested state rather than serializing undefined fields.
+        fontInfo.FaceName = m_FontName ? m_FontName : "";
+        fontInfo.Height = m_FontSize;
+        fontInfo.Weight = m_FontWeight;
+        fontInfo.Italic = m_FontItalic;
+        fontInfo.Underline = m_FontUnderline;
+    }
 
     chunk->WriteIdentifier(CK_STATESAVE_SPRITEFONT);
     chunk->WriteString(fontInfo.FaceName.CStr());
@@ -263,6 +271,8 @@ CKERROR RCKSpriteText::Load(CKStateChunk *chunk, CKFile *file) {
     if (chunk->SeekIdentifier(CK_STATESAVE_SPRITEFONT)) {
         char *fontName = nullptr;
         chunk->ReadString(&fontName);
+        // Match Save's wire order. The original nested ReadInt arguments
+        // reverse these fields; reproducing that would corrupt font settings.
         int fontSize = chunk->ReadInt();
         int weight = chunk->ReadInt();
         int italic = chunk->ReadInt();
