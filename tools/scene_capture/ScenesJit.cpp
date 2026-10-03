@@ -2,6 +2,7 @@
 // meshes. Motion depends only on the frame index, so separate JIT modes can
 // compare the same checkpoints regardless of compilation timing.
 #include "SceneUtil.h"
+#include "ImageIO.h"
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -181,6 +182,66 @@ void MoveAttenuationLighting(SceneContext &sc) {
         light->SetLinearAttenuation(changed ? 0.25f : 0.04f);
         light->SetQuadraticAttenuation(changed ? 0.25f : 0.005f);
     }
+}
+
+bool BuildSpotlightCone(SceneContext &sc) {
+    g_Lights.clear();
+    SceneSetBackgroundColor(sc, 0xff000000);
+    SceneSetAmbient(sc, 0xff000000);
+    CKMaterial *material = SceneCreateMaterial(sc, "matte", VxColor(0.2f, 0.2f, 0.2f, 1.0f));
+    if (!material) return false;
+    material->SetAmbient(VxColor(0.0f, 0.0f, 0.0f, 1.0f));
+    if (!SceneCreateEntity(sc, "floor", SceneCreatePlaneMesh(sc, "floor", 18, 18, 48, 1, material), VxVector(0, 0, 0)))
+        return false;
+    for (unsigned i = 0; i < 5; ++i) {
+        char name[32]; snprintf(name, sizeof(name), "cone-sphere-%u", i);
+        if (!SceneCreateEntity(sc, name, SceneCreateSphereMesh(sc, name, 0.8f, 20, 28, material),
+                               VxVector(float(i) * 1.4f - 2.8f, 0.8f, 0))) return false;
+    }
+    // The second, black light changes the upload from inline to packed without
+    // changing the bound: diffuse 0.2 * white light 1 * N.L <= 0.2.
+    for (unsigned i = 0; i < 2; ++i) {
+        // LookAt keeps the existing orientation for a direction parallel to Y.
+        CKLight *light = SceneCreateLight(sc, i ? "black" : "spot", VX_LIGHTSPOT,
+            i ? VxColor(0.0f, 0.0f, 0.0f, 1.0f) : VxColor(1.0f, 1.0f, 1.0f, 1.0f),
+            VxVector(0, 8, -2), VxVector(0, -1, 0.25f), 30);
+        if (!light) return false;
+        light->SetSpecularFlag(FALSE);
+        g_Lights.push_back(light);
+    }
+    sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(0, 12, -18), VxVector(0, 0, 0), 45);
+    return sc.MainCamera != NULL;
+}
+
+void MoveSpotlightCone(SceneContext &sc) {
+    const float theta = sc.FrameIndex < 3 ? 0 : sc.FrameIndex < 15 ? 0.34906585f : 0.6f;
+    g_Lights[0]->SetHotSpot(theta);
+    g_Lights[0]->SetFallOffShape(sc.FrameIndex < 60 ? 1.0f : 2.0f);
+    g_Lights[1]->Active(sc.FrameIndex >= 15);
+}
+
+bool ValidateSpotlightCone(SceneContext &sc, const RgbaImage &image) {
+#ifdef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+    // Preserve original hardware output as evidence even on drivers whose
+    // inner cone exceeds one. The bounded expectation is checked below only
+    // for our shaders; native D3D8 software VP provides a separate reference.
+    return true;
+#else
+    unsigned peak = 0, visible = 0;
+    if (!image.Valid()) { sc.Error = "lighting_spotlight: invalid image"; return false; }
+    for (size_t pixel = 0; pixel < image.Pixels.size(); pixel += 4) {
+        if (image.Pixels[pixel] >= 10) ++visible;
+        for (unsigned c = 0; c < 3; ++c)
+            if (image.Pixels[pixel + c] > peak) peak = image.Pixels[pixel + c];
+    }
+    if (peak > 52 || peak < 40 || visible < image.Pixels.size() / 400) {
+        sc.Error = "lighting_spotlight: expected visible geometry with diffuse peak <= 52; peak=" +
+            std::to_string(peak) + ", visible=" + std::to_string(visible);
+        return false;
+    }
+    printf("lighting_spotlight: bounded diffuse peak=%u, visible pixels=%u\n", peak, visible);
+    return true;
+#endif
 }
 
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
@@ -423,6 +484,7 @@ const SceneDef g_ScenesJit[] = {
     {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, true, 2, 1.0f, NULL},
     {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, true, 2, 1.0f, NULL},
     {"lighting_attenuation", "Lit spheres with 0/1/8/3 point lights and changing legacy attenuation/range", BuildAttenuationLighting, MoveAttenuationLighting, NULL, true, 2, 1.0f, NULL},
+    {"lighting_spotlight", "Matte spheres and tessellated ground with changing inner cone, exponent and light packing", BuildSpotlightCone, MoveSpotlightCone, NULL, true, 2, 1.0f, NULL, 1, ValidateSpotlightCone},
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
     {"tween_3d", "Six textured lit/prelit morphs with position/normal streams, fog and depth occlusion", BuildTweenScene, NULL, NULL, false, 2, 1.0f, NULL},
     {"clipping_3d", "Six dynamic user planes over lit/prelit ordinary, tweened and skinned meshes plus a clipped 2D overlay", BuildClipScene, NULL, NULL, false, 2, 1.0f, NULL},
