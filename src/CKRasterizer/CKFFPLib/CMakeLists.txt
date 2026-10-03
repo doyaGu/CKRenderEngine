@@ -15,6 +15,7 @@ set(CKFFP_LIB_SOURCES
     ShaderModel/CKFFFragmentProgram.cpp
     ShaderModel/CKFFNativeFragmentJit.cpp
     ShaderModel/CKFFNativePositionTJit.cpp
+    ShaderModel/CKFFNative3dJit.cpp
     FixedFunction/CKDrawStateCache.cpp
     FixedFunction/CKFFBufferUseTracker.cpp
     FixedFunction/CKFFBufferData.cpp
@@ -65,6 +66,7 @@ set(CKFFP_LIB_HEADERS
     ShaderModel/CKFFFragmentProgramLayout.h
     ShaderModel/CKFFNativeFragmentJit.h
     ShaderModel/CKFFNativePositionTJit.h
+    ShaderModel/CKFFNative3dJit.h
     FixedFunction/CKDrawStateCache.h
     FixedFunction/CKFFBufferUseTracker.h
     FixedFunction/CKFFBufferData.h
