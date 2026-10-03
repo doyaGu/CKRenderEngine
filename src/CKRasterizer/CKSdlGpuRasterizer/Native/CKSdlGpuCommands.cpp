@@ -1305,8 +1305,8 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
         for (auto &ticket : Readbacks) if (!ticket->Fence) ticket->Fence = fence;
     }
     ++LastSubmitId;
-    Submissions.PushBack(CKSdlGpuSubmission());
-    CKSdlGpuSubmission &submission = Submissions.Back();
+    Submissions.emplace_back();
+    CKSdlGpuSubmission &submission = Submissions.back();
     submission.Fence.swap(fence);
     submission.Geometry.Swap(PendingGeometry);
     submission.BufferUploads.Swap(PendingBufferUploads);
@@ -1325,8 +1325,8 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     Collect();
     // No pass is open, so completed jobs may change what later draws use.
     CollectJobs(kFrameJobBudgetNs);
-    CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", Submissions.Size());
-    if (Submissions.Size() > 3) {
+    CKRE_PROFILE_VALUE("CKRE.Queue.PendingSubmissions", Submissions.size());
+    if (Submissions.size() > 3) {
         CKRE_PROFILE_SCOPE("CKRE.SDL.WaitInflight");
         SDL_GPUFence *oldest = Submissions[0].Fence.get();
         if (!SDL_WaitForGPUFences(Device, true, &oldest, 1)) return Fail("WaitForGPUFences.inflight");

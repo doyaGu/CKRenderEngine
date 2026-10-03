@@ -19,6 +19,7 @@
 #include "XSHashTable.h"
 
 #include <memory>
+#include <deque>
 
 #include "../Native/CKSdlGpuInternal.h"
 #include "../Native/CKSdlGpuWorker.h"
@@ -615,7 +616,9 @@ private:
     unsigned DitherScratchSamples = 1;
     CKSdlGpuDefaultTextureTable DefaultTextures;
     XClassArray<std::shared_ptr<CKSdlGpuReadback>> Readbacks;
-    XClassArray<CKSdlGpuSubmission> Submissions;
+    // Completed submissions must destroy their owners, not retain inactive
+    // elements in spare array capacity.
+    std::deque<CKSdlGpuSubmission> Submissions;
     XClassArray<std::shared_ptr<CKSdlGpuGeometryBuffer>> PendingGeometry;
     XClassArray<std::shared_ptr<CKSdlGpuGeometryBuffer>> FreeGeometry;
     size_t FreeGeometryBytes = 0;

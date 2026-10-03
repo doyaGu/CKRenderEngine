@@ -224,7 +224,7 @@ void CKSdlGpuRasterizerContext::Collect()
         ticket->Complete = TRUE;
         Readbacks.RemoveAt(i);
     }
-    while (Submissions.Size() != 0) {
+    while (!Submissions.empty()) {
         CKSdlGpuSubmission &submission = Submissions[0];
         if (submission.Fence &&
             !SDL_QueryGPUFence(Device, submission.Fence.get()))
@@ -249,7 +249,7 @@ void CKSdlGpuRasterizerContext::Collect()
             }
         }
         CompletedSubmitId = submission.SubmitId;
-        Submissions.RemoveAt(0);
+        Submissions.pop_front();
     }
 }
 
@@ -326,12 +326,12 @@ CKBOOL CKSdlGpuRasterizerContext::FinishBackgroundWorkForTests(Sint32 timeoutMs)
 
 CKBOOL CKSdlGpuRasterizerContext::CompleteEmptySubmissionsForTests()
 {
-    Submissions.PushBack(CKSdlGpuSubmission());
-    Submissions.Back().SubmitId = 7;
-    Submissions.PushBack(CKSdlGpuSubmission());
-    Submissions.Back().SubmitId = 8;
+    Submissions.emplace_back();
+    Submissions.back().SubmitId = 7;
+    Submissions.emplace_back();
+    Submissions.back().SubmitId = 8;
     Collect();
-    return Submissions.Size() == 0 && CompletedSubmitId == 8;
+    return Submissions.empty() && CompletedSubmitId == 8;
 }
 
 CKBOOL CKSdlGpuRasterizerContext::CollectJobsWithinBudgetForTests()
@@ -377,7 +377,7 @@ void CKSdlGpuRasterizerContext::Shutdown()
         ticket->Error = CKERR_INVALIDOPERATION;
         ticket->Transfer.reset(); ticket->Fence.reset();
     }
-    Readbacks.Clear(); Submissions.Clear();
+    Readbacks.Clear(); Submissions.clear();
     PendingGeometry.Clear(); FreeGeometry.Clear(); FreeGeometryBytes = 0;
     PendingBufferUploads.Clear();
     FreeBufferUploads.Clear();
