@@ -624,8 +624,72 @@ struct Reference {
             TexelHash(CKJIT_OP_SAMPLE, (uint32_t)slot, dim).Add(at, 3).Add(&lodBias, 1).Color(texel);
             return {texel[0], texel[1], texel[2], texel[3]};
         }
+        if (dim == CKJIT_SAMPLER_CUBE)
+            return FilterCube(slot, c, lodBias);
         TexelHash(CKJIT_OP_SAMPLE, (uint32_t)slot, dim).Add(c, CoordinateCount(dim)).Add(&lodBias, 1).Color(texel);
         return {texel[0], texel[1], texel[2], texel[3]};
+    }
+
+    // Scalar reference for face-local cube taps. The texture hash verifies
+    // the sampled direction, exact mip and sample operation independently.
+    Float4 FilterCube(int slot, const float c[3], float bias) const {
+        const Texture &texture = F.Textures[slot];
+        const Float4 info = Uniform(ROW_SAMPLER_INFO + slot);
+        const float ax = std::fabs(c[0]), ay = std::fabs(c[1]), az = std::fabs(c[2]);
+        const int axis = ax > ay && ax > az ? 0 : ay > az ? 1 : 2;
+        const int u = axis == 0 ? 2 : 0, v = axis == 1 ? 2 : 1;
+        const float major = std::fmax(std::fmax(std::fmax(ax, ay), az), 1.0e-20f);
+        const float sign = c[axis] < 0 ? -1.0f : 1.0f;
+        const float su = axis == 0 ? -sign : axis == 1 ? 1.0f : sign;
+        const float sv = axis == 1 ? sign : -1.0f;
+        const float projected[2] = {(su*c[u])/major, (sv*c[v])/major};
+        const float uv[2] = {projected[0]*0.5f+0.5f, projected[1]*0.5f+0.5f};
+        float gradients[2][2];
+        for (int a=0; a<2; ++a) for (int i=0; i<2; ++i)
+            gradients[a][i] = ((i==0 ? su:sv)*Derivative(c[i==0 ? u:v], a) - projected[i]*(Derivative(c[axis],a)*sign))/major*0.5f;
+        const int packed = Truncate(info.w), mipFilter = packed & 15;
+        const float minMip = float((packed >> 12) & 31);
+        float lod = std::fmax(CalcLod(texture,c,3)+bias,minMip);
+        const int filter = Truncate(lod>0 ? info.y:info.z);
+        int taps=1;
+        float step[2] = {};
+        if (filter==7 && lod>0) {
+            const float lx = Length(gradients[0][0]*texture.Size[0],gradients[0][1]*texture.Size[0]);
+            const float ly = Length(gradients[1][0]*texture.Size[0],gradients[1][1]*texture.Size[0]);
+            const float longest = std::fmax(lx,ly), limit = Clamp(float((packed>>4)&255),1,16);
+            const float minor = std::fmax(std::fmin(lx,ly),longest/limit);
+            taps=Truncate(Clamp(std::ceil(longest/std::fmax(minor,1.0f)),1,limit));
+            for (int i=0;i<2;++i) step[i]=gradients[lx>ly ? 0:1][i]/float(taps);
+            lod=std::fmax(std::log2(std::fmax(minor,1.0f))+bias,minMip);
+        }
+        lod = mipFilter==0 ? 0.0f:Clamp(lod,0,float(texture.Levels-1));
+        const bool blend = mipFilter==2 || mipFilter==7;
+        const int lower=Truncate(std::floor(blend ? lod:lod+0.5f));
+        const int upper=lower+1 < texture.Levels ? lower+1 : texture.Levels-1;
+        Float4 sum=Splat(0);
+        for (int t=0;t<taps;++t) {
+            const float offset=float(t)-float(taps-1)*0.5f;
+            const float at[2] = {uv[0]+offset*step[0],uv[1]+offset*step[1]};
+            const auto level = [&](int mip) {
+                const float size=float(MipExtent(texture,0,mip));
+                const float scaled[2] = {at[0]*size-(filter==1 ? 0.0f:0.5f),at[1]*size-(filter==1 ? 0.0f:0.5f)};
+                const float base[2] = {std::floor(scaled[0]),std::floor(scaled[1])};
+                const auto sample = [&](float x, float y) {
+                    float direction[3]; direction[axis]=sign;
+                    direction[u]=su*(((Clamp(base[0]+x,0,size-1)+0.5f)/size)*2-1);
+                    direction[v]=sv*(((Clamp(base[1]+y,0,size-1)+0.5f)/size)*2-1);
+                    float rgba[4], levelValue=float(mip);
+                    TexelHash(CKJIT_OP_SAMPLE_LEVEL,(uint32_t)slot,CKJIT_SAMPLER_CUBE).Add(direction,3).Add(&levelValue,1).Color(rgba);
+                    return Float4{rgba[0],rgba[1],rgba[2],rgba[3]};
+                };
+                const Float4 a=sample(0,0);
+                if (filter==1) return a;
+                return Lerp(Lerp(a,sample(1,0),scaled[0]-base[0]),
+                            Lerp(sample(0,1),sample(1,1),scaled[0]-base[0]),scaled[1]-base[1]);
+            };
+            sum=sum+(blend ? Lerp(level(lower),level(upper),lod-std::floor(lod)):level(lower));
+        }
+        return sum/float(taps);
     }
 
     // CKFFSampleNative2D / Cube / Volume of each shader: its texture registers,
@@ -1686,6 +1750,10 @@ void ApplySamplers(const CKFFFragmentProgram &program, CKFFSamplerLayout layout,
     for (CKDWORD stage = 0; stage < CKFF_FRAGMENT_PROGRAM_STAGE_COUNT; ++stage) {
         const CKDWORD type = program.GetStage(stage, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE);
         const CKDWORD slot = StageSlot(program, stage, layout, comparisons);
+        if (type == CKFF_SAMPLER_CUBE) {
+            const int minMip = (samplers.State[slot] >> CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT) & CKFF_SAMPLER_SHADER_MIN_MIP_MASK;
+            fragment.Uniforms[ROW_SAMPLER_INFO + slot][3] = float((Truncate(samplers.Info[slot][3]) & 4095) | (minMip << 12));
+        }
         const float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
         fragment.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][3] = coord[2] > 0.5f ? (float)samplers.State[slot] : 0.0f;
     }
@@ -2541,7 +2609,7 @@ void TestSpecialization() {
                 TestCheck(node.Imm[0] == (uint32_t)c.Slot && node.Imm[1] == c.Dim,
                           "the stage samples the texture register of the native shader");
             }
-            TestCheck(samples == (sampled ? (c.Dim == CKJIT_SAMPLER_CUBE ? 2 : 1) : 0),
+            TestCheck(samples == (sampled ? 1 : 0),
                       "a stage has one sample per selected path, or none without a texture");
         }
     }

@@ -187,7 +187,7 @@ CKDWORD CanonicalCompareFunc(CKDWORD func, CKFFSamplerLayout layout, CKDWORD com
 
 // The sampling flags a shader-sampling shader tests for a stage that samples.
 // Mirror-once applies to the axes of the sampler type, and never to cubes,
-// which sample in hardware. A texture addressed by the shader tests border
+// whose face-local filter reads its metadata at runtime. A texture addressed by the shader tests border
 // addressing, except an undeclared depth texture, whose texels are all the
 // border. A 2D texture otherwise tests only explicit gradients, and a volume
 // without anisotropy its minimum mip level only where that alone keeps it
@@ -339,7 +339,7 @@ struct Color {
 
 enum Channel { CHANNEL_RGB, CHANNEL_ALPHA };
 
-// A 2D or volume texture the shader filters itself: its slot, its sampler's
+// A 2D, cube or volume texture the shader filters itself: its slot, its sampler's
 // metadata and the stage's sampler state.
 struct ShaderSampler {
     uint32_t Slot;
@@ -355,6 +355,7 @@ struct ShaderSampler {
     CKJitValue Levels;        // INT
     CKJitValue MinMip;        // FLOAT: the lowest mip level sampled
     CKJitValue MaxAnisotropy; // FLOAT
+    CKJitValue CubeX, CubeY, CubeSign; // selected face basis (cube only)
 };
 
 // A depth texture a shader-sampling shader of a layout without stage-indexed
@@ -464,10 +465,13 @@ private:
     CKJitValue Level(const ShaderSampler &sampler, CKJitValue uv, CKJitValue mip, CKJitValue filtered) {
         if (sampler.BlendsBorder)
             return BorderLevel(sampler, uv, mip, filtered);
+        if (sampler.Dim == CKJIT_SAMPLER_CUBE)
+            return LevelCube(sampler, uv, mip, filtered);
         if (sampler.Dim == CKJIT_SAMPLER_2D)
             return Level2D(sampler, uv, mip, filtered);
         return Level3D(sampler, uv, mip, filtered);
     }
+    CKJitValue LevelCube(const ShaderSampler &sampler, CKJitValue uv, CKJitValue mip, CKJitValue filtered);
     CKJitValue Level2D(const ShaderSampler &sampler, CKJitValue uv, CKJitValue mip, CKJitValue filtered);
     CKJitValue Level3D(const ShaderSampler &sampler, CKJitValue uvw, CKJitValue mip, CKJitValue filtered);
     CKJitValue BorderLevel(const ShaderSampler &sampler, CKJitValue uv, CKJitValue mip, CKJitValue filtered);
@@ -723,31 +727,86 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
                      : m_B.Swizzle(color, "xxxx");
 }
 
-// Single-level cube filtering with equal isotropic min/mag filters, matching
-// native_cube_sampling.hlsli. Other footprints keep the native sampling path.
+// Face-local cube filtering, matching native_cube_sampling.hlsli. The
+// original direction supplies LOD and projected gradients before addressing.
 CKJitValue NativeFragmentCompiler::SampleCube(uint32_t slot, CKJitValue direction, CKJitValue lodBias) {
     const CKJitValue info = Uniform(m_Rows.SamplerInfo, slot);
-    const CKJitValue nativeFilter = m_B.Or(
-        m_B.Equal(m_B.Component(info, 1), m_B.Float(float(VXTEXTUREFILTER_ANISOTROPIC))),
-        m_B.NotEqual(m_B.Component(info, 1), m_B.Component(info, 2)));
-    const CKJitValue native = m_B.Or(nativeFilter,
-        m_B.IntNotEqual(m_B.TextureLevels(slot, CKJIT_SAMPLER_CUBE), m_B.Int(1)));
-    m_B.If(native);
-    const CKJitValue ordinary = m_B.Sample(slot, CKJIT_SAMPLER_CUBE, direction, lodBias);
-    m_B.Else({ordinary});
+    const CKJitValue levels = m_B.TextureLevels(slot, CKJIT_SAMPLER_CUBE);
+    const CKJitValue simple = m_B.And(m_B.IntEqual(levels, m_B.Int(1)), m_B.And(
+        m_B.NotEqual(m_B.Component(info, 1), m_B.Float(float(VXTEXTUREFILTER_ANISOTROPIC))),
+        m_B.Equal(m_B.Component(info, 1), m_B.Component(info, 2))));
     const CKJitValue axes = m_B.Abs(direction);
     const CKJitValue ax = m_B.Component(axes, 0), ay = m_B.Component(axes, 1), az = m_B.Component(axes, 2);
     const CKJitValue x = m_B.And(m_B.Greater(ax, ay), m_B.Greater(ax, az));
     const CKJitValue y = m_B.And(m_B.Not(x), m_B.Greater(ay, az));
     const CKJitValue major = m_B.Max(m_B.Max(ax, ay), az);
     const CKJitValue size = m_B.IntToFloat(m_B.Component(m_B.TextureSize(slot, CKJIT_SAMPLER_CUBE, m_B.Int(0)), 0));
+    m_B.If(simple);
     const CKJitValue limit = m_B.Mul(major, m_B.Sub(m_B.Float(1.0f), m_B.Div(m_B.Float(1.0f), size)));
     const CKJitValue inside = m_B.Min(m_B.Max(direction, m_B.Neg(limit)), limit);
     const CKJitValue at = m_B.Construct({
         m_B.Select(x, m_B.Component(direction, 0), m_B.Component(inside, 0)),
         m_B.Select(y, m_B.Component(direction, 1), m_B.Component(inside, 1)),
         m_B.Select(m_B.And(m_B.Not(x), m_B.Not(y)), m_B.Component(direction, 2), m_B.Component(inside, 2))});
-    return m_B.EndIf(m_B.Sample(slot, CKJIT_SAMPLER_CUBE, at, lodBias));
+    const CKJitValue ordinary = m_B.Sample(slot, CKJIT_SAMPLER_CUBE, at, lodBias);
+    m_B.Else({ordinary});
+    const auto axis = [&](CKJitValue v) {
+        return m_B.Select(x, m_B.Component(v, 0), m_B.Select(y, m_B.Component(v, 1), m_B.Component(v, 2)));
+    };
+    const CKJitValue divisor = m_B.Max(major, m_B.Float(1.0e-20f));
+    const CKJitValue sign = m_B.Select(m_B.Less(axis(direction), m_B.Float(0)), m_B.Float(-1), m_B.Float(1));
+    // Apply the face's orientation before taking floor in LevelCube; a sign
+    // flip after choosing a texel changes nearest-filter boundary ties.
+    const auto minor = [&](CKJitValue v) {
+        const CKJitValue a = m_B.Component(v, 0), b = m_B.Component(v, 1), c = m_B.Component(v, 2);
+        return m_B.Select(x, m_B.Construct({m_B.Neg(m_B.Mul(sign, c)), m_B.Neg(b)}),
+            m_B.Select(y, m_B.Construct({a, m_B.Mul(sign, c)}), m_B.Construct({m_B.Mul(sign, a), m_B.Neg(b)})));
+    };
+    const CKJitValue projected = m_B.Div(minor(direction), divisor);
+    const CKJitValue uv = m_B.Add(m_B.Mul(projected, m_B.Float(0.5f)), m_B.Float(0.5f));
+    const auto gradient = [&](CKJitValue v) {
+        return m_B.Mul(m_B.Div(m_B.Sub(minor(v), m_B.Mul(projected, m_B.Mul(axis(v), sign))), divisor), m_B.Float(0.5f));
+    };
+    const CKJitValue dx = gradient(m_B.Ddx(direction)), dy = gradient(m_B.Ddy(direction));
+    const CKJitValue packed = m_B.FloatToInt(m_B.Component(info, 3));
+    ShaderSampler sampler;
+    sampler.Slot = slot; sampler.Dim = CKJIT_SAMPLER_CUBE; sampler.BlendsBorder = false;
+    sampler.Info = info; sampler.Levels = levels; sampler.MipFilter = Bits(packed, 0, 15);
+    sampler.CubeX = x; sampler.CubeY = y; sampler.CubeSign = sign;
+    sampler.MinMip = m_B.IntToFloat(Bits(packed, 12, 31));
+    sampler.MaxAnisotropy = m_B.Min(m_B.IntToFloat(Bits(packed, 4, 255)), m_B.Float(16));
+    const FilterTaps taps = PlanTaps2D(info, m_B.Splat(size, 2), dx, dy,
+        m_B.CalcLod(slot, CKJIT_SAMPLER_CUBE, direction), lodBias, sampler.MinMip, sampler.MaxAnisotropy, false);
+    CKJitValue sum;
+    const CKJitValue tap = m_B.Loop(taps.Count, 16, {m_B.Float4(0,0,0,0)}, &sum);
+    const CKJitValue offset = m_B.Mul(m_B.Sub(m_B.IntToFloat(tap), taps.Center), taps.Step);
+    const CKJitValue color = Mips(sampler, m_B.Add(uv, offset), taps.Lod, taps.Filtered);
+    const CKJitValue result = m_B.Div(m_B.EndLoop(m_B.Add(sum, color)), taps.Total);
+    return m_B.EndIf(result);
+}
+
+CKJitValue NativeFragmentCompiler::LevelCube(const ShaderSampler &sampler, CKJitValue uv,
+                                             CKJitValue mip, CKJitValue filtered) {
+    const CKJitValue extent = m_B.IntToFloat(m_B.Component(m_B.TextureSize(sampler.Slot, sampler.Dim, mip), 0));
+    const CKJitValue scaled = m_B.Sub(m_B.Mul(uv, extent), m_B.Select(filtered, m_B.Float(0.5f), m_B.Float(0)));
+    const CKJitValue base = m_B.Floor(scaled);
+    const CKJitValue weight = m_B.Sub(scaled, base);
+    const auto tap = [&](float u, float v) {
+        const CKJitValue p = m_B.Min(m_B.Max(m_B.Add(base, m_B.Float2(u,v)), m_B.Float(0)), m_B.Sub(extent, m_B.Float(1)));
+        const CKJitValue coord = m_B.Sub(m_B.Mul(m_B.Div(m_B.Add(p, m_B.Float(0.5f)), extent), m_B.Float(2)), m_B.Float(1));
+        const CKJitValue cu = m_B.Component(coord, 0), cv = m_B.Component(coord, 1), sign = sampler.CubeSign;
+        const CKJitValue direction = m_B.Select(sampler.CubeX, m_B.Construct({sign, m_B.Neg(cv), m_B.Neg(m_B.Mul(sign, cu))}),
+            m_B.Select(sampler.CubeY, m_B.Construct({cu, sign, m_B.Mul(sign, cv)}),
+                       m_B.Construct({m_B.Mul(sign, cu), m_B.Neg(cv), sign})));
+        return m_B.SampleLevel(sampler.Slot, sampler.Dim, direction, m_B.IntToFloat(mip));
+    };
+    const CKJitValue a = tap(0,0);
+    m_B.If(filtered);
+    const CKJitValue b = tap(1,0), c = tap(0,1), d = tap(1,1);
+    const CKJitValue color = m_B.Lerp(m_B.Lerp(a,b,m_B.Component(weight, 0)),
+                                     m_B.Lerp(c,d,m_B.Component(weight, 0)), m_B.Component(weight, 1));
+    m_B.Else({color});
+    return m_B.EndIf(a);
 }
 
 // Samples a 2D texture as native_sampling.hlsli: mirror-once folds the

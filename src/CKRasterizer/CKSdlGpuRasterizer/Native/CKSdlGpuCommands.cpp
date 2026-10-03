@@ -611,6 +611,10 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         samplerInfo[1] = float(binding.Sampler.MinFilter); samplerInfo[2] = float(binding.Sampler.MagFilter);
         CKDWORD packedMipFilter = unsigned(binding.Sampler.MipFilter) & 0xfu;
         packedMipFilter |= (binding.Sampler.MaxAnisotropy & 0xffu) << 4;
+        // Cube filtering selects individual mips in the shader. Preserve the
+        // native sampler's lower LOD bound in the cube metadata as well.
+        if (texture->Info.type == SDL_GPU_TEXTURETYPE_CUBE)
+            packedMipFilter |= (binding.Sampler.MinMipLevel & 0x1fu) << 12;
         samplerInfo[3] = float(packedMipFilter);
         std::memcpy(uniforms.Data.Begin() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
         std::memcpy(uniforms.Data.Begin() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));

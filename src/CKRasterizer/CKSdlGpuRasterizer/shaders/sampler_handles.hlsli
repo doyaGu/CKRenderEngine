@@ -117,6 +117,24 @@ struct CKFFTextureCube
 {
     uint Index;
 
+    float CalculateLevelOfDetailUnclamped(CKFFSampler state, float3 uv)
+    {
+        float result = 0.0;
+#define CKFF_METHOD(_texture, _sampler) result = _texture.CalculateLevelOfDetailUnclamped(_sampler, uv)
+        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+#undef CKFF_METHOD
+        return result;
+    }
+
+    float4 SampleLevel(CKFFSampler state, float3 uv, float lod)
+    {
+        float4 result = 0.0;
+#define CKFF_METHOD(_texture, _sampler) result = _texture.SampleLevel(_sampler, uv, lod)
+        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+#undef CKFF_METHOD
+        return result;
+    }
+
     void GetDimensions(uint mip, out uint width, out uint height, out uint levels)
     {
         width = 0; height = 0; levels = 0;
