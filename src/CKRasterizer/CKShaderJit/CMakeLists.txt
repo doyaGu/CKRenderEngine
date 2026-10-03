@@ -1,5 +1,5 @@
-# Runtime shader compiler for fixed-function fragment programs. It emits
-# SPIR-V, and DXBC with DirectX.
+# Runtime shader compiler for fixed-function fragment and vertex programs. It
+# emits SPIR-V, and DXBC with DirectX.
 set(CKSHADERJIT_SOURCES
     CKJitBuilder.cpp
     CKJitIR.cpp
@@ -11,6 +11,7 @@ set(CKSHADERJIT_HEADERS
     CKJitIR.h
     CKJitOps.def
     CKJitSpirv.h
+    README.md
 )
 
 if (CKRE_ENABLE_DIRECTX)
