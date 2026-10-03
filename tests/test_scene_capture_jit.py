@@ -100,14 +100,16 @@ class SceneCaptureReferenceTest(unittest.TestCase):
                 self.assertEqual(error.exception.code, 2)
                 run.assert_not_called()
 
-    def test_spotlight_parity_requires_generated_lighting(self):
-        for draws in (0, 1):
-            with self.subTest(lit_draws=draws):
-                code, _, rows, _, _ = self.run_capture(scene="lighting_spotlight", lit_draws=draws)
-                self.assertEqual(code, int(draws == 0))
-                self.assertEqual(rows[0]["issues"], [])
-                self.assertEqual(rows[1]["issues"], [])
-                self.assertEqual(rows[2]["issues"], [] if draws else ["no generated lit vertex draw"])
+    def test_lit_scene_parity_requires_generated_lighting(self):
+        for scene in ("lighting_spotlight", "material_channels", "fog_linear", "fog_exp",
+                      "fog_exp2", "texgen_envmap"):
+            for draws in (0, 1):
+                with self.subTest(scene=scene, lit_draws=draws):
+                    code, _, rows, _, _ = self.run_capture(scene=scene, lit_draws=draws)
+                    self.assertEqual(code, int(draws == 0))
+                    self.assertEqual(rows[0]["issues"], [])
+                    self.assertEqual(rows[1]["issues"], [])
+                    self.assertEqual(rows[2]["issues"], [] if draws else ["no generated lit vertex draw"])
 
 
 if __name__ == "__main__":
