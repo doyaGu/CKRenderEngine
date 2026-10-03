@@ -190,6 +190,9 @@ public:
     std::weak_ptr<CKSdlGpuTexture> GetDepthPadForTests() const {
         return DepthPads.Size() ? DepthPads.Back().Texture : std::weak_ptr<CKSdlGpuTexture>();
     }
+    std::weak_ptr<SDL_GPUGraphicsPipeline> GetLastPipelineForTests() const {
+        return PendingPipelines.Size() ? PendingPipelines.Back() : std::weak_ptr<SDL_GPUGraphicsPipeline>();
+    }
     CKBOOL CompleteEmptySubmissionsForTests();
     // Runs background jobs and completes them with a spent budget.
     CKBOOL CollectJobsWithinBudgetForTests();
@@ -208,6 +211,10 @@ public:
         CKDWORD Samplers = 0;
     };
     FFJitCounts CountFFJitProgramsForTests() const;
+    struct PipelineCacheCounts {
+        CKDWORD Slots = 0, Entries = 0, Ready = 0, Pending = 0, Failed = 0;
+    };
+    PipelineCacheCounts CountPipelineCacheForTests() const;
 private:
     typedef CKFFVertexBufferData VertexBufferData;
     typedef CKFFIndexBufferData IndexBufferData;
@@ -299,6 +306,9 @@ private:
                                           SDL_GPUTextureFormat Color,
                                           SDL_GPUTextureFormat Depth,
                                           SDL_GPUSampleCount Samples);
+    CKSdlGpuPipelineEntry *ReservePipeline(CKSdlGpuProgram &Program,
+                                          const CKSdlGpuPipelineKey &Key);
+    SDL_GPUGraphicsPipeline *UsePipeline(CKSdlGpuPipelineEntry &Entry);
     std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc);
     void PruneProgramCaches();
     void Collect();
@@ -636,6 +646,15 @@ private:
     // elements in spare array capacity.
     std::deque<CKSdlGpuSubmission> Submissions;
     XClassArray<std::shared_ptr<CKSdlGpuGeometryBuffer>> PendingGeometry;
+    struct PipelineSlot {
+        std::weak_ptr<CKSdlGpuProgram> Program;
+        CKSdlGpuPipelineKey Key;
+    };
+    // Global across JIT, fallback, public and helper programs. Weak owners
+    // allow a deleted program's slots to be reused without keeping it alive.
+    XClassArray<PipelineSlot> PipelineSlots;
+    uint64_t PipelineClock = 0;
+    XClassArray<std::shared_ptr<SDL_GPUGraphicsPipeline>> PendingPipelines;
     XClassArray<std::shared_ptr<CKSdlGpuGeometryBuffer>> FreeGeometry;
     size_t FreeGeometryBytes = 0;
     XClassArray<std::shared_ptr<CKSdlGpuBufferUploadPage>> PendingBufferUploads;

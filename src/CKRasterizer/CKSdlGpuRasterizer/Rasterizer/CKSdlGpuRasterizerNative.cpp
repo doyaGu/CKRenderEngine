@@ -378,6 +378,7 @@ void CKSdlGpuRasterizerContext::Shutdown()
         ticket->Transfer.reset(); ticket->Fence.reset();
     }
     Readbacks.Clear(); Submissions.clear();
+    PendingPipelines.Clear(); PipelineSlots.Clear(); PipelineClock = 0;
     PendingGeometry.Clear(); FreeGeometry.Clear(); FreeGeometryBytes = 0;
     PendingBufferUploads.Clear();
     FreeBufferUploads.Clear();

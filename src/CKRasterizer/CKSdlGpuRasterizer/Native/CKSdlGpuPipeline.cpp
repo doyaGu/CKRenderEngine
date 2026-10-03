@@ -73,6 +73,8 @@ namespace {
 // leaves half the budget available for the current run's draws.
 const uint64_t kPipelineJobLimit = 128;
 const uint64_t kPipelinePrewarmLimit = kPipelineJobLimit / 2;
+const int kPipelineCacheLimit = 1024;
+static_assert(kPipelineCacheLimit > kPipelineJobLimit, "pending jobs must leave room for synchronous PSOs");
 
 // Everything SDL needs to create a pipeline. It owns its shaders and arrays,
 // so it stays valid after the draw that described it.
@@ -242,6 +244,7 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples,
     const CKSdlGpuProgram **owner)
 {
+    ++PipelineClock;
     const CKSdlGpuPipelineKey key = PipelineKey(draw, color, depth, samples);
     CKSdlGpuProgram *program = draw.Program;
     if (program->Fallback) {
@@ -250,10 +253,11 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
         // budget allows, deduplicate pending work, and use the fallback until
         // the worker's result is collected.
         CKSdlGpuPipelineEntry *found = program->Pipelines.FindPtr(key);
+        if (found) found->LastUse = PipelineClock;
         if (found && found->Pipeline) {
             ++m_FFJitStats.PipelineReady;
             if (owner) *owner = program;
-            return found->Pipeline.get();
+            return UsePipeline(*found);
         }
         if (!found) {
             QueuePipeline(draw, color, depth, samples, CKSDLGPU_JOB_NORMAL);
@@ -290,11 +294,73 @@ SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::Pipeline(const CKSdlGpuDraw 
     }
     found->Drawn = true;
     if (owner) *owner = program;
-    return found->Pipeline.get();
+    return UsePipeline(*found);
 }
 
+SDL_GPUGraphicsPipeline *CKSdlGpuRasterizerContext::UsePipeline(CKSdlGpuPipelineEntry &entry)
+{
+    entry.LastUse = PipelineClock;
+    // Cache eviction can happen later in this same pass. Retain each selected
+    // PSO once per command submission, independently of its program and slot.
+    if (entry.RetainedSubmitId != LastSubmitId + 1) {
+        PendingPipelines.PushBack(entry.Pipeline);
+        entry.RetainedSubmitId = LastSubmitId + 1;
+    }
+    return entry.Pipeline.get();
+}
 
+CKSdlGpuPipelineEntry *CKSdlGpuRasterizerContext::ReservePipeline(
+    CKSdlGpuProgram &program, const CKSdlGpuPipelineKey &key)
+{
+    if (CKSdlGpuPipelineEntry *found = program.Pipelines.FindPtr(key)) return found;
+    int slot = -1, victim = -1;
+    uint64_t oldest = UINT64_MAX;
+    for (int i = 0; i < PipelineSlots.Size(); ++i) {
+        const auto owner = PipelineSlots[i].Program.lock();
+        CKSdlGpuPipelineEntry *entry = owner ? owner->Pipelines.FindPtr(PipelineSlots[i].Key) : nullptr;
+        if (!entry) { slot = i; break; }
+        if (!entry->Job && (victim < 0 || entry->LastUse < oldest)) {
+            victim = i;
+            oldest = entry->LastUse;
+        }
+    }
+    if (slot < 0 && PipelineSlots.Size() < kPipelineCacheLimit) {
+        slot = PipelineSlots.Size();
+        PipelineSlots.PushBack(PipelineSlot());
+    }
+    if (slot < 0) {
+        if (victim < 0) return nullptr;
+        slot = victim;
+        const auto owner = PipelineSlots[slot].Program.lock();
+        // XSHashTable removal only marks a tombstone; explicitly release the
+        // value so a dead bucket cannot keep an evicted GPU object alive.
+        *owner->Pipelines.FindPtr(PipelineSlots[slot].Key) = CKSdlGpuPipelineEntry();
+        owner->Pipelines.Remove(PipelineSlots[slot].Key);
+        ++m_FFJitStats.PipelineEvictions;
+    }
+    PipelineSlots[slot].Program = program.weak_from_this();
+    PipelineSlots[slot].Key = key;
+    // Grow by the live count, not tombstone occupancy after repeated eviction.
+    program.Pipelines.InsertUnique(key, CKSdlGpuPipelineEntry());
+    return program.Pipelines.FindPtr(key);
+}
 
+CKSdlGpuRasterizerContext::PipelineCacheCounts
+CKSdlGpuRasterizerContext::CountPipelineCacheForTests() const
+{
+    PipelineCacheCounts counts;
+    counts.Slots = PipelineSlots.Size();
+    for (const auto &slot : PipelineSlots) {
+        const auto owner = slot.Program.lock();
+        const CKSdlGpuPipelineEntry *entry = owner ? owner->Pipelines.FindPtr(slot.Key) : nullptr;
+        if (!entry) continue;
+        ++counts.Entries;
+        if (entry->Pipeline) ++counts.Ready;
+        if (entry->Job) ++counts.Pending;
+        if (entry->Failed) ++counts.Failed;
+    }
+    return counts;
+}
 
 CKSdlGpuPipelineEntry *CKSdlGpuRasterizerContext::CreatePipeline(CKSdlGpuProgram &program,
     const CKSdlGpuPipelineKey &key, const CKSdlGpuDraw &draw,
@@ -328,9 +394,11 @@ CKSdlGpuPipelineEntry *CKSdlGpuRasterizerContext::CreatePipeline(CKSdlGpuProgram
         Fail("CreateGPUGraphicsPipeline");
         return nullptr;
     }
-    CKSdlGpuPipelineEntry &entry = program.Pipelines[key];
-    entry.Pipeline = pipeline;
-    return &entry;
+    CKSdlGpuPipelineEntry *entry = ReservePipeline(program, key);
+    if (!entry) { Fail("ReservePipeline"); return nullptr; }
+    entry->Pipeline = pipeline;
+    entry->Failed = false;
+    return entry;
 }
 
 void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
@@ -351,8 +419,13 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
         return;
     }
     // A null entry marks the pipeline as pending.
-    program.Pipelines.Insert(key, CKSdlGpuPipelineEntry(), FALSE);
-    CKSdlGpuPipelineEntry *entry = program.Pipelines.FindPtr(key);
+    CKSdlGpuPipelineEntry *entry = ReservePipeline(program, key);
+    if (!entry) {
+        ++m_FFJitStats.PipelineQueueDeferred;
+        if (priority == CKSDLGPU_JOB_IDLE) ++m_FFJitStats.PipelinePrewarmDeferred;
+        return;
+    }
+    entry->LastUse = priority == CKSDLGPU_JOB_IDLE ? 0 : PipelineClock;
     auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key, m_FFJitStats);
     entry->Job = job;
     DescribePipeline(program, draw, color, depth, samples, job->Desc);

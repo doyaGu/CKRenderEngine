@@ -1308,6 +1308,7 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     Submissions.emplace_back();
     CKSdlGpuSubmission &submission = Submissions.back();
     submission.Fence.swap(fence);
+    submission.Pipelines.Swap(PendingPipelines);
     submission.Geometry.Swap(PendingGeometry);
     submission.BufferUploads.Swap(PendingBufferUploads);
     submission.SubmitId = LastSubmitId;

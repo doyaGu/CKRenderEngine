@@ -56,6 +56,8 @@ struct CKSdlGpuPipelineEntry {
     std::shared_ptr<SDL_GPUGraphicsPipeline> Pipeline;
     // Accessed only on the context thread. Pending jobs pin their cache entry.
     const CKSdlGpuJob *Job = nullptr;
+    uint64_t LastUse = 0;
+    CKQWORD RetainedSubmitId = 0;
     bool Failed = false;
     // A draw used it. The manifest records the precompiled programs' ones.
     bool Drawn = false;
@@ -188,7 +190,8 @@ struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     // first such draw, once CompareSamplerCount is set.
     std::shared_ptr<SDL_GPUSampler> DefaultSamplers[CKFF_TEXTURE_SLOT_COUNT];
     // A queued draw retains its program; private image helpers do too after
-    // their public handle is removed. Pipelines follow those exact lifetimes.
+    // their public handle is removed. The context bounds these pipeline maps
+    // together; encoded commands retain selected PSOs separately until fenced.
     CKSdlGpuPipelineTable Pipelines;
     // A specialized program shares Fallback's interface. It draws with
     // Fallback's pipelines until the worker has created its own.
@@ -438,6 +441,7 @@ struct CKSdlGpuBufferUploadPage {
 };
 struct CKSdlGpuSubmission {
     std::shared_ptr<SDL_GPUFence> Fence;
+    XClassArray<std::shared_ptr<SDL_GPUGraphicsPipeline>> Pipelines;
     XClassArray<std::shared_ptr<CKSdlGpuGeometryBuffer>> Geometry;
     XClassArray<std::shared_ptr<CKSdlGpuBufferUploadPage>> BufferUploads;
     CKQWORD SubmitId = 0;
