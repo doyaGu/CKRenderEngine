@@ -2633,6 +2633,8 @@ void TestEmission() {
 
 #include "TestFFPositionTJit.inl"
 
+#include "TestFFUnlitJit.inl"
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -2656,5 +2658,7 @@ int main(int argc, char **argv) {
     framework.Run("state dependency boundaries", TestStateDependencies);
     framework.Run("emission", TestEmission);
     framework.Run("POSITIONT specialization", TestPositionT);
+    framework.Run("unlit draw eligibility", TestUnlitEligibility);
+    framework.Run("unlit 3D specialization", TestUnlit);
     return framework.ExitCode();
 }
