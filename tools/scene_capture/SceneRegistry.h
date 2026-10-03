@@ -32,6 +32,7 @@ struct SceneDef {
     const char *IniOverrides;               // CK2_3D.ini <Render> lines, or NULL (present_* scenes)
     int MinFrames;                          // frames the scene needs before its capture is meaningful (0 = 1)
     bool (*ValidateImage)(SceneContext &sc, const RgbaImage &image) = NULL; // optional functional pixel assertions
+    bool ValidateCheckpoints = false;      // apply the same assertion to each captured frame
 };
 
 int GetSceneCount();

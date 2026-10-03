@@ -540,6 +540,10 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
                 if (!error.empty()) Fail(error);
                 return false;
             }
+            if (scene.ValidateCheckpoints && scene.ValidateImage && !scene.ValidateImage(sc, checkpoint)) {
+                Fail(sc.Error.empty() ? std::string(scene.Name) + ": checkpoint validation failed" : sc.Error);
+                return false;
+            }
         }
     }
     if (!CaptureBackBuffer(out))
