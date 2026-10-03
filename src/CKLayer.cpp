@@ -211,14 +211,20 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
         if (m_Format == 0 && m_Grid) {
             const int gridWidth = m_Grid->GetWidth();
             const int gridLength = m_Grid->GetLength();
-            const int bufferSize = 4 * gridLength * gridWidth;
-            chunk->WriteBuffer_LEndian(bufferSize, m_SquareArray);
+            const int count = gridLength * gridWidth;
+            // CKSquare also contains a pointer; its host size can exceed the
+            // four-byte values stored by the original Win32 engine.
+            XArray<CKDWORD> values;
+            values.Resize(count);
+            for (int i = 0; i < count; ++i)
+                values[i] = m_SquareArray ? m_SquareArray[i].dval : 0;
+            chunk->WriteBuffer_LEndian(count * sizeof(CKDWORD), values.Begin());
         }
 
         // Mark type as used in file
         if (file) {
-            // ManagerByGuid[11] + 4 * m_Type check from original
-            // This updates tracking in the grid manager
+            if (gridMgr && gridMgr->m_Remap && m_Type >= 0 && !gridMgr->m_Remap[m_Type])
+                gridMgr->m_Remap[m_Type] = gridMgr->m_RemapCount++;
         }
     }
 
@@ -275,7 +281,7 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
                 } else {
                     if (version < 3) {
                         // Historical default associated param GUID for older files
-                        gridMgr->SetAssociatedParam(static_cast<int>(m_Type), CKGUID(0x5A6B0AFD, 0x44EB9DD7));
+                        gridMgr->SetAssociatedParam(static_cast<int>(m_Type), CKGUID(0x5A5716FD, 0x44E276D7));
                     } else {
                         const CKGUID paramGuid = chunk->ReadGuid();
                         gridMgr->SetAssociatedParam(static_cast<int>(m_Type), paramGuid);
@@ -296,19 +302,14 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
         if (!m_Format) {
             void *raw = nullptr;
             const int bufferSize = chunk->ReadBuffer(&raw);
-            if (raw && bufferSize > 0 && m_Grid) {
-                const int width = m_Grid->GetWidth();
-                const int length = m_Grid->GetLength();
-                const int count = width * length;
-                const int expectedBytes = count * static_cast<int>(sizeof(CKSquare));
-
-                m_SquareArray = (count > 0) ? new CKSquare[count] : nullptr;
-                if (m_SquareArray) {
-                    memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
-                    const int copyBytes = (bufferSize < expectedBytes) ? bufferSize : expectedBytes;
-                    memcpy(m_SquareArray, raw, static_cast<size_t>(copyBytes));
-                    CKConvertEndianArray32(reinterpret_cast<CKDWORD *>(m_SquareArray), expectedBytes >> 2);
-                }
+            if (raw && bufferSize > 0) {
+                // Layers can be loaded before their owner grid's dimensions.
+                const int count = bufferSize / sizeof(CKDWORD);
+                CKDWORD *values = static_cast<CKDWORD *>(raw);
+                CKConvertEndianArray32(values, count);
+                m_SquareArray = count > 0 ? new CKSquare[count]() : nullptr;
+                for (int i = 0; i < count; ++i)
+                    m_SquareArray[i].dval = values[i];
             }
             if (raw)
                 CKDeletePointer(raw);

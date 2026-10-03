@@ -371,7 +371,7 @@ CKGrid *RCKGrid::CreateInstance(CKContext *Context) {
 // =====================================================
 
 void RCKGrid::PostLoad() {
-    // IDA: If visible, construct mesh texture with 0.5f threshold
+    // IDA: If visible, construct mesh texture with 0.5f opacity
     if (IsVisible())
         ConstructMeshTexture(0.5f);
     RCK3dEntity::PostLoad();
@@ -466,7 +466,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     m_Mesh->SetFaceVertexIndex(9, 7, 4, 8);
 
     // Set vertex colors
-    VxColor white(1.0f, 1.0f, 1.0f, 1.0f);
+    VxColor white(1.0f, 1.0f, 1.0f, scale);
     CKDWORD whiteColor = RGBAFTOCOLOR(white.r, white.g, white.b, white.a);
     for (int i = 0; i < 4; ++i) {
         m_Mesh->SetVertexColor(i, whiteColor);
@@ -536,10 +536,10 @@ void RCKGrid::ConstructMeshTexture(float scale) {
     float uScale = (float) (m_Width * 2) / (float) texWidth;
     float vScale = (float) (m_Length * 2) / (float) texHeight;
 
-    m_Mesh->SetVertexTextureCoordinates(0, 0.0f, 0.0f, 0);
-    m_Mesh->SetVertexTextureCoordinates(1, 0.0f, vScale, 0);
-    m_Mesh->SetVertexTextureCoordinates(2, uScale, vScale, 0);
-    m_Mesh->SetVertexTextureCoordinates(3, uScale, 0.0f, 0);
+    m_Mesh->SetVertexTextureCoordinates(0, 0.0f, 0.0f, -1);
+    m_Mesh->SetVertexTextureCoordinates(1, 0.0f, vScale, -1);
+    m_Mesh->SetVertexTextureCoordinates(2, uScale, vScale, -1);
+    m_Mesh->SetVertexTextureCoordinates(3, uScale, 0.0f, -1);
 
     // Get grid manager for layer color info
     int layerCount = GetLayerCount();
@@ -553,8 +553,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
         for (int i = 0; i < layerCount; ++i) {
             layers[i] = (CKLayer *) m_Layers.GetObject(m_Context, i);
             if (layers[i] && layers[i]->IsVisible()) {
-                // Get layer color from grid manager
-                // The layer stores color info that we use for texture generation
+                gridMgr->GetAssociatedColor(layers[i]->GetType(), &layerColors[i]);
             }
         }
 
@@ -571,11 +570,14 @@ void RCKGrid::ConstructMeshTexture(float scale) {
                     for (int j = 0; j < layerCount; ++j) {
                         if (layers[j]) {
                             int value = 0;
-                            // Get cell value from layer
-                            // Multiply by layer color and accumulate
-                            r += (int) (value * layerColors[j].r);
-                            g += (int) (value * layerColors[j].g);
-                            b += (int) (value * layerColors[j].b);
+                            layers[j]->GetValue(x, y, &value);
+                            if (gridMgr->GetAssociatedParam(layers[j]->GetType()) == CKPGUID_LINKERGRAPH_ENUM)
+                                value *= 85;
+                            // The Win32 DLL truncates each layer's contribution
+                            // before adding it, using the x87 product precision.
+                            r += static_cast<int>(static_cast<double>(value) * layerColors[j].r);
+                            g += static_cast<int>(static_cast<double>(value) * layerColors[j].g);
+                            b += static_cast<int>(static_cast<double>(value) * layerColors[j].b);
                         }
                     }
 
@@ -597,11 +599,12 @@ void RCKGrid::ConstructMeshTexture(float scale) {
             }
             texture->ReleaseSurfacePtr();
 
-            // Mark objects as not to be saved (dynamically generated)
-            m_Mesh->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
-            material->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
-            material2->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
-            texture->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED | CK_OBJECT_NOTTOBEDELETED | CK_OBJECT_DYNAMIC, 0);
+            // 0x10017A83 adds 0x23: private interface resources excluded from saving.
+            const CKDWORD generatedFlags = CK_OBJECT_INTERFACEOBJ | CK_OBJECT_PRIVATE | CK_OBJECT_NOTTOBESAVED;
+            m_Mesh->ModifyObjectFlags(generatedFlags, 0);
+            material->ModifyObjectFlags(generatedFlags, 0);
+            material2->ModifyObjectFlags(generatedFlags, 0);
+            texture->ModifyObjectFlags(generatedFlags, 0);
 
             // Add to current level
             CKLevel *level = m_Context->GetCurrentLevel();
