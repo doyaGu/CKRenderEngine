@@ -6,8 +6,10 @@
 
 #include "ImageIO.h"
 #include "SceneRegistry.h"
+#include "../../src/CKRasterizer/CKSdlGpuRasterizer/Native/CKSdlGpuFFJitSnapshot.h"
 
 struct SDL_Window;
+struct SDL_SharedObject;
 class CKPluginManager;
 
 struct CaptureOptions {
@@ -67,6 +69,7 @@ private:
     bool CaptureBackBuffer(RgbaImage &out);
     bool WriteProfileJson(const SceneDef &scene);
     bool WaitForProfileStart(const SceneDef &scene);
+    void InitJitProfiler();
     void Fail(const std::string &message);
 
     CaptureOptions m_Options;
@@ -95,6 +98,10 @@ private:
     double m_ProfileEngineInitMilliseconds = 0;
     double m_ProfileContextCreateMilliseconds = 0;
     double m_ProfileSceneBuildMilliseconds = 0;
+    SDL_SharedObject *m_JitLibrary = nullptr;
+    CKSdlGpuQueryFFJitSnapshotV1Function m_QueryJitSnapshot = nullptr;
+    CKSdlGpuFFJitSnapshotV1 m_ProfileJitBefore, m_ProfileJitAfter;
+    std::string m_JitSnapshotProvider;
 };
 
 #endif // CKRE_SCENE_CAPTURE_CAPTUREAPP_H

@@ -7,6 +7,7 @@
 #include <vector>
 #include <algorithm>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <locale>
 #include <numeric>
@@ -87,6 +88,17 @@ std::string TodayIso()
     else
         snprintf(buf, sizeof(buf), "unknown");
     return buf;
+}
+
+void WriteJitSnapshot(std::ostream &out, const CKSdlGpuFFJitSnapshotV1 &snapshot)
+{
+    out << '{';
+    bool first = true;
+#define CKSDL_GPU_WRITE_SNAPSHOT(Name) \
+    out << (first ? "" : ", ") << "\"" #Name "\": " << snapshot.Name; first = false;
+    CKSDL_GPU_FF_JIT_SNAPSHOT_V1_FIELDS(CKSDL_GPU_WRITE_SNAPSHOT)
+#undef CKSDL_GPU_WRITE_SNAPSHOT
+    out << '}';
 }
 
 } // namespace
@@ -318,7 +330,32 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
     if (options.Verbose)
         printf("render context %dx%d on driver %d (%s)\n", m_RenderContext->GetWidth(),
                m_RenderContext->GetHeight(), selectedDriver, m_DriverName.c_str());
+    InitJitProfiler();
     return true;
+}
+
+void CaptureApp::InitJitProfiler()
+{
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+    if (m_Options.ProfileJson.empty() || m_DriverName != "SDL_gpu Driver") return;
+#ifdef _WIN32
+    const char *library = "CKSdlGpuRasterizer.dll";
+#elif defined(__APPLE__)
+    const char *library = "libCKSdlGpuRasterizer.dylib";
+#else
+    const char *library = "libCKSdlGpuRasterizer.so";
+#endif
+    // A reference to the selected directory's plugin keeps the optional export
+    // alive. Older runtimes remain usable without a new rasterizer vtable slot.
+    const auto path = std::filesystem::absolute(std::filesystem::path(m_Options.RenderEngineDir) / library);
+    m_JitLibrary = SDL_LoadObject(path.string().c_str());
+    if (m_JitLibrary) {
+        m_QueryJitSnapshot = reinterpret_cast<CKSdlGpuQueryFFJitSnapshotV1Function>(
+            SDL_LoadFunction(m_JitLibrary, "CKSdlGpuQueryFFJitSnapshotV1"));
+        if (m_QueryJitSnapshot) m_JitSnapshotProvider = path.string();
+    }
+    if (!m_QueryJitSnapshot) SDL_ClearError();
+#endif
 }
 
 bool CaptureApp::WriteCapsJson(const std::string &path)
@@ -448,6 +485,13 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
         CK_RENDER_FLAGS flags = CK_RENDER_DEFAULTSETTINGS;
         if (i == frames - 1 && !m_Options.PresentLastFrame)
             flags = (CK_RENDER_FLAGS)(flags & ~CK_RENDER_DOBACKTOFRONT);
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+        if (m_QueryJitSnapshot && i == m_Options.ProfileWarmup &&
+            !m_QueryJitSnapshot(m_RenderContext->GetRasterizerContext(), sizeof(m_ProfileJitBefore), &m_ProfileJitBefore)) {
+            Fail("JIT statistics query failed at the measurement boundary");
+            return false;
+        }
+#endif
         const Uint64 renderStart = profile ? SDL_GetPerformanceCounter() : 0;
         const CKERROR err = m_RenderContext->Render(flags);
         const Uint64 renderEnd = profile ? SDL_GetPerformanceCounter() : 0;
@@ -457,6 +501,13 @@ bool CaptureApp::CaptureScene(const SceneDef &scene, RgbaImage &out)
             Fail(buf);
             return false;
         }
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+        if (m_QueryJitSnapshot && i == frames - 1 &&
+            !m_QueryJitSnapshot(m_RenderContext->GetRasterizerContext(), sizeof(m_ProfileJitAfter), &m_ProfileJitAfter)) {
+            Fail("JIT statistics query failed after the last measured render");
+            return false;
+        }
+#endif
         if (profile) {
             ProfileFrame sample;
             sample.RenderMilliseconds = double(renderEnd - renderStart) * m_ProfileTickMilliseconds;
@@ -599,6 +650,18 @@ bool CaptureApp::WriteProfileJson(const SceneDef &scene)
         report << "{\"drawCalls\": " << draws << ", \"primitives\": " << primitives << ", \"passes\": " << passes
                << ", \"clears\": " << clears << ", \"textureUploads\": " << textures << ", \"bufferUploads\": " << buffers << "}";
     else report << "null";
+    report << ",\n  \"jitSnapshotProvider\": ";
+    if (m_QueryJitSnapshot) quote(m_JitSnapshotProvider.c_str());
+    else report << "null";
+    report << ",\n  \"jitInterval\": ";
+    if (m_QueryJitSnapshot) {
+        report << "{\"schemaVersion\": 1, \"firstFrame\": " << warmup
+               << ", \"endFrameExclusive\": " << m_ProfileFrames.size() << ", \"before\": ";
+        WriteJitSnapshot(report, m_ProfileJitBefore);
+        report << ", \"after\": ";
+        WriteJitSnapshot(report, m_ProfileJitAfter);
+        report << '}';
+    } else report << "null";
     report << ",\n  \"frames\": [\n";
     for (size_t i = 0; i < m_ProfileFrames.size(); ++i) {
         const auto &sample = m_ProfileFrames[i];
@@ -667,6 +730,7 @@ void CaptureApp::HoldVisibleFrame()
 
 void CaptureApp::Shutdown()
 {
+    m_QueryJitSnapshot = nullptr;
     if (m_RenderContext && m_RenderManager) {
         m_RenderManager->DestroyRenderContext(m_RenderContext);
         m_RenderContext = NULL;
@@ -678,6 +742,10 @@ void CaptureApp::Shutdown()
     if (m_CkStarted) {
         CKShutdown();
         m_CkStarted = false;
+    }
+    if (m_JitLibrary) {
+        SDL_UnloadObject(m_JitLibrary);
+        m_JitLibrary = nullptr;
     }
     if (m_Window) {
         SDL_DestroyWindow(m_Window);
