@@ -124,6 +124,21 @@ set_target_properties(ckre_scene_capture PROPERTIES
 )
 ckre_copy_runtime_dependencies(ckre_scene_capture)
 
+if(CKRE_BUILD_TESTS AND TARGET CKSdlGpuRasterizer)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME scene_capture_jit
+            COMMAND "${CMAKE_COMMAND}"
+                -DPYTHON=${Python3_EXECUTABLE}
+                -DTOOL=$<TARGET_FILE:ckre_scene_capture>
+                -DENGINE_DIR=$<TARGET_FILE_DIR:CK2_3D>
+                -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture_jit
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/scene_capture_jit.cmake)
+        set_tests_properties(scene_capture_jit PROPERTIES
+            RUN_SERIAL TRUE TIMEOUT 1800 SKIP_REGULAR_EXPRESSION "SKIPPED:")
+    endif()
+endif()
+
 if (NOT _ckre_scene_capture_standalone AND CKRE_INSTALL)
     install(TARGETS ckre_scene_capture RUNTIME DESTINATION tools COMPONENT Development)
 endif ()

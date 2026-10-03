@@ -1,0 +1,18 @@
+if(NOT "$ENV{CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS}" STREQUAL "1")
+    message(STATUS "SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 for scene JIT parity")
+    return()
+endif()
+set(_drivers "$ENV{CKRE_SDL_GPU_DRIVER}")
+if(_drivers STREQUAL "")
+    if(WIN32)
+        set(_drivers "direct3d12,vulkan")
+    else()
+        set(_drivers "vulkan")
+    endif()
+endif()
+execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/scene_capture_jit.py"
+    --tool "${TOOL}" --engine-dir "${ENGINE_DIR}" --out "${OUT_DIR}" --drivers "${_drivers}"
+    RESULT_VARIABLE _result)
+if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Scene JIT parity failed; see ${OUT_DIR}/results.json and per-scene logs/images")
+endif()
