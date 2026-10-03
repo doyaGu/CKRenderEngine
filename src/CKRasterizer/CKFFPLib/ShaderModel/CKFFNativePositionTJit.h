@@ -3,7 +3,7 @@
 
 #include "CKFFNativeFragmentJit.h"
 
-// POSITIONT with optional user clip distances.
+// POSITIONT with optional user clip distances and depth-border padding.
 // Specializes texture-coordinate work and affine interpolation from the
 // canonical fragment key. Every other vertex switch remains a uniform, so
 // the fragment cache key also identifies this paired vertex program.
@@ -14,6 +14,6 @@
 // the JIT output format. Its optimized position arithmetic must be retained
 // for EQUAL depth tests across the asynchronous fallback/JIT transition.
 bool CKFFCompileNativePositionTProgram(const CKFFNativeFragmentKey &key, CKFFSamplerLayout layout,
-                                       CK_SHADER_FORMAT referenceFormat, CKJitVertexShader &out, bool clipping = false);
+                                       CK_SHADER_FORMAT referenceFormat, CKJitVertexShader &out, bool clipping = false, bool depthPad = false);
 
 #endif

@@ -8,7 +8,7 @@ struct Row {
 };
 struct Uniforms {
     uint32_t Count = 0, Rows[CKJIT_MAX_UNIFORM_BUFFERS] = {};
-    Row Draw, Viewport, Stages, ClipPlanes, ClipParams;
+    Row Draw, Viewport, Stages, Textures, ClipPlanes, ClipParams;
 };
 
 bool ResolveUniforms(Uniforms &out) {
@@ -22,6 +22,7 @@ bool ResolveUniforms(Uniforms &out) {
     struct Block { CKFFConstantBlock Id; uint32_t Count; Row *Target; };
     const Block blocks[] = {{CKRST_BLOCK_DRAW_PARAMS, CKFF_DRAW_PARAM_VEC4_COUNT, &out.Draw},
                             {CKRST_BLOCK_VIEWPORT, 1, &out.Viewport},
+                            {CKRST_BLOCK_TEX_MATRICES, 4 * CKFF_MAX_TEXTURE_STAGES, &out.Textures},
                             {CKRST_BLOCK_STAGE_PARAMS, CKFF_STAGE_PARAM_VEC4_COUNT, &out.Stages},
                             {CKRST_BLOCK_CLIP_PLANES, CKFF_CLIP_PLANE_COUNT, &out.ClipPlanes},
                             {CKRST_BLOCK_CLIP_PARAMS, 1, &out.ClipParams}};
@@ -42,7 +43,7 @@ bool ResolveUniforms(Uniforms &out) {
 }
 
 bool CKFFCompileNativePositionTProgram(const CKFFNativeFragmentKey &input, CKFFSamplerLayout layout,
-                                       CK_SHADER_FORMAT referenceFormat, CKJitVertexShader &out, bool clipping) {
+                                       CK_SHADER_FORMAT referenceFormat, CKJitVertexShader &out, bool clipping, bool depthPad) {
     if ((CKDWORD)layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
         (referenceFormat != CKRST_SHADER_FORMAT_DXIL && referenceFormat != CKRST_SHADER_FORMAT_SPIRV)) return false;
     const bool dxil = referenceFormat == CKRST_SHADER_FORMAT_DXIL;
@@ -97,6 +98,18 @@ bool CKFFCompileNativePositionTProgram(const CKFFNativeFragmentKey &input, CKFFS
             for (uint32_t i = 1; i < 8; ++i)
                 coord = b.Select(b.IntEqual(index, b.Int(i)), b.Input({8 + i, 4, CKJIT_INPUT_ATTRIBUTE}), coord);
             const CKJitValue flags = b.FloatToInt(component(state, 1));
+            if (depthPad) {
+                // The draw-local matrix remaps only XY into a padded depth
+                // texture. Preserve the comparison reference and input W.
+                CKJitValue padded = b.Mul(b.Swizzle(uniform(rows.Textures, stage * 4), "xy"), component(coord, 0));
+                for (unsigned column = 1; column < 4; ++column) {
+                    const CKJitValue matrix = b.Swizzle(uniform(rows.Textures, stage * 4 + column), "xy");
+                    const CKJitValue value = column == 3 ? one : component(coord, column);
+                    padded = dxil ? b.Mad(matrix, value, padded) : b.Add(padded, b.Mul(matrix, value));
+                }
+                const CKJitValue enabled = b.IntNotEqual(b.IntAnd(flags, b.Int(0x1000)), b.Int(0));
+                coord = b.Construct({b.Select(enabled, padded, b.Swizzle(coord, "xy")), b.Swizzle(coord, "zw")});
+            }
             const CKJitValue count = b.IntAnd(flags, b.Int(255));
             const CKJitValue projected = b.IntNotEqual(b.IntAnd(flags, b.Int(256)), b.Int(0));
             CKJitValue divisor = component(coord, 3);
