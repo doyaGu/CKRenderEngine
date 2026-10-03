@@ -54,6 +54,9 @@ typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
 // it failed to.
 struct CKSdlGpuPipelineEntry {
     std::shared_ptr<SDL_GPUGraphicsPipeline> Pipeline;
+    // Accessed only on the context thread. Pending jobs pin their cache entry.
+    const CKSdlGpuJob *Job = nullptr;
+    bool Failed = false;
     // A draw used it. The manifest records the precompiled programs' ones.
     bool Drawn = false;
 };
