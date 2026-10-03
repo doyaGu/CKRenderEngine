@@ -64,9 +64,11 @@ enum : uint32_t {
     DxbcOpDclResource = 88,
     DxbcOpDclConstantBuffer = 89,
     DxbcOpDclSampler = 90,
+    DxbcOpDclInput = 95,
     DxbcOpDclInputPs = 98,
     DxbcOpDclInputPsSiv = 100,
     DxbcOpDclOutput = 101,
+    DxbcOpDclOutputSiv = 103,
     DxbcOpDclTemps = 104,
     DxbcOpDclGlobalFlags = 106,
     DxbcOpLod = 108,
@@ -114,8 +116,11 @@ enum : uint32_t {
     DxbcModifierAbs = 2,
 
     DxbcNamePosition = 1,
+    DxbcNameClipDistance = 2,
+    DxbcComponentUint32 = 1,
     DxbcComponentFloat32 = 3,
     DxbcPixelShader51 = 0x51,
+    DxbcVertexShader51 = 0x10051,
     DxbcContainerVersion = 1,
     DxbcMaxInputRegisters = 32,
 };
@@ -127,7 +132,7 @@ bool DxbcIsPosition(const CKJitInput &input) {
 }
 
 uint32_t DxbcInputRegister(const CKJitInput &input) {
-    return DxbcIsPosition(input) ? 0u : input.Location + 1u;
+    return DxbcIsPosition(input) ? 0u : input.Location + (input.Kind == CKJIT_INPUT_ATTRIBUTE ? 0u : 1u);
 }
 
 uint32_t FourCC(const char *code) {
@@ -344,6 +349,7 @@ struct DxbcSignatureElement {
     uint32_t Register;
     uint32_t Mask;
     uint32_t ReadWriteMask; // components an input reads, or an output never writes
+    uint32_t ComponentType = DxbcComponentFloat32;
 };
 
 // A signature chunk: the elements, then their names, each stored once and
@@ -373,7 +379,7 @@ void AppendSignature(XArray<uint32_t> &chunk, const XArray<DxbcSignatureElement>
         chunk.PushBack(offset);
         chunk.PushBack(element.SemanticIndex);
         chunk.PushBack(element.SystemValue);
-        chunk.PushBack(DxbcComponentFloat32);
+        chunk.PushBack(element.ComponentType);
         chunk.PushBack(element.Register);
         chunk.PushBack(element.Mask | element.ReadWriteMask << 8);
     }
@@ -422,7 +428,8 @@ void Md5Block(uint32_t state[4], const uint32_t block[16]) {
 
 class DxbcEmitter {
 public:
-    DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout);
+    DxbcEmitter(const CKJitShader &shader, const CKJitResourceLayout &layout, CKJitValue primary,
+                CKJitValue discard, const CKJitVertexShader *vertex = nullptr);
 
     bool Emit(XArray<uint32_t> &words);
 
@@ -431,6 +438,9 @@ private:
 
     bool MapInputs();
     void Analyze();
+    void KeepOutput(CKJitValue value);
+    void WriteOutput(CKJitValue value, uint32_t reg, uint32_t lane = 0);
+    uint32_t m_ClipRegister = 1;
     DxbcValue View(const CKJitNode &node) const;
     DxbcValue Destination(uint32_t node);
     void Release(uint32_t node);
@@ -458,8 +468,11 @@ private:
     void Declare(DxbcStream &out) const;
     void Signatures(XArray<uint32_t> &input, XArray<uint32_t> &output) const;
 
-    const CKJitFragmentShader &m_Shader;
+    const CKJitShader &m_Shader;
     const CKJitResourceLayout &m_Layout;
+    CKJitValue m_Primary;
+    CKJitValue m_Discard;
+    const CKJitVertexShader *m_Vertex;
     DxbcStream m_Code;
     DxbcTemps m_Temps;
     XArray<DxbcValue> m_Values; // where the value of every node is
@@ -477,8 +490,10 @@ private:
     uint32_t m_ReadUniformBuffers;                    // bit per constant buffer read
 };
 
-DxbcEmitter::DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout)
-    : m_Shader(shader), m_Layout(layout), m_SampledSlots(0), m_ColorInOutput(false), m_ReadUniformBuffers(0) {
+DxbcEmitter::DxbcEmitter(const CKJitShader &shader, const CKJitResourceLayout &layout, CKJitValue primary,
+                         CKJitValue discard, const CKJitVertexShader *vertex)
+    : m_Shader(shader), m_Layout(layout), m_Primary(primary), m_Discard(discard), m_Vertex(vertex),
+      m_SampledSlots(0), m_ColorInOutput(false), m_ReadUniformBuffers(0) {
     std::memset(m_InputByRegister, 0xff, sizeof(m_InputByRegister));
     std::memset(m_InputReads, 0, sizeof(m_InputReads));
     std::memset(m_SamplerDims, 0xff, sizeof(m_SamplerDims));
@@ -490,14 +505,29 @@ DxbcEmitter::DxbcEmitter(const CKJitFragmentShader &shader, const CKJitResourceL
 bool DxbcEmitter::MapInputs() {
     for (int i = 0; i < m_Shader.Inputs.Size(); ++i) {
         const CKJitInput &input = m_Shader.Inputs[i];
-        if (!DxbcIsPosition(input) && input.Location >= DxbcMaxInputRegisters - 1u)
+        if (!DxbcIsPosition(input) && input.Location >= DxbcMaxInputRegisters - (m_Vertex ? 0u : 1u))
             return false;
         const uint32_t reg = DxbcInputRegister(input);
         if (m_InputByRegister[reg] >= 0)
             return false;
         m_InputByRegister[reg] = i;
     }
+    if (m_Vertex) {
+        for (int i = 0; i < m_Vertex->Outputs.Size(); ++i) {
+            if (m_Vertex->Outputs[i].Location >= DxbcMaxInputRegisters - 1u)
+                return false;
+            if (m_Vertex->Outputs[i].Location + 2 > m_ClipRegister)
+                m_ClipRegister = m_Vertex->Outputs[i].Location + 2;
+        }
+        if (m_Vertex->ClipDistances.Size() && m_ClipRegister + (m_Vertex->ClipDistances.Size() + 3) / 4 > DxbcMaxInputRegisters)
+            return false;
+    }
     return true;
+}
+
+void DxbcEmitter::KeepOutput(CKJitValue value) {
+    if (value.IsValid() && m_Roots[(int)value.Id] != NoRoot)
+        m_LastUse[(int)m_Roots[(int)value.Id]] = (uint32_t)m_Shader.Nodes.Size();
 }
 
 // A computed value keeps its temporary components from its node to its last
@@ -600,12 +630,15 @@ void DxbcEmitter::Analyze() {
     }
 
     // A computed colour nothing else reads is computed into the output.
-    const uint32_t color = m_Shader.Color.Id;
-    m_ColorInOutput = m_Roots[(int)color] == color && m_LastUse[(int)color] == color;
-    if (m_Roots[(int)color] != NoRoot)
-        m_LastUse[(int)m_Roots[(int)color]] = count;
-    if (m_Shader.Discard.IsValid() && m_Roots[(int)m_Shader.Discard.Id] != NoRoot)
-        m_LastUse[(int)m_Roots[(int)m_Shader.Discard.Id]] = count;
+    const uint32_t color = m_Primary.Id;
+    m_ColorInOutput = !m_Vertex && m_Roots[(int)color] == color && m_LastUse[(int)color] == color;
+    KeepOutput(m_Primary);
+    KeepOutput(m_Discard);
+    if (m_Vertex) {
+        for (int i = 0; i < m_Vertex->Outputs.Size(); ++i)
+            KeepOutput(m_Vertex->Outputs[i].Value);
+        for (const CKJitValue value : m_Vertex->ClipDistances) KeepOutput(value);
+    }
 
     uint32_t resources = 0, samplers = 0;
     for (uint32_t slot = 0; slot < CKJIT_MAX_SAMPLERS; ++slot) {
@@ -667,7 +700,7 @@ DxbcValue DxbcEmitter::Destination(uint32_t node) {
     DxbcValue dest;
     std::memset(&dest, 0, sizeof(dest));
     dest.Count = CKJitComponentCount(m_Shader.Nodes[(int)node].Type);
-    if (node == m_Shader.Color.Id && m_ColorInOutput) {
+    if (node == m_Primary.Id && m_ColorInOutput) {
         dest.File = DxbcOperandOutput;
         for (uint32_t k = 0; k < 4; ++k)
             dest.Lanes[k] = k;
@@ -1188,6 +1221,9 @@ void DxbcEmitter::Declare(DxbcStream &out) const {
         const uint32_t operand = DxbcOperandInput | DxbcComponents4 | DxbcSelectMask |
                                  (uint32_t)m_InputReads[reg] << DxbcSelectorShift | DxbcIndex1D;
         switch (m_Shader.Inputs[m_InputByRegister[reg]].Kind) {
+        case CKJIT_INPUT_ATTRIBUTE:
+            out.Instruction(DxbcOpDclInput, {operand, reg});
+            break;
         case CKJIT_INPUT_FRAG_COORD:
             out.Instruction(DxbcOpDclInputPsSiv | DxbcInterpolationLinearNoPerspective,
                             {operand, reg, DxbcNamePosition});
@@ -1200,8 +1236,22 @@ void DxbcEmitter::Declare(DxbcStream &out) const {
             break;
         }
     }
-    out.Instruction(DxbcOpDclOutput,
-                    {DxbcOperandOutput | DxbcComponents4 | DxbcSelectMask | 0xfu << DxbcSelectorShift | DxbcIndex1D, 0});
+    const uint32_t outputOperand = DxbcOperandOutput | DxbcComponents4 | DxbcSelectMask | DxbcIndex1D;
+    if (m_Vertex) {
+        out.Instruction(DxbcOpDclOutputSiv, {outputOperand | 0xfu << DxbcSelectorShift, 0, DxbcNamePosition});
+        for (int i = 0; i < m_Vertex->Outputs.Size(); ++i) {
+            const CKJitVertexOutput &output = m_Vertex->Outputs[i];
+            const uint32_t mask = (1u << CKJitComponentCount(m_Shader.Node(output.Value).Type)) - 1u;
+            out.Instruction(DxbcOpDclOutput, {outputOperand | mask << DxbcSelectorShift, output.Location + 1});
+        }
+        for (int i = 0; i < m_Vertex->ClipDistances.Size(); i += 4) {
+            const uint32_t width = m_Vertex->ClipDistances.Size() - i < 4 ? m_Vertex->ClipDistances.Size() - i : 4;
+            out.Instruction(DxbcOpDclOutputSiv, {outputOperand | ((1u << width) - 1u) << DxbcSelectorShift,
+                                               m_ClipRegister + i / 4, DxbcNameClipDistance});
+        }
+    } else {
+        out.Instruction(DxbcOpDclOutput, {outputOperand | 0xfu << DxbcSelectorShift, 0});
+    }
     if (m_Temps.Count() > 0)
         out.Instruction(DxbcOpDclTemps, {m_Temps.Count()});
 }
@@ -1220,15 +1270,47 @@ void DxbcEmitter::Signatures(XArray<uint32_t> &input, XArray<uint32_t> &output) 
             reg,
             (1u << source.Components) - 1u,
             m_InputReads[reg],
+            source.Scalar == CKJIT_INPUT_UINT ? (uint32_t)DxbcComponentUint32 : (uint32_t)DxbcComponentFloat32,
         };
         elements.PushBack(element);
     }
     AppendSignature(input, elements);
 
     elements.Clear();
-    const DxbcSignatureElement target = {"SV_Target", 0, 0, 0, 0xf, 0};
+    const DxbcSignatureElement target = {
+        m_Vertex ? "SV_Position" : "SV_Target", 0, m_Vertex ? (uint32_t)DxbcNamePosition : 0u, 0, 0xf, 0};
     elements.PushBack(target);
+    if (m_Vertex) {
+        // Signatures are in register order, regardless of frontend declaration order.
+        for (uint32_t location = 0; location < DxbcMaxInputRegisters - 1; ++location) {
+            for (int i = 0; i < m_Vertex->Outputs.Size(); ++i) {
+                const CKJitVertexOutput &output = m_Vertex->Outputs[i];
+                if (output.Location != location)
+                    continue;
+                const uint32_t mask = (1u << CKJitComponentCount(m_Shader.Node(output.Value).Type)) - 1u;
+                const DxbcSignatureElement varying = {"TEXCOORD", location, 0, location + 1, mask, 0};
+                elements.PushBack(varying);
+            }
+        }
+    }
+    if (m_Vertex) {
+        for (int i = 0; i < m_Vertex->ClipDistances.Size(); i += 4) {
+            const uint32_t width = m_Vertex->ClipDistances.Size() - i < 4 ? m_Vertex->ClipDistances.Size() - i : 4;
+            elements.PushBack({"SV_ClipDistance", uint32_t(i / 4), DxbcNameClipDistance,
+                               m_ClipRegister + i / 4, (1u << width) - 1u, 0});
+        }
+    }
     AppendSignature(output, elements);
+}
+
+void DxbcEmitter::WriteOutput(CKJitValue value, uint32_t reg, uint32_t lane) {
+    DxbcValue output = {};
+    output.File = DxbcOperandOutput;
+    output.Index = reg;
+    output.Count = CKJitComponentCount(m_Shader.Node(value).Type);
+    for (uint32_t k = 0; k < output.Count; ++k)
+        output.Lanes[k] = k + lane;
+    Unary(DxbcOpMov, output, m_Values[(int)value.Id]);
 }
 
 bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
@@ -1241,19 +1323,18 @@ bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
 
     // Every value is computed before the discard, so no implicit-LOD sample,
     // LOD query or derivative runs after a quad neighbour was discarded.
-    if (m_Shader.Discard.IsValid()) {
+    if (m_Discard.IsValid()) {
         m_Code.Open(DxbcOpDiscard | DxbcTestNonZero);
-        Source(m_Values[(int)m_Shader.Discard.Id], Leading(1));
+        Source(m_Values[(int)m_Discard.Id], Leading(1));
         m_Code.Close();
     }
-    if (!m_ColorInOutput) {
-        DxbcValue output;
-        std::memset(&output, 0, sizeof(output));
-        output.File = DxbcOperandOutput;
-        output.Count = 4;
-        for (uint32_t k = 0; k < 4; ++k)
-            output.Lanes[k] = k;
-        Unary(DxbcOpMov, output, m_Values[(int)m_Shader.Color.Id]);
+    if (!m_ColorInOutput)
+        WriteOutput(m_Primary, 0);
+    if (m_Vertex) {
+        for (int i = 0; i < m_Vertex->Outputs.Size(); ++i)
+            WriteOutput(m_Vertex->Outputs[i].Value, m_Vertex->Outputs[i].Location + 1);
+        for (int i = 0; i < m_Vertex->ClipDistances.Size(); ++i)
+            WriteOutput(m_Vertex->ClipDistances[i], m_ClipRegister + i / 4, i % 4);
     }
     m_Code.Instruction(DxbcOpRet, {});
 
@@ -1261,7 +1342,7 @@ bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
     DxbcStream declarations;
     Declare(declarations);
     XArray<uint32_t> program;
-    program.PushBack(DxbcPixelShader51);
+    program.PushBack(m_Vertex ? DxbcVertexShader51 : DxbcPixelShader51);
     program.PushBack(2u + (uint32_t)declarations.Tokens().Size() + (uint32_t)m_Code.Tokens().Size());
     program += declarations.Tokens();
     program += m_Code.Tokens();
@@ -1297,7 +1378,14 @@ bool DxbcEmitter::Emit(XArray<uint32_t> &words) {
 bool CKJitEmitDxbc(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout, XArray<uint32_t> &words) {
     if (!CKJitVerify(shader))
         return false;
-    DxbcEmitter emitter(shader, layout);
+    DxbcEmitter emitter(shader, layout, shader.Color, shader.Discard);
+    return emitter.Emit(words);
+}
+
+bool CKJitEmitDxbc(const CKJitVertexShader &shader, const CKJitResourceLayout &layout, XArray<uint32_t> &words) {
+    if (!CKJitVerify(shader))
+        return false;
+    DxbcEmitter emitter(shader, layout, shader.Position, CKJitValue(), &shader);
     return emitter.Emit(words);
 }
 

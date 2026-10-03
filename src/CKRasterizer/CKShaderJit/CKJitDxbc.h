@@ -18,6 +18,14 @@
 bool CKJitEmitDxbc(const CKJitFragmentShader &shader, const CKJitResourceLayout &layout,
                    XArray<uint32_t> &words);
 
+// Vertex attributes at location n are TEXCOORDn in input register n (n < 32).
+// Position is SV_Position in o0; varying n is TEXCOORDn in o(n + 1), n < 31,
+// matching the fragment overload. The fragment input controls interpolation.
+// Clip distances pack into up to two SV_ClipDistance registers after the last
+// varying; all outputs must fit in the 32-register vertex output space.
+bool CKJitEmitDxbc(const CKJitVertexShader &shader, const CKJitResourceLayout &layout,
+                   XArray<uint32_t> &words);
+
 // The digest D3D validates in dwords 1..4 of a container of count dwords:
 // MD5 of everything after it, with DXBC's own final block.
 void CKJitDxbcDigest(const uint32_t *words, uint32_t count, uint32_t digest[4]);
