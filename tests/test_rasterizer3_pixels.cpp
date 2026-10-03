@@ -15,6 +15,7 @@
 #include "CKBgfxRasterizerContext.h"
 #endif
 #include "TestTriangleMultiset.h"
+#include "TestFFImageDiff.h"
 
 #include <SDL3/SDL.h>
 
@@ -433,7 +434,7 @@ void DestroyTextures(CKRasterizerContext *ctx, Textures &t)
 }
 
 // ---------------------------------------------------------------------------
-// Pixel cases (centre samples recorded for the shader-mode parity check)
+// Pixel cases (complete images retained for the shader-mode parity check)
 // ---------------------------------------------------------------------------
 
 enum SampleId {
@@ -457,13 +458,12 @@ enum SampleId {
 };
 
 struct Samples {
-    CKBYTE Center[SAMPLE_COUNT][4];
-    Samples() { memset(Center, 0, sizeof(Center)); }
+    Pixels Images[SAMPLE_COUNT];
 };
 
 void Record(Samples &s, SampleId id, const Pixels &pixels)
 {
-    GetPixel(pixels, kWidth / 2, kHeight / 2, s.Center[id]);
+    s.Images[id] = pixels;
 }
 
 void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
@@ -947,19 +947,44 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
 }
 
 #ifdef CKRE_PIXEL_SDL_GPU
+void CheckMatchingImage(const char *name, const Pixels &actual, const Pixels &expected,
+                        unsigned tolerance = 1, const CKBYTE *clear = nullptr)
+{
+    TestCheckf(actual.Width == expected.Width && actual.Height == expected.Height &&
+                   actual.Width > 0 && actual.Height > 0 &&
+                   actual.Data.Size() == actual.Width * actual.Height * 4 &&
+                   expected.Data.Size() == actual.Data.Size(), "%s: image dimensions", name);
+    const auto diff = FFImageDiff::Compare(expected.Data.Begin(), actual.Data.Begin(),
+                                           actual.Width, actual.Height, tolerance, clear);
+    if (!diff.Matches() || EnvFlagEnabled("CKRE_FF_JIT_SAVE_REPLAYS")) {
+        const char *directory = GetEnvValue("CKRE_FF_JIT_ARTIFACTS");
+        if (!directory) directory = "ffjit-failures";
+        SDL_CreateDirectory(directory);
+        char path[1024];
+        for (int kind = 0; kind < 3; ++kind) {
+            snprintf(path, sizeof(path), "%s/%s-%s.ppm", directory, name,
+                     kind == 0 ? "reference" : kind == 1 ? "actual" : "diff");
+            if (!FFImageDiff::SavePPM(path, kind == 0 ? expected.Data.Begin() : actual.Data.Begin(),
+                                      actual.Width, actual.Height, kind == 2 ? expected.Data.Begin() : nullptr))
+                printf("  could not save %s\n", path);
+        }
+        for (int kind = 0; kind < 2; ++kind) {
+            snprintf(path, sizeof(path), "%s/%s-%s.bgra", directory, name, kind ? "actual" : "reference");
+            const auto &data = kind ? actual.Data : expected.Data;
+            if (!SDL_SaveFile(path, data.Begin(), size_t(data.Size())))
+                printf("  could not save %s\n", path);
+        }
+    }
+    TestCheckf(diff.Matches(), "%s: %u pixels differ, %u coverage changes, max error %u, first (%d,%d)",
+               name, diff.Pixels, diff.Coverage, diff.MaxError, diff.FirstX, diff.FirstY);
+}
+
 void CheckMatchingSamples(const char *mode, const Samples &samples, const Samples &precompiled)
 {
     for (int id = 0; id < SAMPLE_COUNT; ++id) {
-        const CKBYTE *expected = precompiled.Center[id];
-        const CKBYTE *actual = samples.Center[id];
-        bool matches = true;
-        for (int channel = 0; channel < 4; ++channel)
-            matches = matches && abs((int)actual[channel] - (int)expected[channel]) <= 1;
-        TestCheckf(matches,
-                   "%s sample %d: BGRA=(%u,%u,%u,%u), precompiled (%u,%u,%u,%u)", mode, id,
-                   (unsigned)actual[0], (unsigned)actual[1], (unsigned)actual[2],
-                   (unsigned)actual[3], (unsigned)expected[0], (unsigned)expected[1],
-                   (unsigned)expected[2], (unsigned)expected[3]);
+        char name[96];
+        snprintf(name, sizeof(name), "%s-case-%02d", mode, id);
+        CheckMatchingImage(name, samples.Images[id], precompiled.Images[id]);
     }
 }
 
@@ -4367,6 +4392,27 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 
 // ---------------------------------------------------------------------------
 
+void CheckFullImageComparator()
+{
+    const CKBYTE clear[4] = {0x13, 0x07, 0x0d, 0};
+    CKBYTE expected[16] = {}, actual[16] = {};
+    auto compare = [&](unsigned tolerance, const CKBYTE *background = nullptr) {
+        return FFImageDiff::Compare(expected, actual, 2, 2, tolerance, background);
+    };
+    TestCheck(compare(0).Matches(), "identical images match");
+    actual[15] = 2;
+    auto diff = compare(1);
+    TestCheck(diff.Pixels == 1 && diff.FirstX == 1 && diff.FirstY == 1 && diff.MaxError == 2,
+              "off-center alpha differences are detected");
+    TestCheck(compare(2).Matches(), "explicit channel tolerance is respected");
+    memcpy(expected, clear, 4);
+    memcpy(actual, clear, 4);
+    actual[0] += 1;
+    diff = compare(2, clear);
+    TestCheck(diff.Pixels == 0 && diff.Coverage == 1 && diff.FirstX == 0 && diff.FirstY == 0,
+              "coverage differences cannot hide inside color tolerance");
+}
+
 void BackendRendersFixedFunctionSemantics()
 {
 #ifdef CKRE_PIXEL_SDL_GPU
@@ -4476,6 +4522,10 @@ void BackendRendersFixedFunctionSemantics()
 
 int main(int argc, char **argv)
 {
+    TestFramework tests;
+    tests.Run("full-image comparator detects color, alpha and coverage differences", &CheckFullImageComparator);
+    if (tests.ExitCode() != 0 || (argc > 1 && strcmp(argv[1], "--image-diff-only") == 0))
+        return tests.ExitCode();
     const bool visible = argc > 1 && strcmp(argv[1], "--visible") == 0;
     if (!visible && !EnvFlagEnabled("CKRE_RUN_OPENGL_RUNTIME_TESTS") && !EnvFlagEnabled("CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS")) {
         printf("SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the real-backend pixel gate.\n");
@@ -4487,7 +4537,6 @@ int main(int argc, char **argv)
     SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", "0", 0);
 #endif
 
-    TestFramework tests;
     tests.Run("backend renders the fixed-function semantics through the private interface",
               &BackendRendersFixedFunctionSemantics);
     return tests.ExitCode();
