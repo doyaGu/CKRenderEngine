@@ -24,6 +24,74 @@ CKFFFragmentProgram BuildTestFragmentProgram(const CKFFShaderKeyFS &key)
     return CKFFBuildFragmentProgram(key, samplerLayoutPlan);
 }
 
+void LegacyLightAttenuationReachesInlineAndArrayUniforms()
+{
+    FFPRecordingDriver driver;
+    FFPRecordingBackend context(&driver);
+    CKFixedFunctionPipeline ffp;
+    TestCheck(ffp.Init(context.StartedBackend(), context.ShaderSet()), "light pipeline initialization");
+    ffp.SetRenderState(VXRENDERSTATE_LIGHTING, TRUE);
+    CKLightData light = {};
+    light.Type = VX_LIGHTPOINT;
+    light.Range = 10.0f;
+    light.Attenuation0 = 0.5f;
+    light.Attenuation1 = light.Attenuation2 = 0.25f;
+    light.Falloff = 2.0f;
+    light.Direction = VxVector(0, 0, 1);
+    ffp.SetLight(0, &light);
+    ffp.EnableLight(0, TRUE);
+    const auto draw = [&]() {
+        TestCheck(ffp.DrawVertexBuffer(VX_TRIANGLELIST, 1, 0, 0, 3, 0, 0,
+            CKRST_DP_TRANSFORM | CKRST_DP_LIGHT, CKFF_VF_NORMAL, 1), "lit draw submits");
+    };
+    const auto check = [](const std::vector<float> &values, size_t offset, float linear, float quadratic) {
+        TestCheck(values.size() >= offset + 4, "light attenuation uniform is present");
+        if (values.size() < offset + 4) return;
+        TestCheck(values[offset] == 1.0f && std::fabs(values[offset + 1] - linear) < 1e-7f &&
+            std::fabs(values[offset + 2] - quadratic) < 1e-7f && values[offset + 3] == 2.0f,
+            "legacy DX5 coefficients convert before shader upload; spotlight falloff is independent");
+    };
+    const CKDWORD drawUniform = context.GetBlockUniformForTests(CKRST_BLOCK_DRAW_PARAMS);
+    const CKDWORD lightsUniform = context.GetBlockUniformForTests(CKRST_BLOCK_LIGHTS);
+    draw();
+    check(context.Log.FloatUniforms[drawUniform], (CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 5) * 4, .075f, .008125f);
+    TestCheck(memcmp(&ffp.GetLight(0), &light, sizeof(light)) == 0,
+              "GetLight preserves the original legacy coefficients");
+
+    // A range-only update must recompute both distance terms, including when
+    // the light moves from the inline slot to a packed multi-light array.
+    light.Range = 20.0f;
+    ffp.SetLight(0, &light);
+    draw();
+    check(context.Log.FloatUniforms[drawUniform], (CKFF_DRAW_PARAM_INLINE_LIGHT_BASE + 5) * 4, .0375f, .00203125f);
+    light.Type = VX_LIGHTSPOT;
+    light.Range = 10.0f;
+    ffp.SetLight(7, &light);
+    ffp.EnableLight(7, TRUE);
+    draw();
+    check(context.Log.FloatUniforms[lightsUniform], 5 * 4, .0375f, .00203125f);
+    check(context.Log.FloatUniforms[lightsUniform], (7 + 5) * 4, .075f, .008125f);
+    const uint64_t revision = ffp.GetStaticUniformRevision();
+    ffp.SetLight(7, &light);
+    TestCheck(ffp.GetStaticUniformRevision() == revision,
+              "repeating a legacy light does not reconvert or dirty its constants");
+    ffp.Shutdown();
+}
+
+void LegacyConstantLightAttenuationIsReciprocal()
+{
+    CKFixedFunctionPipeline ffp;
+    CKLightData light = {};
+    light.Type = VX_LIGHTPOINT;
+    light.Range = 30.0f;
+    light.Attenuation0 = 2.0f;
+    ffp.SetLight(0, &light);
+    const CKFFStateStore state = ffp.CaptureState();
+    TestCheck(state.LightConstants[0].Attenuation[0] == .5f &&
+        state.LightConstants[0].Attenuation[1] == 0 && state.LightConstants[0].Attenuation[2] == 0,
+        "legacy constant attenuation represents intensity, not a distance denominator");
+}
+
 void PointImageScalingUsesDestinationPixelCenters()
 {
     const CKDWORD source[] = {
@@ -4601,6 +4669,8 @@ int main() {
               &PointImageScalingUsesDestinationPixelCenters);
     tests.Run("Shared presentation preparation builds the complete draw",
               &SharedPresentPreparationBuildsTheCompleteDraw);
+    tests.Run("Legacy light attenuation reaches inline and array uniforms", &LegacyLightAttenuationReachesInlineAndArrayUniforms);
+    tests.Run("Legacy constant light attenuation is reciprocal", &LegacyConstantLightAttenuationIsReciprocal);
     tests.Run("FFP declares generic program resources", &FixedFunctionProgramDeclaresItsShaderInterface);
     tests.Run("Shader catalog and program metadata stay outside cached draws",
               &ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss);
