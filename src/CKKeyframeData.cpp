@@ -2438,8 +2438,18 @@ CKBOOL RCKMorphController::Evaluate(float TimeStep, void *res) {
 
 CKBOOL RCKMorphController::Evaluate(float TimeStep, int VertexCount, void *VertexPtr,
                                     CKDWORD VertexStride, VxCompressedVector *NormalPtr) {
-    if (m_NbKeys <= 0 || VertexCount < 0)
+    if (m_NbKeys <= 0 || !m_Keys || VertexCount < 0 || VertexCount > m_VertexCount || !std::isfinite(TimeStep))
         return FALSE;
+
+    // Native 0x1004FF81 assumes ordered finite times and a valid request count.
+    // Reject invalid state before writing either output, including when an
+    // endpoint would otherwise conceal a malformed later key.
+    for (int i = 0; i < m_NbKeys; ++i) {
+        if (!std::isfinite(m_Keys[i].TimeStep) || (i > 0 && m_Keys[i].TimeStep < m_Keys[i - 1].TimeStep))
+            return FALSE;
+    }
+    if (VertexCount == 0)
+        return TRUE;
 
     // Find the key index
     int keyIdx = -1;
@@ -2495,7 +2505,9 @@ CKBOOL RCKMorphController::Evaluate(float TimeStep, int VertexCount, void *Verte
 
     float t1 = key1.TimeStep;
     float t2 = key2.TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    const double interval = static_cast<double>(t2) - t1;
+    const double t = (static_cast<double>(TimeStep) - t1) / interval;
+    const double leftWeight = (static_cast<double>(t2) - TimeStep) / interval;
 
     if (VertexPtr && key1.PosArray && key2.PosArray) {
         char *destPtr = static_cast<char *>(VertexPtr);
@@ -2504,9 +2516,12 @@ CKBOOL RCKMorphController::Evaluate(float TimeStep, int VertexCount, void *Verte
             VxVector &p1 = key1.PosArray[i];
             VxVector &p2 = key2.PosArray[i];
 
-            dest->x = p1.x + (p2.x - p1.x) * t;
-            dest->y = p1.y + (p2.y - p1.y) * t;
-            dest->z = p1.z + (p2.z - p1.z) * t;
+            // Independent wide weights avoid overflowing float differences,
+            // cancellation at the right endpoint, and loss of a tiny phase
+            // that still makes a representable contribution.
+            dest->x = static_cast<float>(p1.x * leftWeight + p2.x * t);
+            dest->y = static_cast<float>(p1.y * leftWeight + p2.y * t);
+            dest->z = static_cast<float>(p1.z * leftWeight + p2.z * t);
 
             destPtr += VertexStride;
         }
@@ -2516,7 +2531,7 @@ CKBOOL RCKMorphController::Evaluate(float TimeStep, int VertexCount, void *Verte
         // CK2_3D.dll 0x10051510 wraps the angular component and uses a
         // 16-bit fixed-point coefficient, including its rounding behavior.
         for (int i = 0; i < VertexCount; ++i) {
-            NormalPtr[i].Slerp(t, key1.NormArray[i], key2.NormArray[i]);
+            NormalPtr[i].Slerp(static_cast<float>(t), key1.NormArray[i], key2.NormArray[i]);
         }
     }
 

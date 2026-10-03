@@ -1515,6 +1515,172 @@ void MergedMorphPreservesAbsentKeyPayloads() {
           normal.xa == 111 && normal.ya == 222, "Merged Morph changed an output omitted by the available key");
 }
 
+void AddMorphRequestKeys(RCKObjectAnimation &animation, float firstTime = 0.0f, float lastTime = 10.0f) {
+    RCKMorphController *morph = static_cast<RCKMorphController *>(animation.CreateController(CKANIMATION_MORPH_CONTROL));
+    morph->SetMorphVertexCount(3);
+    for (int i = 0; i < 2; ++i) {
+        CKMorphKey *key = static_cast<CKMorphKey *>(morph->GetKey(morph->AddKey(i ? lastTime : firstTime, TRUE)));
+        for (int vertex = 0; vertex < 3; ++vertex) {
+            key->PosArray[vertex].Set((i ? 10.0f : 2.0f) + vertex, i ? 7.0f : 3.0f, i ? 8.0f : 4.0f);
+            key->NormArray[vertex].xa = i ? 1000 : 200;
+            key->NormArray[vertex].ya = 300;
+        }
+    }
+    animation.SetLength(10.0f);
+}
+
+template<int InvalidKind>
+void LoadedMorphRejectsInvalidRequests() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation source(&context, "MorphRequestSource"), loaded(&context, "MorphRequestLoaded");
+    AddMorphRequestKeys(source);
+    Chunk chunk(source.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    LoadChunk(loaded, chunk.get());
+    RCKObjectAnimation *targets[] = {&source, &loaded};
+    const int invalidCounts[] = {4, INT_MAX, -1};
+    const float invalidTimes[] = {FloatWithBits(0x7FC00000u), FloatWithBits(0x7F800000u), FloatWithBits(0xFF800000u)};
+    for (int targetIndex = 0; targetIndex < 2; ++targetIndex) {
+        RCKObjectAnimation &target = *targets[targetIndex];
+        for (int i = 0; i < 3; ++i) {
+            const int count = InvalidKind == 0 ? invalidCounts[i] : 2;
+            const float time = InvalidKind == 1 ? invalidTimes[i] : 5.0f;
+            CKMorphKey *first = static_cast<CKMorphKey *>(target.GetMorphController()->GetKey(0));
+            if (InvalidKind == 2) first->TimeStep = invalidTimes[i];
+            // Start without outputs to reproduce bad acceptance without an
+            // out-of-bounds read; then verify rejected calls preserve bytes.
+            Check(!target.EvaluateMorphTarget(time, count, nullptr, 0, nullptr), "Morph accepted an invalid request/key time");
+            VxVector positions[3];
+            VxCompressedVector normals[3];
+            for (int vertex = 0; vertex < 3; ++vertex) {
+                positions[vertex].Set(123.0f, 234.0f, 345.0f);
+                normals[vertex].xa = 111; normals[vertex].ya = 222;
+            }
+            VxVector positionsBefore[3];
+            VxCompressedVector normalsBefore[3];
+            memcpy(positionsBefore, positions, sizeof(positions)); memcpy(normalsBefore, normals, sizeof(normals));
+            Check(!target.EvaluateMorphTarget(time, count, positions, sizeof(VxVector), normals), "Morph wrote an invalid request/key time");
+            Check(!memcmp(positionsBefore, positions, sizeof(positions)) && !memcmp(normalsBefore, normals, sizeof(normals)),
+                  "Failed Morph request changed caller bytes");
+            if (InvalidKind == 2) first->TimeStep = 0.0f;
+        }
+        if (InvalidKind == 2) {
+            CKMorphKey *last = static_cast<CKMorphKey *>(target.GetMorphController()->GetKey(1));
+            for (int i = 0; i < 4; ++i) {
+                last->TimeStep = i < 3 ? invalidTimes[i] : -1.0f;
+                VxVector output(123.0f);
+                Check(!target.EvaluateMorphTarget(0.0f, 1, &output, sizeof(output), nullptr) && Equal(output, VxVector(123.0f)),
+                      "Morph accepted a nonfinite or unordered unselected key");
+            }
+            last->TimeStep = 10.0f;
+        }
+    }
+}
+
+void LoadedMorphRetainsValidOutputContracts() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation source(&context, "MorphOutputSource"), loaded(&context, "MorphOutputLoaded");
+    AddMorphRequestKeys(source);
+    Chunk chunk(source.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    LoadChunk(loaded, chunk.get());
+    RCKObjectAnimation *targets[] = {&source, &loaded};
+    const float times[] = {-1.0f, 0.0f, 5.0f, 10.0f, 11.0f};
+    struct StridedOutput { CKDWORD Before; VxVector Value; CKDWORD After; };
+    for (int targetIndex = 0; targetIndex < 2; ++targetIndex) {
+        RCKObjectAnimation &target = *targets[targetIndex];
+        for (int sample = 0; sample < 5; ++sample) {
+            StridedOutput output[3];
+            VxCompressedVector normals[3];
+            for (int i = 0; i < 3; ++i) {
+                output[i].Before = output[i].After = 0x12345678u;
+                output[i].Value.Set(123.0f, 123.0f, 123.0f);
+                normals[i].xa = 111; normals[i].ya = 222;
+            }
+            const float phase = sample < 2 ? 0.0f : (sample == 2 ? 0.5f : 1.0f);
+            Check(target.EvaluateMorphTarget(times[sample], 2, &output[0].Value, sizeof(output[0]), normals), "Valid Morph subset failed");
+            for (int i = 0; i < 3; ++i) {
+                Check(output[i].Before == 0x12345678u && output[i].After == 0x12345678u, "Morph changed output stride padding");
+                if (i < 2) {
+                    Check(Equal(output[i].Value, VxVector(2.0f + i + 8.0f * phase, 3.0f + 4.0f * phase, 4.0f + 4.0f * phase)) &&
+                          normals[i].xa == static_cast<short>(200 + 800 * phase) && normals[i].ya == 300,
+                          "Morph output differs from independent linear values");
+                } else {
+                    Check(Equal(output[i].Value, VxVector(123.0f)) && normals[i].xa == 111 && normals[i].ya == 222,
+                          "Morph changed the unrequested tail");
+                }
+            }
+            VxCompressedVector normalsOnly[2];
+            Check(target.EvaluateMorphTarget(times[sample], 2, nullptr, 0, normalsOnly) && !memcmp(normalsOnly, normals, sizeof(normalsOnly)),
+                  "Normals-only Morph changed results");
+            VxVector positionsOnly[2];
+            Check(target.EvaluateMorphTarget(times[sample], 2, positionsOnly, sizeof(VxVector), nullptr) &&
+                  Equal(positionsOnly[0], output[0].Value) && Equal(positionsOnly[1], output[1].Value), "Position-only Morph changed results");
+            Check(target.EvaluateMorphTarget(times[sample], 2, nullptr, 0, nullptr), "Morph rejected omitted outputs");
+            Check(target.EvaluateMorphTarget(times[sample], 0, nullptr, 0, nullptr), "Morph rejected a zero-vertex request");
+        }
+    }
+    RCKMorphController empty;
+    Check(!empty.Evaluate(5.0f, 0, nullptr, 0, nullptr), "Keyless Morph succeeded");
+    empty.AddKey(0.0f, TRUE);
+    Check(empty.Evaluate(5.0f, 0, nullptr, 0, nullptr) && !empty.Evaluate(5.0f, 1, nullptr, 0, nullptr),
+          "Zero-sized Morph key request contract changed");
+    // Duplicate stored times remain valid: the first equal key is selected,
+    // and a time beyond the duplicate group selects its final key.
+    CKMorphKey *last = static_cast<CKMorphKey *>(source.GetMorphController()->GetKey(1));
+    last->TimeStep = 0.0f;
+    Chunk repeated(source.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    LoadChunk(loaded, repeated.get());
+    VxVector value;
+    Check(loaded.EvaluateMorphTarget(0.0f, 1, &value, sizeof(value), nullptr) && Equal(value, VxVector(2.0f, 3.0f, 4.0f)),
+          "Morph rejected or changed the first repeated-time key");
+    Check(loaded.EvaluateMorphTarget(1.0f, 1, &value, sizeof(value), nullptr) && Equal(value, VxVector(10.0f, 7.0f, 8.0f)),
+          "Morph rejected or changed the final repeated-time key");
+}
+
+template<int WideCase>
+void LoadedMorphInterpolationAvoidsIntermediateLoss() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation source(&context, "WideMorphSource"), loaded(&context, "WideMorphLoaded");
+    const float firstTime = WideCase == 0 || WideCase == 4 ? -FLT_MAX : 0.0f;
+    const float lastTime = WideCase == 1 || WideCase == 3 ? 10.0f : (WideCase == 4 ? FLT_MIN : FLT_MAX);
+    AddMorphRequestKeys(source, firstTime, lastTime);
+    RCKMorphController *morph = static_cast<RCKMorphController *>(source.GetMorphController());
+    CKMorphKey *first = static_cast<CKMorphKey *>(morph->GetKey(0));
+    CKMorphKey *last = static_cast<CKMorphKey *>(morph->GetKey(1));
+    if (WideCase == 1) {
+        first->PosArray[0].Set(-FLT_MAX, FLT_MAX, 3.0f);
+        last->PosArray[0].Set(FLT_MAX, -FLT_MAX, 5.0f);
+    } else if (WideCase == 2) {
+        first->PosArray[0].Set(0.0f, 3.0f, 4.0f);
+        last->PosArray[0].Set(FLT_MAX, 3.0f, 4.0f);
+    } else if (WideCase == 3) {
+        first->PosArray[0].Set(FLT_MAX, -FLT_MAX, FLT_MAX);
+        last->PosArray[0].Set(1.0f, 2.0f, 3.0f);
+    } else if (WideCase == 4) {
+        first->PosArray[0].Set(FLT_MAX, 3.0f, 4.0f);
+        last->PosArray[0].Set(0.0f, 3.0f, 4.0f);
+    }
+    Chunk chunk(source.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    LoadChunk(loaded, chunk.get());
+    RCKObjectAnimation *targets[] = {&source, &loaded};
+    for (int targetIndex = 0; targetIndex < 2; ++targetIndex) {
+        VxVector output(123.0f);
+        VxCompressedVector normal; normal.xa = 111; normal.ya = 222;
+        const float time = WideCase == 0 || WideCase == 4 ? 0.0f : (WideCase == 1 ? 5.0f : (WideCase == 3 ? 10.0f : FLT_MIN));
+        Check(targets[targetIndex]->EvaluateMorphTarget(time, 1, &output, sizeof(output), &normal), "Wide finite Morph evaluation failed");
+        if (WideCase == 0) {
+            Check(Equal(output, VxVector(6.0f, 5.0f, 6.0f)) && normal.xa == 600 && normal.ya == 300,
+                  "Morph lost a finite phase across large key times");
+        } else if (WideCase == 1) {
+            Check(Equal(output, VxVector(0.0f, 0.0f, 4.0f)), "Morph overflowed a finite vector interpolation");
+        } else if (WideCase == 3) {
+            Check(Equal(output, VxVector(1.0f, 2.0f, 3.0f)), "Morph lost the exact last key through cancellation");
+        } else {
+            Check(std::fabs(output.x - FLT_MIN) <= FLT_MIN * 1.0e-5f && output.y == 3.0f && output.z == 4.0f,
+                  "Morph discarded a representable contribution from a tiny phase");
+        }
+    }
+}
+
 template<int Topology>
 void LoadedMergedAnimationTerminatesCycles() {
     CKContext context(nullptr, 0, 0);
@@ -2987,6 +3153,15 @@ int main(int argc, char **argv) {
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
     };
     const Test tests[] = {
+        {"Loaded Morph rejects excessive/negative counts", LoadedMorphRejectsInvalidRequests<0>},
+        {"Loaded Morph rejects nonfinite requested times", LoadedMorphRejectsInvalidRequests<1>},
+        {"Loaded Morph rejects nonfinite/unordered key times", LoadedMorphRejectsInvalidRequests<2>},
+        {"Loaded Morph valid subset/optional output contracts", LoadedMorphRetainsValidOutputContracts},
+        {"Loaded Morph large finite key-time interval", LoadedMorphInterpolationAvoidsIntermediateLoss<0>},
+        {"Loaded Morph finite vector interpolation avoids overflow", LoadedMorphInterpolationAvoidsIntermediateLoss<1>},
+        {"Loaded Morph retains tiny-phase contribution", LoadedMorphInterpolationAvoidsIntermediateLoss<2>},
+        {"Loaded Morph retains exact endpoint across large values", LoadedMorphInterpolationAvoidsIntermediateLoss<3>},
+        {"Loaded Morph retains near-last tiny-phase contribution", LoadedMorphInterpolationAvoidsIntermediateLoss<4>},
         {"Zero-length merged animation freezes at source time zero", MergedAnimationTimeMappingRemainsFinite<0>},
         {"Merged time mapping avoids intermediate overflow", MergedAnimationTimeMappingRemainsFinite<1>},
         {"Merged time mapping avoids intermediate underflow", MergedAnimationTimeMappingRemainsFinite<2>},
