@@ -247,6 +247,95 @@ bool BuildTweenScene(SceneContext &sc) {
     sc.RenderContext->AddPostRenderCallBack(DrawTweenScene, &sc, FALSE, TRUE);
     return sc.MainCamera != NULL;
 }
+
+struct SkinVertex { float PositionWeights[7]; VxVector Normal; Vx2DVector UV; CKDWORD Color; };
+std::vector<SkinVertex> g_SkinVertices[4];
+std::vector<CKWORD> g_SkinIndices;
+CKMaterial *g_SkinMaterial = NULL;
+
+void DrawSkinScene(CKRenderContext *rc, void *argument) {
+    SceneContext &sc = *static_cast<SceneContext *>(argument);
+    CKRasterizerContext *rasterizer = rc->GetRasterizerContext();
+    if (!rasterizer) { sc.Error = "skin scene has no rasterizer"; return; }
+    for (unsigned object = 0; object < 8; ++object) {
+        const unsigned count = object % 4;
+        const bool indexed = sc.FrameIndex >= 3 && sc.FrameIndex < 60;
+        // The public packed layout carries indices after a weight field,
+        // even when blend state uses only the implicit weight.
+        const unsigned storedWeights = indexed && count == 0 ? 1 : count;
+        const bool lit = object < 4;
+        rc->SetCurrentMaterial(g_SkinMaterial, lit);
+        rc->SetState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
+        rc->SetState(VXRENDERSTATE_VERTEXBLEND, (count ? count : VXVBLEND_0WEIGHTS));
+        rc->SetState(VXRENDERSTATE_INDEXVBLENDENABLE, indexed);
+        VxMatrix world; Vx3DMatrixIdentity(world);
+        rc->SetWorldTransformationMatrix(world);
+        for (unsigned slot = 0; slot < 4; ++slot) {
+            const float angle = 0.3f * std::sin(float(sc.FrameIndex) * 0.025f + slot * 0.5f) * float(slot + 1);
+            VxMatrix bone; Vx3DMatrixIdentity(bone);
+            bone[0][0] = bone[1][1] = std::cos(angle);
+            bone[0][1] = std::sin(angle); bone[1][0] = -std::sin(angle);
+            const float pivot = float(slot) * 1.5f;
+            bone[3][0] = float(count) * 5.0f - 7.5f + pivot * std::sin(angle);
+            bone[3][1] = 0.4f + pivot * (1 - std::cos(angle)); bone[3][2] = lit ? 3.5f : -4.0f;
+            if (!rasterizer->SetTransformMatrix(VXMATRIX_WORLDMATRIX(slot), bone)) sc.Error = "skin palette upload failed";
+        }
+        SkinVertex &v = g_SkinVertices[count].front();
+        VxDrawPrimitiveData data = {};
+        data.VertexCount = int(g_SkinVertices[count].size());
+        data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE | CKRST_DP_STAGES0 | CKRST_DP_WEIGHT(storedWeights) |
+                     (lit ? CKRST_DP_LIGHT : 0) | (indexed ? CKRST_DP_MATRIXPAL : 0);
+        data.PositionPtr = v.PositionWeights; data.NormalPtr = &v.Normal; data.TexCoordPtr = &v.UV; data.ColorPtr = &v.Color;
+        data.PositionStride = data.NormalStride = data.TexCoordStride = data.ColorStride = sizeof(v);
+        if (!rc->DrawPrimitive(VX_TRIANGLELIST, g_SkinIndices.data(), int(g_SkinIndices.size()), &data))
+            sc.Error = "skin scene draw failed";
+    }
+    rc->SetState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_DISABLE);
+    rc->SetState(VXRENDERSTATE_INDEXVBLENDENABLE, FALSE);
+    VxMatrix identity; Vx3DMatrixIdentity(identity);
+    rc->SetWorldTransformationMatrix(identity);
+    for (unsigned slot = 0; slot < 4; ++slot) rasterizer->SetTransformMatrix(VXMATRIX_WORLDMATRIX(slot), identity);
+}
+
+bool BuildSkinScene(SceneContext &sc) {
+    g_SkinIndices.clear();
+    for (auto &vertices : g_SkinVertices) vertices.clear();
+    SceneSetBackgroundColor(sc, 0xff283848); SceneSetAmbient(sc, 0xff383838);
+    CKTexture *checker = SceneCreateCheckerTexture(sc, "skin-checker", 128, 128, 16, 0xffe0b868, 0xff406880);
+    g_SkinMaterial = SceneCreateMaterial(sc, "skin", VxColor(1.0f, 1.0f, 1.0f, 1.0f), checker);
+    if (!g_SkinMaterial) return false;
+    g_SkinMaterial->SetSpecular(VxColor(0.65f, 0.65f, 0.65f, 1.0f)); g_SkinMaterial->SetPower(16);
+    CKMaterial *floor = SceneCreateMaterial(sc, "floor", VxColor(0.6f, 0.65f, 0.7f, 1.0f));
+    SceneCreateEntity(sc, "floor", SceneCreatePlaneMesh(sc, "floor", 28, 24, 6, 1, floor), VxVector(0, 0, 0));
+    const unsigned rings = 24, segments = 20;
+    for (unsigned r = 0; r <= rings; ++r) for (unsigned s = 0; s <= segments; ++s) {
+        const float t = float(r) / rings, a = 6.28318530718f * float(s) / segments;
+        for (unsigned count = 0; count < 4; ++count) {
+            SkinVertex v = {};
+            v.PositionWeights[0] = std::cos(a) * 0.6f; v.PositionWeights[1] = t * 6; v.PositionWeights[2] = std::sin(a) * 0.6f;
+            if (count == 1) v.PositionWeights[3] = 1 - t;
+            if (count == 2) { v.PositionWeights[3] = (1 - t) * (1 - t); v.PositionWeights[4] = 2 * t * (1 - t); }
+            if (count == 3) {
+                v.PositionWeights[3] = (1 - t) * (1 - t) * (1 - t);
+                v.PositionWeights[4] = 3 * t * (1 - t) * (1 - t); v.PositionWeights[5] = 3 * t * t * (1 - t);
+            }
+            const CKDWORD indices = 0x00010203u; // reverse the palette to distinguish indexed and sequential draws
+            std::memcpy(v.PositionWeights + 3 + (count ? count : 1), &indices, sizeof(indices));
+            v.Normal = VxVector(std::cos(a), 0, std::sin(a)); v.UV = Vx2DVector(float(s) / segments, t * 2); v.Color = 0xffffffff;
+            g_SkinVertices[count].push_back(v);
+        }
+        if (r < rings && s < segments) {
+            const CKWORD a0 = CKWORD(r * (segments + 1) + s), b = a0 + 1, c = a0 + segments + 1, d = c + 1;
+            for (CKWORD index : {a0, d, b, a0, c, d}) g_SkinIndices.push_back(index);
+        }
+    }
+    SceneCreateLight(sc, "sun", VX_LIGHTDIREC, VxColor(0.9f, 0.8f, 0.7f, 1.0f), VxVector(0, 8, -5), VxVector(0.4f, -1, 0.5f), 100);
+    sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(0, 13, -27), VxVector(0, 2.5f, 0), 50);
+    sc.RenderContext->SetFogMode(VXFOG_LINEAR); sc.RenderContext->SetFogStart(20); sc.RenderContext->SetFogEnd(50);
+    sc.RenderContext->SetFogColor(0xff283848);
+    sc.RenderContext->AddPostRenderCallBack(DrawSkinScene, &sc, FALSE, TRUE);
+    return sc.MainCamera != NULL;
+}
 #endif
 }
 
@@ -256,6 +345,7 @@ const SceneDef g_ScenesJit[] = {
     {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, false, 2, 1.0f, NULL},
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
     {"tween_3d", "Six textured lit/prelit morphs with position/normal streams, fog and depth occlusion", BuildTweenScene, NULL, NULL, false, 2, 1.0f, NULL},
+    {"skinning_3d", "Eight lit/prelit skinned tubes with 0-3 weights and changing palette/index state", BuildSkinScene, NULL, NULL, false, 2, 1.0f, NULL},
 #endif
 };
 const int g_ScenesJitCount = sizeof(g_ScenesJit) / sizeof(g_ScenesJit[0]);
