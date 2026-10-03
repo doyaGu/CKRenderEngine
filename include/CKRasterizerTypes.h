@@ -165,6 +165,8 @@ struct CKLightData {
     VxVector Direction;
     float Range;
     float Falloff;
+    // Legacy Virtools/DX5 intensity coefficients. The fixed-function layer
+    // converts these using Range before evaluating distance attenuation.
     float Attenuation0;
     float Attenuation1;
     float Attenuation2;

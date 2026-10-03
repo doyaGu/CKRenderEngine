@@ -825,6 +825,25 @@ void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
     dst.Attenuation[2] = light->Attenuation2;
     dst.Attenuation[3] = light->Falloff;
 
+    // CKLightData carries the legacy DX5 intensity model. The original DX8
+    // rasterizer converts it to a distance-polynomial denominator before
+    // SetLight. Keep the public state above unchanged and convert once here
+    // for both precompiled and generated vertex shaders. Nonpositive ranges
+    // or coefficient sums retain the existing raw-value fallback; the legacy
+    // conversion is undefined there. Directional lights do not attenuate.
+    const double sum = double(light->Attenuation0) + light->Attenuation1 + light->Attenuation2;
+    if (light->Type != VX_LIGHTDIREC && sum > 0.0 && light->Range > 0.0f) {
+        const double constant = 1.0 / sum;
+        const double range = light->Range;
+        const double linear = (2.0 * light->Attenuation2 + light->Attenuation1) *
+                              (constant / range) * constant;
+        const double quadratic = constant * light->Attenuation2 * constant / (range * range) +
+                                 linear * linear / constant;
+        dst.Attenuation[0] = float(constant);
+        dst.Attenuation[1] = float(linear);
+        dst.Attenuation[2] = float(quadratic);
+    }
+
     dst.SpotParams[0] = cosf(light->InnerSpotCone * 0.5f);
     dst.SpotParams[1] = cosf(light->OuterSpotCone * 0.5f);
     dst.SpotParams[2] = 0.0f;
