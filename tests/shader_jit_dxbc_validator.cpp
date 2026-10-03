@@ -1,4 +1,5 @@
 #include "CKJitDxbc.h"
+#include "CKJitBuilder.h"
 
 #include <cstdio>
 #include <cstring>
@@ -15,11 +16,13 @@
 // pixel shader is paired with a generated vertex shader writing its input
 // signature register by register, and with the root signature of the SDL_gpu
 // fragment ABI: textures and samplers in space 2, uniforms at b0 of space 3.
+// Vertex containers are paired with a generated pixel shader that reads their
+// outputs, an input layout matching their attributes, and the vertex ABI
+// (textures/samplers in space 0, uniform buffers in space 1).
 //
 // Controls show that each check is active: the first container with a wrong
 // digest, every container with resources against a root signature in another
-// space, and every container with varyings against vertex outputs one
-// register off must be refused.
+// space, and every container with incompatible varying linkage must be refused.
 
 using Microsoft::WRL::ComPtr;
 
@@ -74,17 +77,24 @@ bool DeclaresResources(const XArray<uint32_t> &words) {
     return false;
 }
 
+bool IsVertexShader(const XArray<uint32_t> &words) {
+    uint32_t size = 0;
+    const uint32_t *program = FindChunk(words, "SHEX", size);
+    return program && size >= 2 && program[0] == 0x10051;
+}
+
 // Input signature registers: the semantic of each, and the highest one.
 struct Varyings {
     const char *Names[32];
     uint32_t Indices[32];
+    uint32_t Masks[32];
     uint32_t Last;
 };
 
-bool ReadVaryings(const XArray<uint32_t> &pixelShader, Varyings &varyings) {
+bool ReadVaryings(const XArray<uint32_t> &pixelShader, Varyings &varyings, const char *tag = "ISGN") {
     std::memset(&varyings, 0, sizeof(varyings));
     uint32_t size = 0;
-    const uint32_t *signature = FindChunk(pixelShader, "ISGN", size);
+    const uint32_t *signature = FindChunk(pixelShader, tag, size);
     if (!signature || size < 2 || 2 + signature[0] * 6 > size)
         return false;
     for (uint32_t i = 0; i < signature[0]; ++i) {
@@ -92,10 +102,14 @@ bool ReadVaryings(const XArray<uint32_t> &pixelShader, Varyings &varyings) {
         if (element[4] >= 32 || element[0] >= size * 4)
             return false;
         const char *name = (const char *)signature + element[0];
+        // Clip distances are consumed by rasterization, not the generated pixel interface.
+        if (std::strcmp(tag, "OSGN") == 0 && element[2] == 2 && std::strcmp(name, "SV_ClipDistance") == 0)
+            continue;
         if (element[4] == 0 ? std::strcmp(name, "SV_Position") != 0 : element[2] != 0)
             return false; // only the position is a system value, at register 0
         varyings.Names[element[4]] = name;
         varyings.Indices[element[4]] = element[1];
+        varyings.Masks[element[4]] = element[5] & 0xf;
         varyings.Last = element[4] > varyings.Last ? element[4] : varyings.Last;
     }
     return true;
@@ -122,6 +136,61 @@ bool BuildVertexShader(const Varyings &varyings, uint32_t shift, char *source, s
     return length > 0 && (size_t)length < capacity;
 }
 
+bool BuildPixelShader(const Varyings &varyings, uint32_t shift, XArray<uint32_t> &words) {
+    CKJitBuilder b(0);
+    CKJitValue color = b.Float4(0.0f, 0.0f, 0.0f, 1.0f);
+    for (uint32_t reg = 1; reg <= varyings.Last; ++reg) {
+        if (!varyings.Names[reg])
+            continue;
+        const uint32_t mask = varyings.Masks[reg];
+        const uint8_t width = mask == 1 ? 1 : mask == 3 ? 2 : mask == 7 ? 3 : mask == 15 ? 4 : 0;
+        if (!width || std::strcmp(varyings.Names[reg], "TEXCOORD") != 0 || varyings.Indices[reg] != reg - 1)
+            return false;
+        const CKJitValue value = b.Input({reg - 1, width, CKJIT_INPUT_SMOOTH});
+        const CKJitValue expanded = b.Construct({b.Component(value, 0), b.Component(value, 1 % width),
+                                                 b.Component(value, 2 % width), b.Component(value, 3 % width)});
+        color = b.Add(color, expanded);
+    }
+    CKJitFragmentShader shader;
+    const CKJitResourceLayout layout = {3, 0, 2};
+    if (!b.Finish(color, CKJitValue(), shader) || !CKJitEmitDxbc(shader, layout, words)) return false;
+    if (shift) {
+        // Moving TEXCOORD0 to TEXCOORD1 can still link when both are present.
+        // Instead request a semantic absent from all valid vertex outputs,
+        // while retaining valid registers, instructions and container digest.
+        uint32_t size = 0;
+        const uint32_t *signature = FindChunk(words, "ISGN", size);
+        if (!signature || size < 8 || !signature[0]) return false;
+        words[(int)(signature - words.Begin()) + 3] += 32;
+        CKJitDxbcDigest(words.Begin(), (uint32_t)words.Size(), words.Begin() + 1);
+    }
+    return true;
+}
+
+bool BuildInputLayout(const XArray<uint32_t> &words, XArray<D3D12_INPUT_ELEMENT_DESC> &attributes) {
+    uint32_t size = 0;
+    const uint32_t *signature = FindChunk(words, "ISGN", size);
+    if (!signature || size < 2 || 2 + signature[0] * 6 > size)
+        return false;
+    for (uint32_t i = 0; i < signature[0]; ++i) {
+        const uint32_t *element = signature + 2 + i * 6;
+        const uint32_t mask = element[5] & 0xf;
+        if (element[0] >= size * 4 || element[2] != 0 || (element[3] != 3 && element[3] != 1) || element[4] >= 32)
+            return false;
+        D3D12_INPUT_ELEMENT_DESC attribute = {};
+        attribute.SemanticName = (const char *)signature + element[0];
+        attribute.SemanticIndex = element[1];
+        attribute.Format = mask == 1 ? DXGI_FORMAT_R32_FLOAT : mask == 3 ? DXGI_FORMAT_R32G32_FLOAT :
+                           mask == 7 ? DXGI_FORMAT_R32G32B32_FLOAT : DXGI_FORMAT_R32G32B32A32_FLOAT;
+        if (element[3] == 1)
+            attribute.Format = mask == 1 ? DXGI_FORMAT_R32_UINT : mask == 3 ? DXGI_FORMAT_R32G32_UINT :
+                               mask == 7 ? DXGI_FORMAT_R32G32B32_UINT : DXGI_FORMAT_R32G32B32A32_UINT;
+        attribute.AlignedByteOffset = i * 16;
+        attributes.PushBack(attribute);
+    }
+    return true;
+}
+
 class Validator {
 public:
     enum Resources { ABI, MISPLACED };
@@ -134,12 +203,13 @@ public:
     bool Accepts(const char *name, const XArray<uint32_t> &pixelShader, Resources resources, uint32_t shift);
 
 private:
-    bool CreateRootSignature(UINT samplerSpace, UINT uniformSpace, ComPtr<ID3D12RootSignature> &signature);
+    bool CreateRootSignature(UINT samplerSpace, UINT uniformSpace, D3D12_SHADER_VISIBILITY visibility,
+                             ComPtr<ID3D12RootSignature> &signature);
     bool DrainMessages(); // false after an error message
 
     ComPtr<ID3D12Device> m_Device;
     ComPtr<ID3D12InfoQueue> m_InfoQueue;
-    ComPtr<ID3D12RootSignature> m_RootSignatures[2];
+    ComPtr<ID3D12RootSignature> m_RootSignatures[2][2]; // fragment/vertex, correct/misplaced resources
 };
 
 bool Validator::Initialize() {
@@ -160,10 +230,14 @@ bool Validator::Initialize() {
     }
     if (debug)
         m_Device.As(&m_InfoQueue);
-    return CreateRootSignature(2, 3, m_RootSignatures[ABI]) && CreateRootSignature(0, 0, m_RootSignatures[MISPLACED]);
+    return CreateRootSignature(2, 3, D3D12_SHADER_VISIBILITY_PIXEL, m_RootSignatures[0][ABI]) &&
+           CreateRootSignature(0, 0, D3D12_SHADER_VISIBILITY_PIXEL, m_RootSignatures[0][MISPLACED]) &&
+           CreateRootSignature(0, 1, D3D12_SHADER_VISIBILITY_VERTEX, m_RootSignatures[1][ABI]) &&
+           CreateRootSignature(2, 3, D3D12_SHADER_VISIBILITY_VERTEX, m_RootSignatures[1][MISPLACED]);
 }
 
-bool Validator::CreateRootSignature(UINT samplerSpace, UINT uniformSpace, ComPtr<ID3D12RootSignature> &signature) {
+bool Validator::CreateRootSignature(UINT samplerSpace, UINT uniformSpace, D3D12_SHADER_VISIBILITY visibility,
+                                    ComPtr<ID3D12RootSignature> &signature) {
     D3D12_DESCRIPTOR_RANGE ranges[2] = {};
     ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     ranges[0].NumDescriptors = CKJIT_MAX_SAMPLERS;
@@ -178,19 +252,20 @@ bool Validator::CreateRootSignature(UINT samplerSpace, UINT uniformSpace, ComPtr
         parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         parameters[i].DescriptorTable.NumDescriptorRanges = 1;
         parameters[i].DescriptorTable.pDescriptorRanges = &ranges[i];
-        parameters[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        parameters[i].ShaderVisibility = visibility;
     }
     for (UINT buffer = 0; buffer < CKJIT_MAX_UNIFORM_BUFFERS; ++buffer) {
         D3D12_ROOT_PARAMETER &parameter = parameters[2 + buffer];
         parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
         parameter.Descriptor.ShaderRegister = buffer;
         parameter.Descriptor.RegisterSpace = uniformSpace;
-        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        parameter.ShaderVisibility = visibility;
     }
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};
     desc.NumParameters = 2 + CKJIT_MAX_UNIFORM_BUFFERS;
     desc.pParameters = parameters;
+    desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
     ComPtr<ID3DBlob> blob, errors;
     if (FAILED(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors)) ||
         FAILED(m_Device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
@@ -224,25 +299,36 @@ bool Validator::DrainMessages() {
 
 bool Validator::Accepts(const char *name, const XArray<uint32_t> &pixelShader, Resources resources, uint32_t shift) {
     Varyings varyings;
-    char source[4096];
-    if (!ReadVaryings(pixelShader, varyings) || !BuildVertexShader(varyings, shift, source, sizeof(source))) {
-        std::printf("%s: no vertex shader matches the input signature\n", name);
-        return false;
-    }
     ComPtr<ID3DBlob> vertexShader, errors;
-    if (FAILED(D3DCompile(source, std::strlen(source), "vertex", nullptr, nullptr, "main", "vs_5_1", 0, 0,
-                          &vertexShader, &errors))) {
-        std::printf("%s: the vertex shader does not compile:\n%s\n", name,
-                    errors ? (const char *)errors->GetBufferPointer() : "");
-        return false;
-    }
-
+    XArray<uint32_t> generatedPixel;
+    XArray<D3D12_INPUT_ELEMENT_DESC> attributes;
+    const bool vertex = IsVertexShader(pixelShader);
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
-    desc.pRootSignature = m_RootSignatures[resources].Get();
-    desc.VS.pShaderBytecode = vertexShader->GetBufferPointer();
-    desc.VS.BytecodeLength = vertexShader->GetBufferSize();
-    desc.PS.pShaderBytecode = pixelShader.Begin();
-    desc.PS.BytecodeLength = (SIZE_T)pixelShader.Size() * 4;
+    desc.pRootSignature = m_RootSignatures[vertex ? 1 : 0][resources].Get();
+    if (vertex) {
+        if (!ReadVaryings(pixelShader, varyings, "OSGN") || !BuildPixelShader(varyings, shift, generatedPixel) ||
+            !BuildInputLayout(pixelShader, attributes)) {
+            std::printf("%s: cannot build the vertex validation interface\n", name);
+            return false;
+        }
+        desc.VS = {pixelShader.Begin(), (SIZE_T)pixelShader.Size() * 4};
+        desc.PS = {generatedPixel.Begin(), (SIZE_T)generatedPixel.Size() * 4};
+        desc.InputLayout = {attributes.Begin(), (UINT)attributes.Size()};
+    } else {
+        char source[4096];
+        if (!ReadVaryings(pixelShader, varyings) || !BuildVertexShader(varyings, shift, source, sizeof(source))) {
+            std::printf("%s: no vertex shader matches the input signature\n", name);
+            return false;
+        }
+        if (FAILED(D3DCompile(source, std::strlen(source), "vertex", nullptr, nullptr, "main", "vs_5_1", 0, 0,
+                              &vertexShader, &errors))) {
+            std::printf("%s: the vertex shader does not compile:\n%s\n", name,
+                        errors ? (const char *)errors->GetBufferPointer() : "");
+            return false;
+        }
+        desc.VS = {vertexShader->GetBufferPointer(), vertexShader->GetBufferSize()};
+        desc.PS = {pixelShader.Begin(), (SIZE_T)pixelShader.Size() * 4};
+    }
     desc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
     desc.SampleMask = 0xffffffffu;
     desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
@@ -295,19 +381,19 @@ int main(int argc, char **argv) {
         }
         failures += validator.Accepts(argv[i], words, Validator::ABI, 0) ? 0 : 1;
 
-        if (digestControls == 0) {
+        if (digestControls == 0 || IsVertexShader(words)) {
             XArray<uint32_t> corrupted = words;
             corrupted[1] ^= 1;
             failures += Refuses(validator, argv[i], "wrong digest", corrupted, Validator::ABI, 0) ? 0 : 1;
             ++digestControls;
         }
         if (DeclaresResources(words)) {
-            failures += Refuses(validator, argv[i], "resources in space 0", words, Validator::MISPLACED, 0) ? 0 : 1;
+            failures += Refuses(validator, argv[i], "resources in another space", words, Validator::MISPLACED, 0) ? 0 : 1;
             ++resourceControls;
         }
         Varyings varyings;
-        if (ReadVaryings(words, varyings) && varyings.Last > 0) {
-            failures += Refuses(validator, argv[i], "vertex outputs one register off", words, Validator::ABI, 1) ? 0 : 1;
+        if (ReadVaryings(words, varyings, IsVertexShader(words) ? "OSGN" : "ISGN") && varyings.Last > 0) {
+            failures += Refuses(validator, argv[i], "incompatible varying linkage", words, Validator::ABI, 1) ? 0 : 1;
             ++linkageControls;
         }
     }
