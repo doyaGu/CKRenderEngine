@@ -49,7 +49,11 @@ bool SupportedDeformation(const CKFFConstantSet &constants) {
     const CKBYTE *draw = constants[CKRST_BLOCK_DRAW_PARAMS].Bytes.Begin();
     float tween[4];
     std::memcpy(tween, draw + CKFF_DRAW_PARAM_TWEEN * 16, sizeof(tween));
-    return tween[1] == 0.0f;
+    if (tween[1] == 0.0f) return true;
+    // The resolver supplies a position/normal stream mask and no indices.
+    // Finite factors are deliberately not clamped: extrapolation is legal.
+    return tween[1] == 2.0f && std::isfinite(tween[0]) && tween[3] == 0.0f &&
+           (tween[2] == 1.0f || tween[2] == 2.0f || tween[2] == 3.0f);
 }
 }
 
@@ -102,7 +106,17 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
     CKJitValue diffuse = b.Input({4, 4, CKJIT_INPUT_ATTRIBUTE});
     CKJitValue specular = b.Input({5, 4, CKJIT_INPUT_ATTRIBUTE});
     const CKJitValue weight = b.Input({7, 3, CKJIT_INPUT_ATTRIBUTE});
-    const CKJitValue tweening = b.Bool(false);
+    const CKJitValue tween = uniform(rows.Draw, CKFF_DRAW_PARAM_TWEEN);
+    const CKJitValue tweening = b.Equal(c(tween, 1), b.Float(2));
+    const CKJitValue streams = b.FloatToInt(c(tween, 2));
+    const auto interpolate = [&](CKJitValue from, CKJitValue to) {
+        return referenceFormat == CKRST_SHADER_FORMAT_DXIL
+            ? b.Mad(b.Sub(to, from), c(tween, 0), from) : b.Lerp(from, to, c(tween, 0));
+    };
+    position = b.Select(b.And(tweening, b.IntNotEqual(b.IntAnd(streams, b.Int(1)), b.Int(0))),
+        interpolate(position, tangent), position);
+    normal = b.Select(b.And(tweening, b.IntNotEqual(b.IntAnd(streams, b.Int(2)), b.Int(0))),
+        interpolate(normal, b.Input({3, 3, CKJIT_INPUT_ATTRIBUTE})), normal);
     const CKJitValue geometry[] = {transform(rows.Matrices, CKFF_MATRIX_MVP_OR_VIEWPROJ, position, true),
         b.Swizzle(transform(rows.Matrices, CKFF_MATRIX_MODELVIEW, position, true), "xyz"),
         b.Swizzle(transform(rows.Matrices, CKFF_MATRIX_NORMAL, normal, false), "xyz"),
