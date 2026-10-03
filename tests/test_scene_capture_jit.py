@@ -12,7 +12,7 @@ import scene_capture_jit
 
 
 class SceneCaptureReferenceTest(unittest.TestCase):
-    def run_capture(self, external=True, off_exit=0, off_comparisons=5, scene="test_scene", lit_draws=0,
+    def run_capture(self, external=True, off_exit=0, off_comparisons=None, scene="test_scene", lit_draws=0,
                     off_failed_pixels=0, off_max_diff=1):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -33,10 +33,11 @@ class SceneCaptureReferenceTest(unittest.TestCase):
                 stats = "FFJIT_STATS ready=1 selected=1" if enabled else "FFJIT_STATS ready=0 selected=0"
                 if enabled and kwargs["env"]["CKRE_SDL_GPU_FF_VERTEX_JIT"] == "1":
                     stats += f" lit={lit_draws}"
-                count = 5 if enabled else off_comparisons
+                frames = command[command.index("--capture-frames") + 1].split(",")
+                count = len(frames) + 1 if enabled or off_comparisons is None else off_comparisons
                 comparisons = ""
                 if "--compare" in command:
-                    names = [scene] + [f"{scene}.frame-{frame}" for frame in (1, 5, 30, 120)]
+                    names = [scene] + [f"{scene}.frame-{frame}" for frame in frames]
                     for index, name in enumerate(names[:count]):
                         failed = off_failed_pixels if not enabled and index == 0 else 0
                         maximum = off_max_diff if not enabled and index == 0 else 1
@@ -80,7 +81,17 @@ class SceneCaptureReferenceTest(unittest.TestCase):
     def test_missing_off_mode_checkpoint_fails_the_run(self):
         code, _, rows, _, _ = self.run_capture(off_comparisons=4)
         self.assertEqual(code, 1)
-        self.assertIn("expected final image and four checkpoints", rows[0]["issues"])
+        self.assertIn("expected final image and all scene checkpoints", rows[0]["issues"])
+
+    def test_dynamic_cube_requires_every_filter_checkpoint(self):
+        for scene in ("cube_filter_dynamic", "cube_mip_dynamic"):
+            code, captures, rows, _, _ = self.run_capture(scene=scene, lit_draws=1)
+            self.assertEqual(code, 0)
+            self.assertTrue(all(row["comparisons"] == 7 for row in rows))
+            self.assertTrue(all(command[command.index("--capture-frames") + 1] == "1,5,30,60,90,120" for command in captures))
+            code, _, rows, _, _ = self.run_capture(scene=scene, lit_draws=1, off_comparisons=6)
+            self.assertEqual(code, 1)
+            self.assertIn("expected final image and all scene checkpoints", rows[0]["issues"])
 
     def test_default_keeps_same_engine_parity(self):
         code, captures, rows, _, output = self.run_capture(external=False)
@@ -102,7 +113,8 @@ class SceneCaptureReferenceTest(unittest.TestCase):
 
     def test_lit_scene_parity_requires_generated_lighting(self):
         for scene in ("lighting_spotlight", "material_channels", "fog_linear", "fog_exp",
-                      "fog_exp2", "texgen_envmap", "rtt_2d", "rtt_cube", "cube_face_filter"):
+                      "fog_exp2", "texgen_envmap", "rtt_2d", "rtt_cube", "cube_face_filter",
+                      "cube_filter_dynamic", "cube_mip_dynamic"):
             for draws in (0, 1):
                 with self.subTest(scene=scene, lit_draws=draws):
                     code, _, rows, _, _ = self.run_capture(scene=scene, lit_draws=draws)

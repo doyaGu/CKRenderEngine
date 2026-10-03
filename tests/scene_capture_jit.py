@@ -43,6 +43,7 @@ def main():
             folder = output / driver / mode
             folder.mkdir(parents=True, exist_ok=True)
             for scene in scenes:
+                checkpoints = "1,5,30,60,90,120" if scene in ("cube_filter_dynamic", "cube_mip_dynamic") else "1,5,30,120"
                 env = os.environ.copy()
                 env.update(CKRE_SDL_GPU_DRIVER=driver, CKRE_SDL_GPU_FF_JIT_CACHE="0",
                            CKRE_SDL_GPU_FF_JIT="0" if mode == "off" else "1",
@@ -50,7 +51,7 @@ def main():
                            CKRE_SDL_GPU_FF_JIT_STATS="1")
                 command = [str(tool), "--render-engine-dir", str(engine), "--rasterizer", "sdlgpu",
                            "--scene", scene, "--frames", "120", "--frame-delay-ms", "16",
-                           "--capture-frames", "1,5,30,120",
+                           "--capture-frames", checkpoints,
                            "--size", "640x480", "--hidden", "--out", str(folder)]
                 compare_dir = reference
                 if compare_dir is None and mode != "off":
@@ -85,7 +86,7 @@ def main():
                                              "lighting_attenuation", "lighting_spotlight", "tween_3d",
                                              "skinning_3d", "material_channels", "fog_linear", "fog_exp",
                                              "fog_exp2", "texgen_envmap", "rtt_2d", "rtt_cube",
-                                             "cube_face_filter") and not stats.get("lit", 0):
+                                             "cube_face_filter", "cube_filter_dynamic", "cube_mip_dynamic") and not stats.get("lit", 0):
                     issues.append("no generated lit vertex draw")
                 if mode == "on" and scene == "tween_3d":
                     if not stats.get("tween", 0) or not stats.get("unlit", 0):
@@ -106,7 +107,8 @@ def main():
                               reference=str(compare_dir) if compare_dir else None,
                               comparisons=len(maxima), max_channel_diff=max(maxima, default=None),
                               image_comparisons=image_comparisons, issues=issues)
-                if compare_dir is not None and len(maxima) != 5: issues.append("expected final image and four checkpoints")
+                if compare_dir is not None and len(maxima) != 1 + len(checkpoints.split(",")):
+                    issues.append("expected final image and all scene checkpoints")
                 results.append(record)
                 (output / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
                 print(f"{driver}/{mode}/{scene}: {'FAIL ' + '; '.join(issues) if issues else 'PASS'}", flush=True)
