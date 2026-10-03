@@ -93,9 +93,15 @@ def main():
                     for field in ("clip", "positiont", "unlit", "lit", "tween", "blend"):
                         if not stats.get(field, 0): issues.append(f"no generated {field} draw in clipping scene")
                 maxima = [int(x) for x in re.findall(r"max diff (\d+)", text)]
+                image_comparisons = [dict(image=name, max_channel_diff=int(maximum),
+                                          failed_pixels=int(failed), masked_pixels=int(masked))
+                    for name, maximum, failed, masked in re.findall(
+                        r"^\[([^\]\r\n]+)\] pass [^\r\n]*max diff (\d+), failed pixels (\d+), masked (\d+)\)",
+                        text, re.MULTILINE)]
                 record = dict(driver=driver, mode=mode, scene=scene, exit=code, stats=stats,
                               reference=str(compare_dir) if compare_dir else None,
-                              comparisons=len(maxima), max_channel_diff=max(maxima, default=None), issues=issues)
+                              comparisons=len(maxima), max_channel_diff=max(maxima, default=None),
+                              image_comparisons=image_comparisons, issues=issues)
                 if compare_dir is not None and len(maxima) != 5: issues.append("expected final image and four checkpoints")
                 results.append(record)
                 (output / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")

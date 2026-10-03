@@ -12,7 +12,8 @@ import scene_capture_jit
 
 
 class SceneCaptureReferenceTest(unittest.TestCase):
-    def run_capture(self, external=True, off_exit=0, off_comparisons=5, scene="test_scene", lit_draws=0):
+    def run_capture(self, external=True, off_exit=0, off_comparisons=5, scene="test_scene", lit_draws=0,
+                    off_failed_pixels=0, off_max_diff=1):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             reference = root / "reference"
@@ -33,7 +34,15 @@ class SceneCaptureReferenceTest(unittest.TestCase):
                 if enabled and kwargs["env"]["CKRE_SDL_GPU_FF_VERTEX_JIT"] == "1":
                     stats += f" lit={lit_draws}"
                 count = 5 if enabled else off_comparisons
-                comparisons = "max diff 1\n" * count if "--compare" in command else ""
+                comparisons = ""
+                if "--compare" in command:
+                    names = [scene] + [f"{scene}.frame-{frame}" for frame in (1, 5, 30, 120)]
+                    for index, name in enumerate(names[:count]):
+                        failed = off_failed_pixels if not enabled and index == 0 else 0
+                        maximum = off_max_diff if not enabled and index == 0 else 1
+                        comparisons += (f"[{name}] pass {100 * (1 - failed / 307200):.6f}% "
+                                        f"(threshold 2, min 100.00%, max diff {maximum}, "
+                                        f"failed pixels {failed}, masked 0) {'FAIL' if failed else 'OK'}\n")
                 return subprocess.CompletedProcess(command, 0 if enabled else off_exit, stats + "\n" + comparisons)
 
             with patch("sys.argv", args), patch.object(scene_capture_jit.subprocess, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
@@ -56,6 +65,16 @@ class SceneCaptureReferenceTest(unittest.TestCase):
     def test_off_mode_oracle_failure_fails_the_run(self):
         code, _, rows, _, _ = self.run_capture(off_exit=5)
         self.assertEqual(code, 1)
+        self.assertIn("capture/compare exit 5", rows[0]["issues"])
+
+    def test_report_retains_single_pixel_failure_evidence(self):
+        code, _, rows, _, _ = self.run_capture(off_exit=5, off_failed_pixels=1, off_max_diff=11)
+        self.assertEqual(code, 1)
+        self.assertEqual(rows[0]["max_channel_diff"], 11)
+        self.assertEqual(rows[0]["image_comparisons"][0],
+                         dict(image="test_scene", max_channel_diff=11, failed_pixels=1, masked_pixels=0))
+        self.assertEqual(len(rows[0]["image_comparisons"]), 5)
+        self.assertTrue(all(image["failed_pixels"] == 0 for image in rows[0]["image_comparisons"][1:]))
         self.assertIn("capture/compare exit 5", rows[0]["issues"])
 
     def test_missing_off_mode_checkpoint_fails_the_run(self):
