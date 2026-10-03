@@ -16,10 +16,17 @@ def main():
     parser.add_argument("--tool", required=True, type=Path)
     parser.add_argument("--engine-dir", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--reference-dir", type=Path,
+                        help="compare every mode, including off, against these external scene PNGs")
     parser.add_argument("--drivers", default="direct3d12,vulkan")
     parser.add_argument("--scenes", default="all")
     args = parser.parse_args()
     tool, engine, output = args.tool.resolve(), args.engine_dir.resolve(), args.out.resolve()
+    reference = args.reference_dir.resolve() if args.reference_dir else None
+    if reference and (reference == output or output in reference.parents or reference in output.parents):
+        parser.error("external reference and output directories must not overlap")
+    if reference and not reference.is_dir():
+        parser.error("external reference directory does not exist")
     listing = subprocess.run([str(tool), "--list-scenes"], check=True, capture_output=True, text=True).stdout
     scenes = re.findall(r"^(\w+)\s+oracle=", listing, re.MULTILINE)
     if args.scenes != "all":
@@ -45,8 +52,11 @@ def main():
                            "--scene", scene, "--frames", "120", "--frame-delay-ms", "16",
                            "--capture-frames", "1,5,30,120",
                            "--size", "640x480", "--hidden", "--out", str(folder)]
-                if mode != "off":
-                    command += ["--compare", str(output / driver / "off"), "--threshold", "2",
+                compare_dir = reference
+                if compare_dir is None and mode != "off":
+                    compare_dir = output / driver / "off"
+                if compare_dir is not None:
+                    command += ["--compare", str(compare_dir), "--threshold", "2",
                                 "--min-pass", "1", "--require-all"]
                 try:
                     run = subprocess.run(command, env=env, stdout=subprocess.PIPE,
@@ -84,8 +94,9 @@ def main():
                         if not stats.get(field, 0): issues.append(f"no generated {field} draw in clipping scene")
                 maxima = [int(x) for x in re.findall(r"max diff (\d+)", text)]
                 record = dict(driver=driver, mode=mode, scene=scene, exit=code, stats=stats,
+                              reference=str(compare_dir) if compare_dir else None,
                               comparisons=len(maxima), max_channel_diff=max(maxima, default=None), issues=issues)
-                if mode != "off" and len(maxima) != 5: issues.append("expected final image and four checkpoints")
+                if compare_dir is not None and len(maxima) != 5: issues.append("expected final image and four checkpoints")
                 results.append(record)
                 (output / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
                 print(f"{driver}/{mode}/{scene}: {'FAIL ' + '; '.join(issues) if issues else 'PASS'}", flush=True)
