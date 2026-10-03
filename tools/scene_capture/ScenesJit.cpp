@@ -156,11 +156,106 @@ void MoveDynamicLighting(SceneContext &sc) {
         light->LookAt(&target);
     }
 }
+
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+// The extended tween streams are a Ballanced API. The surrounding world,
+// materials, camera, lighting and render callback use ordinary CK2 objects.
+struct TweenVertex {
+    VxVector Position, Normal, Target, TargetNormal;
+    Vx2DVector UV;
+    CKDWORD Color;
+};
+std::vector<TweenVertex> g_TweenVertices;
+std::vector<CKWORD> g_TweenIndices;
+CKMaterial *g_TweenMaterials[6] = {};
+
+void DrawTweenScene(CKRenderContext *rc, void *argument) {
+    SceneContext &sc = *static_cast<SceneContext *>(argument);
+    const float frame = float(sc.FrameIndex);
+    const float factor = frame <= 4 ? frame / 4 : frame <= 29 ? 1 - (frame - 4) * 0.65f / 25
+        : 0.35f + (frame - 29) * 0.85f / 90;
+    CKDWORD factorBits;
+    std::memcpy(&factorBits, &factor, sizeof(factor));
+    for (unsigned object = 0; object < 6; ++object) {
+        const bool lit = object < 3;
+        const unsigned streams = object % 3 + 1;
+        rc->SetCurrentMaterial(g_TweenMaterials[object], lit);
+        rc->SetState(VXRENDERSTATE_LIGHTING, lit);
+        rc->SetState(VXRENDERSTATE_NORMALIZENORMALS, TRUE);
+        rc->SetState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_TWEENING);
+        rc->SetState(VXRENDERSTATE_TWEENFACTOR, factorBits);
+        VxMatrix world; Vx3DMatrixIdentity(world);
+        const float angle = frame * 0.003f;
+        world[0][0] = world[2][2] = std::cos(angle);
+        world[0][2] = std::sin(angle); world[2][0] = -std::sin(angle);
+        world[3][0] = float(object % 3) * 4.5f - 4.5f;
+        world[3][1] = 2.3f; world[3][2] = lit ? 2.8f : -3.0f;
+        rc->SetWorldTransformationMatrix(world);
+        TweenVertex &v = g_TweenVertices.front();
+        VxDrawPrimitiveData data = {};
+        data.VertexCount = int(g_TweenVertices.size());
+        data.Flags = CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE | CKRST_DP_STAGES0 | CKRST_DP_TWEEN;
+        if (lit) data.Flags |= CKRST_DP_LIGHT;
+        data.PositionPtr = &v.Position; data.NormalPtr = &v.Normal;
+        data.ColorPtr = &v.Color; data.TexCoordPtr = &v.UV;
+        data.PositionStride = data.NormalStride = data.ColorStride = data.TexCoordStride = sizeof(v);
+        if (streams & 1) { data.TweenPositionPtr = &v.Target; data.TweenPositionStride = sizeof(v); }
+        if (streams & 2) { data.TweenNormalPtr = &v.TargetNormal; data.TweenNormalStride = sizeof(v); }
+        if (!rc->DrawPrimitive(VX_TRIANGLELIST, g_TweenIndices.data(), int(g_TweenIndices.size()), &data))
+            sc.Error = "tween scene draw failed";
+    }
+    rc->SetState(VXRENDERSTATE_VERTEXBLEND, VXVBLEND_DISABLE);
+    rc->SetState(VXRENDERSTATE_LIGHTING, TRUE);
+}
+
+bool BuildTweenScene(SceneContext &sc) {
+    g_TweenVertices.clear(); g_TweenIndices.clear();
+    SceneSetBackgroundColor(sc, 0xff283848);
+    SceneSetAmbient(sc, 0xff383838);
+    CKTexture *checker = SceneCreateCheckerTexture(sc, "tween-checker", 128, 128, 16, 0xffe0c878, 0xff405870);
+    CKMaterial *floor = SceneCreateMaterial(sc, "floor", VxColor(0.6f, 0.65f, 0.7f, 1.0f));
+    SceneCreateEntity(sc, "floor", SceneCreatePlaneMesh(sc, "floor", 24, 22, 6, 1, floor), VxVector(0, 0, 0));
+    CKMaterial *occluder = SceneCreateMaterial(sc, "occluder", VxColor(0.2f, 0.35f, 0.45f, 1.0f));
+    SceneCreateEntity(sc, "occluder", SceneCreateBoxMesh(sc, "occluder", VxVector(11, 0.8f, 0.8f), occluder), VxVector(0, 0.8f, -4.2f));
+    for (unsigned i = 0; i < 6; ++i) {
+        char name[32]; snprintf(name, sizeof(name), "tween-%u", i);
+        g_TweenMaterials[i] = SceneCreateMaterial(sc, name, VxColor(1.0f, 1.0f, 1.0f, 1.0f), checker);
+        if (!g_TweenMaterials[i]) return false;
+        g_TweenMaterials[i]->SetSpecular(VxColor(0.7f, 0.7f, 0.7f, 1.0f));
+        g_TweenMaterials[i]->SetPower(16.0f);
+    }
+    const unsigned rings = 20, segments = 28;
+    for (unsigned r = 0; r <= rings; ++r) for (unsigned s = 0; s <= segments; ++s) {
+        const float phi = 3.14159265359f * float(r) / rings, theta = 6.28318530718f * float(s) / segments;
+        TweenVertex v;
+        v.Normal = VxVector(std::sin(phi) * std::cos(theta), std::cos(phi), std::sin(phi) * std::sin(theta));
+        v.Position = v.Normal * 1.4f;
+        v.Target = VxVector(v.Position.x * 0.65f, v.Position.y * 1.5f, v.Position.z * 0.85f);
+        v.TargetNormal = VxVector(v.Normal.x / 0.65f, v.Normal.y / 1.5f, v.Normal.z / 0.85f);
+        v.TargetNormal.Normalize();
+        v.UV = Vx2DVector(float(s) / segments, float(r) / rings); v.Color = 0xffffffff;
+        g_TweenVertices.push_back(v);
+        if (r < rings && s < segments) {
+            const CKWORD a = CKWORD(r * (segments + 1) + s), b = a + 1, c = a + segments + 1, d = c + 1;
+            for (CKWORD index : {a, b, d, a, d, c}) g_TweenIndices.push_back(index);
+        }
+    }
+    SceneCreateLight(sc, "sun", VX_LIGHTDIREC, VxColor(0.9f, 0.8f, 0.7f, 1.0f), VxVector(0, 8, -5), VxVector(0.4f, -1, 0.5f), 100);
+    sc.MainCamera = SceneCreateCamera(sc, "camera", VxVector(0, 10, -20), VxVector(0, 1.4f, 0), 50);
+    sc.RenderContext->SetFogMode(VXFOG_LINEAR);
+    sc.RenderContext->SetFogStart(16); sc.RenderContext->SetFogEnd(40); sc.RenderContext->SetFogColor(0xff283848);
+    sc.RenderContext->AddPostRenderCallBack(DrawTweenScene, &sc, FALSE, TRUE);
+    return sc.MainCamera != NULL;
+}
+#endif
 }
 
 const SceneDef g_ScenesJit[] = {
     {"composite_2d", "Animated cards, overlapping alpha panels and sprite text through CK2 scene traversal", BuildComposite2D, MoveComposite2D, NULL, false, 2, 1.0f, NULL},
     {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, false, 2, 1.0f, NULL},
     {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, false, 2, 1.0f, NULL},
+#ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
+    {"tween_3d", "Six textured lit/prelit morphs with position/normal streams, fog and depth occlusion", BuildTweenScene, NULL, NULL, false, 2, 1.0f, NULL},
+#endif
 };
 const int g_ScenesJitCount = sizeof(g_ScenesJit) / sizeof(g_ScenesJit[0]);
