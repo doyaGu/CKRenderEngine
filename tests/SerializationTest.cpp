@@ -4,6 +4,7 @@
 #include <climits>
 #include <cstring>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <vector>
 
@@ -41,6 +42,24 @@
 #include "MorphEditReferenceSamples.h"
 #include "LinearReferenceSamples.h"
 #include "VxSharedLibrary.h"
+
+// Test-executable-only replacement for the nothrow array allocation entry.
+// Delegate normally; a scoped counter in the test thread can fail one request.
+static thread_local int s_MorphArrayAllocationFailure = -1;
+
+void *operator new[](size_t bytes, const std::nothrow_t &) noexcept {
+    if (s_MorphArrayAllocationFailure == 0) {
+        s_MorphArrayAllocationFailure = -1;
+        return nullptr;
+    }
+    if (s_MorphArrayAllocationFailure > 0)
+        --s_MorphArrayAllocationFailure;
+    try {
+        return ::operator new[](bytes);
+    } catch (...) {
+        return nullptr;
+    }
+}
 
 extern void SetProcessorSpecific_FunctionsPtr();
 
@@ -1681,6 +1700,216 @@ void LoadedMorphInterpolationAvoidsIntermediateLoss() {
     }
 }
 
+void CheckResizedMorphKeys(RCKMorphController &controller, int count, int retained, bool normals) {
+    Check(controller.GetMorphVertexCount() == count && controller.GetKeyCount() == 2 && controller.GetLength() == 10.0f,
+          "Morph resize changed controller/key counts or length");
+    CKDWORD expected[45] = {};
+    expected[0] = 2; expected[1] = count; expected[2] = normals ? 1 : 0;
+    int word = 3;
+    for (int keyIndex = 0; keyIndex < 2; ++keyIndex) {
+        CKMorphKey *key = static_cast<CKMorphKey *>(controller.GetKey(keyIndex));
+        const float time = keyIndex ? 10.0f : 0.0f;
+        Check(key->TimeStep == time && key->PosArray && (key->NormArray != nullptr) == normals,
+              "Morph resize changed key time or array presence");
+        memcpy(expected + word++, &time, sizeof(time));
+        for (int vertex = 0; vertex < count; ++vertex) {
+            const VxVector value = vertex < retained ? VxVector((keyIndex ? 10.0f : 2.0f) + vertex,
+                keyIndex ? 7.0f : 3.0f, keyIndex ? 8.0f : 4.0f) : VxVector(0.0f);
+            Check(Equal(key->PosArray[vertex], value), "Morph resize lost the retained prefix or failed to clear the new tail");
+            memcpy(expected + word, &value, sizeof(value)); word += 3;
+        }
+        if (normals) {
+            for (int vertex = 0; vertex < count; ++vertex) {
+                const CKDWORD packed = vertex < retained ? (300u << 16) | (keyIndex ? 1000u : 200u) : 0u;
+                Check(!memcmp(key->NormArray + vertex, &packed, sizeof(packed)), "Morph resize changed normal prefix/tail bytes");
+                expected[word++] = packed;
+            }
+        }
+    }
+    CKDWORD output[47];
+    for (int i = 0; i < 47; ++i) output[i] = 0x12345678u;
+    const int bytes = word * sizeof(CKDWORD);
+    Check(controller.DumpKeysTo(nullptr) == bytes && controller.DumpKeysTo(output + 1) == bytes,
+          "Resized Morph wire size changed");
+    Check(output[0] == 0x12345678u && !memcmp(output + 1, expected, bytes), "Resized Morph wire data differs from independent values");
+    for (int i = word + 1; i < 47; ++i) Check(output[i] == 0x12345678u, "Morph Save exceeded its declared size");
+    VxVector values[5];
+    VxCompressedVector packedNormals[5];
+    Check(controller.Evaluate(5.0f, count, values, sizeof(VxVector), normals ? packedNormals : nullptr), "Resized Morph evaluation failed");
+    for (int vertex = 0; vertex < count; ++vertex) {
+        Check(Equal(values[vertex], vertex < retained ? VxVector(6.0f + vertex, 5.0f, 6.0f) : VxVector(0.0f)),
+              "Resized Morph interpolated the wrong prefix/tail");
+        if (normals) Check(packedNormals[vertex].xa == (vertex < retained ? 600 : 0) && packedNormals[vertex].ya == (vertex < retained ? 300 : 0),
+                           "Resized Morph normal interpolation changed");
+    }
+}
+
+template<bool Normals>
+void LoadedMorphCountResizesStorage() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation source(&context, "MorphResizeSource"), loaded(&context, "MorphResizeLoaded");
+    AddMorphRequestKeys(source);
+    if (!Normals) {
+        for (int i = 0; i < 2; ++i) {
+            CKMorphKey *key = static_cast<CKMorphKey *>(source.GetMorphController()->GetKey(i));
+            delete[] key->NormArray; key->NormArray = nullptr;
+        }
+    }
+    Chunk initial(source.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    LoadChunk(loaded, initial.get());
+    RCKMorphController *controller = static_cast<RCKMorphController *>(loaded.GetMorphController());
+    const int counts[] = {5, 2, 4, 0, 1};
+    const int retained[] = {3, 2, 2, 0, 0};
+    for (int step = 0; step < 5; ++step) {
+        CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
+        VxVector *oldPosition = first->PosArray;
+        VxCompressedVector *oldNormal = first->NormArray;
+        controller->SetMorphVertexCount(counts[step]);
+        Check(controller->GetKey(0) == first && first->PosArray != oldPosition && (!Normals || first->NormArray != oldNormal),
+              "Morph count change retained old capacity instead of resizing payloads");
+        CheckResizedMorphKeys(*controller, counts[step], retained[step], Normals);
+        VxVector *samePosition = first->PosArray;
+        VxCompressedVector *sameNormal = first->NormArray;
+        controller->SetMorphVertexCount(counts[step]);
+        Check(first->PosArray == samePosition && first->NormArray == sameNormal, "Same-count Morph update replaced payloads");
+        RCKMorphController copy;
+        Check(copy.Clone(controller), "Resized Morph Clone failed");
+        CheckResizedMorphKeys(copy, counts[step], retained[step], Normals);
+        Check(copy.GetKey(0) != first && static_cast<CKMorphKey *>(copy.GetKey(0))->PosArray != first->PosArray,
+              "Resized Morph Clone aliases source storage");
+        Chunk saved(loaded.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        RCKObjectAnimation reloaded(&context, "MorphResizeReloaded");
+        LoadChunk(reloaded, saved.get());
+        CheckResizedMorphKeys(*static_cast<RCKMorphController *>(reloaded.GetMorphController()), counts[step], retained[step], Normals);
+    }
+}
+
+void MorphCountRejectsInvalidSizes() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphInvalidSize");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(0));
+    VxVector *positions = key->PosArray;
+    VxCompressedVector *normals = key->NormArray;
+    const int invalid[] = {-1, INT_MAX};
+    for (int i = 0; i < 2; ++i) {
+        controller->SetMorphVertexCount(invalid[i]);
+        Check(controller->GetMorphVertexCount() == 3 && key->PosArray == positions && key->NormArray == normals,
+              "Invalid Morph count changed state");
+        CheckResizedMorphKeys(*controller, 3, 3, true);
+    }
+    RCKMorphController empty;
+    for (int i = 0; i < 2; ++i) {
+        empty.SetMorphVertexCount(invalid[i]);
+        Check(empty.GetMorphVertexCount() == 0 && empty.GetKeyCount() == 0, "Empty Morph accepted an unrepresentable count");
+    }
+}
+
+void MorphCountPreservesOmittedPayloads() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphOmittedPayloadResize");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
+    CKMorphKey *last = static_cast<CKMorphKey *>(controller->GetKey(1));
+    delete[] first->PosArray; first->PosArray = nullptr;
+    delete[] first->NormArray; first->NormArray = nullptr;
+    VxVector *oldLast = last->PosArray;
+    controller->SetMorphVertexCount(5);
+    Check(!first->PosArray && !first->NormArray && last->PosArray != oldLast && last->NormArray,
+          "Morph resize changed omitted payload presence or left old capacity");
+    VxVector values[5];
+    VxCompressedVector normals[5];
+    for (int i = 0; i < 5; ++i) { values[i].Set(123.0f, 123.0f, 123.0f); normals[i].xa = 111; normals[i].ya = 222; }
+    Check(controller->Evaluate(0.0f, 5, values, sizeof(VxVector), normals), "Omitted first-key evaluation failed");
+    for (int i = 0; i < 5; ++i) Check(Equal(values[i], VxVector(123.0f)) && normals[i].xa == 111 && normals[i].ya == 222,
+                                      "Resizing an omitted payload changed caller outputs");
+    Check(controller->Evaluate(11.0f, 5, values, sizeof(VxVector), normals), "Resized last-key evaluation failed");
+    for (int i = 0; i < 5; ++i) Check(Equal(values[i], i < 3 ? VxVector(10.0f + i, 7.0f, 8.0f) : VxVector(0.0f)) &&
+                                      normals[i].xa == (i < 3 ? 1000 : 0) && normals[i].ya == (i < 3 ? 300 : 0),
+                                      "Partial Morph resize lost its valid prefix/tail");
+    RCKMorphController copy;
+    Check(copy.Clone(controller) && !static_cast<CKMorphKey *>(copy.GetKey(0))->PosArray &&
+          !static_cast<CKMorphKey *>(copy.GetKey(0))->NormArray, "Resize/Clone materialized omitted arrays");
+}
+
+void MorphCountResizeComposesWithKeyEditing() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphResizeThenEdit");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
+    VxVector *oldPosition = first->PosArray;
+    controller->SetMorphVertexCount(5);
+    Check(first->PosArray != oldPosition, "Morph edit fixture retained undersized storage");
+    CKMorphKey source = *first;
+    source.TimeStep = -5.0f;
+    Check(controller->AddKey(&source, FALSE) == 0, "Morph insertion after resize lost time ordering");
+    CKMorphKey *added = static_cast<CKMorphKey *>(controller->GetKey(0));
+    Check(added->PosArray != source.PosArray && added->NormArray != source.NormArray && added->NormArray,
+          "Morph insertion after resize lost independent normal/position storage");
+    for (int i = 0; i < 5; ++i) Check(Equal(added->PosArray[i], i < 3 ? VxVector(2.0f + i, 3.0f, 4.0f) : VxVector(0.0f)) &&
+                                     added->NormArray[i].xa == (i < 3 ? 200 : 0) && added->NormArray[i].ya == (i < 3 ? 300 : 0),
+                                     "Morph insertion failed to copy the resized prefix/tail");
+    controller->RemoveKey(1);
+    controller->SetMorphVertexCount(2);
+    CKDWORD expected[21] = {};
+    expected[0] = 2; expected[1] = 2; expected[2] = 1;
+    int word = 3;
+    for (int i = 0; i < 2; ++i) {
+        const float time = i ? 10.0f : -5.0f;
+        memcpy(expected + word++, &time, sizeof(time));
+        for (int vertex = 0; vertex < 2; ++vertex) {
+            const VxVector value((i ? 10.0f : 2.0f) + vertex, i ? 7.0f : 3.0f, i ? 8.0f : 4.0f);
+            memcpy(expected + word, &value, sizeof(value)); word += 3;
+        }
+        for (int vertex = 0; vertex < 2; ++vertex) expected[word++] = (300u << 16) | (i ? 1000u : 200u);
+    }
+    WireWords expectedWire(expected, expected + word);
+    CheckSavedController(animation, CKANIMATION_MORPH_CONTROL, expectedWire);
+    Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    RCKObjectAnimation reloaded(&context, "MorphResizeEditReloaded");
+    LoadChunk(reloaded, saved.get());
+    CheckSavedController(reloaded, CKANIMATION_MORPH_CONTROL, expectedWire);
+    VxVector output[2];
+    VxCompressedVector normals[2];
+    Check(reloaded.EvaluateMorphTarget(-5.0f, 2, output, sizeof(VxVector), normals) && Equal(output[0], VxVector(2.0f, 3.0f, 4.0f)) &&
+          Equal(output[1], VxVector(3.0f, 3.0f, 4.0f)) && normals[0].xa == 200 && normals[0].ya == 300,
+          "Resize/Add/Remove/Save/Load lost the independent endpoint state");
+}
+
+void MorphCountResizePreservesStateOnAllocationFailure() {
+    int failures = 0;
+    bool succeeded = false;
+    for (int failedAllocation = 0; failedAllocation < 16; ++failedAllocation) {
+        CKContext context(nullptr, 0, 0);
+        RCKObjectAnimation animation(&context, "MorphResizeAllocationFailure");
+        AddMorphRequestKeys(animation);
+        RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+        CKMorphKey *keys[2];
+        VxVector *positions[2];
+        VxCompressedVector *normals[2];
+        for (int i = 0; i < 2; ++i) {
+            keys[i] = static_cast<CKMorphKey *>(controller->GetKey(i));
+            positions[i] = keys[i]->PosArray; normals[i] = keys[i]->NormArray;
+        }
+        s_MorphArrayAllocationFailure = failedAllocation;
+        controller->SetMorphVertexCount(5);
+        s_MorphArrayAllocationFailure = -1;
+        if (controller->GetMorphVertexCount() == 5) {
+            CheckResizedMorphKeys(*controller, 5, 3, true);
+            succeeded = true;
+            break;
+        }
+        ++failures;
+        for (int i = 0; i < 2; ++i) Check(controller->GetKey(i) == keys[i] && keys[i]->PosArray == positions[i] && keys[i]->NormArray == normals[i],
+                                         "Failed Morph resize partially committed replacement pointers");
+        CheckResizedMorphKeys(*controller, 3, 3, true);
+    }
+    Check(failures > 0 && succeeded, "Morph allocation failure injection did not cover failure and success");
+}
+
 template<int Topology>
 void LoadedMergedAnimationTerminatesCycles() {
     CKContext context(nullptr, 0, 0);
@@ -3046,6 +3275,60 @@ void MorphEditingMatchesOriginalRuntime() {
     }
 }
 
+// Count-only native fixtures document the intentional difference: portable
+// resizing discards truncated vertices and clears newly introduced storage.
+template<int FixtureIndex>
+void MorphCountEditingUsesPortableStorageContract() {
+    const MorphEditReference::Fixture &fixture = MorphEditReference::Fixtures[FixtureIndex];
+    const bool normals = FixtureIndex == 12;
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphPortableCountEditing");
+    WireWords input(fixture.words, fixture.words + fixture.wordCount);
+    Chunk initial = AnimationWithController(CKANIMATION_MORPH_CONTROL, input);
+    LoadChunk(animation, initial.get());
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    for (int step = 0; step < fixture.operationCount; ++step) {
+        const int count = fixture.operations[step].argument;
+        CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
+        VxVector *oldPositions = first->PosArray;
+        controller->SetMorphVertexCount(count);
+        Check(controller->GetMorphVertexCount() == fixture.states[step].vertexCount && controller->GetKeyCount() == 2 &&
+              controller->GetKey(0) == first && first->PosArray != oldPositions,
+              "Morph count fixture did not resize coherent storage");
+        CKDWORD expected[45] = {};
+        expected[0] = 2; expected[1] = count; expected[2] = normals ? 1 : 0;
+        int word = 3;
+        for (int keyIndex = 0; keyIndex < 2; ++keyIndex) {
+            CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(keyIndex));
+            const float time = keyIndex ? 10.0f : 2.0f;
+            Check(key->TimeStep == time && key->PosArray && (key->NormArray != nullptr) == normals,
+                  "Morph count fixture lost array presence or key time");
+            memcpy(expected + word++, &time, sizeof(time));
+            for (int vertex = 0; vertex < count; ++vertex) {
+                // Only the initial 3 -> 1 step retains data. The following
+                // transition through zero discards all former payload values.
+                const VxVector value = step == 0 ? VxVector(keyIndex ? 11.0f : 1.0f, keyIndex ? 12.0f : 2.0f,
+                    keyIndex ? 13.0f : 3.0f) : VxVector(0.0f);
+                Check(Equal(key->PosArray[vertex], value), "Portable Morph count fixture retained truncated data or lost its prefix");
+                memcpy(expected + word, &value, sizeof(value)); word += 3;
+            }
+            if (normals) {
+                for (int vertex = 0; vertex < count; ++vertex) {
+                    const CKDWORD packed = step == 0 ? (keyIndex ? 0x00100084u : 0x00100020u) : 0u;
+                    Check(!memcmp(key->NormArray + vertex, &packed, sizeof(packed)), "Portable count fixture changed normal bytes");
+                    expected[word++] = packed;
+                }
+            }
+        }
+        WireWords expectedWire(expected, expected + word);
+        CheckSavedController(animation, CKANIMATION_MORPH_CONTROL, expectedWire);
+        Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        RCKObjectAnimation reloaded(&context, "MorphCountFixtureReloaded");
+        LoadChunk(reloaded, saved.get());
+        CheckSavedController(reloaded, CKANIMATION_MORPH_CONTROL, expectedWire);
+    }
+}
+
 // The two constant source keys are taken from the native Morph fixture. The
 // merged caller uses the same compressed-normal helper (CK2_3D.dll 0x10051510).
 template<bool FirstNormals, bool SecondNormals>
@@ -3153,6 +3436,12 @@ int main(int argc, char **argv) {
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
     };
     const Test tests[] = {
+        {"Loaded Morph resize keeps normals and coherent storage", LoadedMorphCountResizesStorage<true>},
+        {"Loaded Morph resize keeps absent normals and coherent storage", LoadedMorphCountResizesStorage<false>},
+        {"Morph resize rejects negative/unrepresentable counts", MorphCountRejectsInvalidSizes},
+        {"Morph resize preserves omitted payloads", MorphCountPreservesOmittedPayloads},
+        {"Morph resize composes with insertion/removal and Save/Load", MorphCountResizeComposesWithKeyEditing},
+        {"Morph resize allocation failures preserve complete state", MorphCountResizePreservesStateOnAllocationFailure},
         {"Loaded Morph rejects excessive/negative counts", LoadedMorphRejectsInvalidRequests<0>},
         {"Loaded Morph rejects nonfinite requested times", LoadedMorphRejectsInvalidRequests<1>},
         {"Loaded Morph rejects nonfinite/unordered key times", LoadedMorphRejectsInvalidRequests<2>},
@@ -3353,8 +3642,8 @@ int main(int argc, char **argv) {
         {"Morph editing duplicate source keys", MorphEditingMatchesOriginalRuntime<9>},
         {"Morph editing duplicate time keeps normals", MorphEditingMatchesOriginalRuntime<10>},
         {"Morph editing duplicate time keeps absent normals", MorphEditingMatchesOriginalRuntime<11>},
-        {"Morph editing changes only count with normals", MorphEditingMatchesOriginalRuntime<12>},
-        {"Morph editing changes only count without normals", MorphEditingMatchesOriginalRuntime<13>},
+        {"Morph count editing uses safe storage with normals", MorphCountEditingUsesPortableStorageContract<12>},
+        {"Morph count editing uses safe storage without normals", MorphCountEditingUsesPortableStorageContract<13>},
         {"Morph editing removes and reinserts keys", MorphEditingMatchesOriginalRuntime<14>},
         {"Morph editing null and empty keys", MorphEditingMatchesOriginalRuntime<15>},
         {"Morph editing zero vertices without normals", MorphEditingMatchesOriginalRuntime<16>},

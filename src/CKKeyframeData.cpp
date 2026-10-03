@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <climits>
+#include <new>
 
 //===================================================================
 // Helper functions for TCB spline interpolation
@@ -2778,7 +2780,68 @@ CKBOOL RCKMorphController::Clone(CKAnimController *control) {
 }
 
 void RCKMorphController::SetMorphVertexCount(int count) {
-    // 0x10052560 only updates the count. Existing key buffers remain owned by
-    // the controller at their original sizes; callers prepare matching data.
-    m_VertexCount = count;
+    // Native 0x10052560 only changes the count. Keep owned payloads coherent
+    // instead: count changes invalidate payload pointers, but retain key objects.
+    if (count < 0 || count == m_VertexCount || m_VertexCount < 0 || m_NbKeys < 0)
+        return;
+    // Reserve room for normal-bearing wire keys, including at least one future
+    // key in an empty controller. DumpKeysTo returns a signed-int byte count.
+    const int keys = m_NbKeys > 0 ? m_NbKeys : 1;
+    const size_t maxKeyBytes = (INT_MAX - 3 * sizeof(int)) / keys;
+    if (maxKeyBytes < sizeof(float) || static_cast<size_t>(count) >
+        (maxKeyBytes - sizeof(float)) / (sizeof(VxVector) + sizeof(VxCompressedVector)))
+        return;
+    if (m_NbKeys == 0) {
+        m_VertexCount = count;
+        return;
+    }
+    if (!m_Keys)
+        return;
+
+    CKMorphKey *resized = new(std::nothrow) CKMorphKey[m_NbKeys];
+    if (!resized)
+        return;
+    for (int i = 0; i < m_NbKeys; ++i) {
+        resized[i].PosArray = nullptr;
+        resized[i].NormArray = nullptr;
+    }
+    const int retained = count < m_VertexCount ? count : m_VertexCount;
+    CKBOOL allocated = TRUE;
+    for (int i = 0; i < m_NbKeys; ++i) {
+        if (m_Keys[i].PosArray) {
+            resized[i].PosArray = new(std::nothrow) VxVector[count];
+            if (!resized[i].PosArray) { allocated = FALSE; break; }
+            if (retained > 0)
+                memcpy(resized[i].PosArray, m_Keys[i].PosArray, retained * sizeof(VxVector));
+            for (int vertex = retained; vertex < count; ++vertex)
+                resized[i].PosArray[vertex].Set(0.0f, 0.0f, 0.0f);
+        }
+        if (m_Keys[i].NormArray) {
+            resized[i].NormArray = new(std::nothrow) VxCompressedVector[count];
+            if (!resized[i].NormArray) { allocated = FALSE; break; }
+            if (retained > 0)
+                memcpy(resized[i].NormArray, m_Keys[i].NormArray, retained * sizeof(VxCompressedVector));
+            for (int vertex = retained; vertex < count; ++vertex) {
+                resized[i].NormArray[vertex].xa = 0;
+                resized[i].NormArray[vertex].ya = 0;
+            }
+        }
+    }
+    if (allocated) {
+        // Commit only after every replacement is ready. Array presence, key
+        // addresses, times and controller length remain unchanged, even at zero.
+        for (int i = 0; i < m_NbKeys; ++i) {
+            delete[] m_Keys[i].PosArray;
+            delete[] m_Keys[i].NormArray;
+            m_Keys[i].PosArray = resized[i].PosArray;
+            m_Keys[i].NormArray = resized[i].NormArray;
+        }
+        m_VertexCount = count;
+    } else {
+        for (int i = 0; i < m_NbKeys; ++i) {
+            delete[] resized[i].PosArray;
+            delete[] resized[i].NormArray;
+        }
+    }
+    delete[] resized;
 }
