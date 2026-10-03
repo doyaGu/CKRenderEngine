@@ -163,6 +163,26 @@ void MoveDynamicLighting(SceneContext &sc) {
     }
 }
 
+bool BuildAttenuationLighting(SceneContext &sc) {
+    if (!BuildDynamicLighting(sc)) return false;
+    for (CKLight *light : g_Lights) light->SetType(VX_LIGHTPOINT);
+    return true;
+}
+
+void MoveAttenuationLighting(SceneContext &sc) {
+    MoveDynamicLighting(sc);
+    // Checkpoints cover ambient, one inline point light, eight packed lights,
+    // then three lights with a new range and a different legacy attenuation
+    // curve. The same public-API scene runs against the original DX8 DLLs.
+    for (CKLight *light : g_Lights) {
+        const bool changed = sc.FrameIndex >= 60;
+        light->SetRange(changed ? 12.0f : 30.0f);
+        light->SetConstantAttenuation(changed ? 0.5f : 1.0f);
+        light->SetLinearAttenuation(changed ? 0.25f : 0.04f);
+        light->SetQuadraticAttenuation(changed ? 0.25f : 0.005f);
+    }
+}
+
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
 // The extended tween streams are a Ballanced API. The surrounding world,
 // materials, camera, lighting and render callback use ordinary CK2 objects.
@@ -402,6 +422,7 @@ const SceneDef g_ScenesJit[] = {
     {"composite_2d", "Animated cards, overlapping alpha panels and sprite text through CK2 scene traversal", BuildComposite2D, MoveComposite2D, NULL, false, 2, 1.0f, NULL},
     {"composite_3d", "Moving camera, lit and prelit meshes, occlusion, transparent glass and 2D HUD", BuildComposite3D, MoveComposite3D, NULL, false, 2, 1.0f, NULL},
     {"lighting_dynamic", "Lit spheres with 0/1/8/3 moving directional, point and spot lights", BuildDynamicLighting, MoveDynamicLighting, NULL, false, 2, 1.0f, NULL},
+    {"lighting_attenuation", "Lit spheres with 0/1/8/3 point lights and changing legacy attenuation/range", BuildAttenuationLighting, MoveAttenuationLighting, NULL, true, 2, 1.0f, NULL},
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
     {"tween_3d", "Six textured lit/prelit morphs with position/normal streams, fog and depth occlusion", BuildTweenScene, NULL, NULL, false, 2, 1.0f, NULL},
     {"clipping_3d", "Six dynamic user planes over lit/prelit ordinary, tweened and skinned meshes plus a clipped 2D overlay", BuildClipScene, NULL, NULL, false, 2, 1.0f, NULL},
