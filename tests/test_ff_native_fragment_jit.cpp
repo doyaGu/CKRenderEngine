@@ -2346,6 +2346,68 @@ void TestCanonicalKeys() {
     }
 }
 
+// The expected boundary behavior is specified here independently of the key
+// extractor. A nonzero bias's magnitude is uniform, while crossing zero is a
+// specialization; inactive stage switches must disappear in canonical keys.
+void TestStateDependencies() {
+    const struct Dependency {
+        const char *Name;
+        int Row, Component;
+        float A, B;
+        bool RawChanges, CanonicalChanges;
+    } dependencies[] = {
+        {"affine below threshold", ROW_DRAW_PARAMS + 4, 2, 0.0f, 0.5f, false, false},
+        {"affine threshold", ROW_DRAW_PARAMS + 4, 2, 0.5f, 0.50000006f, true, true},
+        {"line below threshold", ROW_DRAW_PARAMS + 4, 3, 0.0f, 2.5f, false, false},
+        {"line threshold", ROW_DRAW_PARAMS + 4, 3, 2.5f, 2.50000024f, true, true},
+        {"texture below threshold", ROW_STAGE_PARAMS, 2, 0.0f, 0.5f, false, false},
+        {"texture threshold", ROW_STAGE_PARAMS, 2, 0.5f, 0.50000006f, true, true},
+        {"LOD signed zeros", ROW_BUMP_ENV + 1, 2, 0.0f, -0.0f, false, false},
+        {"LOD zero boundary", ROW_BUMP_ENV + 1, 2, 0.0f, 1.0f, true, true},
+        {"LOD nonzero magnitude", ROW_BUMP_ENV + 1, 2, 1.0f, 2.0f, false, false},
+        {"LOD nonzero sign", ROW_BUMP_ENV + 1, 2, -1.0f, 1.0f, false, false},
+        {"alpha reference", ROW_DRAW_PARAMS + 8, 0, 64.0f, 192.0f, false, false},
+        {"texture factor", ROW_DRAW_PARAMS + 9, 0, 0.25f, 0.75f, false, false},
+        {"fog bounds", ROW_DRAW_PARAMS + 10, 0, 0.25f, 0.75f, false, false},
+        {"fog color", ROW_DRAW_PARAMS + 11, 2, 0.25f, 0.75f, false, false},
+        {"stage constant", ROW_STAGE_PARAMS + 1, 1, 0.25f, 0.75f, false, false},
+        {"bump matrix", ROW_BUMP_ENV, 0, 0.25f, 0.75f, false, false},
+        {"bump luminance", ROW_BUMP_ENV + 1, 0, 0.25f, 0.75f, false, false},
+        {"unused bump encoding", ROW_STAGE_PARAMS, 1, 0.0f, float(CKFF_TTF_BUMP_UNORM), true, false},
+        {"unused STAGEBLEND factors", ROW_STAGE_PARAMS, 3, 0.0f, float(VXBLEND_ONE << 4), true, false},
+        {"inactive texture presence", ROW_STAGE_PARAMS + 14, 2, 0.0f, 1.0f, true, false},
+        {"inactive LOD bias", ROW_BUMP_ENV + 15, 2, 0.0f, 1.0f, true, false},
+        {"inactive stage constant", ROW_STAGE_PARAMS + 15, 3, 0.25f, 0.75f, false, false},
+    };
+    CKFFFragmentProgram program;
+    SetSelectArg1(program, 0, CKRST_TA_TEXTURE);
+    program.SetStage(0, CKFF_FRAGMENT_PROGRAM_STAGE_SAMPLER_TYPE, CKFF_SAMPLER_2D);
+    for (CKFFSamplerLayout layout : kLayouts) {
+        for (const auto &dependency : dependencies) {
+            Fragment a = {}, b = {};
+            a.Uniforms[ROW_STAGE_PARAMS][2] = b.Uniforms[ROW_STAGE_PARAMS][2] = 1;
+            a.Uniforms[dependency.Row][dependency.Component] = dependency.A;
+            b.Uniforms[dependency.Row][dependency.Component] = dependency.B;
+            const auto ka = DrawKey(program, a), kb = DrawKey(program, b);
+            const bool raw = (ka != kb) == dependency.RawChanges;
+            const bool canonical = (Canonical(ka, layout) != Canonical(kb, layout)) == dependency.CanonicalChanges;
+            if (!raw || !canonical) {
+                std::printf("\nDependency %s, layout %u: raw changed=%d canonical changed=%d\n",
+                            dependency.Name, unsigned(layout), ka != kb, Canonical(ka, layout) != Canonical(kb, layout));
+                TestFail("constant changes obey the raw and canonical key dependency contract");
+            }
+        }
+    }
+    // Constants outside a supplied block read as zero, including partially
+    // supplied rows. Non-key data must not accidentally select a switch.
+    CKFFConstantSet empty, partial;
+    const float data[] = {1.0f, 2.0f};
+    partial.Set(CKRST_BLOCK_STAGE_PARAMS, data, sizeof(data));
+    TestCheck(CKFFNativeFragmentDrawKey(program, empty, false, 0) ==
+                  CKFFNativeFragmentDrawKey(program, partial, false, 0),
+              "an incomplete row cannot select missing texture presence or blend factors");
+}
+
 void TestInterface() {
     for (CKFFSamplerLayout layout : kLayouts) {
         CKJitFragmentShader shader;
@@ -2589,6 +2651,7 @@ int main(int argc, char **argv) {
     framework.Run("matches the comparison shaders", TestMatchesComparisonShaders);
     framework.Run("compares depths as the shader-sampling shaders do", TestComparesDepths);
     framework.Run("canonical keys", TestCanonicalKeys);
+    framework.Run("state dependency boundaries", TestStateDependencies);
     framework.Run("emission", TestEmission);
     return framework.ExitCode();
 }
