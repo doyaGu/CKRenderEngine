@@ -58,7 +58,7 @@ void AppendConstant(XString &out, const CKJitNode &node) {
 
 // Called only after operand counts, indices and types have been checked.
 // Builders insert splats explicitly; backends may assume exact IR widths.
-bool CheckTypes(const CKJitFragmentShader &shader, const CKJitNode &node) {
+bool CheckTypes(const CKJitShader &shader, const CKJitNode &node) {
     const auto operand = [&](uint32_t i) { return shader.Nodes[(int)node.Operands[i]].Type; };
     const auto same = [&]() {
         for (uint32_t i = 0; i < node.OperandCount; ++i) {
@@ -160,7 +160,7 @@ class RegionChecker {
 public:
     static const uint32_t Root = 0xffffffffu;
 
-    explicit RegionChecker(const CKJitFragmentShader &shader) : m_Nodes(shader.Nodes), m_Results{Root, Root, 0} {
+    explicit RegionChecker(const CKJitShader &shader) : m_Nodes(shader.Nodes), m_Results{Root, Root, 0} {
         m_Scopes.Resize(m_Nodes.Size());
         m_Open.Resize(m_Nodes.Size());
         m_Open.Memset(0);
@@ -337,24 +337,36 @@ bool CKJitTextureAccepts(CKJitOp op, CKJitSamplerDim dim) {
     }
 }
 
-bool CKJitVerify(const CKJitFragmentShader &shader) {
+namespace {
+
+bool VerifyNodes(const CKJitShader &shader, bool vertex, RegionChecker &regions) {
     if (shader.UniformBufferCount > CKJIT_MAX_UNIFORM_BUFFERS || shader.SamplerCount > CKJIT_MAX_SAMPLERS)
         return false;
     for (int i = 0; i < shader.Inputs.Size(); ++i) {
         const CKJitInput &input = shader.Inputs[i];
-        if (input.Components < 1 || input.Components > 4 || input.Kind > CKJIT_INPUT_FRAG_COORD ||
-            (input.Kind == CKJIT_INPUT_FRAG_COORD && input.Components != 4)) {
+        if (input.Components < 1 || input.Components > 4 ||
+            (vertex ? input.Kind != CKJIT_INPUT_ATTRIBUTE : input.Kind > CKJIT_INPUT_FRAG_COORD) ||
+            (input.Kind == CKJIT_INPUT_FRAG_COORD && input.Components != 4) ||
+            input.Scalar > CKJIT_INPUT_UINT || (input.Scalar == CKJIT_INPUT_UINT && !vertex)) {
             return false;
+        }
+        for (int j = 0; j < i; ++j) {
+            const CKJitInput &other = shader.Inputs[j];
+            const bool position = input.Kind == CKJIT_INPUT_FRAG_COORD;
+            if ((other.Kind == CKJIT_INPUT_FRAG_COORD) == position &&
+                (position || other.Location == input.Location))
+                return false;
         }
     }
 
     uint8_t dims[CKJIT_MAX_SAMPLERS];
     std::memset(dims, 0xff, sizeof(dims));
-    RegionChecker regions(shader);
     const uint32_t count = (uint32_t)shader.Nodes.Size();
     for (uint32_t i = 0; i < count; ++i) {
         const CKJitNode &node = shader.Nodes[(int)i];
         if (node.Op >= CKJIT_OP_COUNT || node.Type >= CKJIT_TYPE_COUNT)
+            return false;
+        if (vertex && (kOps[node.Op].Flags & CKJIT_OPFLAG_QUAD) != 0)
             return false;
         const uint32_t operands = kOps[node.Op].Operands;
         if ((kOps[node.Op].Flags & CKJIT_OPFLAG_VARIADIC) != 0
@@ -381,7 +393,7 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
         switch (node.Op) {
         case CKJIT_OP_INPUT:
             if (node.Imm[0] >= (uint32_t)shader.Inputs.Size() ||
-                node.Type != CKJitFloatType(shader.Inputs[(int)node.Imm[0]].Components)) {
+                node.Type != shader.Inputs[(int)node.Imm[0]].Type()) {
                 return false;
             }
             break;
@@ -406,7 +418,15 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
         }
     }
 
-    if (!regions.Closed() || !shader.Color.IsValid() || shader.Color.Id >= count ||
+    return regions.Closed();
+}
+
+} // namespace
+
+bool CKJitVerify(const CKJitFragmentShader &shader) {
+    RegionChecker regions(shader);
+    const uint32_t count = (uint32_t)shader.Nodes.Size();
+    if (!VerifyNodes(shader, false, regions) || !shader.Color.IsValid() || shader.Color.Id >= count ||
         shader.Node(shader.Color).Type != CKJIT_TYPE_FLOAT4 || !regions.AtRoot(shader.Color)) {
         return false;
     }
@@ -415,7 +435,31 @@ bool CKJitVerify(const CKJitFragmentShader &shader) {
                                          regions.AtRoot(shader.Discard));
 }
 
-XString CKJitDump(const CKJitFragmentShader &shader) {
+bool CKJitVerify(const CKJitVertexShader &shader) {
+    RegionChecker regions(shader);
+    const uint32_t count = (uint32_t)shader.Nodes.Size();
+    if (!VerifyNodes(shader, true, regions) || !shader.Position.IsValid() || shader.Position.Id >= count ||
+        shader.Node(shader.Position).Type != CKJIT_TYPE_FLOAT4 || !regions.AtRoot(shader.Position))
+        return false;
+    if (shader.ClipDistances.Size() > 8) return false;
+    for (const CKJitValue value : shader.ClipDistances) {
+        if (!value.IsValid() || value.Id >= count || shader.Node(value).Type != CKJIT_TYPE_FLOAT ||
+            !regions.AtRoot(value)) return false;
+    }
+    for (int i = 0; i < shader.Outputs.Size(); ++i) {
+        const CKJitVertexOutput &output = shader.Outputs[i];
+        if (output.Kind > CKJIT_INPUT_FLAT || !output.Value.IsValid() || output.Value.Id >= count ||
+            !CKJitIsFloat(shader.Node(output.Value).Type) || !regions.AtRoot(output.Value))
+            return false;
+        for (int j = 0; j < i; ++j) {
+            if (shader.Outputs[j].Location == output.Location)
+                return false;
+        }
+    }
+    return true;
+}
+
+static XString DumpNodes(const CKJitShader &shader) {
     static const char kComponents[] = "xyzw";
     XString out;
     uint32_t depth = 0; // of the arms around the node
@@ -464,9 +508,28 @@ XString CKJitDump(const CKJitFragmentShader &shader) {
         }
         out << "\n";
     }
+    return out;
+}
+
+XString CKJitDump(const CKJitFragmentShader &shader) {
+    XString out = DumpNodes(shader);
     if (shader.Color.IsValid())
         Append(out, "color %%%u\n", shader.Color.Id);
     if (shader.Discard.IsValid())
         Append(out, "discard %%%u\n", shader.Discard.Id);
+    return out;
+}
+
+XString CKJitDump(const CKJitVertexShader &shader) {
+    XString out = DumpNodes(shader);
+    if (shader.Position.IsValid())
+        Append(out, "position %%%u\n", shader.Position.Id);
+    for (int i = 0; i < shader.ClipDistances.Size(); ++i)
+        Append(out, "clipdistance %d %%%u\n", i, shader.ClipDistances[i].Id);
+    for (int i = 0; i < shader.Outputs.Size(); ++i) {
+        const CKJitVertexOutput &output = shader.Outputs[i];
+        Append(out, "output location%u %s %%%u\n", output.Location,
+               output.Kind == CKJIT_INPUT_FLAT ? "flat" : "smooth", output.Value.Id);
+    }
     return out;
 }

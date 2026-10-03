@@ -2,9 +2,9 @@
 // takes from two up to that many operands.
 //
 // Every value is a pure function of its operands; structured regions (IF and
-// LOOP below) only decide which of them a pixel computes, and how often.
-// QUAD operations read the pixel's quad neighbours, so they run only where
-// control flow is uniform (see CKJitIR.h). Operations are
+// LOOP below) only decide which of them a shader invocation computes, and how often.
+// QUAD operations read the pixel's quad neighbours, so they run only in fragment
+// programs where control flow is uniform (see CKJitIR.h). Operations are
 // component-wise over operands of one type unless noted, and comparisons
 // produce BOOLs of their operands' width. Keep this list in sync with the
 // operand and type rules in CKJitBuilder and with every backend.

@@ -178,7 +178,19 @@ public:
     // ill-typed outputs.
     bool Finish(CKJitValue color, CKJitValue discard, CKJitFragmentShader &out) const;
 
+    // Keeps the union of position, varying and clip-distance dependencies. Only ATTRIBUTE
+    // inputs and operations valid in a vertex stage may survive finishing.
+    bool FinishVertex(CKJitValue position, const CKJitVertexOutput *outputs, uint32_t outputCount,
+                      CKJitVertexShader &out, const CKJitValue *clipDistances = nullptr, uint32_t clipCount = 0) const;
+    bool FinishVertex(CKJitValue position, std::initializer_list<CKJitVertexOutput> outputs,
+                      CKJitVertexShader &out, std::initializer_list<CKJitValue> clipDistances = {}) const {
+        return FinishVertex(position, outputs.begin(), (uint32_t)outputs.size(), out,
+                            clipDistances.begin(), (uint32_t)clipDistances.size());
+    }
+
 private:
+    bool FinishNodes(const CKJitValue *roots, uint32_t rootCount, CKJitShader &out,
+                     XArray<uint32_t> &remap) const;
     struct NodeHash {
         int operator()(const CKJitNode &node) const;
     };

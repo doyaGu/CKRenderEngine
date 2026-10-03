@@ -10,9 +10,9 @@
 // of pure nodes in dependency order, which structured regions divide into
 // arms (IF, ELSE and ENDIF markers with PHI results) and loop bodies (LOOP and
 // ENDLOOP markers with carried values and their RESULTs); the only side
-// effects are the fragment outputs. CKJitBuilder creates the nodes
+// effects are the stage outputs. CKJitBuilder creates the nodes
 // (hash-consed and folded); the SPIR-V and DXBC backends translate a finished
-// CKJitFragmentShader.
+// CKJitFragmentShader or CKJitVertexShader.
 //
 // Control flow is uniform outside regions, and in the arms and bodies of
 // uniform flow whose condition or count does not vary: a value varies when
@@ -88,16 +88,22 @@ enum CKJitInputKind : uint8_t {
     CKJIT_INPUT_SMOOTH,     // perspective-correct varying
     CKJIT_INPUT_FLAT,       // provoking-vertex value
     CKJIT_INPUT_FRAG_COORD, // SV_Position / FragCoord exactly as the API delivers it
+    CKJIT_INPUT_ATTRIBUTE,  // vertex attribute at Location; no interpolation
 };
 
-// One fragment input: the fragment position, or the varying the vertex shader
-// writes at Location. Each backend derives its linkage from the location and
-// keeps every declared input in its interface, whether or not the program
-// reads it.
+// One stage input: a vertex attribute, the fragment position, or the varying
+// the vertex shader writes at Location. Each backend derives linkage from the
+// location and keeps every declared input, whether or not the program reads it.
+enum CKJitInputScalar : uint8_t { CKJIT_INPUT_FLOAT, CKJIT_INPUT_UINT };
+
 struct CKJitInput {
-    uint32_t Location;  // varying location (ignored for FRAG_COORD)
-    uint8_t Components; // 1..4 floats
+    uint32_t Location;  // attribute/varying location (ignored for FRAG_COORD)
+    uint8_t Components; // 1..4 components
     CKJitInputKind Kind;
+    // UINT is a vertex attribute only. Its bits enter the IR as signed INT,
+    // matching an explicit uint-to-int cast; no float conversion is involved.
+    CKJitInputScalar Scalar = CKJIT_INPUT_FLOAT;
+    CKJitType Type() const { return Scalar == CKJIT_INPUT_UINT ? CKJitIntType(Components) : CKJitFloatType(Components); }
 };
 
 struct CKJitValue {
@@ -123,19 +129,36 @@ static_assert(sizeof(CKJitNode) == 36, "CKJitNode must not contain padding");
 
 // Finished program: nodes in dependency order (operands precede users), every
 // node reachable from an output, the leaves ahead of every region.
-struct CKJitFragmentShader {
+struct CKJitShader {
     XArray<CKJitInput> Inputs;
     XArray<CKJitNode> Nodes;
-    uint32_t UniformBufferCount = 0;                            // fragment uniform blocks
+    uint32_t UniformBufferCount = 0;                            // stage uniform blocks
     uint32_t UniformVec4Counts[CKJIT_MAX_UNIFORM_BUFFERS] = {}; // float4 rows of each
     uint32_t SamplerCount = 0;                                  // sampler slots bound, above every slot read
-    CKJitValue Color;              // FLOAT4 written to render target 0
-    CKJitValue Discard;            // optional scalar BOOL; true discards the fragment
-
     const CKJitNode &Node(CKJitValue value) const { return Nodes[(int)value.Id]; }
 };
 
-// Where a backend places the fragment resources. Uniform buffer b is at
+struct CKJitFragmentShader : CKJitShader {
+    CKJitValue Color;              // FLOAT4 written to render target 0
+    CKJitValue Discard;            // optional scalar BOOL; true discards the fragment
+};
+
+struct CKJitVertexOutput {
+    uint32_t Location;
+    CKJitInputKind Kind; // SMOOTH or FLAT, matching the fragment input
+    CKJitValue Value;    // FLOAT..FLOAT4, with the fragment input's width
+};
+
+// Vertex inputs are float or unsigned integer attributes. Position is mandatory; varying locations
+// are unique. QUAD operations are forbidden, including implicit-LOD sampling.
+// Explicit-LOD/gradient sampling and uniform resources use the same IR nodes.
+struct CKJitVertexShader : CKJitShader {
+    CKJitValue Position; // FLOAT4 homogeneous clip position, in the backend's clip space
+    XArray<CKJitVertexOutput> Outputs;
+    XArray<CKJitValue> ClipDistances; // 0..8 scalar FLOATs; negative distances clip primitives
+};
+
+// Where a backend places the stage resources. Uniform buffer b is at
 // binding (register) UniformBinding + b of UniformSpace and sampler slot s is
 // one combined texture and sampler at binding (register) s of SamplerSpace.
 struct CKJitResourceLayout {
@@ -150,11 +173,14 @@ struct CKJitResourceLayout {
 // and sampler references are in range, a sampler slot has one dimension its
 // operations accept, regions and loops nest with their PHIs, headers and
 // RESULTs in place, nodes read only values their arm or body sees, QUAD
-// operations run in uniform control flow and the outputs have their types.
+// operations run only in fragment programs and in uniform control flow, input
+// kinds match the stage, locations are unique and outputs have their types.
 // This also checks shaders assembled or changed without CKJitBuilder.
 bool CKJitVerify(const CKJitFragmentShader &shader);
+bool CKJitVerify(const CKJitVertexShader &shader);
 
 // Readable listing for tests and diagnostics.
 XString CKJitDump(const CKJitFragmentShader &shader);
+XString CKJitDump(const CKJitVertexShader &shader);
 
 #endif // CKJITIR_H

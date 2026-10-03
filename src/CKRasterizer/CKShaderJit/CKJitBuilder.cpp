@@ -357,8 +357,9 @@ CKJitValue CKJitBuilder::Bool(bool x) {
 }
 
 CKJitValue CKJitBuilder::Input(const CKJitInput &input) {
-    if (input.Components < 1 || input.Components > 4 ||
-        (input.Kind == CKJIT_INPUT_FRAG_COORD && input.Components != 4)) {
+    if (input.Components < 1 || input.Components > 4 || input.Kind > CKJIT_INPUT_ATTRIBUTE ||
+        (input.Kind == CKJIT_INPUT_FRAG_COORD && input.Components != 4) ||
+        input.Scalar > CKJIT_INPUT_UINT || (input.Scalar == CKJIT_INPUT_UINT && input.Kind != CKJIT_INPUT_ATTRIBUTE)) {
         return Fail();
     }
     // The position is one input and every varying location another.
@@ -368,13 +369,13 @@ CKJitValue CKJitBuilder::Input(const CKJitInput &input) {
         const CKJitInput &other = m_Inputs[index];
         if ((other.Kind == CKJIT_INPUT_FRAG_COORD) != position || (!position && other.Location != input.Location))
             continue;
-        if (other.Components != input.Components || other.Kind != input.Kind)
+        if (other.Components != input.Components || other.Kind != input.Kind || other.Scalar != input.Scalar)
             return Fail();
         break;
     }
     if (index == (uint32_t)m_Inputs.Size())
         m_Inputs.PushBack(input);
-    return Emit(CKJIT_OP_INPUT, CKJitFloatType(input.Components), {}, {index});
+    return Emit(CKJIT_OP_INPUT, input.Type(), {}, {index});
 }
 
 CKJitValue CKJitBuilder::Uniform(uint32_t buffer, uint32_t row) {
@@ -1214,13 +1215,61 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
     if (IsConstantBool(discard, false))
         discard = CKJitValue();
 
+    const CKJitValue roots[] = {color, discard};
+    XArray<uint32_t> remap;
+    if (!FinishNodes(roots, discard.IsValid() ? 2u : 1u, out, remap))
+        return false;
+    out.Color = CKJitValue{remap[color.Id]};
+    out.Discard = discard.IsValid() ? CKJitValue{remap[discard.Id]} : CKJitValue();
+    return CKJitVerify(out);
+}
+
+bool CKJitBuilder::FinishVertex(CKJitValue position, const CKJitVertexOutput *outputs, uint32_t outputCount,
+                                CKJitVertexShader &out, const CKJitValue *clipDistances, uint32_t clipCount) const {
+    if (!Valid(position) || TypeOf(position) != CKJIT_TYPE_FLOAT4 || (outputCount && !outputs) ||
+        clipCount > 8 || (clipCount && !clipDistances))
+        return false;
+    XArray<CKJitValue> roots;
+    roots.PushBack(position);
+    for (uint32_t i = 0; i < outputCount; ++i) {
+        if (!Valid(outputs[i].Value) || !CKJitIsFloat(TypeOf(outputs[i].Value)))
+            return false;
+        roots.PushBack(outputs[i].Value);
+    }
+    for (uint32_t i = 0; i < clipCount; ++i) {
+        if (!Valid(clipDistances[i]) || TypeOf(clipDistances[i]) != CKJIT_TYPE_FLOAT) return false;
+        roots.PushBack(clipDistances[i]);
+    }
+    XArray<uint32_t> remap;
+    if (!FinishNodes(roots.Begin(), (uint32_t)roots.Size(), out, remap))
+        return false;
+    // Copy before clearing: callers may reuse out.Outputs as the declarations.
+    XArray<CKJitVertexOutput> mapped;
+    for (uint32_t i = 0; i < outputCount; ++i) {
+        CKJitVertexOutput output = outputs[i];
+        output.Value = CKJitValue{remap[output.Value.Id]};
+        mapped.PushBack(output);
+    }
+    XArray<CKJitValue> mappedClip;
+    for (uint32_t i = 0; i < clipCount; ++i)
+        mappedClip.PushBack(CKJitValue{remap[clipDistances[i].Id]});
+    out.Position = CKJitValue{remap[position.Id]};
+    out.Outputs = mapped;
+    out.ClipDistances = mappedClip;
+    return CKJitVerify(out);
+}
+
+bool CKJitBuilder::FinishNodes(const CKJitValue *roots, uint32_t rootCount, CKJitShader &out,
+                               XArray<uint32_t> &remap) const {
+    if (m_Failed || m_Regions.Size() != 0)
+        return false;
+
     const int count = m_Nodes.Size();
     XArray<uint8_t> live;
     live.Resize(count);
     live.Memset(0);
-    live[color.Id] = 1;
-    if (discard.IsValid())
-        live[discard.Id] = 1;
+    for (uint32_t i = 0; i < rootCount; ++i)
+        live[roots[i].Id] = 1;
     for (int i = count; i-- > 0;) {
         if (!live[i])
             continue;
@@ -1240,7 +1289,6 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
     // Leaves first, so every arm sees them; the other nodes keep their
     // relative order, so operands stay ahead of users and arms within their
     // markers.
-    XArray<uint32_t> remap;
     remap.Resize(count);
     out.Nodes.Clear();
     uint32_t samplers = 0;
@@ -1262,7 +1310,5 @@ bool CKJitBuilder::Finish(CKJitValue color, CKJitValue discard, CKJitFragmentSha
     out.SamplerCount = samplers;
     out.UniformBufferCount = m_UniformBufferCount;
     std::memcpy(out.UniformVec4Counts, m_UniformVec4Counts, sizeof(out.UniformVec4Counts));
-    out.Color = CKJitValue{remap[color.Id]};
-    out.Discard = discard.IsValid() ? CKJitValue{remap[discard.Id]} : CKJitValue();
     return true;
 }
