@@ -9,6 +9,28 @@
 #include <new>
 
 //===================================================================
+// Controller Clone helpers
+//===================================================================
+
+// Native transform-controller Clone releases destination keys before copying,
+// so self-Clone reads freed storage. Build the copy first; self-Clone and
+// allocation failure leave the destination unchanged.
+template <class Key>
+static bool CopyControllerKeys(const Key *source, int count, Key *&copy) {
+    copy = nullptr;
+    if (count < 0 || (count > 0 && !source) ||
+        static_cast<size_t>(count) > static_cast<size_t>(-1) / sizeof(Key))
+        return false;
+    if (count == 0)
+        return true;
+    copy = new(std::nothrow) Key[count];
+    if (!copy)
+        return false;
+    memcpy(copy, source, count * sizeof(Key));
+    return true;
+}
+
+//===================================================================
 // Helper functions for TCB spline interpolation
 //===================================================================
 
@@ -371,18 +393,17 @@ CKBOOL RCKLinearPositionController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKLinearPositionController *other = static_cast<RCKLinearPositionController *>(control);
+    CKPositionKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKPositionKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKPositionKey));
-    }
+    m_Keys = keys;
 
     return TRUE;
 }
@@ -554,18 +575,17 @@ CKBOOL RCKLinearRotationController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKLinearRotationController *other = static_cast<RCKLinearRotationController *>(control);
+    CKRotationKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKRotationKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKRotationKey));
-    }
+    m_Keys = keys;
 
     return TRUE;
 }
@@ -737,18 +757,17 @@ CKBOOL RCKLinearScaleController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKLinearScaleController *other = static_cast<RCKLinearScaleController *>(control);
+    CKScaleKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKScaleKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKScaleKey));
-    }
+    m_Keys = keys;
 
     return TRUE;
 }
@@ -915,18 +934,17 @@ CKBOOL RCKLinearScaleAxisController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKLinearScaleAxisController *other = static_cast<RCKLinearScaleAxisController *>(control);
+    CKScaleAxisKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKScaleAxisKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKScaleAxisKey));
-    }
+    m_Keys = keys;
 
     return TRUE;
 }
@@ -1144,20 +1162,19 @@ CKBOOL RCKTCBPositionController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKTCBPositionController *other = static_cast<RCKTCBPositionController *>(control);
+    CKTCBPositionKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
+    m_Keys = keys;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKTCBPositionKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKTCBPositionKey));
-    }
 
     return TRUE;
 }
@@ -1359,20 +1376,19 @@ CKBOOL RCKTCBRotationController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKTCBRotationController *other = static_cast<RCKTCBRotationController *>(control);
+    CKTCBRotationKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
+    m_Keys = keys;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKTCBRotationKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKTCBRotationKey));
-    }
 
     return TRUE;
 }
@@ -1582,20 +1598,19 @@ CKBOOL RCKTCBScaleController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKTCBScaleController *other = static_cast<RCKTCBScaleController *>(control);
+    CKTCBScaleKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
+    m_Keys = keys;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKTCBScaleKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKTCBScaleKey));
-    }
 
     return TRUE;
 }
@@ -1795,20 +1810,19 @@ CKBOOL RCKTCBScaleAxisController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKTCBScaleAxisController *other = static_cast<RCKTCBScaleAxisController *>(control);
+    CKTCBScaleAxisKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
+    m_Keys = keys;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKTCBScaleAxisKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKTCBScaleAxisKey));
-    }
 
     return TRUE;
 }
@@ -2193,19 +2207,18 @@ CKBOOL RCKBezierPositionController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKBezierPositionController *other = static_cast<RCKBezierPositionController *>(control);
+    CKBezierPositionKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
+    m_Keys = keys;
     m_TangentsComputed = FALSE;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKBezierPositionKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKBezierPositionKey));
-    }
 
     return TRUE;
 }
@@ -2398,19 +2411,18 @@ CKBOOL RCKBezierScaleController::Clone(CKAnimController *control) {
     if (!control || control->GetType() != m_Type)
         return FALSE;
 
-    if (!CKAnimController::Clone(control))
-        return FALSE;
+    if (control == this)
+        return TRUE;
 
     RCKBezierScaleController *other = static_cast<RCKBezierScaleController *>(control);
+    CKBezierScaleKey *keys;
+    if (!CopyControllerKeys(other->m_Keys, other->m_NbKeys, keys))
+        return FALSE;
 
+    CKAnimController::Clone(control);
     delete[] m_Keys;
-    m_Keys = nullptr;
+    m_Keys = keys;
     m_TangentsComputed = FALSE;
-
-    if (other->m_NbKeys > 0) {
-        m_Keys = new CKBezierScaleKey[other->m_NbKeys];
-        memcpy(m_Keys, other->m_Keys, other->m_NbKeys * sizeof(CKBezierScaleKey));
-    }
 
     return TRUE;
 }
@@ -2646,15 +2658,21 @@ int RCKMorphController::DumpKeysTo(void *Buffer) {
     // counts. Even an empty controller writes this complete three-DWORD header.
     if (m_NbKeys < 0 || (m_NbKeys > 0 && !m_Keys))
         return 0;
-    const CKBOOL hasNormals = m_NbKeys > 0 && m_Keys[0].NormArray != nullptr;
+    // The wire format has one normal-presence flag for the whole controller.
+    // Native takes it from key 0 and reads every key's normals, but the public
+    // AddKey overloads can mix presence. Write normals only when every key has
+    // them, so mixed controllers keep their positions instead of failing Save.
+    CKBOOL hasNormals = m_NbKeys > 0;
+    for (int i = 0; i < m_NbKeys; ++i) {
+        if (!m_Keys[i].NormArray)
+            hasNormals = FALSE;
+    }
     const int size = MorphWireSize(m_NbKeys, m_VertexCount, hasNormals);
     if (!size)
         return 0;
-    // The wire format has one normal-presence flag for the whole controller.
-    // Reject incomplete payloads before either querying or writing any bytes.
+    // Reject payloads Load cannot accept before querying or writing any bytes.
     for (int i = 0; i < m_NbKeys; ++i) {
         if ((m_VertexCount > 0 && !m_Keys[i].PosArray) ||
-            (m_Keys[i].NormArray != nullptr) != (hasNormals != FALSE) ||
             !std::isfinite(m_Keys[i].TimeStep) || (i > 0 && m_Keys[i].TimeStep < m_Keys[i - 1].TimeStep))
             return 0;
     }

@@ -97,6 +97,10 @@ RCKObjectAnimation::RCKObjectAnimation(CKContext *Context, CKSTRING name)
 }
 
 RCKObjectAnimation::~RCKObjectAnimation() {
+    ReleaseKeyframeData();
+}
+
+void RCKObjectAnimation::ReleaseKeyframeData() {
     // Handle keyframe data reference counting and ownership transfer
     // Based on IDA decompilation at 0x10056A50
     if (m_KeyframeData) {
@@ -1667,17 +1671,15 @@ CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
     if (srcAnim == this)
         return FALSE;
 
-    // Release current keyframe data
-    if (m_KeyframeData) {
-        // Decrement reference count
-        if (--m_KeyframeData->m_RefCount <= 0) {
-            // We're the last user - delete the keyframe data
-            if (m_KeyframeData) {
-                delete m_KeyframeData;
-            }
-        }
-        m_KeyframeData = nullptr;
-    }
+    // Already sharing: native releases and re-adds the same reference.
+    if (srcAnim && srcAnim->m_KeyframeData == m_KeyframeData)
+        return TRUE;
+
+    // Native 0x100566B9 only decrements the reference count, so an owner that
+    // switches away leaves remaining sharers pointing at it. Their shared Save
+    // then references this object's new data, or a destroyed object. Hand
+    // ownership over as the destructor does.
+    ReleaseKeyframeData();
 
     // Share from source animation or create new
     if (srcAnim) {

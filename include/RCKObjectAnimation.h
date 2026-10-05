@@ -98,6 +98,10 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    // Drops this object's keyframe data reference. Shared data stays alive,
+    // and ownership passes to another sharer when this object owns it.
+    void ReleaseKeyframeData();
+
     CKKeyframeData *m_KeyframeData;  // 0x1C
     CKDWORD m_Flags;                 // 0x20
     RCK3dEntity *m_Entity;           // 0x24

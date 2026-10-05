@@ -18,6 +18,7 @@
 #include "CKGlobals.h"
 #include "CKFile.h"
 #include "CKGridManager.h"
+#include "CKObjectManager.h"
 #include "CKParameterLocal.h"
 #include "CKStateChunk.h"
 #include "RCK3dEntity.h"
@@ -1107,6 +1108,31 @@ void ClearAllReleasesControllerStorage() {
     Check(destroyed == 1, "Repeated ClearAll released a controller twice");
 }
 
+// An owner switching to other data must hand its old data to a remaining
+// sharer; otherwise the sharer's Save references the owner's new keys.
+void ShareDataFromTransfersOwnershipOfReleasedData() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation owner(&context, "SwitchingOwner"), alias(&context, "RemainingAlias"),
+        other(&context, "OtherData");
+    // Ownership transfer searches the class list that CreateObject fills.
+    RCKObjectAnimation *animations[] = {&owner, &alias, &other};
+    for (RCKObjectAnimation *animation : animations) context.m_ObjectManager->FinishRegisterObject(animation);
+    VxVector ownerPosition(9.0f, 8.0f, 7.0f), otherPosition(1.0f, 2.0f, 3.0f);
+    owner.AddPositionKey(0.0f, &ownerPosition);
+    other.AddPositionKey(0.0f, &otherPosition);
+    Check(alias.ShareDataFrom(&owner) && alias.Shared() == &owner, "Cannot share the owner's data");
+    Check(owner.ShareDataFrom(&other), "Owner cannot switch to other data");
+    Check(alias.Shared() == &alias && owner.Shared() == &other, "Released data kept the switched owner");
+    Check(alias.ShareDataFrom(&alias) == FALSE && owner.ShareDataFrom(&other), "Repeated sharing changed results");
+    Check(owner.Shared() == &other && other.Shared() == &other, "Repeated sharing changed ownership");
+    VxVector actual;
+    Check(alias.EvaluatePosition(0.0f, actual) && Equal(actual, ownerPosition), "Alias lost the released data");
+    Chunk saved(alias.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    saved->StartRead();
+    Check(!saved->SeekIdentifier(CK_STATESAVE_OBJANIMSHARED) && saved->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS),
+          "New owner saved a shared reference instead of its controllers");
+}
+
 template<int Version>
 void AnimationLoadRestoresSharedOwnership() {
     CKContext context(nullptr, 0, 0);
@@ -1941,8 +1967,6 @@ void MorphDumpRejectsInconsistentState() {
     CKMorphKey *last = static_cast<CKMorphKey *>(controller.GetKey(1));
     if (InvalidKind == 0) controller.SetRawVertexCount(INT_MAX);
     if (InvalidKind == 1) { delete[] first->PosArray; first->PosArray = nullptr; }
-    if (InvalidKind == 2) { delete[] first->NormArray; first->NormArray = nullptr; }
-    if (InvalidKind == 3) { delete[] last->NormArray; last->NormArray = nullptr; }
     if (InvalidKind == 4) first->TimeStep = FloatWithBits(0x7FC00000u);
     if (InvalidKind == 5) last->TimeStep = -1.0f;
     Check(controller.DumpKeysTo(nullptr) == 0, "Morph size query accepted inconsistent or unrepresentable state");
@@ -1950,6 +1974,25 @@ void MorphDumpRejectsInconsistentState() {
     for (int i = 0; i < 40; ++i) output[i] = 0x12345678u;
     Check(controller.DumpKeysTo(output) == 0, "Morph dump wrote invalid state");
     for (int i = 0; i < 40; ++i) Check(output[i] == 0x12345678u, "Rejected Morph dump changed caller bytes");
+}
+
+// Native 0x100505D9 takes normal presence from key 0 and reads later keys'
+// normals. Mixed presence keeps every position and omits all normals.
+template<bool FirstMissing>
+void MorphSaveOmitsPartialNormals() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "MorphPartialNormals");
+    AddMorphRequestKeys(animation);
+    RCKMorphController *controller = static_cast<RCKMorphController *>(animation.GetMorphController());
+    CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(FirstMissing ? 0 : 1));
+    delete[] key->NormArray; key->NormArray = nullptr;
+    const int bytes = controller->DumpKeysTo(nullptr);
+    Check(bytes == static_cast<int>((3 + 2 * (1 + 3 * 3)) * sizeof(CKDWORD)), "Partial-normal Morph size included normals");
+    Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(saved != nullptr, "Partial-normal Morph discarded the animation Save");
+    RCKObjectAnimation reloaded(&context, "MorphPartialNormalsReloaded");
+    LoadChunk(reloaded, saved.get());
+    CheckResizedMorphKeys(*static_cast<RCKMorphController *>(reloaded.GetMorphController()), 3, 3, false);
 }
 
 template<int InvalidKind>
@@ -2119,7 +2162,8 @@ void LoadedMorphSkipsRecordPaddingAndUnknownControllers() {
 }
 
 void MorphSaveRejectsIncompletePayloads() {
-    for (int kind = 0; kind < 5; ++kind) {
+    // Partial normals are omitted rather than rejected; see MorphSaveOmitsPartialNormals.
+    for (int kind : {0, 3, 4}) {
         CKContext context(nullptr, 0, 0);
         RCKObjectAnimation animation(&context, "MorphBadSave");
         AddMorphRequestKeys(animation);
@@ -2127,8 +2171,6 @@ void MorphSaveRejectsIncompletePayloads() {
         CKMorphKey *first = static_cast<CKMorphKey *>(controller->GetKey(0));
         CKMorphKey *last = static_cast<CKMorphKey *>(controller->GetKey(1));
         if (kind == 0) { delete[] first->PosArray; first->PosArray = nullptr; }
-        if (kind == 1) { delete[] first->NormArray; first->NormArray = nullptr; }
-        if (kind == 2) { delete[] last->NormArray; last->NormArray = nullptr; }
         if (kind == 3) first->TimeStep = FloatWithBits(0x7FC00000u);
         if (kind == 4) last->TimeStep = -1.0f;
         Check(controller->DumpKeysTo(nullptr) == 0, "Invalid Save fixture unexpectedly serialized");
@@ -3141,6 +3183,40 @@ void TransformClonePreservesTypedSerializedKeys() {
 }
 
 template<CKANIMATION_CONTROLLER Type>
+void TransformSelfCloneAndFailedCopyPreserveKeys() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation sourceAnimation(&context, "TransformFailedCopySource"), animation(&context, "TransformSelfClone");
+    WireWords words = TransformControllerWire(Type);
+    Chunk sourceChunk = AnimationWithController(Type, words);
+    Chunk chunk = AnimationWithController(Type, words);
+    LoadChunk(sourceAnimation, sourceChunk.get());
+    LoadChunk(animation, chunk.get());
+    CKAnimController *source = TransformController(sourceAnimation, Type);
+    CKAnimController *controller = TransformController(animation, Type);
+    const int keyCount = controller->GetKeyCount();
+    CKKey *key = controller->GetKey(0);
+
+    s_MorphArrayAllocationFailure = 0;
+    const CKBOOL cloned = controller->Clone(controller);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(cloned && noAllocation, "Transform self-Clone allocated or failed");
+    Check(keyCount > 0 && controller->GetKeyCount() == keyCount && controller->GetKey(0) == key && controller->GetLength() == 20.0f,
+          "Transform self-Clone changed owned keys");
+    CheckSavedController(animation, Type, words);
+
+    sourceAnimation.SetLength(37.0f);
+    source->GetKey(0)->SetTime(-3.0f);
+    s_MorphArrayAllocationFailure = 0;
+    const CKBOOL failed = controller->Clone(source);
+    s_MorphArrayAllocationFailure = -1;
+    Check(!failed, "Transform Clone ignored a key allocation failure");
+    Check(keyCount > 0 && controller->GetKeyCount() == keyCount && controller->GetKey(0) == key && controller->GetLength() == 20.0f,
+          "Failed transform Clone changed the destination");
+    CheckSavedController(animation, Type, words);
+}
+
+template<CKANIMATION_CONTROLLER Type>
 void LoadedTCBUsesOriginalTimeRemapping() {
     CKContext context(nullptr, 0, 0);
     const bool rotation = Type == CKANIMATION_TCBROT_CONTROL || Type == CKANIMATION_TCBSCLAXIS_CONTROL;
@@ -3696,8 +3772,8 @@ int main(int argc, char **argv) {
         {"Morph read rejects nonfinite key times atomically", MorphReadRejectsInvalidHeaderOrTimes<2>},
         {"Morph dump rejects byte-size overflow", MorphDumpRejectsInconsistentState<0>},
         {"Morph dump rejects missing positions", MorphDumpRejectsInconsistentState<1>},
-        {"Morph dump rejects first-only missing normals", MorphDumpRejectsInconsistentState<2>},
-        {"Morph dump rejects later missing normals", MorphDumpRejectsInconsistentState<3>},
+        {"Morph Save omits normals missing from the first key", MorphSaveOmitsPartialNormals<true>},
+        {"Morph Save omits normals missing from a later key", MorphSaveOmitsPartialNormals<false>},
         {"Morph dump rejects nonfinite key times", MorphDumpRejectsInconsistentState<4>},
         {"Morph dump rejects descending key times", MorphDumpRejectsInconsistentState<5>},
         {"Loaded Morph rejects incomplete header envelope", LoadedMorphRespectsControllerRecordBoundaries<0>},
@@ -3836,6 +3912,7 @@ int main(int argc, char **argv) {
         {"Clear owner resets shared controllers", ClearingAnimationClearsSharedControllers<true>},
         {"Clear alias resets shared controllers", ClearingAnimationClearsSharedControllers<false>},
         {"ClearAll releases controller storage", ClearAllReleasesControllerStorage},
+        {"ShareDataFrom transfers ownership of released data", ShareDataFromTransfersOwnershipOfReleasedData},
         {"Legacy v0 animation preserves shared owner", AnimationLoadRestoresSharedOwnership<0>},
         {"Legacy snapshot animation takes ownership", AnimationLoadRestoresSharedOwnership<1>},
         {"Modern animation takes ownership", AnimationLoadRestoresSharedOwnership<10>},
@@ -3867,6 +3944,16 @@ int main(int argc, char **argv) {
         {"TCB scale-axis Clone type and keys", TransformClonePreservesTypedSerializedKeys<CKANIMATION_TCBSCLAXIS_CONTROL>},
         {"Bezier position Clone type and keys", TransformClonePreservesTypedSerializedKeys<CKANIMATION_BEZIERPOS_CONTROL>},
         {"Bezier scale Clone type and keys", TransformClonePreservesTypedSerializedKeys<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"Linear position self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_LINPOS_CONTROL>},
+        {"Linear rotation self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_LINROT_CONTROL>},
+        {"Linear scale self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_LINSCL_CONTROL>},
+        {"Linear scale-axis self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCB position self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_TCBPOS_CONTROL>},
+        {"TCB rotation self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_TCBROT_CONTROL>},
+        {"TCB scale self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_TCBSCL_CONTROL>},
+        {"TCB scale-axis self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"Bezier position self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"Bezier scale self-Clone and failed copy preserve keys", TransformSelfCloneAndFailedCopyPreserveKeys<CKANIMATION_BEZIERSCL_CONTROL>},
         {"Loaded TCB position easing", LoadedTCBUsesOriginalTimeRemapping<CKANIMATION_TCBPOS_CONTROL>},
         {"Loaded TCB rotation easing", LoadedTCBUsesOriginalTimeRemapping<CKANIMATION_TCBROT_CONTROL>},
         {"Loaded TCB scale easing", LoadedTCBUsesOriginalTimeRemapping<CKANIMATION_TCBSCL_CONTROL>},
