@@ -578,6 +578,20 @@ void LayerSaveRegistersTypeRemapping() {
     Check(registry->m_RemapCount == 2, "Layer Save registered the same type more than once");
 }
 
+// m_Remap holds one entry per type registered at PreSave; an out-of-range
+// type wrote past it.
+void LayerSaveIgnoresUnregisteredTypeRemapping() {
+    CKContext context(nullptr, 0, 0);
+    LayerRegistry *registry = new LayerRegistry(&context);
+    RCKLayer layer(&context, "Layer", 0);
+    layer.SetFormat(1);
+    layer.SetType(registry->GetLayerTypeCount());
+    CKFile file(&context);
+    Chunk saved(layer.Save(&file, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    Check(registry->m_RemapCount == 1 && registry->remap[0] == 0 && registry->remap[1] == 0,
+          "Layer Save remapped a type outside the registered range");
+}
+
 void LayerSquaresUseFourByteWireStride() {
     CKContext context(nullptr, 0, 0);
     new LayerRegistry(&context);
@@ -787,6 +801,64 @@ void GridLayerFileLoadRestoresDisplay() {
     }
     loaded.PostLoad();
     CheckGridDisplay(loaded);
+}
+
+// The texture is capped at 256 pixels, or 128 cells. Later cells wrapped into
+// the next pixel row and finally wrote past the surface.
+void GridTextureDrawsOnlyCellsThatFit() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    RCKGrid grid(&context, "WideGrid");
+    grid.SetDimensions(200, 1, 1.0f, 1.0f);
+    const int type = registry->RegisterType(const_cast<char *>("Intensity"));
+    VxColor white(VxColor(1.0f, 1.0f, 1.0f).GetRGBA());
+    registry->SetAssociatedColor(type, &white);
+    registry->SetAssociatedParam(type, CKGUID(0, 0));
+    CKLayer *layer = grid.AddLayer(type);
+    Check(layer != nullptr, "Cannot create grid layer");
+    layer->GetSquareArray()[0].ival = 10;
+    layer->GetSquareArray()[128].ival = 200;
+    grid.ConstructMeshTexture(0.5f);
+    CKMesh *mesh = grid.GetCurrentMesh();
+    CKTexture *texture = mesh ? mesh->GetFaceMaterial(0)->GetTexture() : nullptr;
+    Check(texture && texture->GetWidth() == 256 && texture->GetHeight() == 16, "Wide grid texture size changed");
+    const CKDWORD *pixels = reinterpret_cast<const CKDWORD *>(texture->LockSurfacePtr());
+    Check(pixels != nullptr, "Cannot inspect wide grid pixels");
+    const CKDWORD cell = 0xFF0A0A0Au;
+    const bool kept = pixels[0] == cell && pixels[1] == cell && pixels[256] == cell && pixels[257] == cell;
+    texture->ReleaseSurfacePtr();
+    Check(kept, "Cells beyond the texture width overwrote the next pixel row");
+}
+
+// Load sizes cells from the file, but value access and Save index by the grid.
+void LayerLoadFitsCellsToItsGrid() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    RCKGrid grid(&context, "Grid");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    const int type = registry->RegisterType(const_cast<char *>("Short"));
+    CKLayer *layer = grid.AddLayer(type);
+    CKLayer *reloaded = grid.AddLayer(registry->RegisterType(const_cast<char *>("Reloaded")));
+    Check(layer && reloaded, "Cannot create grid layers");
+    Chunk chunk = NewChunk(CKCID_LAYER);
+    chunk->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    chunk->WriteObject(&grid);
+    chunk->WriteInt(type); // Runtime type index.
+    chunk->WriteInt(0); // Square data format.
+    chunk->WriteInt(1); // Visibility.
+    CKDWORD values[] = {5, 6};
+    chunk->WriteBuffer_LEndian(sizeof(values), values);
+    LoadChunk(*layer, chunk.get());
+    int value = -1;
+    layer->GetValue(1, 1, &value);
+    Check(value == 0, "Layer cells were not extended to the grid size");
+    Chunk saved(layer->Save(nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    LoadChunk(*reloaded, saved.get());
+    const int expected[] = {5, 6, 0, 0};
+    for (int i = 0; i < 4; ++i)
+        Check(reloaded->GetSquareArray()[i].ival == expected[i], "Layer Save read cells beyond its loaded values");
 }
 
 void GridMemorySnapshotRestoresEmbeddedLayers() {
@@ -3934,6 +4006,9 @@ int main(int argc, char **argv) {
         {"Grid loaded before layers", GridLayerFileLoadRestoresDisplay<false>},
         {"Layers loaded before grid", GridLayerFileLoadRestoresDisplay<true>},
         {"Grid embedded layer snapshot", GridMemorySnapshotRestoresEmbeddedLayers},
+        {"Grid texture draws only cells that fit", GridTextureDrawsOnlyCellsThatFit},
+        {"Layer Load fits cells to its grid", LayerLoadFitsCellsToItsGrid},
+        {"Layer Save ignores unregistered type remapping", LayerSaveIgnoresUnregisteredTypeRemapping},
         {"Morph save without normals", MorphSaveUsesGlobalNormalFlag<false>},
         {"Morph save with normals", MorphSaveUsesGlobalNormalFlag<true>},
         {"Morph load without normals", MorphLoadReadsOriginalControllerLayout<false>},

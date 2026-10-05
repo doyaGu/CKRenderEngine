@@ -52,12 +52,18 @@ public:
     static CKLayer *CreateInstance(CKContext *Context);
     static CK_CLASSID m_ClassID;
 
+    // Resizes owned cells to the owner grid's width * length, keeping the
+    // stored prefix. Load sizes cells from the file before the grid's
+    // dimensions may be known; value access and Save index by the grid.
+    void FitSquareArray();
+
 protected:
     CKGrid *m_Grid;
     int m_Type;
     int m_Format;
     CKDWORD m_Flags;
     CKSquare *m_SquareArray;
+    int m_SquareCount; // Allocated cells, or -1 for an array from SetSquareArray.
 };
 
 #endif // RCKLAYER_H

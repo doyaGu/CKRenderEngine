@@ -208,6 +208,13 @@ CKERROR RCKGrid::Load(CKStateChunk *chunk, CKFile *file) {
 
         // Check and validate loaded layers
         m_Layers.Check(m_Context);
+
+        // Layers loaded before these dimensions sized their cells from the file.
+        for (int i = 0; i < m_Layers.Size(); ++i) {
+            CKObject *layerObject = m_Context->GetObject(m_Layers[i]);
+            if (layerObject && layerObject->GetClassID() == CKCID_LAYER)
+                static_cast<RCKLayer *>(layerObject)->FitSquareArray();
+        }
     }
 
     return CK_OK;
@@ -560,10 +567,15 @@ void RCKGrid::ConstructMeshTexture(float scale) {
         // Lock texture surface and fill with layer data
         CKBYTE *surfacePtr = texture->LockSurfacePtr();
         if (surfacePtr) {
+            // Each cell covers 2x2 pixels of a texture capped at 256 pixels.
+            // The original also fills cells past 128, which wraps into the next
+            // row and finally writes past the surface; draw only those that fit.
+            const CKDWORD cellsWide = m_Width < (CKDWORD) texWidth / 2 ? m_Width : (CKDWORD) texWidth / 2;
+            const CKDWORD cellsLong = m_Length < (CKDWORD) texHeight / 2 ? m_Length : (CKDWORD) texHeight / 2;
             CKBYTE *rowPtr = surfacePtr;
-            for (CKDWORD y = 0; y < m_Length; ++y) {
+            for (CKDWORD y = 0; y < cellsLong; ++y) {
                 CKBYTE *pixelPtr = rowPtr;
-                for (CKDWORD x = 0; x < m_Width; ++x) {
+                for (CKDWORD x = 0; x < cellsWide; ++x) {
                     int r = 0, g = 0, b = 0;
 
                     // Accumulate color from all layers at this cell
