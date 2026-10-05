@@ -905,8 +905,13 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
             UseMipmap(useMipMap);
             if (size > sizeof(CKDWORD)) {
                 VxImageDescEx desc;
-                chunk->ReadAndFillBuffer(&desc.Width);
-                m_DesiredVideoFormat = VxImageDesc2PixelFormat(desc);
+                // Skip a block larger than the descriptor tail instead of overflowing it.
+                const int capacity = (int) (reinterpret_cast<char *>(&desc + 1) - reinterpret_cast<char *>(&desc.Width));
+                const int descSize = chunk->ReadInt();
+                const bool fits = descSize >= 0 && descSize <= capacity;
+                chunk->ReadAndFillBuffer_LEndian(descSize, fits ? &desc.Width : nullptr);
+                if (fits)
+                    m_DesiredVideoFormat = VxImageDesc2PixelFormat(desc);
             }
         }
         if (chunk->SeekIdentifier(CK_STATESAVE_TEXSAVEFORMAT)) {

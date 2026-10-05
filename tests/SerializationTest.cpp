@@ -290,6 +290,39 @@ void LegacyBodyPartUsesIntegerFlagsAndX86ShiftCounts() {
               Equal(body.Joint().m_Damping, joint.damping), "Legacy joint vectors changed");
 }
 
+// The legacy reader copied the stored size into the 72-byte stack layout.
+void LegacyBodyPartSkipsOversizedJoint() {
+    CKContext context(nullptr, 0, 0);
+    BodyPartForTest body(&context);
+    const CKIkJoint before = body.Joint();
+    CKDWORD oversized[20];
+    for (CKDWORD &word : oversized) word = 1;
+    Chunk chunk = NewChunk(CKCID_BODYPART, 4);
+    chunk->WriteIdentifier(CK_STATESAVE_BODYPARTROTJOINT);
+    chunk->WriteBuffer_LEndian(sizeof(oversized), oversized);
+    LoadChunk(body, chunk.get());
+    Check(body.Joint().m_Flags == before.m_Flags && Equal(body.Joint().m_Min, before.m_Min) &&
+              Equal(body.Joint().m_Max, before.m_Max) && Equal(body.Joint().m_Damping, before.m_Damping),
+          "Oversized legacy joint block changed the joint");
+}
+
+// The video format reader copied the stored size into a stack VxImageDescEx.
+void LegacyTextureSkipsOversizedVideoFormat() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context); // Owned by CKContext.
+    LegacyTexture texture(&context);
+    const VX_PIXELFORMAT before = texture.GetDesiredVideoFormat();
+    CKDWORD oversized[64] = {};
+    oversized[0] = 64; oversized[1] = 64; oversized[2] = 32;
+    Chunk chunk = NewChunk(CKCID_TEXTURE, 4);
+    chunk->WriteIdentifier(CK_STATESAVE_TEXVIDEOFORMAT);
+    chunk->WriteInt(1);
+    chunk->WriteBuffer_LEndian(sizeof(oversized), oversized);
+    LoadChunk(texture, chunk.get());
+    Check(texture.mipmapRequest == 1, "Legacy mipmap request was ignored");
+    Check(texture.GetDesiredVideoFormat() == before, "Oversized video format block changed the desired format");
+}
+
 // 0x100621FF calls RCK2dEntity::Save, bypassing sprite bitmap state.
 void SpriteTextSaveOmitsSpriteBitmapState() {
     CKContext context(nullptr, 0, 0);
@@ -303,7 +336,7 @@ void SpriteTextSaveOmitsSpriteBitmapState() {
 }
 
 // 0x1007C340 handles three distinct vertex layouts and material-grouped faces.
-template <int Version, bool Lit, CKDWORD SaveFlags = 0>
+template <int Version, bool Lit, CKDWORD SaveFlags = 0, bool OversizedLines = false>
 void LegacyMeshLayout() {
     CKContext context(nullptr, 0, 0);
     RCKMesh mesh(&context, "LegacyMesh");
@@ -379,8 +412,9 @@ void LegacyMeshLayout() {
     chunk->WriteIdentifier(CK_STATESAVE_MESHLINES);
     chunk->WriteInt(1);
     if (Version >= 1) {
-        CKWORD indices[] = {1, 2};
-        chunk->WriteBuffer_LEndian16(sizeof(indices), indices);
+        // An oversized block declares more indices than the one stored line.
+        CKWORD indices[] = {1, 2, 3, 4};
+        chunk->WriteBuffer_LEndian16(OversizedLines ? sizeof(indices) : 2 * sizeof(CKWORD), indices);
     } else {
         chunk->WriteInt(1);
         chunk->WriteInt(2);
@@ -416,7 +450,10 @@ void LegacyMeshLayout() {
     }
     int a, b;
     mesh.GetLine(0, &a, &b);
-    Check(a == 1 && b == 2, "Legacy line index buffer layout is incorrect");
+    if (OversizedLines)
+        Check(mesh.GetLineCount() == 1 && a == 0 && b == 0, "Oversized legacy line block was copied");
+    else
+        Check(a == 1 && b == 2, "Legacy line index buffer layout is incorrect");
 }
 
 template <bool NonUnit>
@@ -3872,6 +3909,9 @@ int main(int argc, char **argv) {
         {"Mesh v0 lit", LegacyMeshLayout<0, true>},
         {"Mesh v0 prelit", LegacyMeshLayout<0, false>},
         {"Mesh v1 lit", LegacyMeshLayout<1, true>},
+        {"Mesh v1 skips oversized line block", LegacyMeshLayout<1, true, 0, true>},
+        {"Legacy body part skips oversized joint block", LegacyBodyPartSkipsOversizedJoint},
+        {"Legacy texture skips oversized video format block", LegacyTextureSkipsOversizedVideoFormat},
         {"Mesh v1 prelit", LegacyMeshLayout<1, false>},
         {"Mesh v4 lit", LegacyMeshLayout<4, true>},
         {"Mesh v4 prelit", LegacyMeshLayout<4, false>},

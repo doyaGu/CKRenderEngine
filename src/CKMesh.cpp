@@ -1773,8 +1773,11 @@ static void LoadLegacyMesh(RCKMesh &mesh, CKStateChunk *chunk) {
             for (int i = 0; i < vertexCount; ++i) {
                 VxVector position, normal;
                 if (version < 1) {
-                    chunk->ReadAndFillBuffer_LEndian(&position);
-                    chunk->ReadAndFillBuffer_LEndian(&normal);
+                    // Skip oversized blocks instead of overflowing the vectors.
+                    int size = chunk->ReadInt();
+                    chunk->ReadAndFillBuffer_LEndian(size, size >= 0 && size <= (int) sizeof(position) ? &position : nullptr);
+                    size = chunk->ReadInt();
+                    chunk->ReadAndFillBuffer_LEndian(size, size >= 0 && size <= (int) sizeof(normal) ? &normal : nullptr);
                     mesh.SetVertexNormal(i, &normal);
                 } else {
                     chunk->ReadVector(&position);
@@ -1839,7 +1842,11 @@ static void LoadLegacyMesh(RCKMesh &mesh, CKStateChunk *chunk) {
         const int lineCount = chunk->ReadInt();
         mesh.SetLineCount(lineCount);
         if (version >= 1) {
-            chunk->ReadAndFillBuffer_LEndian16(mesh.GetLineIndices());
+            // Skip a block larger than the allocated indices instead of overflowing them.
+            const int size = chunk->ReadInt();
+            const bool fits = size >= 0 &&
+                static_cast<size_t>(size) <= static_cast<size_t>(mesh.GetLineCount()) * 2 * sizeof(CKWORD);
+            chunk->ReadAndFillBuffer_LEndian16(size, fits ? mesh.GetLineIndices() : nullptr);
         } else {
             for (int i = 0; i < lineCount; ++i) {
                 const int a = chunk->ReadInt();
@@ -1964,7 +1971,10 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
             if (chunk->SeekIdentifier(CK_STATESAVE_MESHLINES)) {
                 int lineCount = chunk->ReadInt();
                 SetLineCount(lineCount);
-                chunk->ReadAndFillBuffer_LEndian16(m_LineIndices.Begin());
+                // Skip a block larger than the allocated indices instead of overflowing them.
+                const int size = chunk->ReadInt();
+                const bool fits = size >= 0 && size <= m_LineIndices.Size() * (int) sizeof(CKWORD);
+                chunk->ReadAndFillBuffer_LEndian16(size, fits ? m_LineIndices.Begin() : nullptr);
             }
 
             // Rebuild geometry
@@ -2043,8 +2053,10 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
             }
         } else {
             SetVertexWeightsCount(weightCount);
-            if (m_VertexWeights)
-                chunk->ReadAndFillBuffer_LEndian(m_VertexWeights->Begin());
+            // Skip a block larger than the allocated weights instead of overflowing them.
+            const int size = chunk->ReadInt();
+            const bool fits = m_VertexWeights && size >= 0 && size <= m_VertexWeights->Size() * (int) sizeof(float);
+            chunk->ReadAndFillBuffer_LEndian(size, fits ? m_VertexWeights->Begin() : nullptr);
 
             const int expectedNoTail = (int) (sizeof(CKDWORD) + sizeof(CKDWORD) + weightCount * sizeof(float));
             if (weightSize >= expectedNoTail + (int) sizeof(float)) {

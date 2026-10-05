@@ -104,14 +104,18 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
     } else {
         // Legacy data starts with nine integer booleans, followed by three vectors.
         // 0x1000EB98 uses SHL r32, CL: x86 masks (i - 1) to five bits.
-        if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTROTJOINT)) {
-            struct LegacyRotationJoint {
-                CKDWORD flags[3][3];
-                VxVector minimum, maximum, damping;
-            } legacy = {};
-            static_assert(sizeof(LegacyRotationJoint) == 72, "Legacy rotation joint layout");
-            chunk->ReadAndFillBuffer_LEndian(&legacy);
-
+        // An oversized block is skipped instead of overflowing the legacy layout.
+        struct LegacyRotationJoint {
+            CKDWORD flags[3][3];
+            VxVector minimum, maximum, damping;
+        } legacy = {};
+        static_assert(sizeof(LegacyRotationJoint) == 72, "Legacy rotation joint layout");
+        const CKBOOL hasJoint = chunk->SeekIdentifier(CK_STATESAVE_BODYPARTROTJOINT);
+        const int size = hasJoint ? chunk->ReadInt() : -1;
+        const bool fits = size >= 0 && size <= static_cast<int>(sizeof(legacy));
+        if (hasJoint)
+            chunk->ReadAndFillBuffer_LEndian(size, fits ? &legacy : nullptr);
+        if (fits) {
             m_RotationJoint.m_Damping = legacy.damping;
             m_RotationJoint.m_Max = legacy.maximum;
             m_RotationJoint.m_Min = legacy.minimum;
