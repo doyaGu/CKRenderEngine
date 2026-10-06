@@ -213,7 +213,13 @@ void CKSdlGpuRasterizerContext::Collect()
             ++i;
             continue;
         }
-        const void *bytes = SDL_MapGPUTransferBuffer(Device, ticket->Transfer.get(), false);
+        // Without unrestricted copy pitch, SDL's D3D12 backend copies a
+        // download with unaligned rows into the transfer buffer only while
+        // cleaning up the finished command buffer. A fence query does not
+        // clean up; waiting on the signaled fence does, and returns at once.
+        SDL_GPUFence *fence = ticket->Fence.get();
+        const void *bytes = SDL_WaitForGPUFences(Device, true, &fence, 1)
+            ? SDL_MapGPUTransferBuffer(Device, ticket->Transfer.get(), false) : nullptr;
         if (!bytes) ticket->Error = CKERR_INVALIDOPERATION;
         else {
             std::memcpy(ticket->Data.Begin(), bytes, ticket->Data.Size());

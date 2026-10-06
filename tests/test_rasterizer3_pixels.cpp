@@ -4263,6 +4263,25 @@ void CheckRenderTargetReadback(Backend &b)
     TestCheck(pixels.Width == 32 && pixels.Height == 32, "target readback has the texture size");
     TestCheckf(PixelNear(pixels, 16, 6, 0, 255, 0), "target readback: top of the triangle must be green");
     TestCheckf(PixelNear(pixels, 16, 26, 0, 0, 0), "target readback: the lower half must stay black (top-down layout)");
+    // A readback delivered once the GPU has finished, before anything else
+    // submits or waits: SDL's D3D12 backend copies rows that are not 256-byte
+    // aligned (128 here) into the transfer buffer while cleaning up the
+    // finished command buffer, not when its fence signals.
+    ReadbackCapture polled;
+    BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+    TestCheck(DrawColorTriangle(ctx, upper, kGreen), "triangle before the polled readback");
+    TestCheck(ctx->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &polled),
+              "polled target readback");
+    EndFrame(ctx);
+    for (int attempt = 0; attempt < 100 && polled.Calls == 0; ++attempt) {
+        SDL_Delay(attempt == 0 ? 100 : 10);
+        BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
+        EndFrame(ctx);
+    }
+    TestCheck(polled.Calls == 1 && polled.Success && polled.Width == 32 && polled.Height == 32,
+              "polled target readback completes once");
+    TestCheckf(polled.Calls == 1 && PixelNear(polled.Image, 16, 6, 0, 255, 0),
+               "polled target readback must hold the finished frame, not the transfer buffer before SDL's copy");
     TestCheck(ctx->SetTargetTexture(0, 0, 0, CKRST_CUBEFACE_XPOS), "release target");
     const CKRasterizerContextDesc contextDesc = ReadContextDesc(ctx);
     full.ViewWidth = contextDesc.Width;
