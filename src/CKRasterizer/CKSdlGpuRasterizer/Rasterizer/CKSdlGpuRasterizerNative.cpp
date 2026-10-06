@@ -279,17 +279,20 @@ bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority 
     return Worker.Submit(job, priority, after);
 }
 
-void CKSdlGpuRasterizerContext::CollectJobs(Uint64 budgetNs)
+int CKSdlGpuRasterizerContext::CollectJobs(Uint64 budgetNs)
 {
     const Uint64 start = SDL_GetTicksNS();
+    int collected = 0;
     while (CKSdlGpuJob *job = Worker.Collect()) {
         job->Complete();
         delete job;
+        ++collected;
         if (SDL_GetTicksNS() - start >= budgetNs)
             break;
     }
     // Completions free the idle budget for prewarms it deferred.
     RetryFFJitPrewarms();
+    return collected;
 }
 
 CKERROR CKSdlGpuRasterizerContext::FlushPendingCommandsForTests()
@@ -319,9 +322,11 @@ CKBOOL CKSdlGpuRasterizerContext::FinishBackgroundWorkForTests(Sint32 timeoutMs)
         const Uint64 now = SDL_GetTicks();
         if (!Worker.WaitIdle(Sint32(now < deadline ? deadline - now : 0)))
             return FALSE;
-        CollectJobs(SDL_MAX_UINT64);
-        // A compiled program queues the pipelines it prewarms.
-        if (Worker.Pending() == 0)
+        // Collected jobs queue more: a compiled program the pipelines it
+        // prewarms, the freed budget deferred prewarms. That work can finish
+        // before Pending looks, uncollected, so stop only after a pass that
+        // collected nothing.
+        if (CollectJobs(SDL_MAX_UINT64) == 0 && Worker.Pending() == 0)
             return TRUE;
     }
 }

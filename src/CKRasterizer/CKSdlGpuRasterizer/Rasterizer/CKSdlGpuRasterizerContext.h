@@ -331,8 +331,8 @@ private:
                    const CKSdlGpuJob *After = nullptr);
     // Completes finished jobs in the order they ran, until BudgetNs of the
     // calling thread's time is spent; the next call completes the rest.
-    // Call only at a frame boundary.
-    void CollectJobs(Uint64 BudgetNs);
+    // Call only at a frame boundary. Returns the number completed.
+    int CollectJobs(Uint64 BudgetNs);
     bool StartWorker();
     // Creates shaders on the worker. Programs take them at once; their
     // pipelines wait for the job, and a pipeline created while drawing
