@@ -408,14 +408,14 @@ CKSdlGpuPipelineEntry *CKSdlGpuRasterizerContext::CreatePipeline(CKSdlGpuProgram
     return entry;
 }
 
-void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
+bool CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
     SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples,
     CKSdlGpuJobPriority priority)
 {
     const CKSdlGpuPipelineKey key = PipelineKey(draw, color, depth, samples);
     CKSdlGpuProgram &program = *draw.Program;
     if (program.Pipelines.FindPtr(key))
-        return;
+        return true;
     const uint64_t pending = m_FFJitStats.PipelineQueued - m_FFJitStats.PipelineCompleted;
     const uint64_t limit = priority == CKSDLGPU_JOB_IDLE ? kPipelinePrewarmLimit : kPipelineJobLimit;
     if (pending >= limit) {
@@ -423,14 +423,14 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
         if (priority == CKSDLGPU_JOB_IDLE)
             ++m_FFJitStats.PipelinePrewarmDeferred;
         // No placeholder: a later draw must be able to queue this PSO again.
-        return;
+        return false;
     }
     // A null entry marks the pipeline as pending.
     CKSdlGpuPipelineEntry *entry = ReservePipeline(program, key);
     if (!entry) {
         ++m_FFJitStats.PipelineQueueDeferred;
         if (priority == CKSDLGPU_JOB_IDLE) ++m_FFJitStats.PipelinePrewarmDeferred;
-        return;
+        return false;
     }
     entry->LastUse = priority == CKSDLGPU_JOB_IDLE ? 0 : PipelineClock;
     auto *job = new CKSdlGpuPipelineJob(Device, program.weak_from_this(), key, m_FFJitStats);
@@ -450,6 +450,7 @@ void CKSdlGpuRasterizerContext::QueuePipeline(const CKSdlGpuDraw &draw,
         entry->Failed = true;
     }
     CKRE_PROFILE_VALUE("CKRE.SDL.BackgroundPipelines", 1);
+    return true;
 }
 
 bool CKSdlGpuRasterizerContext::ClaimShaders(const CKSdlGpuProgram &program)

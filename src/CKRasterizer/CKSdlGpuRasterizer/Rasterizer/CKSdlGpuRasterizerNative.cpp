@@ -288,6 +288,8 @@ void CKSdlGpuRasterizerContext::CollectJobs(Uint64 budgetNs)
         if (SDL_GetTicksNS() - start >= budgetNs)
             break;
     }
+    // Completions free the idle budget for prewarms it deferred.
+    RetryFFJitPrewarms();
 }
 
 CKERROR CKSdlGpuRasterizerContext::FlushPendingCommandsForTests()

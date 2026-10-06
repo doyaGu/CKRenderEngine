@@ -731,11 +731,39 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
 void CKSdlGpuRasterizerContext::PrewarmFFJitPipeline(CKDWORD Program,
                                                      const CKSdlGpuFFJitPipelineRecord &Record)
 {
-    const CKDWORD layout = GetNativeVertexLayout(Record.VertexFormat);
     const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(Program);
-    const std::shared_ptr<CKSdlGpuLayout> &vertexLayout = Layouts.Borrow(layout);
-    if (!program || !vertexLayout)
+    if (!program || QueueFFJitPrewarm(program, Record))
         return;
+    // Queued again once collected jobs free the idle budget. Without this a
+    // precompiled pipeline past the budget is created at its first draw.
+    if (m_FFJitDeferredPrewarms.Size() < CKSDL_GPU_FF_JIT_MANIFEST_MAX_PIPELINES) {
+        FFJitDeferredPrewarm deferred;
+        deferred.Program = program;
+        deferred.Record = Record;
+        m_FFJitDeferredPrewarms.PushBack(deferred);
+    }
+}
+
+void CKSdlGpuRasterizerContext::RetryFFJitPrewarms()
+{
+    // In manifest order; a deferral leaves the rest for a later collection.
+    for (; m_FFJitDeferredPrewarmNext < m_FFJitDeferredPrewarms.Size(); ++m_FFJitDeferredPrewarmNext) {
+        const FFJitDeferredPrewarm &deferred = m_FFJitDeferredPrewarms[m_FFJitDeferredPrewarmNext];
+        const std::shared_ptr<CKSdlGpuProgram> program = deferred.Program.lock();
+        if (program && !QueueFFJitPrewarm(program, deferred.Record))
+            return;
+    }
+    m_FFJitDeferredPrewarms.Clear();
+    m_FFJitDeferredPrewarmNext = 0;
+}
+
+bool CKSdlGpuRasterizerContext::QueueFFJitPrewarm(const std::shared_ptr<CKSdlGpuProgram> &program,
+                                                  const CKSdlGpuFFJitPipelineRecord &Record)
+{
+    const CKDWORD layout = GetNativeVertexLayout(Record.VertexFormat);
+    const std::shared_ptr<CKSdlGpuLayout> &vertexLayout = Layouts.Borrow(layout);
+    if (!vertexLayout)
+        return true;
     // The fields a pipeline depends on, as the record's draw had them.
     CKSdlGpuDraw draw;
     draw.State.State.Lo = Record.StateLo;
@@ -748,9 +776,9 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitPipeline(CKDWORD Program,
     draw.Program = program.get();
     draw.Layout = vertexLayout.get();
     draw.LayoutHandle = layout;
-    QueuePipeline(draw, (SDL_GPUTextureFormat)Record.ColorFormat,
-                  (SDL_GPUTextureFormat)Record.DepthFormat,
-                  (SDL_GPUSampleCount)Record.SampleCount, CKSDLGPU_JOB_IDLE);
+    return QueuePipeline(draw, (SDL_GPUTextureFormat)Record.ColorFormat,
+                         (SDL_GPUTextureFormat)Record.DepthFormat,
+                         (SDL_GPUSampleCount)Record.SampleCount, CKSDLGPU_JOB_IDLE);
 }
 
 void CKSdlGpuRasterizerContext::SaveFFJitManifest()
@@ -861,6 +889,8 @@ void CKSdlGpuRasterizerContext::ClearFFJitPrograms()
     m_FFJitCandidates.Clear();
     m_FFJitCandidateOrder.Clear();
     m_FFJitCandidateCursor = 0;
+    m_FFJitDeferredPrewarms.Clear();
+    m_FFJitDeferredPrewarmNext = 0;
     // The job keeps the shaders it creates until it is deleted.
     m_FFShaderJob = nullptr;
     for (CKDWORD variant = 0; variant < CKFF_PROGRAM_VARIANT_COUNT; ++variant) {

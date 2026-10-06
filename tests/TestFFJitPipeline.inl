@@ -107,8 +107,18 @@ void CheckFFJitPipelinePressure()
                   active.PipelineDeferred == 0,
               "new draw work can queue while the prewarm budget is full");
     TestCheck(ctx->FinishBackgroundWorkForTests(30000), "startup pipeline work drains");
-    // Prewarm deferral is best effort. Actual draws must recover every skipped
-    // grid PSO, with at most two bounded batches for these 192 variants.
+    // Deferred prewarms queue again as collected jobs free the idle budget,
+    // so the first grid draws find every manifest PSO ready.
+    const auto startup = ctx->GetFFJitStats();
+    TestCheck(startup.PipelineQueued > active.PipelineQueued && startup.PipelineBuildFailed == 0,
+              "deferred prewarms queue as completions free the idle budget");
+    RenderAndRead(ctx, clear, NULL, [&]() { DrawPipelineGrid(ctx); }, actual);
+    CheckMatchingImage("pipeline-prewarm-complete", actual, expected);
+    const auto first = ctx->GetFFJitStats();
+    TestCheck(first.PipelineReady == startup.PipelineReady + 192 && first.PipelineQueued == startup.PipelineQueued &&
+                  first.SynchronousRequests == startup.SynchronousRequests,
+              "every deferred manifest PSO is prewarmed before its first draw");
+    // Draws still recover any PSO a prewarm missed.
     for (int pass = 0; pass < 2; ++pass) {
         RenderAndRead(ctx, clear, NULL, [&]() { DrawPipelineGrid(ctx); }, actual);
         CheckMatchingImage("pipeline-prewarm-retry", actual, expected);

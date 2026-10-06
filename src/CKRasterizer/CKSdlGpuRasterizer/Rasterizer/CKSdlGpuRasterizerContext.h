@@ -306,7 +306,8 @@ private:
     // unless the program has or awaits it already, or the outstanding job
     // budget is full. Deferred requests leave no entry and can retry. The
     // programs are specialized ones, and precompiled ones the manifest prewarms.
-    void QueuePipeline(const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
+    // False only when the request was deferred.
+    bool QueuePipeline(const CKSdlGpuDraw &Draw, SDL_GPUTextureFormat Color,
                        SDL_GPUTextureFormat Depth, SDL_GPUSampleCount Samples,
                        CKSdlGpuJobPriority Priority);
     // Creates the pipeline of a draw at once, or completes the worker's job
@@ -477,6 +478,11 @@ private:
     // Queues at idle priority the pipeline of a manifest record for a
     // program.
     void PrewarmFFJitPipeline(CKDWORD Program, const CKSdlGpuFFJitPipelineRecord &Record);
+    // False when the budget deferred it.
+    bool QueueFFJitPrewarm(const std::shared_ptr<CKSdlGpuProgram> &Program,
+                           const CKSdlGpuFFJitPipelineRecord &Record);
+    // Queues deferred prewarms while the idle budget allows.
+    void RetryFFJitPrewarms();
     // Records for the next run the compiled programs and their pipelines,
     // and the pipelines drawn precompiled.
     void SaveFFJitManifest();
@@ -552,6 +558,14 @@ private:
     // The job creating the precompiled shaders of the manifest, which
     // compilations run after.
     ShaderJob *m_FFShaderJob = nullptr;
+    // Manifest pipelines the idle budget deferred, queued again as the
+    // collected jobs free it. A destroyed program drops its records.
+    struct FFJitDeferredPrewarm {
+        std::weak_ptr<CKSdlGpuProgram> Program;
+        CKSdlGpuFFJitPipelineRecord Record;
+    };
+    XClassArray<FFJitDeferredPrewarm> m_FFJitDeferredPrewarms;
+    int m_FFJitDeferredPrewarmNext = 0;
     CKDWORD m_FFWorkerShaders = 0;
     // Resident slots, and the index of each canonical key's entry. Cold slots
     // can be reused once their shader compilation has finished.
