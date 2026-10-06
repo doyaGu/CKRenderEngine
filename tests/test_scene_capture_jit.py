@@ -15,7 +15,8 @@ class SceneCaptureReferenceTest(unittest.TestCase):
     def run_capture(self, external=True, off_exit=0, off_comparisons=None, scene="test_scene", lit_draws=0,
                     off_failed_pixels=0, off_max_diff=1):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            # The tool resolves its paths: macOS adds /private, Windows expands 8.3 names.
+            root = Path(directory).resolve()
             reference = root / "reference"
             reference.mkdir()
             output = root / "captures"
