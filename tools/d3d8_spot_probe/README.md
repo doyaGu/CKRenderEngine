@@ -38,9 +38,6 @@ with MSVC, but executed `C:\Windows\SYSTEM32\d3d8.dll`. Record the external
 header hashes with the executable, system runtime and driver identity when
 preserving a measurement. No Wine implementation code executes in this probe.
 
-For measured values, the ordinary 3D scene, and the decision to retain the
-bounded shader calculation, see [the DX8 comparison report](../../tests/FFJitDx8Oracle.md).
-
 ## Silhouette coverage diagnostic
 
 `d3d8_spot_probe.exe --coverage` replays one unlit 3D triangle taken from the

@@ -114,12 +114,6 @@ The current 2026-10-03 baseline on an RTX 4090 is:
   acceptance. The later cube-filtering build has full automated scene coverage,
   but no separate latest-build gameplay session is claimed.
 
-See [`FFJitReplay.md`](../../../tests/FFJitReplay.md) for component coverage,
-[`FFJitScenes.md`](../../../tests/FFJitScenes.md) for CK2 scenes and manual-play
-evidence, [`FFJitDx8Oracle.md`](../../../tests/FFJitDx8Oracle.md) for the original
-DX8 comparison, and [`FFJitBenchmark.md`](../../../tests/FFJitBenchmark.md) for
-the timing methodology and measured-interval gate.
-
 ## Remaining work
 
 The open items are compatibility, performance and hardware-coverage questions;
