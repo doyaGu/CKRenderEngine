@@ -24,7 +24,7 @@ inline Result Compare(const uint8_t *expected, const uint8_t *actual, int width,
             bool different = false, expectedClear = true, actualClear = true;
             for (int c = 0; c < 4; ++c) {
                 const unsigned error = unsigned(std::abs(int(expected[offset + c]) - int(actual[offset + c])));
-                result.MaxError = std::max(result.MaxError, error);
+                result.MaxError = (std::max)(result.MaxError, error);
                 different |= error > tolerance;
                 expectedClear &= clear && expected[offset + c] == clear[c];
                 actualClear &= clear && actual[offset + c] == clear[c];
@@ -51,9 +51,9 @@ inline bool SavePPM(const char *path, const uint8_t *pixels, int width, int heig
         uint8_t rgb[3];
         for (int c = 0; c < 3; ++c) {
             const int offset = i * 4;
-            const int error = reference ? std::max(std::abs(int(pixels[offset + 2 - c]) - int(reference[offset + 2 - c])),
+            const int error = reference ? (std::max)(std::abs(int(pixels[offset + 2 - c]) - int(reference[offset + 2 - c])),
                                                   std::abs(int(pixels[offset + 3]) - int(reference[offset + 3]))) : 0;
-            rgb[c] = reference ? uint8_t(std::min(255, error * 16)) : pixels[offset + 2 - c];
+            rgb[c] = reference ? uint8_t((std::min)(255, error * 16)) : pixels[offset + 2 - c];
         }
         ok &= std::fwrite(rgb, 1, 3, file) == 3;
     }
