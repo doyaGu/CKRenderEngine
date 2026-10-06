@@ -467,6 +467,8 @@ int main()
             result.SampleCount = CKBYTE(seed % 4);
             result.StencilReadMask = CKBYTE(seed * 13);
             result.StencilWriteMask = CKBYTE(seed * 17);
+            result.Artifact = CKBYTE(seed % CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT);
+            std::memset(result.Reserved, 0, sizeof(result.Reserved));
             result.VertexFormat = seed * 2654435761u;
             result.StateLo = seed * 40503u;
             result.StateMid = seed ^ 0x5bd1e995u;
@@ -534,11 +536,25 @@ int main()
             }
         }
         XArray<CKBYTE> oldRevision = data;
-        const CKDWORD oldVersion = 6;
+        const CKDWORD oldVersion = 7;
         std::memcpy(oldRevision.Begin() + 4, &oldVersion, sizeof(oldVersion));
         reseal(oldRevision);
         check(!CKSdlGpuDecodeFFJitManifest(identity, oldRevision.Begin(), oldRevision.Size(), decoded),
-              "older manifests without vertex binding semantics are rejected");
+              "older manifests without fallback artifacts are rejected");
+        for (unsigned invalid : {0u, 1u, 2u}) {
+            CKSdlGpuFFJitManifest badArtifact = manifest;
+            if (invalid == 0) badArtifact.Pipelines[0].Artifact = CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
+            if (invalid == 1) badArtifact.Pipelines[0].Reserved[2] = 1;
+            if (invalid == 2) {
+                badArtifact.Pipelines[0].Flags = CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED;
+                badArtifact.Pipelines[0].Program = 1;
+                badArtifact.Pipelines[0].Artifact = 2;
+            }
+            XArray<CKBYTE> badData;
+            CKSdlGpuEncodeFFJitManifest(identity, badArtifact, badData);
+            check(!CKSdlGpuDecodeFFJitManifest(identity, badData.Begin(), badData.Size(), decoded) && empty(decoded),
+                  "pipeline records reject unknown fallback artifacts and reserved bytes");
+        }
         XArray<CKBYTE> emptyData;
         CKSdlGpuEncodeFFJitManifest(identity, CKSdlGpuFFJitManifest(), emptyData);
         check(CKSdlGpuDecodeFFJitManifest(identity, emptyData.Begin(), emptyData.Size(), decoded) &&
@@ -614,6 +630,7 @@ int main()
         malformed = manifest;
         malformed.Pipelines[1].Flags = CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED;
         malformed.Pipelines[1].Program = CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT - 1;
+        malformed.Pipelines[1].Artifact = CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT - 1;
         CKSdlGpuEncodeFFJitManifest(identity, malformed, data);
         const bool precompiledKept =
             CKSdlGpuDecodeFFJitManifest(identity, data.Begin(), data.Size(), decoded) &&

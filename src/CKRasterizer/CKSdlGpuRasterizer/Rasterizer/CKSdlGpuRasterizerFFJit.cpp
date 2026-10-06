@@ -328,17 +328,14 @@ void CKSdlGpuRasterizerContext::LoadFFJitManifest()
         const bool precompiledPipeline =
             (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED) != 0;
         precompiled[i] = 0;
-        CKSdlGpuFFFragmentArtifactKey artifact;
-        if (precompiledPipeline) {
-            // The manifest has checked the index.
-            CKSdlGpuFFFragmentArtifactKeyAt(record.Program, artifact);
-        } else if (entries[record.Program] >= 0) {
-            FFJitProgram &entry = m_FFJitPrograms[entries[record.Program]];
-            entry.Prewarm.PushBack(record);
-            artifact = FFJitArtifact(entry.Key);
-        } else {
+        if (!precompiledPipeline && entries[record.Program] < 0)
             continue;
-        }
+        // The manifest has checked the index; a program's record names the
+        // artifact its draws replaced.
+        CKSdlGpuFFFragmentArtifactKey artifact;
+        CKSdlGpuFFFragmentArtifactKeyAt(record.Artifact, artifact);
+        if (!precompiledPipeline)
+            m_FFJitPrograms[entries[record.Program]].Prewarm.PushBack(record);
         if (!PrewarmablePipeline(Device, record))
             continue;
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
@@ -735,12 +732,13 @@ void CKSdlGpuRasterizerContext::CompleteFFJitProgram(
 void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
 {
     // The draws of the keys that canonicalize to the entry's may replace
-    // other artifacts, and bind programs of their own.
-    const CKSdlGpuFFFragmentArtifactKey artifact = FFJitArtifact(Entry.Key);
+    // other artifacts, and bind programs of their own; each record names its.
     for (int i = 0; i < Entry.Prewarm.Size(); ++i) {
         const CKSdlGpuFFJitPipelineRecord &record = Entry.Prewarm[i];
         if (!PrewarmablePipeline(Device, record))
             continue;
+        CKSdlGpuFFFragmentArtifactKey artifact;
+        CKSdlGpuFFFragmentArtifactKeyAt(record.Artifact, artifact);
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
         const CKDWORD precompiled = NativeFFProgram(
             variant, artifact, (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0);
@@ -846,17 +844,29 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
             manifest.Pipelines.PushBack(entry.Prewarm[r]);
             manifest.Pipelines.Back().Program = index;
         }
-        const CKDWORD artifact = CKSdlGpuFFFragmentArtifactIndex(FFJitArtifact(entry.Key));
         for (int b = 0; b < entry.Programs.Size(); ++b) {
             const FFJitProgram::Binding &binding = entry.Programs[b];
             const std::shared_ptr<CKSdlGpuProgram> &program = Programs.Borrow(binding.Program);
             if (!program)
                 continue;
+            // The draws' fallback may be another artifact than the canonical
+            // key's, so the record names the one they replaced.
+            CKDWORD artifact = CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT, pad = 0;
+            for (CKDWORD a = 0; a < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT && artifact == CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT; ++a) {
+                for (CKDWORD p = 0; p < 2; ++p) {
+                    if (binding.Precompiled == m_NativeFFPrograms[binding.Variant][a][p]) {
+                        artifact = a;
+                        pad = p;
+                        break;
+                    }
+                }
+            }
+            if (artifact == CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT)
+                continue;
             CKSdlGpuFFJitPipelineRecord record = {};
             record.Program = index;
             record.Variant = (CKBYTE)binding.Variant;
-            const bool pad =
-                binding.Precompiled == m_NativeFFPrograms[binding.Variant][artifact][1];
+            record.Artifact = (CKBYTE)artifact;
             const CKBYTE flags = (CKBYTE)((pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0) |
                 (binding.VertexKind == CKSdlGpuProgram::UNLIT_VERTEX ? CKSDL_GPU_FF_JIT_PIPELINE_UNLIT : 0) |
                 (binding.VertexKind == CKSdlGpuProgram::LIT_VERTEX ? CKSDL_GPU_FF_JIT_PIPELINE_LIT : 0));
@@ -879,6 +889,7 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
                     continue;
                 CKSdlGpuFFJitPipelineRecord record = {};
                 record.Program = (CKBYTE)artifact;
+                record.Artifact = (CKBYTE)artifact;
                 record.Variant = (CKBYTE)variant;
                 const CKBYTE flags = (CKBYTE)(CKSDL_GPU_FF_JIT_PIPELINE_PRECOMPILED |
                                               (pad ? CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD : 0));

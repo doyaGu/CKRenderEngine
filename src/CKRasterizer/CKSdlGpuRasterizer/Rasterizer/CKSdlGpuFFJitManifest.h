@@ -44,6 +44,11 @@ struct CKSdlGpuFFJitPipelineRecord {
     CKBYTE Flags;
     CKBYTE ColorFormat, DepthFormat, SampleCount;
     CKBYTE StencilReadMask, StencilWriteMask;
+    // The precompiled artifact of the draw's fallback program. A program's
+    // draws may replace another artifact than its canonical key implies.
+    // Equals Program for precompiled pipelines.
+    CKBYTE Artifact;
+    CKBYTE Reserved[3];
     // Vertex format flags, which name the draw's native vertex layout.
     CKDWORD VertexFormat;
     CKDWORD StateLo, StateMid, StateHi;

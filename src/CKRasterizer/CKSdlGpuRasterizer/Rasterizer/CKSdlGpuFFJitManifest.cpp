@@ -15,12 +15,12 @@
 namespace {
 const CKDWORD kMagic = 0x4A464B43u; // "CKFJ"
 // Revision of the file layout and of the record fields.
-const CKDWORD kVersion = 7;
+const CKDWORD kVersion = 8;
 const size_t kProgramSize = sizeof(CKSdlGpuFFJitProgramRecord);
 const size_t kPipelineSize = sizeof(CKSdlGpuFFJitPipelineRecord);
 static_assert(kProgramSize == sizeof(CKDWORD) * (CKFF_FRAGMENT_PROGRAM_LANE_COUNT +
                                                  CKFF_NATIVE_FRAGMENT_SWITCH_WORD_COUNT + 1) &&
-              kPipelineSize == 8 + 4 * sizeof(CKDWORD),
+              kPipelineSize == 12 + 4 * sizeof(CKDWORD),
               "manifest records have no padding");
 static_assert(CKSDL_GPU_FF_JIT_MANIFEST_MAX_PROGRAMS <= 256 &&
                   CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT <= 256,
@@ -90,6 +90,9 @@ bool ValidPipeline(const CKSdlGpuFFJitPipelineRecord &record, CKDWORD programs)
     const CKDWORD limit = Precompiled(record) ? (CKDWORD)CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT
                                               : programs;
     return record.Program < limit && record.Variant < CKFF_PROGRAM_VARIANT_COUNT &&
+           record.Artifact < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT &&
+           (!Precompiled(record) || record.Artifact == record.Program) &&
+           !record.Reserved[0] && !record.Reserved[1] && !record.Reserved[2] &&
            (record.Flags & ~kPipelineFlags) == 0 &&
            (record.Flags & (CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT)) !=
                (CKSDL_GPU_FF_JIT_PIPELINE_UNLIT | CKSDL_GPU_FF_JIT_PIPELINE_LIT) &&
