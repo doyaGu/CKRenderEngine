@@ -213,6 +213,7 @@ struct CKSdlGpuTarget {
 enum CKSdlGpuSamplerMode : CKDWORD {
     CKSDLGPU_SAMPLER_NATIVE_COMPARE = 1u, // Keep the comparison function.
     CKSDLGPU_SAMPLER_VOLUME = 2u,         // The shader takes the anisotropic taps.
+    CKSDLGPU_SAMPLER_CUBE_TEXELS = 4u,    // The shader filters face-local cube texels.
 };
 // The native sampler of one texture slot, keyed by the slot's source sampler
 // and adjustment mode so that unchanged draws skip the adjustment.

@@ -321,7 +321,7 @@ private:
     CKSdlGpuPipelineEntry *ReservePipeline(CKSdlGpuProgram &Program,
                                           const CKSdlGpuPipelineKey &Key);
     SDL_GPUGraphicsPipeline *UsePipeline(CKSdlGpuPipelineEntry &Entry);
-    std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc);
+    std::shared_ptr<SDL_GPUSampler> Sampler(const CKSamplerDesc &Desc, bool PointTexels = false);
     void PruneProgramCaches();
     void Collect();
     // Takes ownership; the worker starts with its first job. A job

@@ -474,11 +474,11 @@ static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
     return SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 }
 
-std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSamplerDesc &desc)
+std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSamplerDesc &desc, bool pointTexels)
 {
     CKDWORD lodBiasBits = 0;
     std::memcpy(&lodBiasBits, &desc.MipLodBias, sizeof(lodBiasBits));
-    const CKDWORD keyValues[10] = {unsigned(desc.MinFilter), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
+    const CKDWORD keyValues[10] = {unsigned(desc.MinFilter) | (pointTexels ? 0x100u : 0u), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
         unsigned(desc.AddressU), unsigned(desc.AddressV), unsigned(desc.AddressW), unsigned(desc.CompareFunc),
         desc.MinMipLevel, desc.MaxAnisotropy, lodBiasBits};
     CKSdlGpuSamplerKey key;
@@ -486,8 +486,10 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
     std::shared_ptr<SDL_GPUSampler> *found = Samplers.FindPtr(key);
     if (found) return *found;
     SDL_GPUSamplerCreateInfo info = {};
-    info.min_filter = desc.MinFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
-    info.mag_filter = desc.MagFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+    // Point texels keep the mip mode and anisotropy so the shader's LOD query
+    // is unchanged. SDL's D3D12 backend ignores min/mag on anisotropic samplers.
+    info.min_filter = pointTexels || desc.MinFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+    info.mag_filter = pointTexels || desc.MagFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
     info.mipmap_mode = desc.MipFilter == CKRST_FILTER_LINEAR ||
                        desc.MipFilter == CKRST_FILTER_ANISOTROPIC
         ? SDL_GPU_SAMPLERMIPMAPMODE_LINEAR : SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;

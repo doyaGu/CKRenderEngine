@@ -78,6 +78,23 @@ CKSamplerDesc CKSdlGpuHardwareSampler(const CKSamplerDesc &source, CKDWORD mode)
     return sampler;
 }
 
+// How Draw adjusts a slot's sampler for the bound texture. Cube textures
+// outside the shader's single-level, equal-filter path are filtered by the
+// shader from texel-center taps; a filtering sampler would blend each tap
+// again, and seamless cube filtering pulls in the neighboring face when a
+// driver's coordinates are not exact (llvmpipe).
+CKDWORD CKSdlGpuSamplerAdjustment(const CKSdlGpuTexture &texture, const CKSamplerDesc &sampler,
+                                  bool nativeComparison) {
+    CKDWORD mode = nativeComparison ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u;
+    if (texture.Info.type == SDL_GPU_TEXTURETYPE_3D)
+        mode |= CKSDLGPU_SAMPLER_VOLUME;
+    if (texture.Info.type == SDL_GPU_TEXTURETYPE_CUBE && !nativeComparison &&
+        (texture.Info.num_levels > 1 || sampler.MinFilter != sampler.MagFilter ||
+         sampler.MinFilter == CKRST_FILTER_ANISOTROPIC))
+        mode |= CKSDLGPU_SAMPLER_CUBE_TEXELS;
+    return mode;
+}
+
 template<class Index>
 bool CKSdlGpuValidateTransientIndices(const CKBYTE *bytes, CKDWORD start,
                                       CKDWORD count, CKDWORD vertexCount)
@@ -523,10 +540,9 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
             texture = textureOwner->get();
             std::shared_ptr<SDL_GPUSampler> &sampler = draw.Program->DefaultSamplers[slot];
             if (!sampler) {
-                const CKDWORD samplerMode =
-                    (nativeComparisonSampler ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u) |
-                    (texture->Info.type == SDL_GPU_TEXTURETYPE_3D ? CKSDLGPU_SAMPLER_VOLUME : 0u);
-                sampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode));
+                const CKDWORD samplerMode = CKSdlGpuSamplerAdjustment(*texture, binding.Sampler, nativeComparisonSampler);
+                sampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode),
+                                  (samplerMode & CKSDLGPU_SAMPLER_CUBE_TEXELS) != 0);
                 if (!sampler) return Error;
             }
             samplerOwner = &sampler;
@@ -565,14 +581,13 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                             sizeof(transform));
                 hasDepthPad = true;
             }
-            const CKDWORD samplerMode =
-                (nativeComparisonSampler ? CKSDLGPU_SAMPLER_NATIVE_COMPARE : 0u) |
-                (texture->Info.type == SDL_GPU_TEXTURETYPE_3D ? CKSDLGPU_SAMPLER_VOLUME : 0u);
+            const CKDWORD samplerMode = CKSdlGpuSamplerAdjustment(*texture, binding.Sampler, nativeComparisonSampler);
             if (!cached.NativeSampler || cached.Mode != samplerMode ||
                 !CKSdlGpuSameSampler(cached.Sampler, binding.Sampler)) {
                 cached.Sampler = binding.Sampler;
                 cached.Mode = samplerMode;
-                cached.NativeSampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode));
+                cached.NativeSampler = Sampler(CKSdlGpuHardwareSampler(binding.Sampler, samplerMode),
+                                               (samplerMode & CKSDLGPU_SAMPLER_CUBE_TEXELS) != 0);
                 if (!cached.NativeSampler) return Error;
             }
             samplerOwner = &cached.NativeSampler;
