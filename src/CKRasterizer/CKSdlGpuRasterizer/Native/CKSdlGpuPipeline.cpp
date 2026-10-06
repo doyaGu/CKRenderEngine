@@ -487,9 +487,13 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
     if (found) return *found;
     SDL_GPUSamplerCreateInfo info = {};
     // Point texels keep the mip mode and anisotropy so the shader's LOD query
-    // is unchanged. SDL's D3D12 backend ignores min/mag on anisotropic samplers.
-    info.min_filter = pointTexels || desc.MinFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
-    info.mag_filter = pointTexels || desc.MagFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+    // is unchanged. An anisotropic sampler keeps linear min/mag: D3D12 has no
+    // point anisotropic filter, and SDL's D3D12 backend encodes the invalid
+    // one, which breaks the device.
+    const bool anisotropic = desc.MinFilter == CKRST_FILTER_ANISOTROPIC || desc.MagFilter == CKRST_FILTER_ANISOTROPIC;
+    const bool point = pointTexels && !anisotropic;
+    info.min_filter = point || desc.MinFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
+    info.mag_filter = point || desc.MagFilter == CKRST_FILTER_NEAREST ? SDL_GPU_FILTER_NEAREST : SDL_GPU_FILTER_LINEAR;
     info.mipmap_mode = desc.MipFilter == CKRST_FILTER_LINEAR ||
                        desc.MipFilter == CKRST_FILTER_ANISOTROPIC
         ? SDL_GPU_SAMPLERMIPMAPMODE_LINEAR : SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
@@ -499,7 +503,7 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
     // samplers carry it in native sampler state.
     info.mip_lod_bias = desc.CompareFunc != CKRST_COMPARE_NONE ?
         desc.MipLodBias : 0.0f;
-    info.enable_anisotropy = desc.MinFilter == CKRST_FILTER_ANISOTROPIC || desc.MagFilter == CKRST_FILTER_ANISOTROPIC;
+    info.enable_anisotropy = anisotropic;
     info.max_anisotropy = info.enable_anisotropy
         ? float(desc.MaxAnisotropy ? desc.MaxAnisotropy : 16u) : 1.0f;
     info.min_lod = desc.MipFilter == CKRST_FILTER_NONE ? 0.0f : float(desc.MinMipLevel);
