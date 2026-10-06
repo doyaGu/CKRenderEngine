@@ -683,6 +683,11 @@ CKJitValue CKJitBuilder::Mad(CKJitValue a, CKJitValue b, CKJitValue c) {
         return Fail();
     return Emit(CKJIT_OP_MAD, TypeOf(a), {a, b, c});
 }
+CKJitValue CKJitBuilder::Mix(CKJitValue x, CKJitValue y, CKJitValue s) {
+    if (!Operands(CKJIT_TYPE_FLOAT, x, y) || !Operands(CKJIT_TYPE_FLOAT, x, s) || !Unify(x, y))
+        return Fail();
+    return Emit(CKJIT_OP_MIX, TypeOf(x), {x, y, s});
+}
 CKJitValue CKJitBuilder::Div(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_DIV, a, b); }
 CKJitValue CKJitBuilder::Min(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_MIN, a, b); }
 CKJitValue CKJitBuilder::Max(CKJitValue a, CKJitValue b) { return FloatBinary(CKJIT_OP_MAX, a, b); }

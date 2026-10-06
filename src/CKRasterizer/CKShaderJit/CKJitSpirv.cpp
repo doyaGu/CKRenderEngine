@@ -141,6 +141,7 @@ enum {
     GLSLstd450SMin = 39,
     GLSLstd450SMax = 42,
     GLSLstd450FClamp = 43,
+    GLSLstd450FMix = 46,
     GLSLstd450Fma = 50,
     GLSLstd450NMin = 79,
     GLSLstd450NMax = 80,
@@ -691,6 +692,7 @@ uint32_t SpirvEmitter::Translate(uint32_t index) {
     case CKJIT_OP_SUB: return Op(SpvOpFSub, type, {a, b});
     case CKJIT_OP_MUL: return Op(SpvOpFMul, type, {a, b});
     case CKJIT_OP_MAD: return Glsl(GLSLstd450Fma, type, {a, b, Value(node.Operands[2])});
+    case CKJIT_OP_MIX: return Glsl(GLSLstd450FMix, type, {a, b, Value(node.Operands[2])});
     case CKJIT_OP_DIV: return Op(SpvOpFDiv, type, {a, b});
     case CKJIT_OP_MIN: return Glsl(GLSLstd450NMin, type, {a, b});
     case CKJIT_OP_MAX: return Glsl(GLSLstd450NMax, type, {a, b});

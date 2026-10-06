@@ -3,6 +3,7 @@
 #include "TestShaderJitVertex.h"
 
 #include <cfenv>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 
@@ -480,43 +481,57 @@ int FindOp(const CKJitFragmentShader &shader, CKJitOp op) {
     return -1;
 }
 
+// MAD and MIX are native three-operand operations the builder never folds.
 void TestMad() {
-    for (uint32_t width = 1; width <= 4; ++width) for (unsigned vectorOperand = 0; vectorOperand < 3; ++vectorOperand) {
-        CKJitBuilder b(0);
-        const CKJitValue position = b.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
-        const CKJitValue vector = b.Input({1, (uint8_t)width, CKJIT_INPUT_ATTRIBUTE});
-        const CKJitValue scalar = b.Component(position, 0);
-        CKJitValue operands[] = {scalar, scalar, scalar};
-        operands[vectorOperand] = vector;
-        const CKJitValue mad = b.Mad(operands[0], operands[1], operands[2]);
-        TestCheck(IsOp(b, mad, CKJIT_OP_MAD) && b.Node(mad).Type == CKJitFloatType(width),
-                  "MAD broadcasts scalars in each operand position");
-        TestCheck(Same(mad, b.Mad(operands[0], operands[1], operands[2])), "MAD reuses identical nodes");
-        CKJitVertexShader shader;
-        TestCheck(b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, mad}, {1, CKJIT_INPUT_SMOOTH, scalar}}, shader),
-                  "MAD operand widths verify after broadcasting");
-        CKJitVertexShader corrupt = shader;
-        corrupt.Nodes[corrupt.Outputs[0].Value.Id].OperandCount = 2;
-        TestCheck(!CKJitVerify(corrupt), "MAD requires its addend");
-        corrupt = shader;
-        corrupt.Nodes[corrupt.Outputs[0].Value.Id].Type = CKJitIntType(width);
-        TestCheck(!CKJitVerify(corrupt), "MAD is floating point only");
-        if (width > 1) {
+    struct Ternary {
+        CKJitOp Op;
+        CKJitValue (CKJitBuilder::*Emit)(CKJitValue, CKJitValue, CKJitValue);
+        const char *Name;
+    };
+    const Ternary ops[] = {{CKJIT_OP_MAD, &CKJitBuilder::Mad, "MAD"}, {CKJIT_OP_MIX, &CKJitBuilder::Mix, "MIX"}};
+    static char label[96]; // TestFail keeps the message after unwinding.
+    const auto check = [&](bool condition, const Ternary &op, const char *what) {
+        std::snprintf(label, sizeof(label), "%s %s", op.Name, what);
+        TestCheck(condition, label);
+    };
+    for (const Ternary &op : ops) {
+        for (uint32_t width = 1; width <= 4; ++width) for (unsigned vectorOperand = 0; vectorOperand < 3; ++vectorOperand) {
+            CKJitBuilder b(0);
+            const CKJitValue position = b.Input({0, 4, CKJIT_INPUT_ATTRIBUTE});
+            const CKJitValue vector = b.Input({1, (uint8_t)width, CKJIT_INPUT_ATTRIBUTE});
+            const CKJitValue scalar = b.Component(position, 0);
+            CKJitValue operands[] = {scalar, scalar, scalar};
+            operands[vectorOperand] = vector;
+            const CKJitValue value = (b.*op.Emit)(operands[0], operands[1], operands[2]);
+            check(IsOp(b, value, op.Op) && b.Node(value).Type == CKJitFloatType(width), op,
+                  "broadcasts scalars in each operand position");
+            check(Same(value, (b.*op.Emit)(operands[0], operands[1], operands[2])), op, "reuses identical nodes");
+            CKJitVertexShader shader;
+            check(b.FinishVertex(position, {{0, CKJIT_INPUT_SMOOTH, value}, {1, CKJIT_INPUT_SMOOTH, scalar}}, shader), op,
+                  "operand widths verify after broadcasting");
+            CKJitVertexShader corrupt = shader;
+            corrupt.Nodes[corrupt.Outputs[0].Value.Id].OperandCount = 2;
+            check(!CKJitVerify(corrupt), op, "requires its third operand");
             corrupt = shader;
-            corrupt.Nodes[corrupt.Outputs[0].Value.Id].Operands[2] = corrupt.Outputs[1].Value.Id;
-            TestCheck(!CKJitVerify(corrupt), "raw MAD operands require equal widths");
+            corrupt.Nodes[corrupt.Outputs[0].Value.Id].Type = CKJitIntType(width);
+            check(!CKJitVerify(corrupt), op, "is floating point only");
+            if (width > 1) {
+                corrupt = shader;
+                corrupt.Nodes[corrupt.Outputs[0].Value.Id].Operands[2] = corrupt.Outputs[1].Value.Id;
+                check(!CKJitVerify(corrupt), op, "raw operands require equal widths");
+            }
         }
-    }
-    CKJitBuilder constants(0);
-    TestCheck(IsOp(constants, constants.Mad(constants.Float(1), constants.Float(2), constants.Float(3)), CKJIT_OP_MAD),
-              "native MAD rounding is not folded on the host");
-    for (unsigned bad = 0; bad < 4; ++bad) {
-        CKJitBuilder b(0);
-        CKJitValue operands[] = {b.Float2(1, 2), b.Float(3), b.Float(4)};
-        if (bad < 3) operands[bad] = b.Int(1);
-        else operands[2] = b.Float3(1, 2, 3);
-        TestCheck(!b.Mad(operands[0], operands[1], operands[2]).IsValid() && b.Failed(),
-                  "MAD rejects integer operands and mismatched vectors");
+        CKJitBuilder constants(0);
+        check(IsOp(constants, (constants.*op.Emit)(constants.Float(1), constants.Float(2), constants.Float(3)), op.Op), op,
+              "native rounding is not folded on the host");
+        for (unsigned bad = 0; bad < 4; ++bad) {
+            CKJitBuilder b(0);
+            CKJitValue operands[] = {b.Float2(1, 2), b.Float(3), b.Float(4)};
+            if (bad < 3) operands[bad] = b.Int(1);
+            else operands[2] = b.Float3(1, 2, 3);
+            check(!(b.*op.Emit)(operands[0], operands[1], operands[2]).IsValid() && b.Failed(), op,
+                  "rejects integer operands and mismatched vectors");
+        }
     }
 }
 

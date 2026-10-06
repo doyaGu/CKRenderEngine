@@ -385,6 +385,10 @@ void ExecuteNodes(const CKJitShader &shader, const Fragment &fragment, XArray<Va
             for (uint32_t i = 0; i < width; ++i)
                 out.F[i] = std::fma(a.F[i], b.F[i], values[(int)node.Operands[2]].F[i]);
             break;
+        case CKJIT_OP_MIX:
+            for (uint32_t i = 0; i < width; ++i)
+                out.F[i] = a.F[i] + values[(int)node.Operands[2]].F[i] * (b.F[i] - a.F[i]);
+            break;
         case CKJIT_OP_DIV: for (uint32_t i = 0; i < width; ++i) out.F[i] = a.F[i] / b.F[i]; break;
         case CKJIT_OP_MIN: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::fmin(a.F[i], b.F[i]); break;
         case CKJIT_OP_MAX: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::fmax(a.F[i], b.F[i]); break;

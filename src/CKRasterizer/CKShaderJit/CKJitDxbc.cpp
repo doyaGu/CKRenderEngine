@@ -1119,6 +1119,22 @@ void DxbcEmitter::Translate(uint32_t index) {
             Source(m_Values[(int)node.Operands[i]], ComponentWise(dest));
         m_Code.Close();
         break;
+    case CKJIT_OP_MIX: {
+        // As FXC expands lerp. The difference needs its own temp: dest may be
+        // an output, which cannot be read.
+        DxbcValue delta = dest;
+        delta.File = DxbcOperandTemp;
+        delta.Index = m_Temps.Allocate(delta.Count, delta.Lanes);
+        Binary(DxbcOpAdd, delta, b, Negated(a));
+        m_Code.Open(DxbcOpMad);
+        Dest(dest);
+        Source(m_Values[(int)node.Operands[2]], ComponentWise(dest));
+        Source(delta, ComponentWise(dest));
+        Source(a, ComponentWise(dest));
+        m_Code.Close();
+        m_Temps.Release(delta.Index, LaneMask(delta));
+        break;
+    }
     case CKJIT_OP_DIV: Binary(DxbcOpDiv, dest, a, b); break;
     case CKJIT_OP_MIN: Binary(DxbcOpMin, dest, a, b); break;
     case CKJIT_OP_MAX: Binary(DxbcOpMax, dest, a, b); break;

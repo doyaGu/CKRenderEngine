@@ -34,6 +34,10 @@ CKJIT_OP(MUL,        2, CKJIT_OPFLAG_COMMUTATIVE)
 // MAD(a,b,c) preserves a native multiply-add. It may round differently from
 // separate MUL/ADD and is never folded or reassociated by the builder.
 CKJIT_OP(MAD,        3, 0)
+// MIX(x,y,s) is the native linear interpolation (SPIR-V FMix), evaluated as
+// the driver evaluates a reference's mix. Backends without one emit
+// x + s * (y - x) as an add and a multiply-add. Never folded.
+CKJIT_OP(MIX,        3, 0)
 CKJIT_OP(DIV,        2, 0)
 CKJIT_OP(MIN,        2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(MAX,        2, CKJIT_OPFLAG_COMMUTATIVE)
