@@ -404,16 +404,40 @@ int CKSdlGpuRasterizerContext::AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank
     entry.Rank = Rank;
     m_FFJitPrograms.PushBack(entry);
     const int index = m_FFJitPrograms.Size() - 1;
-    m_FFJitKeys.Insert(Key, index, FALSE);
+    m_FFJitKeys.InsertUnique(Key, index);
     return index;
+}
+
+// XSHashTable::Remove leaves a tombstone that Insert counts towards doubling
+// the table. The bounded tables insert with InsertUnique, which grows by the
+// live count, and are rebuilt in place once per cycle of replacements so that
+// tombstones do not lengthen probes; Clear keeps the buckets.
+void CKSdlGpuRasterizerContext::RebuildFFJitCandidates()
+{
+    XClassArray<CKSdlGpuFFJitUsage> usage;
+    usage.Resize(m_FFJitCandidateOrder.Size());
+    for (int i = 0; i < m_FFJitCandidateOrder.Size(); ++i)
+        usage[i] = *m_FFJitCandidates.FindPtr(m_FFJitCandidateOrder[i]);
+    m_FFJitCandidates.Clear();
+    for (int i = 0; i < m_FFJitCandidateOrder.Size(); ++i)
+        m_FFJitCandidates.InsertUnique(m_FFJitCandidateOrder[i], usage[i]);
+}
+
+void CKSdlGpuRasterizerContext::RebuildFFJitKeys()
+{
+    m_FFJitKeys.Clear();
+    for (int i = 0; i < m_FFJitPrograms.Size(); ++i)
+        m_FFJitKeys.InsertUnique(m_FFJitPrograms[i].Key, i);
 }
 
 void CKSdlGpuRasterizerContext::ReleaseFFJitProgram(FFJitProgram &entry)
 {
     // Queued draw packets retain their program. Removing public handles only
     // drops cache ownership; pipeline jobs also retain their shader inputs.
-    for (int b = 0; b < entry.Programs.Size(); ++b)
-        DestroyObject(entry.Programs[b].Program, CKRST_OBJ_PROGRAM);
+    for (int b = 0; b < entry.Programs.Size(); ++b) {
+        if (entry.Programs[b].Program)
+            DestroyObject(entry.Programs[b].Program, CKRST_OBJ_PROGRAM);
+    }
     if (entry.PixelShader)
         DestroyObject(entry.PixelShader, CKRST_OBJ_SHADER);
     for (unsigned clip = 0; clip < 2; ++clip) {
@@ -435,7 +459,12 @@ int CKSdlGpuRasterizerContext::AdmitFFJitProgram(const FFJitKey &key)
         } else {
             m_FFJitCandidateOrder.PushBack(key);
         }
-        m_FFJitCandidates.Insert(key, CKSdlGpuFFJitUsage(), FALSE);
+        m_FFJitCandidates.InsertUnique(key, CKSdlGpuFFJitUsage());
+        // Each full cycle of the FIFO has left as many tombstones as keys.
+        if (m_FFJitCandidateCursor == 0 && m_FFJitCandidateOrder.Size() == kFFJitDrawKeyLimit) {
+            RebuildFFJitCandidates();
+            ++m_FFJitStats.TableRebuilds;
+        }
         candidate = m_FFJitCandidates.FindPtr(key);
     }
     candidate->Touch(m_FFJitClock);
@@ -477,8 +506,12 @@ int CKSdlGpuRasterizerContext::AdmitFFJitProgram(const FFJitKey &key)
     // Draw-key entries contain slot indices. No alias may keep the victim's
     // index after this slot is reused for another canonical key.
     m_FFJitDrawKeys.Clear();
-    m_FFJitKeys.Insert(key, victim, FALSE);
+    m_FFJitKeys.InsertUnique(key, victim);
     ++m_FFJitStats.Evictions;
+    if (m_FFJitStats.Evictions % kFFJitProgramLimit == 0) {
+        RebuildFFJitKeys();
+        ++m_FFJitStats.TableRebuilds;
+    }
     return victim;
 }
 
@@ -612,11 +645,8 @@ CKDWORD CKSdlGpuRasterizerContext::BindFFJitProgram(
     const FFJitProgram::Binding binding = {
         Precompiled, Variant, CreateFFJitProgram(Entry.PixelShader, Variant, Precompiled, Entry.PositionTShader[clip],
                                                 Entry.DepthPadShader[clip], shader3d, VertexKind), VertexKind};
-    // The entry's draws are then drawn precompiled.
-    if (!binding.Program) {
-        Entry.State = FFJitProgram::REJECTED;
-        return 0;
-    }
+    // A failed binding is remembered, so its draws stay precompiled without
+    // retrying; the entry's other bindings keep their programs.
     Entry.Programs.PushBack(binding);
     return binding.Program;
 }
@@ -714,16 +744,14 @@ void CKSdlGpuRasterizerContext::PrewarmFFJitProgram(FFJitProgram &Entry)
         const CKFFProgramVariant variant = (CKFFProgramVariant)record.Variant;
         const CKDWORD precompiled = NativeFFProgram(
             variant, artifact, (record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_DEPTH_PAD) != 0);
-        // As when a draw creates it, the program is then drawn precompiled.
+        // As when a draw creates it, a binding that fails is drawn
+        // precompiled; the record's other bindings are still prewarmed.
         const CKDWORD handle = precompiled ? BindFFJitProgram(Entry, variant, precompiled,
             record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_UNLIT ? CKSdlGpuProgram::UNLIT_VERTEX :
             record.Flags & CKSDL_GPU_FF_JIT_PIPELINE_LIT ? CKSdlGpuProgram::LIT_VERTEX :
             CKSdlGpuProgram::PRECOMPILED_VERTEX) : 0;
-        if (!handle) {
-            Entry.State = FFJitProgram::REJECTED;
-            break;
-        }
-        PrewarmFFJitPipeline(handle, record);
+        if (handle)
+            PrewarmFFJitPipeline(handle, record);
     }
     Entry.Prewarm.Clear();
 }

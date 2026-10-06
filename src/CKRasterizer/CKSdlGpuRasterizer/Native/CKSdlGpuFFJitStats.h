@@ -12,6 +12,8 @@ struct CKSdlGpuFFJitStats {
     uint64_t Requests = 0, Specialized = 0;
     uint64_t Unavailable = 0, Capacity = 0, Rejected = 0, QueueDeferred = 0;
     uint64_t Evictions = 0, CompilePendingPeak = 0;
+    // In-place rebuilds of the candidate and key tables that drop tombstones.
+    uint64_t TableRebuilds = 0;
     uint64_t CompileQueued = 0, CompileCompleted = 0, CompileFailed = 0;
     uint64_t CompileNs = 0, CompileMaxNs = 0;
     // POSITIONT and 3D companions share the bounded fragment compilation jobs.

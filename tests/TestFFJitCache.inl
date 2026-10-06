@@ -143,8 +143,9 @@ void CheckFFJitCachePressure()
     TestCheck(ctx->CountFFJitProgramsForTests().Candidates == 1024 &&
                   afterFlood.Evictions == beforeFlood.Evictions &&
                   afterFlood.CompileQueued == beforeFlood.CompileQueued &&
-                  afterFlood.Capacity == beforeFlood.Capacity + 1281,
-              "candidate FIFO wraps at 1024 and expired one-offs remain cold");
+                  afterFlood.Capacity == beforeFlood.Capacity + 1281 &&
+                  afterFlood.TableRebuilds > beforeFlood.TableRebuilds,
+              "candidate FIFO wraps at 1024, drops its tombstones and expired one-offs remain cold");
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() { DrawCacheProgram(ctx, 512); }, actual);
     TestCheck(ctx->GetFFJitStats().Evictions == afterFlood.Evictions + 1 &&
                   ctx->GetFFJitStats().CompileQueued == afterFlood.CompileQueued + 1,

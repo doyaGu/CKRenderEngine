@@ -497,13 +497,17 @@ private:
                         CKFFSamplerLayout Layout);
     int AddFFJitProgram(const FFJitKey &Key, CKDWORD Rank);
     int AdmitFFJitProgram(const FFJitKey &Key);
+    // Reinsert the live entries in place, dropping removal tombstones.
+    void RebuildFFJitCandidates();
+    void RebuildFFJitKeys();
     void ReleaseFFJitProgram(FFJitProgram &Entry);
     // Queues the compilation of a new entry and registers its shader. False
     // when the entry is rejected.
     bool SubmitFFJitProgram(FFJitProgram &Entry, const CKFFNativeFragmentKey &Fragment,
                             CKFFSamplerLayout Layout, CKSdlGpuJobPriority Priority);
     // The program of an entry for the draws of a precompiled program,
-    // created on first use. When it cannot be, the entry is rejected.
+    // created on first use. When it cannot be, 0 is returned and remembered
+    // for that binding only; those draws stay precompiled.
     CKDWORD BindFFJitProgram(FFJitProgram &Entry, CKFFProgramVariant Variant,
                              CKDWORD Precompiled, CKSdlGpuProgram::VertexJitKind VertexKind = CKSdlGpuProgram::PRECOMPILED_VERTEX);
     CKDWORD CreateFFJitProgram(CKDWORD PixelShader,
