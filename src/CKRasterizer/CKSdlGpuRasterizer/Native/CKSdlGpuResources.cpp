@@ -236,7 +236,8 @@ CKERROR CKSdlGpuRasterizerContext::CreateBuffer(const CKBufferDesc *desc, CKDWOR
     }
     SDL_GPUBufferCreateInfo info = {};
     info.usage = desc->Kind == CKRST_BUFFER_VERTEX ? SDL_GPU_BUFFERUSAGE_VERTEX : SDL_GPU_BUFFERUSAGE_INDEX;
-    info.size = desc->Size;
+    // SDL rejects buffers under 4 bytes; a single 16-bit index is valid here.
+    info.size = SDL_max(desc->Size, 4u);
     buffer->Buffer = CKSdlGpuOwn(Device, SDL_CreateGPUBuffer(Device, &info), SDL_ReleaseGPUBuffer);
     if (!buffer->Buffer) return Fail("CreateGPUBuffer");
     const void *initialData = desc->InitialData;
@@ -270,7 +271,7 @@ CKERROR CKSdlGpuRasterizerContext::UpdateBuffer(const CKBufferUpdateDesc *desc)
         SDL_GPUBufferCreateInfo info = {};
         info.usage = desc->Kind == CKRST_BUFFER_VERTEX
             ? SDL_GPU_BUFFERUSAGE_VERTEX : SDL_GPU_BUFFERUSAGE_INDEX;
-        info.size = buffer->Desc.Size;
+        info.size = SDL_max(buffer->Desc.Size, 4u);
         native = CKSdlGpuOwn(Device,
             SDL_CreateGPUBuffer(Device, &info), SDL_ReleaseGPUBuffer);
         if (!native)
