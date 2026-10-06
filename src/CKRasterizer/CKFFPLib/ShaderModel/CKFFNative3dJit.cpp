@@ -90,20 +90,27 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
     const auto uniform = [&](Row row, uint32_t offset = 0) { return b.Uniform(row.Buffer, row.Index + offset); };
     const auto c = [&](CKJitValue value, uint32_t index) { return b.Component(value, index); };
     // Native matrices are four packed columns. DXIL uses explicit MADs;
-    // SPIR-V matrix operations retain contraction freedom instead of forcing
-    // Fma. Cube reflection magnifies this rounding difference. Keep the final
-    // translation addition shared by lit and unlit geometry.
+    // SPIR-V multiplies the full source vector by the matrix (OpVectorTimesMatrix),
+    // whose columns are one component of each packed column: the same dot
+    // products, which the driver evaluates as it does the reference (Mesa sums
+    // from w with FMAs). Cube reflection and EQUAL depth tests over the
+    // reference's depth expose any other order. Keep the final translation
+    // addition shared by lit and unlit geometry.
     const auto transformColumns = [&](const CKJitValue *columns, CKJitValue value, bool translate, bool homogeneous) {
-        CKJitValue result = b.Mul(columns[0], c(value, 0));
-        for (unsigned axis = 1; axis < 3; ++axis) {
-            const CKJitValue column = columns[axis], component = c(value, axis);
-            result = referenceFormat == CKRST_SHADER_FORMAT_DXIL ? b.Mad(column, component, result)
-                : b.Add(b.Mul(column, component), result);
+        if (referenceFormat == CKRST_SHADER_FORMAT_SPIRV) {
+            const CKJitValue vector = homogeneous ? value
+                : b.Construct({c(value, 0), c(value, 1), c(value, 2), b.Float(translate ? 1.0f : 0.0f)});
+            CKJitValue dots[4];
+            for (unsigned row = 0; row < 4; ++row)
+                dots[row] = b.Dot(b.Construct({c(columns[0], row), c(columns[1], row), c(columns[2], row),
+                                               c(columns[3], row)}), vector);
+            return b.Construct({dots[0], dots[1], dots[2], dots[3]});
         }
+        CKJitValue result = b.Mul(columns[0], c(value, 0));
+        for (unsigned axis = 1; axis < 3; ++axis) result = b.Mad(columns[axis], c(value, axis), result);
         if (!translate) return result;
         if (!homogeneous) return b.Add(result, columns[3]);
-        return referenceFormat == CKRST_SHADER_FORMAT_DXIL ? b.Mad(columns[3], c(value, 3), result)
-            : b.Add(b.Mul(columns[3], c(value, 3)), result);
+        return b.Mad(columns[3], c(value, 3), result);
     };
     const auto transform = [&](Row row, unsigned index, CKJitValue value, bool translate, bool homogeneous = false) {
         CKJitValue columns[4];
@@ -121,9 +128,11 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
     const CKJitValue tween = uniform(rows.Draw, CKFF_DRAW_PARAM_TWEEN);
     const CKJitValue tweening = b.Equal(c(tween, 1), b.Float(2));
     const CKJitValue streams = b.FloatToInt(c(tween, 2));
+    // DXC expands the reference's mix in DXIL; SPIR-V keeps FMix, which the
+    // driver may evaluate as one fused multiply-add.
     const auto interpolate = [&](CKJitValue from, CKJitValue to) {
         return referenceFormat == CKRST_SHADER_FORMAT_DXIL
-            ? b.Mad(b.Sub(to, from), c(tween, 0), from) : b.Lerp(from, to, c(tween, 0));
+            ? b.Mad(b.Sub(to, from), c(tween, 0), from) : b.Mix(from, to, c(tween, 0));
     };
     position = b.Select(b.And(tweening, b.IntNotEqual(b.IntAnd(streams, b.Int(1)), b.Int(0))),
         interpolate(position, tangent), position);
@@ -306,8 +315,14 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
     outputs.PushBack({12, CKJIT_INPUT_SMOOTH, fogPosition});
     outputs.PushBack({13, CKJIT_INPUT_SMOOTH, lineOffset});
     const CKJitValue offset = b.Mul(b.Swizzle(expansionData, "xy"), b.Swizzle(uniform(rows.Viewport), "xy"));
-    const CKJitValue xy = b.Select(b.Greater(expansion, half), b.Mad(offset, clipW, b.Swizzle(clip, "xy")), b.Swizzle(clip, "xy"));
-    return b.FinishVertex(b.Construct({xy, b.Mad(b.Neg(c(params, 1)), clipW, c(clip, 2)), clipW}),
+    // SPIR-V references subtract the bias and add the offset after separate multiplies.
+    const bool dxil = referenceFormat == CKRST_SHADER_FORMAT_DXIL;
+    const CKJitValue expanded = dxil ? b.Mad(offset, clipW, b.Swizzle(clip, "xy"))
+        : b.Add(b.Swizzle(clip, "xy"), b.Mul(offset, clipW));
+    const CKJitValue xy = b.Select(b.Greater(expansion, half), expanded, b.Swizzle(clip, "xy"));
+    const CKJitValue z = dxil ? b.Mad(b.Neg(c(params, 1)), clipW, c(clip, 2))
+        : b.Sub(c(clip, 2), b.Mul(c(params, 1), clipW));
+    return b.FinishVertex(b.Construct({xy, z, clipW}),
                            outputs.Begin(), outputs.Size(), out, distances, clipping ? 8 : 0);
 }
 

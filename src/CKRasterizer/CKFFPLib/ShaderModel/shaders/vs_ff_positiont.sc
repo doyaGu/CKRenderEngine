@@ -184,11 +184,14 @@ void main()
         v_texcoord7Fog.xyw *= clipW;
     }
     // D3D8 ZBIAS compatibility offset, resolved for the active depth format.
-    gl_Position.z -= u_ffDrawParams[4].y * gl_Position.w;
+    // The bias and the expansion are applied before the W multiply: z*w - b*w
+    // leaves drivers a choice of multiply-add contraction, and a JIT shader
+    // must reproduce this one's depth exactly for EQUAL tests.
+    gl_Position.z = (a_position.z - u_ffDrawParams[4].y) * clipW;
     if (expansionMode > 0.5) {
         vec2 pointOffset = expansionMode > 1.5 && expansionMode < 2.5
             ? a_weight.xy : a_tangent.xy;
-        gl_Position.xy += pointOffset * u_viewport.xy * gl_Position.w;
+        gl_Position.xy = (vec2(clipX, clipY) + pointOffset * u_viewport.xy) * clipW;
     }
 #if !CKFF_NATIVE_SDL_GPU
     v_clipDistance1.zw = ckffDepthClipDistances(gl_Position);

@@ -74,8 +74,7 @@ bool CKFFCompileNativePositionTProgram(const CKFFNativeFragmentKey &input, CKFFS
     const CKJitValue clipW = b.Div(one, b.Select(b.Equal(rhw, zero), one, rhw));
     const CKJitValue screen = b.Add(b.Swizzle(position, "xy"), b.Float(0.5f));
     const CKJitValue scale = b.Swizzle(viewport, "xy"), origin = b.Swizzle(viewport, "zw");
-    const CKJitValue ndcXY = b.Mad(screen, scale, origin);
-    const CKJitValue clipXY = b.Mul(ndcXY, clipW);
+    const CKJitValue ndcXY = dxil ? b.Mad(screen, scale, origin) : b.Add(b.Mul(screen, scale), origin);
     const CKJitValue clipZ = b.Mul(component(position, 2), clipW);
     const CKJitValue expansion = component(params, 3);
     const CKJitValue edge = b.Greater(expansion, b.Float(2.5f));
@@ -102,10 +101,21 @@ bool CKFFCompileNativePositionTProgram(const CKFFNativeFragmentKey &input, CKFFS
                 // The draw-local matrix remaps only XY into a padded depth
                 // texture. Preserve the comparison reference and input W.
                 CKJitValue padded = b.Mul(b.Swizzle(uniform(rows.Textures, stage * 4), "xy"), component(coord, 0));
-                for (unsigned column = 1; column < 4; ++column) {
+                for (unsigned column = 1; dxil && column < 4; ++column) {
                     const CKJitValue matrix = b.Swizzle(uniform(rows.Textures, stage * 4 + column), "xy");
-                    const CKJitValue value = column == 3 ? one : component(coord, column);
-                    padded = dxil ? b.Mad(matrix, value, padded) : b.Add(padded, b.Mul(matrix, value));
+                    padded = b.Mad(matrix, column == 3 ? one : component(coord, column), padded);
+                }
+                if (!dxil) {
+                    // The SPIR-V reference multiplies by the matrix, as 3D transforms do.
+                    const CKJitValue vector = b.Construct({b.Swizzle(coord, "xyz"), one});
+                    CKJitValue dots[2];
+                    for (unsigned row = 0; row < 2; ++row) {
+                        CKJitValue parts[4];
+                        for (unsigned column = 0; column < 4; ++column)
+                            parts[column] = component(uniform(rows.Textures, stage * 4 + column), row);
+                        dots[row] = b.Dot(b.Construct({parts[0], parts[1], parts[2], parts[3]}), vector);
+                    }
+                    padded = b.Construct({dots[0], dots[1]});
                 }
                 const CKJitValue enabled = b.IntNotEqual(b.IntAnd(flags, b.Int(0x1000)), b.Int(0));
                 coord = b.Construct({b.Select(enabled, padded, b.Swizzle(coord, "xy")), b.Swizzle(coord, "zw")});
@@ -131,14 +141,10 @@ bool CKFFCompileNativePositionTProgram(const CKFFNativeFragmentKey &input, CKFFS
     outputs.PushBack({13, CKJIT_INPUT_SMOOTH, lineOffset});
     const CKJitValue useWeight = b.And(b.Greater(expansion, b.Float(1.5f)), b.Less(expansion, b.Float(2.5f)));
     const CKJitValue offset = b.Select(useWeight, b.Swizzle(weight, "xy"), b.Swizzle(tangent, "xy"));
-    // DXC factors W out of the DXIL fallback's depth bias and expansion;
-    // its SPIR-V output leaves W in the multiply-adds. Preserve the native
-    // contractions: algebraic equivalence does not preserve EQUAL depth.
-    const CKJitValue expandedXY = dxil
-        ? b.Mul(b.Select(b.Greater(expansion, b.Float(0.5f)), b.Mad(offset, scale, ndcXY), ndcXY), clipW)
-        : b.Select(b.Greater(expansion, b.Float(0.5f)), b.Mad(b.Mul(offset, scale), clipW, clipXY), clipXY);
-    const CKJitValue biasedZ = dxil
-        ? b.Mul(b.Sub(component(position, 2), component(params, 1)), clipW)
-        : b.Mad(b.Neg(component(params, 1)), clipW, clipZ);
+    // The reference biases and expands before the W multiply, as DXIL keeps
+    // it; SPIR-V leaves the driver to contract the offset's multiply-add.
+    const CKJitValue expandedNdc = dxil ? b.Mad(offset, scale, ndcXY) : b.Add(b.Mul(offset, scale), ndcXY);
+    const CKJitValue expandedXY = b.Mul(b.Select(b.Greater(expansion, b.Float(0.5f)), expandedNdc, ndcXY), clipW);
+    const CKJitValue biasedZ = b.Mul(b.Sub(component(position, 2), component(params, 1)), clipW);
     return b.FinishVertex(b.Construct({expandedXY, biasedZ, clipW}), outputs.Begin(), outputs.Size(), out, distances, clipping ? 8 : 0);
 }
