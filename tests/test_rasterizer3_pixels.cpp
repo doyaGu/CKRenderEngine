@@ -4372,17 +4372,20 @@ void CheckDithered16BitTarget(Backend &b)
                   "blended dithered RGB565 fill");
     }, blended);
     int blendedRaised = 0;
+    int blendedMin = 255, blendedMax = 0;
     for (int y = 6; y < 10; ++y) {
         for (int x = 6; x < 10; ++x) {
             CKBYTE bgra[4];
             GetPixel(blended, x, y, bgra);
             if (bgra[2] >= 4)
                 ++blendedRaised;
+            if (bgra[2] < blendedMin) blendedMin = bgra[2];
+            if (bgra[2] > blendedMax) blendedMax = bgra[2];
         }
     }
     TestCheckf(blendedRaised == 8,
                "RGB565 dithering must quantize the blended result "
-               "(raised=%d)", blendedRaised);
+               "(raised=%d red=%d..%d)", blendedRaised, blendedMin, blendedMax);
     ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
     TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_DITHER] == 0,
               "dithered RGB565 draws must not report ignored state");
