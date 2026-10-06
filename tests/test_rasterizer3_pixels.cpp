@@ -4317,6 +4317,23 @@ void CheckDithered16BitTarget(Backend &b)
     const CKDWORD nearHalfRed[3] = {
         0xFF040000u, 0xFF040000u, 0xFF040000u,
     };
+    // A failed dither check reads the target again: an unchanged result is
+    // what the draw produced, a different one means the first read was stale.
+    const auto rereadRaised = [&]() {
+        Pixels again;
+        ReadBackbuffer(ctx, again);
+        int count = 0;
+        for (int y = 6; y < 10; ++y) {
+            for (int x = 6; x < 10; ++x) {
+                CKBYTE bgra[4];
+                GetPixel(again, x, y, bgra);
+                if (bgra[2] >= 4)
+                    ++count;
+            }
+        }
+        return count;
+    };
+
     Pixels plain;
     ctx->SetRenderState(VXRENDERSTATE_DITHERENABLE, FALSE);
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
@@ -4356,9 +4373,11 @@ void CheckDithered16BitTarget(Backend &b)
                       "RGB565 dithering must not leak into zero green or blue channels");
         }
     }
+    const int rereadDithered = raised == 8 && lowered == 8 ? raised : rereadRaised();
     TestCheckf(raised == 8 && lowered == 8,
                "4x4 ordered dithering must split a half-step RGB565 value evenly "
-               "(raised=%d lowered=%d)", raised, lowered);
+               "(raised=%d lowered=%d reread raised=%d ignored=%u)", raised, lowered,
+               rereadDithered, (unsigned)ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_DITHER]);
 
     const CKDWORD blendedHalfRed[3] = {
         0x80080000u, 0x80080000u, 0x80080000u,
@@ -4383,9 +4402,11 @@ void CheckDithered16BitTarget(Backend &b)
             if (bgra[2] > blendedMax) blendedMax = bgra[2];
         }
     }
+    const int rereadBlended = blendedRaised == 8 ? blendedRaised : rereadRaised();
     TestCheckf(blendedRaised == 8,
                "RGB565 dithering must quantize the blended result "
-               "(raised=%d red=%d..%d)", blendedRaised, blendedMin, blendedMax);
+               "(raised=%d red=%d..%d reread raised=%d ignored=%u)", blendedRaised, blendedMin,
+               blendedMax, rereadBlended, (unsigned)ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_DITHER]);
     ctx->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, FALSE);
     TestCheck(ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_DITHER] == 0,
               "dithered RGB565 draws must not report ignored state");
