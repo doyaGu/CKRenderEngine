@@ -798,12 +798,11 @@ void SpirvEmitter::Emit(XArray<uint32_t> &words) {
     m_Body.Emit(SpvOpStore, {m_Output, Value(m_Primary.Id)});
     for (int i = 0; i < m_Outputs.Size(); ++i)
         m_Body.Emit(SpvOpStore, {m_Outputs[i], Value(m_Vertex->Outputs[i].Value.Id)});
-    if (m_ClipOutput) {
-        uint32_t distances[8];
-        for (int i = 0; i < m_Vertex->ClipDistances.Size(); ++i)
-            distances[i] = Value(m_Vertex->ClipDistances[i].Id);
-        const uint32_t array = Op(SpvOpCompositeConstruct, m_ClipType, distances, m_Vertex->ClipDistances.Size());
-        m_Body.Emit(SpvOpStore, {m_ClipOutput, array});
+    // One store per distance: MSL cannot assign a whole array output.
+    for (int i = 0; m_ClipOutput && i < m_Vertex->ClipDistances.Size(); ++i) {
+        const uint32_t distance = Op(SpvOpAccessChain, PointerType(SpvStorageClassOutput, FloatType(1)),
+                                     {m_ClipOutput, IntConstant(i)});
+        m_Body.Emit(SpvOpStore, {distance, Value(m_Vertex->ClipDistances[i].Id)});
     }
     m_Body.Emit(SpvOpReturn, {});
     m_Body.Emit(SpvOpFunctionEnd, {});

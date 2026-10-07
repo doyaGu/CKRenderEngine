@@ -1026,7 +1026,8 @@ void TestVertexShaders() {
         TestCheck(module.Count(kOpDecorate, {kAny, kDecorationBuiltIn, kBuiltInFragCoord}) == 0,
                   "vertex attributes are not FragCoord");
         TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageOutput}) == shader.Outputs.Size() + 1 + (shader.ClipDistances.Size() != 0) &&
-                      module.Count(kOpStore) == shader.Outputs.Size() + 1 + (shader.ClipDistances.Size() != 0), "all outputs are declared and stored");
+                      module.Count(kOpStore) == shader.Outputs.Size() + 1 + shader.ClipDistances.Size(),
+                  "all outputs are declared and every clip distance is stored alone");
         TestCheck(module.Count(kOpVariable, {kAny, kAny, kStorageInput}) == shader.Inputs.Size(),
                   "unused attribute declarations remain in the interface");
         int flat = 0;
