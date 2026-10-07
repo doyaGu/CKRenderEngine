@@ -9,6 +9,10 @@
 #include "shaders/generated/dxil_pack.h"
 #endif
 
+#if CKRE_ENABLE_METAL
+#include "shaders/generated/msl_pack.h"
+#endif
+
 #include <SDL3/SDL_endian.h>
 #include <SDL3/SDL_mutex.h>
 #include <new>
@@ -586,6 +590,9 @@ EmbeddedPack s_Packs[] = {
 #if CKRE_ENABLE_DIRECTX
     {SDL_GPU_SHADERFORMAT_DXIL, s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
     {SDL_GPU_SHADERFORMAT_DXBC, s_sdl_dxbc_pack, sizeof(s_sdl_dxbc_pack)},
+#endif
+#if CKRE_ENABLE_METAL
+    {SDL_GPU_SHADERFORMAT_MSL, s_sdl_msl_pack, sizeof(s_sdl_msl_pack)},
 #endif
 };
 

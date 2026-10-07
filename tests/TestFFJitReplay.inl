@@ -480,6 +480,8 @@ void CheckFFReplay(Backend &backend, const std::vector<FFReplayCase> &cases,
     FFReplayImages images;
     RunFFReplay(ctx, cases, resources, images);
     CheckFFReplayImages("cold", cases, resources, images, reference);
+    if (!ctx->IsFFJitEnabledForTests())
+        return;
     TestCheck(ctx->FinishBackgroundWorkForTests(30000), "replay background work finishes");
     const auto before = ctx->GetFFJitStats();
     TestCheck(before.CompileCompleted == before.CompileQueued && before.PipelineCompleted == before.PipelineQueued,

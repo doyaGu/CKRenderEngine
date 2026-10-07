@@ -136,6 +136,9 @@ if (Python3_Interpreter_FOUND)
     if (CKRE_ENABLE_DIRECTX)
         string(APPEND _cksdl_shader_formats ",dxil,dxbc")
     endif ()
+    if (CKRE_ENABLE_METAL)
+        string(APPEND _cksdl_shader_formats ",msl")
+    endif ()
     add_custom_target(CKSdlGpuShaderArtifacts
         COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/shaders/compile_native_shaders.py --verify

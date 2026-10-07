@@ -208,6 +208,9 @@ public:
     // boundary would without a budget, until completing it queues no more.
     // Call between frames.
     CKBOOL FinishBackgroundWorkForTests(Sint32 TimeoutMs);
+    // False when CKRE_SDL_GPU_FF_JIT=0 or the compiler emits no format of
+    // the device, as on Metal.
+    CKBOOL IsFFJitEnabledForTests() const { return m_FFJitFormat != SDL_GPU_SHADERFORMAT_INVALID; }
     struct FFJitCounts {
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
         CKDWORD Candidates = 0, DrawKeys = 0;

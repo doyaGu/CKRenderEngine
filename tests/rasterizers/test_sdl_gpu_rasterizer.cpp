@@ -8,6 +8,9 @@
 #include "shaders/generated/dxbc_pack.h"
 #include "shaders/generated/dxil_pack.h"
 #endif
+#if CKRE_ENABLE_METAL
+#include "shaders/generated/msl_pack.h"
+#endif
 #include "CKSdlGpuTextureData.h"
 #include "CKSdlGpuWorker.h"
 #include "CKFFShaderInterface.h"
@@ -822,40 +825,50 @@ int main()
         }
         check(inverted, "every fragment artifact cache index names its key");
     }
-    // SPIR-V, and with DirectX DXIL and the DXBC vertex shaders.
+    // SPIR-V, with DirectX DXIL and the DXBC vertex shaders, and with Metal
+    // MSL.
     SDL_GPUShaderFormat packFormats = SDL_GPU_SHADERFORMAT_SPIRV;
 #if CKRE_ENABLE_DIRECTX
     packFormats |= SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_DXBC;
+#endif
+#if CKRE_ENABLE_METAL
+    packFormats |= SDL_GPU_SHADERFORMAT_MSL;
 #endif
     check(CKSdlGpuShaderPackFormats() == packFormats, "shader packs are embedded for the platform's APIs");
     {
         // The first use of the packs in this process. This thread loads them
         // in the reverse of the prefetch's order, so it decodes some itself
         // and waits for others; each still decodes once.
-        const SDL_GPUShaderFormat formats[] = {SDL_GPU_SHADERFORMAT_DXBC, SDL_GPU_SHADERFORMAT_DXIL,
-                                               SDL_GPU_SHADERFORMAT_SPIRV};
-        const CKBYTE *first[3] = {}, *later = nullptr;
+        const SDL_GPUShaderFormat formats[] = {SDL_GPU_SHADERFORMAT_MSL, SDL_GPU_SHADERFORMAT_DXBC,
+                                               SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV};
+        const CKBYTE *first[4] = {}, *later = nullptr;
         CKDWORD size = 0;
         bool once = true;
         {
             CKSdlGpuShaderPrefetch prefetch(packFormats);
-            CKSdlGpuShaderPrefetch none(SDL_GPU_SHADERFORMAT_MSL);
-            for (int i = 0; i < 3; ++i)
+            CKSdlGpuShaderPrefetch none(SDL_GPU_SHADERFORMAT_METALLIB);
+            for (int i = 0; i < 4; ++i)
                 if (packFormats & formats[i])
                     once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, first[i], size) && once;
         }
         CKSdlGpuShaderPrefetch decoded(packFormats);
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 4; ++i)
             if (packFormats & formats[i])
                 once = CKSdlGpuShaderCode(formats[i], CKSDL_SHADER_VS_FF_3D, later, size) && later == first[i] &&
                        once;
         check(once, "prefetched shader packs decode once");
     }
-    for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV}) {
+    for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_MSL}) {
         if (!(packFormats & format))
             continue;
         CKFFShaderSet set;
         check(CKSdlGpuShaderSet(format, set) != FALSE, "complete native shader family");
+        bool entries = true;
+        for (unsigned role = 0; role < CKRST_BUILTIN_SHADER_COUNT; ++role)
+            entries = entries && std::strcmp(set.Shaders[role].EntryPoint, CKSdlGpuShaderEntryPoint(format)) == 0;
+        check(entries && std::strcmp(CKSdlGpuShaderEntryPoint(format),
+                                     format == SDL_GPU_SHADERFORMAT_MSL ? "main0" : "main") == 0,
+              "native shader family names the entry points of its format");
         const auto payload = set.Shaders[0].Format, profile = set.Shaders[0].Profile;
         check(payload != CKRST_SHADER_FORMAT_BGFX, "native artifact ownership");
         for (unsigned role = 0; role < CKRST_BUILTIN_SHADER_COUNT; ++role) {
@@ -1037,10 +1050,11 @@ int main()
         // a pack has no shaders.
         bool complete = true;
         for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC,
-                            SDL_GPU_SHADERFORMAT_MSL}) {
+                            SDL_GPU_SHADERFORMAT_MSL, SDL_GPU_SHADERFORMAT_METALLIB}) {
             const bool packed = (packFormats & format) != 0;
             complete = complete && (CKSdlGpuLoadShaders(format) != FALSE) == packed;
-            const char *magic = format == SDL_GPU_SHADERFORMAT_SPIRV ? "#" : "DXBC";
+            const char *magic = format == SDL_GPU_SHADERFORMAT_SPIRV ? "#" :
+                format == SDL_GPU_SHADERFORMAT_MSL ? "#inc" : "DXBC";
             for (int shader = 0; shader <= CKSDL_SHADER_COUNT; ++shader) {
                 const CKBYTE *code = nullptr;
                 CKDWORD size = 0;
@@ -1061,6 +1075,9 @@ int main()
 #if CKRE_ENABLE_DIRECTX
             {s_sdl_dxil_pack, sizeof(s_sdl_dxil_pack)},
             {s_sdl_dxbc_pack, sizeof(s_sdl_dxbc_pack)},
+#endif
+#if CKRE_ENABLE_METAL
+            {s_sdl_msl_pack, sizeof(s_sdl_msl_pack)},
 #endif
         };
         bool faithful = true, cleared = true, truncated = true;

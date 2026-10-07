@@ -20,9 +20,17 @@ struct CKSdlGpuShaderArtifacts {
 CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size,
                                 CKSdlGpuShaderArtifacts &Out);
 
-// The formats of the embedded packs: SPIR-V, and with DirectX DXIL and the
-// DXBC vertex shaders that compiled DXBC programs pair with.
+// The formats of the embedded packs: SPIR-V, with DirectX DXIL and the
+// DXBC vertex shaders that compiled DXBC programs pair with, and with Metal
+// MSL.
 SDL_GPUShaderFormat CKSdlGpuShaderPackFormats();
+
+// The entry point of the shaders of a format. SPIRV-Cross renames the MSL
+// entry point, as main is reserved in Metal.
+inline const char *CKSdlGpuShaderEntryPoint(SDL_GPUShaderFormat Format)
+{
+    return Format == SDL_GPU_SHADERFORMAT_MSL ? "main0" : "main";
+}
 
 // The embedded packs. The first use of a format decodes its pack once per
 // process and is thread safe; a pack that fails to decode leaves its format

@@ -10,6 +10,14 @@ if(_drivers STREQUAL "")
         set(_drivers "vulkan")
     endif()
 endif()
+# The FF JIT emits no MSL, so Metal has no compiled programs to compare.
+string(REPLACE "," ";" _drivers "${_drivers}")
+list(REMOVE_ITEM _drivers metal)
+if(NOT _drivers)
+    message(STATUS "SKIPPED: the FF JIT is unavailable on the requested drivers")
+    return()
+endif()
+string(REPLACE ";" "," _drivers "${_drivers}")
 execute_process(COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/scene_capture_jit.py"
     --tool "${TOOL}" --engine-dir "${ENGINE_DIR}" --out "${OUT_DIR}" --drivers "${_drivers}"
     RESULT_VARIABLE _result)

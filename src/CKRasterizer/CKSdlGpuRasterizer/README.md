@@ -62,15 +62,17 @@ submissions with fences; shutdown waits for the device before releasing it.
 Resource-table generations survive device reinitialization so old handles
 cannot identify newly created resources.
 
-The shader directory contains complete offline DXIL and SPIR-V FFP families
-owned by the rasterizer composition, plus independent native clear and volume
-helper programs. Program declarations provide uniform packing, sampler slots
-and vertex defaults; the backend does not infer FFP roles from those resources.
-Build-time validation checks source/ABI hashes, entry points and reflected
-bindings. Runtime device selection intersects complete families with driver
-support; it never invokes a shader compiler. Windows defaults to D3D12;
-`CKRE_SDL_GPU_DRIVER=vulkan` explicitly selects Vulkan. SDL-only builds do not
-build or stage bgfx shader containers.
+The shader directory contains complete offline DXIL, SPIR-V and MSL FFP
+families owned by the rasterizer composition, plus independent native clear
+and volume helper programs. Program declarations provide uniform packing,
+sampler slots and vertex defaults; the backend does not infer FFP roles from
+those resources. Build-time validation checks source/ABI hashes, entry points
+and reflected bindings. Runtime device selection intersects complete families
+with driver support; it never invokes a shader compiler. Windows defaults to
+D3D12 and Apple platforms to Metal, whose MSL SPIRV-Cross translates from the
+SPIR-V; the FF JIT emits no MSL and is off there. `CKRE_SDL_GPU_DRIVER=vulkan`
+explicitly selects Vulkan. SDL-only builds do not build or stage bgfx shader
+containers.
 
 Run the native and public-interface tests on the interactive desktop with
 `--visible`, `CKRE_GPU_TEST_INTERACTIVE_START=1`, and `CKRE_GPU_TEST_HOLD=1`.

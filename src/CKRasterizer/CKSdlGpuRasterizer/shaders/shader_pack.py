@@ -15,7 +15,7 @@ repeat across variants:
   over absolute value numbers, branch targets become relative to the current
   basic block, and the remaining fields go to streams per block and record
   code.
-* DXBC containers are stored as they are.
+* DXBC containers and MSL sources are stored as they are.
 
 All streams of a pack are compressed together as raw LZMA1. decode() mirrors
 CKSdlGpuShaderPack.cpp, and encode() proves that every pack decodes to its
@@ -39,7 +39,7 @@ import struct
 MAGIC = b"CKSP"
 VERSION = 2
 RAW, SPIRV, DXIL = range(3)
-CODECS = {"dxbc": RAW, "spirv": SPIRV, "dxil": DXIL}
+CODECS = {"dxbc": RAW, "msl": RAW, "spirv": SPIRV, "dxil": DXIL}
 
 # SPIR-V stream contexts.
 SPIRV_SCHEMA, SPIRV_HEADER, SPIRV_OPCODE, SPIRV_COUNT, SPIRV_LITERAL, \

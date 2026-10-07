@@ -1021,13 +1021,12 @@ void CheckFFJitCounts(const char *what, const CKSdlGpuRasterizerContext::FFJitCo
 // precompiled pixels.
 void CheckCompiledFragmentPrograms(Backend &b, const Samples &precompiled)
 {
-    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
-    if (setting && strcmp(setting, "0") == 0) {
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    if (!backend->IsFFJitEnabledForTests()) {
         printf("  compiled fragment programs: disabled\n");
         return;
     }
-    CKSdlGpuRasterizerContext *backend =
-        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
     TestCheck(backend->FinishBackgroundWorkForTests(30000),
               "background compilation finishes");
     const CKSdlGpuRasterizerContext::FFJitCounts counts =
@@ -1120,11 +1119,10 @@ void DrawEqualDepthPass(CKRasterizerContext *ctx, int writer, int tester,
 // an EQUAL pass over the other's depth drops pixels.
 void CheckCompiledProgramDepthInvariance(Backend &b)
 {
-    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
-    if (setting && strcmp(setting, "0") == 0)
-        return;
     CKSdlGpuRasterizerContext *backend =
         static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    if (!backend->IsFFJitEnabledForTests())
+        return;
     CKRasterizerContext *ctx = b.Context;
     const auto entries = [&]() {
         const CKSdlGpuRasterizerContext::FFJitCounts counts =
@@ -1166,13 +1164,12 @@ void CheckCompiledProgramDepthInvariance(Backend &b)
 // The draws of a check may use the programs of earlier ones.
 void CheckCompiled(Backend &b, const char *name, void (*check)(Backend &))
 {
-    const char *setting = GetEnvValue("CKRE_SDL_GPU_FF_JIT");
-    if (setting && strcmp(setting, "0") == 0) {
+    CKSdlGpuRasterizerContext *backend =
+        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    if (!backend->IsFFJitEnabledForTests()) {
         check(b);
         return;
     }
-    CKSdlGpuRasterizerContext *backend =
-        static_cast<CKSdlGpuRasterizerContext *>(b.Context);
     const CKSdlGpuRasterizerContext::FFJitCounts before = backend->CountFFJitProgramsForTests();
     CKSdlGpuRasterizerContext::FFJitCounts counts = before;
     for (int run = 0; run < 2; ++run) {
@@ -4633,6 +4630,11 @@ void BackendRendersFixedFunctionSemantics()
 #endif
     Backend backend;
     const CKBOOL opened = OpenBackend(backend, kWidth, kHeight);
+#ifdef CKRE_PIXEL_SDL_GPU
+    // The contexts of the JIT checks below run on the same driver.
+    const bool jit = opened &&
+        static_cast<CKSdlGpuRasterizerContext *>(backend.Context)->IsFFJitEnabledForTests();
+#endif
     if (opened) {
         if (EnvFlagEnabled("CKRE_GPU_TEST_INTERACTIVE_START")) {
             SDL_SetWindowTitle(backend.Window, "rasterizer3-pixels - press Enter to start");
@@ -4710,14 +4712,15 @@ void BackendRendersFixedFunctionSemantics()
     }
     CloseBackend(backend);
 #ifdef CKRE_PIXEL_SDL_GPU
-    if (opened)
+    if (jit)
         CheckPrewarmedFragmentPrograms(precompiled);
-    if (opened)
+    if (jit)
         CheckFFJitCachePressure();
-    if (opened)
+    if (jit)
         CheckFFJitPipelinePressure();
-    if (opened) {
+    if (opened)
         CheckDepthPadScene();
+    if (jit) {
         CheckFFJitPipelineCache();
         CheckPositionTJitDepth();
         CheckUnlitJitDepth();

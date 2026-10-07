@@ -12,7 +12,11 @@ CKBOOL CKSdlGpuNativeClearShaders(SDL_GPUShaderFormat format, CKShaderDesc &vert
     } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
         vertex.Format = fragment.Format = CKRST_SHADER_FORMAT_SPIRV;
         vertex.Profile = fragment.Profile = CKRST_SHADER_PROFILE_SPIRV;
+    } else if (format == SDL_GPU_SHADERFORMAT_MSL) {
+        vertex.Format = fragment.Format = CKRST_SHADER_FORMAT_MSL;
+        vertex.Profile = fragment.Profile = CKRST_SHADER_PROFILE_MSL;
     } else return FALSE;
+    vertex.EntryPoint = fragment.EntryPoint = CKSdlGpuShaderEntryPoint(format);
     return CKSdlGpuShaderCode(format, CKSDL_SHADER_VS_CLEAR, vertex.Code, vertex.CodeSize) &&
            CKSdlGpuShaderCode(format, CKSDL_SHADER_FS_CLEAR, fragment.Code, fragment.CodeSize);
 }

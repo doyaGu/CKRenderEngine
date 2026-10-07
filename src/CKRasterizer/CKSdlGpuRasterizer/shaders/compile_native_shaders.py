@@ -9,6 +9,9 @@ FXC additionally builds Shader Model 5.1 DXBC variants of the fixed-function
 vertex shaders. D3D12 accepts no pipeline that mixes DXBC with DXIL, and the
 fragment shaders compiled at runtime are DXBC, so they pair with these.
 
+SPIRV-Cross translates the SPIR-V artifacts to MSL for Metal, which has no
+runtime compiler, keeping the SPIR-V bindings as the MSL resource indices.
+
 The artifacts of each format are embedded as one compressed pack (see
 shader_pack.py), indexed by the shader ids of generated/shaders.h.
 
@@ -410,11 +413,53 @@ def validate_dxbc(assembly, code, source, clipping, uniforms):
     assert outputs == expected, "Vertex output signature differs from the fragment input ABI"
 
 
-PACK_FORMATS = ("dxil", "spirv", "dxbc")
+def msl_translate(spirv_cross, spirv: Path, output: Path, vertex: bool) -> bytes:
+    # SDL binds the uniform buffers, textures and samplers of each stage at
+    # the MSL indices of their slots, which are the SPIR-V bindings within
+    # the set of each kind; combined samplers split into a texture and a
+    # sampler of the same index. Point lists need a written point size.
+    command = [spirv_cross, str(spirv), "--msl", "--msl-version", "20300",
+               "--msl-decoration-binding", "--msl-no-clip-distance-user-varying",
+               "--output", str(output)]
+    if vertex:
+        command += ["--msl-default-point-size", "1"]
+    subprocess.run(command, check=True)
+    return output.read_bytes()
+
+
+def validate_msl(text, source, vertex, samplers, uniforms, sampler_layout):
+    entries = re.findall(r"^(vertex|fragment) \w+ (\w+)\((.*)\)$", text, re.M)
+    assert len(entries) == 1 and entries[0][:2] == ("vertex" if vertex else "fragment", "main0")
+    parameters = entries[0][2]
+    buffers = re.findall(r"constant type_(\w+)& \w+ \[\[buffer\((\d+)\)\]\]", parameters)
+    assert buffers == [(name, str(slot)) for slot, (name, _, _) in enumerate(uniform_layout(source))]
+    # No other buffers, as vertex buffers take the indices from 14.
+    assert len(re.findall(r"\[\[buffer\(", parameters)) == uniforms
+    textures = re.findall(r"(\w+)<float> \w+ \[\[texture\((\d+)\)\]\]", parameters)
+    assert [int(index) for _, index in textures] == list(range(samplers))
+    assert re.findall(r"\[\[sampler\((\d+)\)\]\]", parameters) == [str(i) for i in range(samplers)]
+    assert len(re.findall(r"\[\[texture\(", parameters)) == samplers
+    if source == "fs_volume_mip":
+        dimensions = ["3d"]
+    elif source in ("fs_postprocess", "fs_dither_resolve"):
+        dimensions = ["2d"]
+    elif samplers:
+        counts = SAMPLER_LAYOUTS[sampler_layout].counts
+        dimensions = ["2d"] * counts[0] + ["cube"] * counts[1] + ["3d"] * counts[2]
+    else:
+        dimensions = []
+    # Comparison sampling declares depth textures.
+    assert [re.sub("^(texture|depth)", "", kind) for kind, _ in textures] == dimensions
+    if vertex:
+        assert "[[point_size]]" in text
+
+
+PACK_FORMATS = ("dxil", "spirv", "dxbc", "msl")
+ENTRY_POINTS = {"msl": "main0"}
 
 
 def shader_formats(name: str):
-    return ("dxil", "spirv", "dxbc") if name in DXBC_SHADERS else ("dxil", "spirv")
+    return ("dxil", "spirv", "dxbc", "msl") if name in DXBC_SHADERS else ("dxil", "spirv", "msl")
 
 
 def format_list(text: str):
@@ -478,14 +523,17 @@ def verify_artifacts(directory, abi, abi_hash, formats):
     layouts = {name: sum(buffer[2] for buffer in uniform_layout(source))
                for name, source, _, _, _ in SHADERS}
     source_by_name = {name: source for name, source, _, _, _ in SHADERS}
+    spirv_hashes = {s["name"]: s["sha256"] for s in manifest["shaders"] if s["format"] == "spirv"}
     for shader in manifest["shaders"]:
         name, format_ = shader["name"], shader["format"]
         if format_ not in formats:
             continue
         assert (shader["uniform_buffers"], shader["samplers"]) == shader_resources(source_by_name[name]), f"{name}: resource count mismatch"
         assert shader["source_sha256"] == sources[name], f"{name}: source changed; regenerate native shaders"
-        assert shader["entry"] == "main" and shader["reflected"]
+        assert shader["entry"] == ENTRY_POINTS.get(format_, "main") and shader["reflected"]
         assert shader["uniform_bytes"] == layouts[name], f"{name}: uniform layout mismatch"
+        if format_ == "msl":
+            assert shader["spirv_sha256"] == spirv_hashes[name], f"{name}: SPIR-V changed; regenerate msl"
     # Generation proved that every pack decodes to its artifacts; the build
     # only checks that the packs are the generated ones.
     sizes = {(s["name"], s["format"]): s["size"] for s in manifest["shaders"]}
@@ -558,7 +606,7 @@ def main() -> None:
         return
     formats = args.formats
     # Each format needs only its own compilers.
-    tools = (("DXC", args.dxc, ("dxil", "spirv")), ("spirv-cross", args.spirv_cross, ("spirv",)),
+    tools = (("DXC", args.dxc, ("dxil", "spirv")), ("spirv-cross", args.spirv_cross, ("spirv", "msl")),
              ("FXC", args.fxc, ("dxbc",)))
     missing = [tool for tool, path, users in tools if not path and set(users) & set(formats)]
     if not args.work_dir:
@@ -576,6 +624,14 @@ def main() -> None:
     args.work_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     codes = {}
+    if "msl" in formats and "spirv" in kept:
+        # MSL is translated from the kept SPIR-V, which must be current.
+        sources = source_hashes()
+        assert all(shader["source_sha256"] == sources[name]
+                   for (name, format_), shader in kept_shaders.items() if format_ == "spirv"), \
+            "The kept SPIR-V shaders are of older sources; regenerate spirv too"
+        for (name, _, _, _, _), code in zip(SHADERS, shader_pack.decode(read_pack(args.output_dir, "spirv"))):
+            codes["spirv", name] = code
     manifest = {"abi_version": abi, "interface_hash": abi_hash, "shaders": [], "packs": []}
     for name, source, clipping, compare_count, sampler_layout in SHADERS:
         vertex = source.startswith("vs_")
@@ -589,7 +645,11 @@ def main() -> None:
                 continue
             output = args.work_dir / f"{format_}_{name}.bin"
             assembly = args.work_dir / f"{format_}_{name}.asm"
-            if format_ == "dxbc":
+            if format_ == "msl":
+                spirv = args.work_dir / f"{format_}_{name}.spv"
+                spirv.write_bytes(codes["spirv", name])
+                code = msl_translate(args.spirv_cross, spirv, args.work_dir / f"{format_}_{name}.metal", vertex)
+            elif format_ == "dxbc":
                 command = [args.fxc, "/nologo", "/T", "vs_5_1", "/E", "main", "/O3",
                            "/D", "CKFF_NATIVE_DXBC=1",
                            "/Fo", str(output), "/Fc", str(assembly), str(hlsl)]
@@ -600,8 +660,9 @@ def main() -> None:
                 if format_ == "spirv":
                     dxc += ["-spirv", "-fspv-target-env=vulkan1.0", "-fvk-use-gl-layout"]
                 command = dxc + ["-Fo", str(output), "-Fc", str(assembly)]
-            subprocess.run(command, check=True)
-            code = output.read_bytes()
+            if format_ != "msl":
+                subprocess.run(command, check=True)
+                code = output.read_bytes()
             if format_ == "spirv":
                 reflection = json.loads(subprocess.check_output([args.spirv_cross, str(output), "--reflect"]))
                 validate_spirv(reflection, source, vertex, samplers, uniforms,
@@ -609,17 +670,26 @@ def main() -> None:
                 (args.work_dir / f"{format_}_{name}.json").write_text(json.dumps(reflection, indent=2))
             elif format_ == "dxbc":
                 validate_dxbc(assembly.read_text(encoding="utf-8"), code, source, clipping, uniforms)
+            elif format_ == "msl":
+                validate_msl(code.decode("utf-8"), source, vertex, samplers, uniforms, sampler_layout)
             else:
                 validate_dxil(assembly.read_text(encoding="utf-8"), source, vertex, samplers, uniforms)
                 code = strip_reflection(dxc, args.work_dir / f"{format_}_{name}_stripped.bin", code)
-            assert code[:4] == (b"\x03\x02\x23\x07" if format_ == "spirv" else b"DXBC")
+            assert code[:4] == {"spirv": b"\x03\x02\x23\x07", "msl": b"#inc"}.get(format_, b"DXBC")
             codes[format_, name] = code
-            manifest["shaders"].append({"name": name, "format": format_, "entry": "main",
+            # MSL records the SPIR-V it translates, which verification checks.
+            translated = {"spirv_sha256": hashlib.sha256(codes["spirv", name]).hexdigest()} if format_ == "msl" else {}
+            manifest["shaders"].append({"name": name, "format": format_,
+                "entry": ENTRY_POINTS.get(format_, "main"), **translated,
                 "samplers": samplers, "uniform_buffers": uniforms, "reflected": True,
                 "uniform_bytes": sum(buffer[2] for buffer in uniform_layout(source)),
                 "source_sha256": hashlib.sha256(make_source(name, source, clipping,
                                                               compare_count, sampler_layout).encode()).hexdigest(),
                 "size": len(code), "sha256": hashlib.sha256(code).hexdigest()})
+    if "msl" in kept and "spirv" in formats and any(
+            shader.get("spirv_sha256") != hashlib.sha256(codes["spirv", name]).hexdigest()
+            for (name, format_), shader in kept_shaders.items() if format_ == "msl"):
+        print("warning: the kept msl shaders translate older SPIR-V; regenerate msl too", file=sys.stderr)
     headers = {}
     for format_ in PACK_FORMATS:
         if format_ in kept:

@@ -41,7 +41,7 @@ static bool CheckExactCopyMatchesBlit(SDL_Window *window)
     if (!driver) driver = CKRE_ENABLE_DIRECTX ? "direct3d12" : "vulkan";
 #endif
     SDL_GPUDevice *device = SDL_CreateGPUDevice(
-        SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, true, driver);
+        SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, true, driver);
     if (!device) {
         std::fprintf(stderr, "copy equivalence device: %s\n", SDL_GetError());
         return false;
@@ -171,11 +171,18 @@ static bool CheckExactCopyMatchesBlit(SDL_Window *window)
     return exact;
 }
 
+// The embedded shader format of the device.
+static SDL_GPUShaderFormat NativeShaderFormat(CKSdlGpuRasterizerContext &backend)
+{
+    const CK_SHADER_FORMAT format = backend.GetCaps().ShaderFormat;
+    return format == CKRST_SHADER_FORMAT_DXIL ? SDL_GPU_SHADERFORMAT_DXIL :
+        format == CKRST_SHADER_FORMAT_MSL ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV;
+}
+
 static bool CheckGenericProgram(CKSdlGpuRasterizerContext &backend)
 {
     CKShaderDesc vertex, fragment;
-    const auto format = backend.GetCaps().ShaderFormat == CKRST_SHADER_FORMAT_DXIL ?
-        SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV;
+    const auto format = NativeShaderFormat(backend);
     CKDWORD vs = 0, fs = 0, program = 0, texture = 0, output = 0, target = 0;
     if (!CKSdlGpuNativeVolumeShaders(format, vertex, fragment) ||
         backend.CreateShader(&vertex, &vs) != CK_OK || backend.CreateShader(&fragment, &fs) != CK_OK) return false;
@@ -908,8 +915,7 @@ static int Run(SDL_Window *window)
         backend.Submit(CKRST_PRESENT_UNCHANGED, TRUE, nullptr) != CK_OK) return 25;
     CKSdlGpuPresentStage present;
     CKFFShaderSet shaders;
-    if (!CKSdlGpuShaderSet(backend.GetCaps().ShaderFormat == CKRST_SHADER_FORMAT_DXIL ?
-        SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV, shaders)) return 23;
+    if (!CKSdlGpuShaderSet(NativeShaderFormat(backend), shaders)) return 23;
     present.Init(&backend, shaders);
     if (!present.EnsureSceneTarget(640, 480, 0) || !present.EnsureNativeTarget(640, 480) || !present.EnsureResources()) return 2;
     CKDepthTextureDesc sampledDepthDesc;

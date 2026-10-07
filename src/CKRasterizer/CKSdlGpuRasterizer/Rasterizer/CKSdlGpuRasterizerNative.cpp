@@ -36,14 +36,16 @@ static SDL_Window *FindWindow(WIN_HANDLE handle)
 }
 
 // The formats of the shader packs a device of the driver uses: its own, and on
-// D3D12 the DXBC of the programs the FF JIT compiles. Off Windows an unnamed
-// driver is Vulkan, the only other backend taking DXIL or SPIR-V.
+// D3D12 the DXBC of the programs the FF JIT compiles. Windows and Apple
+// platforms name their default driver, so an unnamed one is Vulkan.
 static SDL_GPUShaderFormat DriverPackFormats(const char *driver, SDL_GPUShaderFormat allowedFormats)
 {
     if (!driver || SDL_strcmp(driver, "vulkan") == 0)
         return allowedFormats & SDL_GPU_SHADERFORMAT_SPIRV;
     if (SDL_strcmp(driver, "direct3d12") == 0 && (allowedFormats & SDL_GPU_SHADERFORMAT_DXIL))
         return SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_DXBC;
+    if (SDL_strcmp(driver, "metal") == 0)
+        return allowedFormats & SDL_GPU_SHADERFORMAT_MSL;
     return 0;
 }
 
@@ -69,13 +71,15 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     Window = FindWindow(desc->Window);
     if (!Window) { SDL_SetError("Rasterizer requires a Player-owned SDL_Window"); return Fail("Init.window"); }
     SDL_GPUShaderFormat allowedFormats = desc->ShaderTargets.Size() == 0 ?
-        SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV : 0;
+        SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL : 0;
     for (int i = 0; i < desc->ShaderTargets.Size(); ++i) {
         const CKFFShaderTarget &target = desc->ShaderTargets[i];
         if (target.Format == CKRST_SHADER_FORMAT_DXIL && target.Profile == CKRST_SHADER_PROFILE_DX12)
             allowedFormats |= SDL_GPU_SHADERFORMAT_DXIL;
         else if (target.Format == CKRST_SHADER_FORMAT_SPIRV && target.Profile == CKRST_SHADER_PROFILE_SPIRV)
             allowedFormats |= SDL_GPU_SHADERFORMAT_SPIRV;
+        else if (target.Format == CKRST_SHADER_FORMAT_MSL && target.Profile == CKRST_SHADER_PROFILE_MSL)
+            allowedFormats |= SDL_GPU_SHADERFORMAT_MSL;
     }
     allowedFormats &= CKSdlGpuShaderPackFormats();
     if (!allowedFormats) {
@@ -86,6 +90,8 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     if (driver && SDL_strcmp(driver, "auto") == 0) driver = nullptr;
 #ifdef _WIN32
     if (!driver) driver = allowedFormats & SDL_GPU_SHADERFORMAT_DXIL ? "direct3d12" : "vulkan";
+#elif defined(__APPLE__)
+    if (!driver) driver = allowedFormats & SDL_GPU_SHADERFORMAT_MSL ? "metal" : "vulkan";
 #endif
     const bool debug = SDL_getenv("CKRE_SDL_GPU_DEBUG") && SDL_strcmp(SDL_getenv("CKRE_SDL_GPU_DEBUG"), "0") != 0;
     // Decode the shader packs while the device is created.
@@ -103,7 +109,8 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
         SDL_SetError("Device and requested native shader targets have no common format");
         Fail("Init.shaders"); Shutdown(); return CKERR_INVALIDOPERATION;
     }
-    ShaderFormat = formats & SDL_GPU_SHADERFORMAT_DXIL ? SDL_GPU_SHADERFORMAT_DXIL : SDL_GPU_SHADERFORMAT_SPIRV;
+    ShaderFormat = formats & SDL_GPU_SHADERFORMAT_DXIL ? SDL_GPU_SHADERFORMAT_DXIL :
+                   formats & SDL_GPU_SHADERFORMAT_MSL ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV;
     if (!SDL_ClaimWindowForGPUDevice(Device, Window)) {
         Fail("ClaimWindowForGPUDevice"); Window = nullptr; Shutdown(); return CKERR_INVALIDOPERATION;
     }
@@ -115,8 +122,10 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     Width = unsigned(desc->Width);
     Height = unsigned(desc->Height);
     DebugFlags = desc->DebugFlags;
-    Caps.ShaderFormat = ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_SPIRV;
-    Caps.ShaderProfile = ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
+    Caps.ShaderFormat = ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_FORMAT_DXIL :
+                        ShaderFormat == SDL_GPU_SHADERFORMAT_MSL ? CKRST_SHADER_FORMAT_MSL : CKRST_SHADER_FORMAT_SPIRV;
+    Caps.ShaderProfile = ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 :
+                         ShaderFormat == SDL_GPU_SHADERFORMAT_MSL ? CKRST_SHADER_PROFILE_MSL : CKRST_SHADER_PROFILE_SPIRV;
     Caps.RequiresIntermediateTarget = TRUE;
     Caps.MaxTextureSize = 16384;
     Caps.MaxTextureBindings = CKFF_TEXTURE_SLOT_COUNT;

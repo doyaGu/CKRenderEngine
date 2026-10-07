@@ -1,5 +1,6 @@
 // A real depth prepass and POSITIONT comparison panels share a frame. Native
 // depth resources are registered here because CK2 exposes only color RTTs.
+// Without the JIT only the precompiled reference runs.
 void CheckDepthPadScene()
 {
     constexpr int width = 640, height = 480, size = 160, frames = 6;
@@ -21,6 +22,10 @@ void CheckDepthPadScene()
         Backend backend;
         TestCheck(OpenBackend(backend, width, height), "open depth-pad scene");
         auto *ctx = static_cast<CKSdlGpuRasterizerContext *>(backend.Context);
+        if (mode && !ctx->IsFFJitEnabledForTests()) {
+            CloseBackend(backend);
+            break;
+        }
         CKTextureDesc color;
         VxPixelFormat2ImageDesc(_32_ARGB8888, color.Format);
         color.Format.Width = color.Format.Height = size;
