@@ -149,8 +149,11 @@ CKFFSamplerShaderState CKFFBuildSamplerShaderState(
     const bool manualLod = sampler.MinMipLevel != 0 &&
         (((shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_LOD) != 0) ||
          manualAnisotropy || manualBorder || manualDepthCompare || mirrorOnce);
+    // The explicit-gradient comparison applies the bias the sampler lacks.
+    const bool compareBias = depthCompare && sampler.MipLodBias != 0.0f &&
+        (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS) != 0;
     const bool explicitGradient = mirrorOnce || manualLod ||
-        manualAnisotropy || manualBorder || manualDepthCompare;
+        manualAnisotropy || manualBorder || manualDepthCompare || compareBias;
 
     const CKDWORD minimumMip = sampler.MinMipLevel >
             CKFF_SAMPLER_SHADER_MIN_MIP_MASK

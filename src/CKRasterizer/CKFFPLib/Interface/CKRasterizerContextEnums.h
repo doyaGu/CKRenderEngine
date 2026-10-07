@@ -66,6 +66,7 @@ typedef uint32_t CK_SHADER_PROFILE;
 #define CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO   0x00000010u
 #define CKRST_SHADER_TARGET_MANUAL_BORDER         0x00000020u
 #define CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE  0x00000040u
+#define CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS   0x00000080u
 
 // ---------------------------------------------------------------------------
 // Vertex Attributes

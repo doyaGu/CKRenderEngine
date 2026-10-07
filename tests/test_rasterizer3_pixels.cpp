@@ -3701,6 +3701,32 @@ void CheckFilteredDepthComparison(Backend &b)
     }, pixels);
     ExpectCenter(pixels, 128, 128, 128,
                  "bilinear depth comparison filters four comparison results");
+    // A LOD bias moves a magnified comparison to its minification filter:
+    // the point sample of the accepting texel instead of 70 % of it. Metal
+    // samplers have no bias, so the shader applies it there.
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
+    float biasedCoordinates[3][4] = {
+        {0.55f, 0.3f, 0.5f, 1.0f},
+        {0.55f, 0.5f, 0.5f, 1.0f},
+        {0.55f, 0.7f, 0.5f, 1.0f}
+    };
+    for (float bias : {0.0f, 10.0f}) {
+        CKDWORD bits = 0;
+        memcpy(&bits, &bias, sizeof(bits));
+        ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, bits);
+        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, biasedCoordinates),
+                      "draw magnified depth comparison");
+        }, pixels);
+        if (bias == 0.0f)
+            ExpectCenter(pixels, 179, 179, 179,
+                         "magnified depth comparison uses the linear magnification filter");
+        else
+            ExpectCenter(pixels, 255, 255, 255,
+                         "LOD bias selects the point minification filter of depth comparison");
+    }
+    ctx->SetTextureStageState(0, CKRST_TSS_MIPMAPLODBIAS, 0);
+    ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
 
     SetDiffuseState(ctx);
     for (int stage = 0; stage < 2; ++stage) {

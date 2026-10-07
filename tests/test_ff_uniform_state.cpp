@@ -171,6 +171,27 @@ void SamplerShaderStateResolvesBackendResponsibilities() {
     TestCheck(!sdlDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) &&
                   !sdlDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
               "SDL GPU padded comparison textures must retain native comparison sampling");
+    // Metal samplers have no LOD bias, so the shader applies a comparison
+    // stage's bias through the explicit-gradient path.
+    const CKDWORD metalFlags = sdlFlags | CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS;
+    sampler.AddressU = CKRST_ADDRESS_CLAMP;
+    sampler.AddressV = CKRST_ADDRESS_CLAMP;
+    sampler.MipLodBias = 0.5f;
+    const CKFFSamplerShaderState sdlBiasedDepth = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, sdlFlags);
+    const CKFFSamplerShaderState metalBiasedDepth = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, metalFlags);
+    const CKFFSamplerShaderState metalBiased2D = CKFFBuildSamplerShaderState(
+        sampler, 0, 0, metalFlags);
+    sampler.MipLodBias = 0.0f;
+    const CKFFSamplerShaderState metalDepth = CKFFBuildSamplerShaderState(
+        sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, metalFlags);
+    TestCheck(!sdlBiasedDepth.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) &&
+                  metalBiasedDepth.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) &&
+                  !metalBiasedDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) &&
+                  !metalBiased2D.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT) &&
+                  !metalDepth.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT),
+              "A comparison LOD bias the sampler state cannot carry must be applied by the shader");
 
     sampler.AddressU = CKRST_ADDRESS_CLAMP;
     sampler.AddressV = CKRST_ADDRESS_CLAMP;
