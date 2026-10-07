@@ -230,7 +230,6 @@ void TestFrame()
     state.Scissor.top = 4;
     state.Scissor.right = 20;
     state.Scissor.bottom = 20;
-    state.PointSize = 3.0f;
     draw.Pipeline = state;
     CKTextureDesc tex;
     VxPixelFormat2ImageDesc(_32_ARGB8888, tex.Format);
@@ -259,7 +258,6 @@ void TestFrame()
     TestCheck(f.Backend->Log.LastState.Lo == state.State.Lo, "the pipeline state reaches the backend");
     TestCheck(f.Backend->Log.LastStencilRef == 0x07, "the stencil ref is clamped to 8 bits");
     TestCheck(f.Backend->Log.ScissorEnabled && f.Backend->Log.LastScissor.right == 20, "the scissor reaches the backend");
-    TestCheck(f.Backend->Log.LastPointSize == 3.0f, "the point size reaches the backend");
     TestCheck(f.Backend->Log.TextureBindCount == 1 && f.Backend->Log.LastTextureStage == 2 &&
                   f.Backend->Log.LastTextureHandle == texture &&
                   f.Backend->Log.LastTextureUniform == f.Backend->GetSamplerUniformForTests(2),

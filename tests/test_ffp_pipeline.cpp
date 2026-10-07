@@ -3556,15 +3556,19 @@ void PersistentPointBuffersRequireTransientExpansionForComplexSizes() {
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend(), context.ShaderSet());
 
+    TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,
+                                   1, 0, 0, 1, 0, 0,
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE &&
+                  DrawStateTopology(context.Log.LastState) == VX_POINTLIST &&
+                  ffp.GetLastDrawApproximationMask() == 0,
+              "one-pixel persistent points submit as native points");
+
     ffp.SetRenderState(VXRENDERSTATE_POINTSIZE, FloatStageState(4.0f));
     TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,
                                    1, 0, 0, 1, 0, 0,
-                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == TRUE,
-              "integer constant point size must submit through native point state");
-    TestCheck(context.Log.PointSizeSetCount == 1 &&
-                  context.Log.LastPointSize == 4.0f &&
-                  ffp.GetLastDrawApproximationMask() == 0,
-              "persistent point buffers must submit their exact constant point size");
+                                   CKRST_DP_CL_V, CKRST_DP_CL_V, 1) == FALSE &&
+                  ffp.GetLastDrawRejectReason() == CKFF_DRAW_REJECT_PREPARE_FAILED,
+              "larger direct point sizes require transient expansion");
 
     ffp.SetRenderState(VXRENDERSTATE_POINTSPRITEENABLE, TRUE);
     TestCheck(ffp.DrawVertexBuffer(VX_POINTLIST,

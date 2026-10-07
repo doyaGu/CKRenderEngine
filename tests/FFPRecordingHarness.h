@@ -73,8 +73,6 @@ struct FFPBackendLog {
     CKDWORD LastTextureUniform = 0;
     CKDWORD LastTextureHandle = 0;
     CKSamplerDesc LastTextureSampler = {};
-    float LastPointSize = 0.0f;
-    CKDWORD PointSizeSetCount = 0;
     CKBOOL ScissorEnabled = FALSE;
     CKRECT LastScissor = {0, 0, 0, 0};
     CKDWORD ScissorSetCount = 0;
@@ -517,8 +515,6 @@ inline CKERROR FFPRecordingBackend::Draw(const CKDrawCommand *draw)
     if (state.ScissorEnabled)
         Log.LastScissor = state.Scissor;
     ++Log.ScissorSetCount;
-    Log.LastPointSize = state.PointSize;
-    ++Log.PointSizeSetCount;
     for (CKDWORD slot = 0; slot < CKFF_SLOT_COUNT; ++slot) {
         const CKDWORD texture = draw->Textures ? (*draw->Textures)[slot].Texture : 0;
         if (!texture)

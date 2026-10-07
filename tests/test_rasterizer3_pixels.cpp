@@ -2445,8 +2445,18 @@ void CheckVertexBufferPointSizePixels(Backend &b)
               "create point-size test IB");
 
     SetDiffuseState(ctx);
-    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(24.0f));
+    // Native points are one pixel; larger ones are expanded.
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(8.0f));
     Pixels pixels;
+    RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+        TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 1, NULL, 0),
+                  "draw 8-pixel VB point");
+    }, pixels);
+    TestCheck(PixelNear(pixels, 32, 32, 255, 0, 0) &&
+              PixelNear(pixels, 35, 32, 255, 0, 0) &&
+              PixelNear(pixels, 38, 32, 0, 0, 0),
+              "an 8-pixel VB point covers eight pixels");
+    ctx->SetRenderState(VXRENDERSTATE_POINTSIZE, FloatBits(24.0f));
     RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
         TestCheck(ctx->DrawPrimitiveVB(VX_POINTLIST, vb, 0, 1, NULL, 0),
                   "draw 24-pixel VB point");

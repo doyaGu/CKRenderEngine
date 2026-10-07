@@ -53,7 +53,7 @@ CKSamplerDesc ExpectedSampler(const CKFFBenchmark::MaterialProfile &profile)
 }
 
 using DrawFingerprint =
-    std::array<uint64_t, 12 + CKFF_CONSTANT_SLOT_COUNT>;
+    std::array<uint64_t, 11 + CKFF_CONSTANT_SLOT_COUNT>;
 
 DrawFingerprint NormalizedDrawFingerprint(
     const FFPRecordingBackend &backend,
@@ -70,13 +70,11 @@ DrawFingerprint NormalizedDrawFingerprint(
     fingerprint[6] = log.ScissorEnabled;
     fingerprint[7] = MixBytes(1469598103934665603ull,
                               &log.LastScissor, sizeof(log.LastScissor));
-    fingerprint[8] = MixBytes(1469598103934665603ull,
-                              &log.LastPointSize, sizeof(log.LastPointSize));
-    fingerprint[9] = TextureOrdinal(log.LastTextureHandle, textures);
-    fingerprint[10] = MixBytes(1469598103934665603ull,
-                               &log.LastTextureSampler,
-                               sizeof(log.LastTextureSampler));
-    fingerprint[11] = log.LastProgram != 0;
+    fingerprint[8] = TextureOrdinal(log.LastTextureHandle, textures);
+    fingerprint[9] = MixBytes(1469598103934665603ull,
+                              &log.LastTextureSampler,
+                              sizeof(log.LastTextureSampler));
+    fingerprint[10] = log.LastProgram != 0;
     for (CKDWORD block = 0; block < CKFF_CONSTANT_SLOT_COUNT; ++block) {
         const CKDWORD uniform = backend.GetBlockUniformForTests(block);
         const auto found = log.FloatUniforms.find(uniform);
@@ -84,7 +82,7 @@ DrawFingerprint NormalizedDrawFingerprint(
             continue;
         }
         uint64_t hash = Mix(1469598103934665603ull, found->second.size());
-        fingerprint[12 + block] = MixBytes(
+        fingerprint[11 + block] = MixBytes(
             hash, found->second.data(),
             found->second.size() * sizeof(float));
     }

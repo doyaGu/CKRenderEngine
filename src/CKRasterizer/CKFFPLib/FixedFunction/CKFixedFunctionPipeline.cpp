@@ -352,17 +352,6 @@ void CKFixedFunctionPipeline::ResolveStencilWrite(CKDWORD *effectiveWriteMask) c
         m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
 }
 
-static float CKFFClampVertexBufferPointSize(float size)
-{
-    // bgfx point size is an integer in 1..15.
-    const float rounded = floorf(size + 0.5f);
-    if (rounded < 1.0f)
-        return 1.0f;
-    if (rounded > 15.0f)
-        return 15.0f;
-    return rounded;
-}
-
 static CKDWORD CKFFFormatTexcoordCount(CKDWORD formatFlags)
 {
     CKDWORD mask = (formatFlags >> 4) & 0xffu;
@@ -526,13 +515,13 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferWrap(CKDWORD texcoordCount) con
     return FALSE;
 }
 
+// Native points are one pixel; other sizes are expanded into quads.
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointExpansion(CKDWORD dpFlags) const
 {
-    const float pointSize = CKFFResolveConstantPointSize(m_State.DrawState);
     return m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
            m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
            (dpFlags & CKRST_DP_PSIZE) != 0 ||
-           CKFFClampVertexBufferPointSize(pointSize) != pointSize;
+           CKFFResolveConstantPointSize(m_State.DrawState) != 1.0f;
 }
 
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointFillExpansion(
@@ -1304,9 +1293,6 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
     pipeline.DepthClipEnabled =
         m_State.DrawState.GetRenderState(VXRENDERSTATE_CLIPPING) != 0;
     pipeline.Scissor = m_State.Scissor;
-    pipeline.PointSize = submission.DrawStateType == VX_POINTLIST
-        ? CKFFClampVertexBufferPointSize(CKFFResolveConstantPointSize(m_State.DrawState))
-        : 1.0f;
     m_Draw.ResetSubmissionFields();
     m_Draw.Pipeline = pipeline;
     m_Draw.ProgramContext = programContext;

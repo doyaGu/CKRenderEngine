@@ -112,8 +112,6 @@ uint64_t CKBenchmarkBackend::HashDraw(uint64_t hash,
     hash = Mix(hash, draw.Pipeline.ScissorEnabled);
     hash = SampleBytes(hash, &draw.Pipeline.Scissor,
                        sizeof(draw.Pipeline.Scissor));
-    hash = SampleBytes(hash, &draw.Pipeline.PointSize,
-                       sizeof(draw.Pipeline.PointSize));
     hash = Mix(hash, draw.Layout);
     hash = Mix(hash, draw.VertexBuffer);
     hash = Mix(hash, draw.StartVertex);
