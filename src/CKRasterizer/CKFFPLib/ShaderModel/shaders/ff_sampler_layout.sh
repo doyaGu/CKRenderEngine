@@ -28,7 +28,6 @@ SAMPLER3D(s_textureVolume0, 12);
 SAMPLER3D(s_textureVolume1, 13);
 SAMPLER3D(s_textureVolume2, 14);
 SAMPLER3D(s_textureVolume3, 15);
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SELECT_CUBE(_index, _statement) \
     switch (_index) { \
     case 0: _statement(s_textureCube0, s_textureCube0Sampler); break; \
@@ -217,46 +216,6 @@ SAMPLER3D(s_textureVolume3, 15);
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     CKFF_DISPATCH_HANDLE(CKFFDepthTexture2D, CKFF_2D_SLOT_BASE, 0, 8, _ordinal, _result, _operation)
 #endif
-#else
-#define CKFF_DISPATCH_2D_ALL(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); } \
-    else if ((_ordinal) == 4) { (_result) = _operation(s_texture4); } \
-    else if ((_ordinal) == 5) { (_result) = _operation(s_texture5); } \
-    else if ((_ordinal) == 6) { (_result) = _operation(s_texture6); } \
-    else if ((_ordinal) == 7) { (_result) = _operation(s_texture7); }
-#define CKFF_DISPATCH_2D_STAGE(_stage, _result, _operation) \
-    if ((_stage) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_stage) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_stage) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_stage) == 3) { (_result) = _operation(s_texture3); } \
-    else if ((_stage) == 4) { (_result) = _operation(s_texture4); } \
-    else if ((_stage) == 5) { (_result) = _operation(s_texture5); } \
-    else if ((_stage) == 6) { (_result) = _operation(s_texture6); } \
-    else if ((_stage) == 7) { (_result) = _operation(s_texture7); }
-#define CKFF_DISPATCH_CUBE(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_textureCube0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_textureCube1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_textureCube2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_textureCube3); }
-#define CKFF_DISPATCH_VOLUME(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_textureVolume0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_textureVolume1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_textureVolume2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_textureVolume3); }
-#define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); } \
-    else if ((_ordinal) == 4) { (_result) = _operation(s_texture4); } \
-    else if ((_ordinal) == 5) { (_result) = _operation(s_texture5); } \
-    else if ((_ordinal) == 6) { (_result) = _operation(s_texture6); } \
-    else if ((_ordinal) == 7) { (_result) = _operation(s_texture7); }
-#define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
-#endif
 #elif CKFF_NATIVE_SAMPLER_LAYOUT == 1
 #define CKFF_2D_SLOT_BASE 0
 #define CKFF_CUBE_SLOT_BASE 4
@@ -280,7 +239,6 @@ SAMPLER3D(s_textureVolume0, 12);
 SAMPLER3D(s_textureVolume1, 13);
 SAMPLER3D(s_textureVolume2, 14);
 SAMPLER3D(s_textureVolume3, 15);
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SELECT_CUBE(_index, _statement) \
     switch (_index) { \
     case 0: _statement(s_textureCube0, s_textureCube0Sampler); break; \
@@ -377,38 +335,6 @@ SAMPLER3D(s_textureVolume3, 15);
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     CKFF_DISPATCH_HANDLE(CKFFDepthTexture2D, CKFF_2D_SLOT_BASE, 0, 4, _ordinal, _result, _operation)
 #endif
-#else
-#define CKFF_DISPATCH_2D_ALL(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
-#define CKFF_DISPATCH_2D_STAGE(_stage, _result, _operation) \
-    if ((_stage) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_stage) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_stage) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_stage) == 3) { (_result) = _operation(s_texture3); }
-#define CKFF_DISPATCH_CUBE(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_textureCube0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_textureCube1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_textureCube2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_textureCube3); } \
-    else if ((_ordinal) == 4) { (_result) = _operation(s_textureCube4); } \
-    else if ((_ordinal) == 5) { (_result) = _operation(s_textureCube5); } \
-    else if ((_ordinal) == 6) { (_result) = _operation(s_textureCube6); } \
-    else if ((_ordinal) == 7) { (_result) = _operation(s_textureCube7); }
-#define CKFF_DISPATCH_VOLUME(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_textureVolume0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_textureVolume1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_textureVolume2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_textureVolume3); }
-#define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
-#define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
-#endif
 #elif CKFF_NATIVE_SAMPLER_LAYOUT == 2
 #define CKFF_2D_SLOT_BASE 0
 #define CKFF_CUBE_SLOT_BASE 4
@@ -424,7 +350,7 @@ SAMPLERCUBE(s_textureCube0, 4);
 SAMPLERCUBE(s_textureCube1, 5);
 SAMPLERCUBE(s_textureCube2, 6);
 SAMPLERCUBE(s_textureCube3, 7);
-#if CKFF_NATIVE_SDL_GPU && !defined(__spirv__)
+#if !defined(__spirv__)
 Texture3D<float4> s_textureVolume[8] : register(t8, space2);
 SamplerState s_textureVolumeSampler[8] : register(s8, space2);
 #define CKFF_VOLUME_RESOURCE_ARRAY 1
@@ -439,7 +365,6 @@ SAMPLER3D(s_textureVolume6, 14);
 SAMPLER3D(s_textureVolume7, 15);
 #define CKFF_VOLUME_RESOURCE_ARRAY 0
 #endif
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SELECT_CUBE(_index, _statement) \
     switch (_index) { \
     case 0: _statement(s_textureCube0, s_textureCube0Sampler); break; \
@@ -540,38 +465,6 @@ SAMPLER3D(s_textureVolume7, 15);
 #define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation)
 #define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation) \
     CKFF_DISPATCH_HANDLE(CKFFDepthTexture2D, CKFF_2D_SLOT_BASE, 0, 4, _ordinal, _result, _operation)
-#endif
-#else
-#define CKFF_DISPATCH_2D_ALL(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
-#define CKFF_DISPATCH_2D_STAGE(_stage, _result, _operation) \
-    if ((_stage) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_stage) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_stage) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_stage) == 3) { (_result) = _operation(s_texture3); }
-#define CKFF_DISPATCH_CUBE(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_textureCube0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_textureCube1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_textureCube2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_textureCube3); }
-#define CKFF_DISPATCH_VOLUME(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_textureVolume0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_textureVolume1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_textureVolume2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_textureVolume3); } \
-    else if ((_ordinal) == 4) { (_result) = _operation(s_textureVolume4); } \
-    else if ((_ordinal) == 5) { (_result) = _operation(s_textureVolume5); } \
-    else if ((_ordinal) == 6) { (_result) = _operation(s_textureVolume6); } \
-    else if ((_ordinal) == 7) { (_result) = _operation(s_textureVolume7); }
-#define CKFF_DISPATCH_2D_ORDINARY(_ordinal, _result, _operation) \
-    if ((_ordinal) == 0) { (_result) = _operation(s_texture0); } \
-    else if ((_ordinal) == 1) { (_result) = _operation(s_texture1); } \
-    else if ((_ordinal) == 2) { (_result) = _operation(s_texture2); } \
-    else if ((_ordinal) == 3) { (_result) = _operation(s_texture3); }
-#define CKFF_DISPATCH_DEPTH_COMPARE(_ordinal, _result, _operation)
 #endif
 #else
 #error Unsupported CKFF_NATIVE_SAMPLER_LAYOUT

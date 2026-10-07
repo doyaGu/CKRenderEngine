@@ -15,21 +15,6 @@ void ckffApplyBackendClipSpace(inout vec4 position)
 #endif
 }
 
-#if CKFF_VS_CLIP_DISTANCE
-#endif
-#if CKFF_VS_CLIP_DISTANCE || !CKFF_NATIVE_SDL_GPU
-#endif
-
-#if !CKFF_NATIVE_SDL_GPU
-vec2 ckffDepthClipDistances(vec4 position)
-{
-    if (u_clipParams.y > 0.5) {
-        return vec2(position.z, position.w - position.z);
-    }
-    return vec2(abs(position.w), abs(position.w));
-}
-#endif
-
 int ckffVsTexGenMode(int packedIndex)
 {
     return packedIndex / 65536;
@@ -208,9 +193,6 @@ void main()
     v_clipDistance1.x = clipCount > 4 ? dot(worldClipPos, u_clipPlanes[4]) : 0.0;
     v_clipDistance1.y = clipCount > 5 ? dot(worldClipPos, u_clipPlanes[5]) : 0.0;
     v_clipDistance1.zw = vec2(0.0, 0.0);
-#elif !CKFF_NATIVE_SDL_GPU
-    v_clipDistance0 = vec4_splat(0.0);
-    v_clipDistance1.xy = vec2(0.0, 0.0);
 #endif
     if (u_ffDrawParams[7].y > 0.5) {
         viewNormal = normalize(viewNormal);
@@ -369,8 +351,5 @@ void main()
         vec2 pointOffset = expansionData.xy;
         gl_Position.xy += pointOffset * u_viewport.xy * gl_Position.w;
     }
-#if !CKFF_NATIVE_SDL_GPU
-    v_clipDistance1.zw = ckffDepthClipDistances(gl_Position);
-#endif
     ckffApplyBackendClipSpace(gl_Position);
 }

@@ -59,14 +59,7 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
             originalDx3 = dFdx(originalCoord.xyz);
             originalDy3 = dFdy(originalCoord.xyz);
         }
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_CUBE(_sampler) CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)
-#else
-#define CKFF_SAMPLE_CUBE(_sampler) (manualAnisotropy ? \
-    CKFF_TEXTURE_CUBE_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
-    (manualLod ? CKFF_TEXTURE_CUBE_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
-    CKFF_TEXTURE_CUBE_BIAS(_sampler, coord.xyz, lodBias)))
-#endif
         vec4 color = vec4_splat(0.0);
         CKFF_DISPATCH_CUBE(ordinal, color, CKFF_SAMPLE_CUBE)
 #undef CKFF_SAMPLE_CUBE
@@ -81,26 +74,18 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
             originalDx3 = dFdx(originalCoord3);
             originalDy3 = dFdy(originalCoord3);
         }
-#if CKFF_NATIVE_SDL_GPU && CKFF_VOLUME_RESOURCE_ARRAY
+#if CKFF_VOLUME_RESOURCE_ARRAY
 #define CKFF_SAMPLE_3D(_sampler) ckffNative3DSample( \
     _sampler, _sampler##Sampler, _sampler##Slot, coord.xyz, originalCoord3, \
     originalDx3, originalDy3, mirrorOnceMask, lodBias, minMip, maxAnisotropy)
-#elif CKFF_NATIVE_SDL_GPU
+#else
 #define CKFF_SAMPLE_3D(_sampler) (manualAnisotropy ? \
     CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
     CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias))
-#else
-#define CKFF_SAMPLE_3D(_sampler) (manualAnisotropy ? \
-    CKFF_TEXTURE_3D_ANISO(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip, maxAnisotropy) : \
-    (manualLod ? CKFF_TEXTURE_3D_MIN_MIP(_sampler, coord.xyz, originalDx3, originalDy3, lodBias, minMip) : \
-    CKFF_TEXTURE_3D_GRAD(_sampler, coord.xyz, originalCoord3, originalDx3, originalDy3, mirrorOnceMask, lodBias)))
 #endif
-#if CKFF_NATIVE_SDL_GPU
         vec4 volumeColor = vec4_splat(0.0);
         CKFF_DISPATCH_VOLUME(ordinal, volumeColor, CKFF_SAMPLE_3D)
         return volumeColor;
-#else
-#endif
 #undef CKFF_SAMPLE_3D
     }
 
@@ -114,9 +99,7 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
     vec4 color = vec4_splat(0.0);
     int ordinal = samplerOrdinal;
 
-#if CKFF_NATIVE_SDL_GPU && \
-    (CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0 || \
-     CKFF_NATIVE_SAMPLER_LAYOUT != 0)
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0 || CKFF_NATIVE_SAMPLER_LAYOUT != 0
     if (samplerType == 2 && compareFunc != 0 &&
         (CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0 || requiresExplicitGradient)) {
         vec2 compareDx = dFdx(originalCoord.xy);
@@ -127,47 +110,22 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
         return vec4_splat(compared);
     }
 #endif
-#if !CKFF_NATIVE_SDL_GPU || CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT > 0
     if (samplerType == 2 && compareFunc != 0) {
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_COMPARE_SAMPLE(_sampler) texture2DCompare( \
     _sampler, uv, originalDx, originalDy, lodBias, minMip, \
     maxAnisotropy, coord.z, compareFunc)
         float compared = 0.0;
         CKFF_DISPATCH_DEPTH_COMPARE(ordinal, compared, CKFF_COMPARE_SAMPLE)
 #undef CKFF_COMPARE_SAMPLE
-#else
-#endif
-#if CKFF_NATIVE_SDL_GPU
         return vec4_splat(compared);
-#endif
     }
 #endif
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias), minMip, maxAnisotropy)
-#elif BGFX_SHADER_LANGUAGE_GLSL
-    // bgfx's OpenGL compatibility preamble aliases texture2DGrad to the ARB
-    // extension even on core GLSL contexts; use the core entry point here.
-#define CKFF_TEXTURE_2D_GRAD(_sampler) textureGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
-#else
-#define CKFF_TEXTURE_2D_GRAD(_sampler) texture2DGrad(_sampler, uv, originalDx * exp2(lodBias), originalDy * exp2(lodBias))
-#endif
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_2D(_sampler) (requiresExplicitGradient ? \
     CKFF_TEXTURE_2D_GRAD(_sampler) : CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias))
-#else
-#define CKFF_SAMPLE_2D(_sampler) (manualAnisotropy ? \
-    CKFF_TEXTURE_2D_ANISO(_sampler, uv, originalDx, originalDy, lodBias, minMip, maxAnisotropy) : \
-    (manualLod ? CKFF_TEXTURE_2D_MIN_MIP(_sampler, uv, originalDx, originalDy, lodBias, minMip) : \
-    (requiresExplicitGradient ? CKFF_TEXTURE_2D_GRAD(_sampler) : \
-    CKFF_TEXTURE_2D_BIAS(_sampler, uv, lodBias))))
-#endif
-#if CKFF_NATIVE_SDL_GPU
 #define CKFF_SAMPLE_2D_FINAL(_sampler) CKFF_SAMPLE_2D(_sampler)
-#else
-#endif
-#if CKFF_NATIVE_SDL_GPU && CKFF_NATIVE_SAMPLER_LAYOUT == 0 && \
-    CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
+#if CKFF_NATIVE_SAMPLER_LAYOUT == 0 && CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
     // D3D12 requires the common wide-2D variant to retain sparse stage slots.
     CKFF_DISPATCH_2D_STAGE(stage, color, CKFF_SAMPLE_2D_FINAL)
 #else
@@ -177,13 +135,10 @@ vec4 CKFFSampleTexture(int stage, vec4 coord, int samplerType, int compareFunc,
 #undef CKFF_SAMPLE_2D
 #undef CKFF_TEXTURE_2D_GRAD
     if (samplerType == 2) {
-#if CKFF_NATIVE_SDL_GPU && CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
+#if CKFF_DEPTH_COMPARE_SAMPLER_COUNT == 0
         float depth = color.r;
         if (compareFunc != 0)
             return vec4_splat(compareDepth(depth, coord.z, compareFunc));
-#elif !CKFF_NATIVE_SDL_GPU
-        if (compareFunc != 0)
-            return vec4_splat(compareDepth(color.r, coord.z, compareFunc));
 #endif
         return color.rrrr;
     }

@@ -18,21 +18,6 @@ void ckffApplyBackendClipSpace(inout vec4 position)
 #endif
 }
 
-#if CKFF_VS_CLIP_DISTANCE
-#endif
-#if CKFF_VS_CLIP_DISTANCE || !CKFF_NATIVE_SDL_GPU
-#endif
-
-#if !CKFF_NATIVE_SDL_GPU
-vec2 ckffDepthClipDistances(vec4 position)
-{
-    if (u_clipParams.y > 0.5) {
-        return vec2(position.z, position.w - position.z);
-    }
-    return vec2(abs(position.w), abs(position.w));
-}
-#endif
-
 vec4 selectTexcoord(int index, vec4 tc0, vec4 tc1, vec4 tc2, vec4 tc3, vec4 tc4, vec4 tc5, vec4 tc6, vec4 tc7)
 {
     if (index == 1) return tc1;
@@ -129,9 +114,6 @@ void main()
     v_clipDistance1.x = clipCount > 4 ? dot(worldClipPos, u_clipPlanes[4]) : 0.0;
     v_clipDistance1.y = clipCount > 5 ? dot(worldClipPos, u_clipPlanes[5]) : 0.0;
     v_clipDistance1.zw = vec2(0.0, 0.0);
-#elif !CKFF_NATIVE_SDL_GPU
-    v_clipDistance0 = vec4_splat(0.0);
-    v_clipDistance1.xy = vec2(0.0, 0.0);
 #endif
 
     v_color0 = a_color0;
@@ -184,8 +166,5 @@ void main()
             ? a_weight.xy : a_tangent.xy;
         gl_Position.xy = (vec2(clipX, clipY) + pointOffset * u_viewport.xy) * clipW;
     }
-#if !CKFF_NATIVE_SDL_GPU
-    v_clipDistance1.zw = ckffDepthClipDistances(gl_Position);
-#endif
     ckffApplyBackendClipSpace(gl_Position);
 }

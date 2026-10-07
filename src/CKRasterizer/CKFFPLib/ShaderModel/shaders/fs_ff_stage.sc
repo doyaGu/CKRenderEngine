@@ -8,11 +8,7 @@
 #ifndef CKFF_HARDWARE_SAMPLING
 #define CKFF_HARDWARE_SAMPLING 0
 #endif
-#if !CKFF_NATIVE_SDL_GPU && BGFX_SHADER_LANGUAGE_HLSL >= 600
-#define CKFF_DEFER_COMBINER_DECODE 1
-#else
 #define CKFF_DEFER_COMBINER_DECODE 0
-#endif
 #if CKFF_HARDWARE_SAMPLING
 #include "ff_sampler_hardware.sc"
 #else
@@ -30,16 +26,6 @@ void main()
         if (edgeCoverage <= 0.0)
             discard;
     }
-#if !CKFF_NATIVE_SDL_GPU
-    int linePattern = int(u_ffDrawParams[3].w);
-    int lineRepeat = int(u_ffDrawParams[11].w);
-    if (lineRepeat > 0) {
-        float linePhase = v_fogPos.y * gl_FragCoord.w;
-        int lineBit = 15 - (int(linePhase) & 15);
-        if (((linePattern >> lineBit) & 1) == 0)
-            discard;
-    }
-#endif
     CKFFGlobalFragmentProgram fragmentProgram =
         ckffDecodeGlobalFragmentProgram();
     vec4 diffuse = fragmentProgram.FlatShade ? v_flatColor0 : v_color0;
@@ -51,9 +37,6 @@ void main()
     int previousColorOp = 0;
     int previousAlphaOp = 0;
 
-#if BGFX_SHADER_LANGUAGE_HLSL && !CKFF_NATIVE_SDL_GPU
-    [loop]
-#endif
     for (int stage = 0; stage < 8; ++stage) {
         if (stage > fragmentProgram.LastActiveTextureStage) break;
 
