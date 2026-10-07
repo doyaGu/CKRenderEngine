@@ -3699,8 +3699,7 @@ void CheckFilteredDepthComparison(Backend &b)
     ExpectCenter(pixels, 128, 128, 128,
                  "bilinear depth comparison filters four comparison results");
     // A LOD bias moves a magnified comparison to its minification filter:
-    // the point sample of the accepting texel instead of 70 % of it. Metal
-    // samplers have no bias, so the shader applies it there.
+    // the point sample of the accepting texel instead of 70 % of it.
     ctx->SetTextureStageState(0, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_NEAREST);
     float biasedCoordinates[3][4] = {
         {0.55f, 0.3f, 0.5f, 1.0f},

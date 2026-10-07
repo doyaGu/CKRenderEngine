@@ -485,11 +485,9 @@ static SDL_GPUSamplerAddressMode AddressMode(CK_ADDRESS_MODE mode)
 
 std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSamplerDesc &desc, bool pointTexels)
 {
-    CKDWORD lodBiasBits = 0;
-    std::memcpy(&lodBiasBits, &desc.MipLodBias, sizeof(lodBiasBits));
-    const CKDWORD keyValues[10] = {unsigned(desc.MinFilter) | (pointTexels ? 0x100u : 0u), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
+    const CKDWORD keyValues[9] = {unsigned(desc.MinFilter) | (pointTexels ? 0x100u : 0u), unsigned(desc.MagFilter), unsigned(desc.MipFilter),
         unsigned(desc.AddressU), unsigned(desc.AddressV), unsigned(desc.AddressW), unsigned(desc.CompareFunc),
-        desc.MinMipLevel, desc.MaxAnisotropy, lodBiasBits};
+        desc.MinMipLevel, desc.MaxAnisotropy};
     CKSdlGpuSamplerKey key;
     std::memcpy(key.Values, keyValues, sizeof(keyValues));
     std::shared_ptr<SDL_GPUSampler> *found = Samplers.FindPtr(key);
@@ -507,11 +505,10 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
                        desc.MipFilter == CKRST_FILTER_ANISOTROPIC
         ? SDL_GPU_SAMPLERMIPMAPMODE_LINEAR : SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
     info.address_mode_u = AddressMode(desc.AddressU); info.address_mode_v = AddressMode(desc.AddressV); info.address_mode_w = AddressMode(desc.AddressW);
-    // Ordinary shader paths apply the legacy bias explicitly through
-    // SampleBias/SampleGrad. SampleCmp has no bias operand, so only comparison
-    // samplers carry it in native sampler state.
-    info.mip_lod_bias = desc.CompareFunc != CKRST_COMPARE_NONE ?
-        desc.MipLodBias : 0.0f;
+    // The shaders apply the legacy bias explicitly through SampleBias and
+    // SampleGrad. SampleCmp has no bias operand, so a biased comparison stage
+    // takes the explicit-gradient path: Metal and lavapipe ignore a sampler
+    // bias in comparisons.
     info.enable_anisotropy = anisotropic;
     info.max_anisotropy = info.enable_anisotropy
         ? float(desc.MaxAnisotropy ? desc.MaxAnisotropy : 16u) : 1.0f;

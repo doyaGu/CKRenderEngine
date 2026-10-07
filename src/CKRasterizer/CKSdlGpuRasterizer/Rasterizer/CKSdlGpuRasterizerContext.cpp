@@ -76,13 +76,11 @@ CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, 
         Shutdown();
         return FALSE;
     }
-    // SDL's Metal samplers ignore the LOD bias.
-    const bool metal = SDL_strcmp(SDL_GetGPUDeviceDriver(Device), "metal") == 0;
     if (!m_FFP.Init(backendCaps.Features, backendCaps.MaxTextureBindings,
                     m_ShaderCache.GetTargetFlags() |
                     CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
                     CKRST_SHADER_TARGET_MANUAL_BORDER |
-                    (metal ? CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS : 0u))) {
+                    CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS)) {
         ClearNativeVertexLayouts();
         ClearNativeFFPrograms();
         Shutdown();

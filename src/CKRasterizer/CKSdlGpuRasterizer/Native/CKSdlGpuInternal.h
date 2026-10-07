@@ -48,7 +48,7 @@ struct CKSdlGpuQwordHash {
 };
 
 typedef CKSdlGpuFixedKey<11> CKSdlGpuPipelineKey;
-typedef CKSdlGpuFixedKey<10> CKSdlGpuSamplerKey;
+typedef CKSdlGpuFixedKey<9> CKSdlGpuSamplerKey;
 typedef CKSdlGpuFixedKey<64> CKSdlGpuDefaultVertexKey;
 // A program's pipeline for a key. Null while the worker creates it, or after
 // it failed to.
@@ -70,7 +70,7 @@ typedef XSHashTable<std::weak_ptr<SDL_GPUBuffer>,
                     CKSdlGpuFixedKeyHash<64>> CKSdlGpuDefaultVertexTable;
 typedef XSHashTable<std::shared_ptr<SDL_GPUSampler>,
                     CKSdlGpuSamplerKey,
-                    CKSdlGpuFixedKeyHash<10>> CKSdlGpuSamplerTable;
+                    CKSdlGpuFixedKeyHash<9>> CKSdlGpuSamplerTable;
 
 // Public handles identify logical resources, never SDL pointers. Generations
 // do not wrap: exhausted slots are retired for the life of the device.
