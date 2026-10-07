@@ -2803,7 +2803,19 @@ void CheckLayeredTextureUpdates(Backend &b)
 void CheckWideSamplerLayouts(Backend &b)
 {
     auto *ctx = b.Context;
+#ifdef CKRE_PIXEL_SDL_GPU
+    // The paravirtual Metal device of macOS virtual machines samples other
+    // data from five cube stages; Apple GPUs pass.
+    const bool paravirtual = strcmp(static_cast<CKSdlGpuRasterizerContext *>(ctx)->GetDeviceNameForTests(),
+                                    "Apple Paravirtual device") == 0;
+#else
+    const bool paravirtual = false;
+#endif
     for (bool volume : {false, true}) {
+        if (!volume && paravirtual) {
+            printf("  five cube stages: skipped on the Apple Paravirtual device\n");
+            continue;
+        }
         CKTextureDesc desc;
         VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
         desc.Format.Width = desc.Format.Height = 2;

@@ -4,6 +4,7 @@
 # Arguments (-D): TOOL, ENGINE_DIR, OUT_DIR.
 # Environment:
 #   CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1  required, otherwise the test is skipped
+#   CKRE_SCENE_CAPTURE_SKIP=<a,b>          scenes the GPU of the runner cannot render
 
 if (NOT "$ENV{CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS}" STREQUAL "1")
     message(STATUS "SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the multiframe scene gate")
@@ -18,6 +19,10 @@ file(MAKE_DIRECTORY "${_baseline}" "${_candidate}")
 # Scenes that animate by frame index cannot match across frame counts.
 set(_animated composite_2d,composite_3d,lighting_dynamic,lighting_attenuation,lighting_spotlight,tween_3d,clipping_3d,skinning_3d)
 set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --skip dump_copy,${_animated})
+# Scenes the GPU of the runner cannot render, comma separated.
+if (NOT "$ENV{CKRE_SCENE_CAPTURE_SKIP}" STREQUAL "")
+    list(APPEND _common --skip "$ENV{CKRE_SCENE_CAPTURE_SKIP}")
+endif ()
 
 execute_process(
     COMMAND ${_common} --frames 1 --out "${_baseline}"

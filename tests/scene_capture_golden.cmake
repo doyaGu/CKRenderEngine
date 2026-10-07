@@ -6,6 +6,7 @@
 #   CKBGFX_RENDERER_BACKEND=<backend>      golden directory suffix (default "default")
 #   CKRE_GOLDEN_RUNNER=<runner>            golden directory prefix (default "local")
 #   CKRE_UPDATE_GOLDEN=1                   write the golden frames instead of comparing
+#   CKRE_SCENE_CAPTURE_SKIP=<a,b>          scenes the GPU of the runner cannot render
 # A line containing SKIPPED marks the test as skipped (SKIP_REGULAR_EXPRESSION).
 
 if (NOT "$ENV{CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS}" STREQUAL "1")
@@ -30,6 +31,9 @@ set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640
     --skip composite_2d,composite_3d)
 if (SKIP)
     list(APPEND _common --skip "${SKIP}")
+endif ()
+if (NOT "$ENV{CKRE_SCENE_CAPTURE_SKIP}" STREQUAL "")
+    list(APPEND _common --skip "$ENV{CKRE_SCENE_CAPTURE_SKIP}")
 endif ()
 
 if ("$ENV{CKRE_UPDATE_GOLDEN}" STREQUAL "1")

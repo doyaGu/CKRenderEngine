@@ -211,6 +211,9 @@ public:
     // False when CKRE_SDL_GPU_FF_JIT=0 or the compiler emits no format of
     // the device, as on Metal.
     CKBOOL IsFFJitEnabledForTests() const { return m_FFJitFormat != SDL_GPU_SHADERFORMAT_INVALID; }
+    const char *GetDeviceNameForTests() const {
+        return SDL_GetStringProperty(SDL_GetGPUDeviceProperties(Device), SDL_PROP_GPU_DEVICE_NAME_STRING, "");
+    }
     struct FFJitCounts {
         CKDWORD Queued = 0, Ready = 0, Rejected = 0, Programs = 0, Pipelines = 0;
         CKDWORD Candidates = 0, DrawKeys = 0;
