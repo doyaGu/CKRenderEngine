@@ -4024,9 +4024,11 @@ void CheckOrderedReadbacks(Backend &b)
         SDL_PumpEvents();
         SDL_Delay(1);
     }
-    TestCheck(red.Calls == 1 && red.Success, "first snapshot completes once");
-    TestCheck(blue.Calls == 1 && blue.Success && blue.Width == 8 && blue.Height == 8,
-              "second snapshot completes once with its crop");
+    TestCheckf(red.Calls == 1 && red.Success,
+               "first snapshot completes once: calls=%d success=%d", red.Calls, (int)red.Success);
+    TestCheckf(blue.Calls == 1 && blue.Success && blue.Width == 8 && blue.Height == 8,
+               "second snapshot completes once with its crop: calls=%d success=%d size=%dx%d",
+               blue.Calls, (int)blue.Success, blue.Width, blue.Height);
     ExpectCenter(red.Image, 255, 0, 0, "first snapshot retains earlier draw");
     TestCheck(PixelNear(blue.Image, 4, 4, 0, 0, 255), "second snapshot retains intermediate draw");
 }
