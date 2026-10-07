@@ -198,6 +198,15 @@ static void DescribePipeline(const CKSdlGpuProgram &program, const CKSdlGpuDraw 
         // Program validation keeps input locations distinct and below 16.
         for (int i = 0; i < inputs.Size(); ++i)
             desc.Attributes[vertexInput.num_vertex_attributes++] = locations[inputs[i].Location];
+        // Metal rejects a stream no attribute reads, such as the defaults
+        // when the layouts supply every input.
+        unsigned read = 0, streams = 0;
+        for (unsigned i = 0; i < vertexInput.num_vertex_attributes; ++i)
+            read |= 1u << desc.Attributes[i].buffer_slot;
+        for (unsigned i = 0; i < vertexInput.num_vertex_buffers; ++i)
+            if (read & (1u << desc.Streams[i].slot))
+                desc.Streams[streams++] = desc.Streams[i];
+        vertexInput.num_vertex_buffers = streams;
     }
     switch ((state.Mid >> 6) & 7) {
     case VX_POINTLIST: info.primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST; break;
