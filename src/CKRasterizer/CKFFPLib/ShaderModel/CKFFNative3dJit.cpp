@@ -13,7 +13,7 @@ struct Uniforms {
 };
 
 bool ResolveUniforms(Uniforms &out) {
-    const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE);
+    const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, FALSE, FALSE);
     for (const auto &buffer : desc.UniformBuffers) {
         if (buffer.Stage != CKRST_SHADER_VERTEX) continue;
         if (buffer.Slot >= CKJIT_MAX_UNIFORM_BUFFERS || buffer.Size % 16) return false;

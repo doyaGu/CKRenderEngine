@@ -1,5 +1,5 @@
-# Reusable CPU fixed-function implementation shared by the concrete
-# SDL_gpu and bgfx rasterizer contexts. Each layer includes only the layers
+# Reusable CPU fixed-function implementation of the concrete SDL_gpu
+# rasterizer context. Each layer includes only the layers
 # listed before it:
 #   Interface      data contracts shared with the rasterizer contexts
 #   State          fixed-function state vocabulary and texture stage rules

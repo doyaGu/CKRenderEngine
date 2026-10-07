@@ -47,7 +47,7 @@ struct CKReadbackDesc {
 struct CKShaderDesc {
     CK_SHADER_STAGE Stage;
     // The payload format is explicit: a shader profile alone does not say
-    // whether Code is a bgfx container or a raw SDL_gpu-compatible binary.
+    // whether Code is DXIL or DXBC.
     CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     const CKBYTE *Code;

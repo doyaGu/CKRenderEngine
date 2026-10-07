@@ -44,7 +44,7 @@ const char *CKFFSamplerSlotName(
 // Called only when a cached program is first created. The resulting owned
 // descriptor is compiled by the backend; draw submission does not rebuild it.
 CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
-                                              CK_SHADER_FORMAT format, CKBOOL present = FALSE,
+                                              CKBOOL present = FALSE,
                                               CKBOOL positionT = FALSE,
                                               CKFFSamplerLayout samplerLayout =
                                                   CKFF_SAMPLER_LAYOUT_WIDE_2D);

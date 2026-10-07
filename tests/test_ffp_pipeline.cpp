@@ -150,7 +150,7 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
 
     const CK_SHADER_FORMAT formats[] = {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_FORMAT_SPIRV};
     for (CK_SHADER_FORMAT format : formats) {
-        const CKFFProgramDesc program = CKFFBuildProgramInterface(1, 2, format);
+        const CKFFProgramDesc program = CKFFBuildProgramInterface(1, 2);
         CKShaderDesc vertex, pixel;
         vertex.Format = pixel.Format = format;
         vertex.Profile = pixel.Profile = format == CKRST_SHADER_FORMAT_DXIL ?
@@ -203,7 +203,7 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                   "missing FFP vertex streams keep shader-family defaults");
 
         const CKFFProgramDesc positionT = CKFFBuildProgramInterface(
-            1, 2, format, FALSE, TRUE);
+            1, 2, FALSE, TRUE);
         vertex.UniformBufferCount = 2;
         TestCheck(CKFFValidateProgram(positionT, vertex, pixel) == CK_OK &&
                       positionT.UniformBuffers.Size() == 4 &&
@@ -216,7 +216,7 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                       positionT.UniformBuffers[0].SharedData != UINT32_MAX,
                   "POSITIONT omits the unused matrix buffer and compacts native slots");
 
-        const CKFFProgramDesc present = CKFFBuildProgramInterface(1, 2, format, TRUE);
+        const CKFFProgramDesc present = CKFFBuildProgramInterface(1, 2, TRUE);
         vertex.UniformBufferCount = 0;
         pixel.UniformBufferCount = 1;
         pixel.SamplerCount = 1;
@@ -230,16 +230,6 @@ void FixedFunctionProgramDeclaresItsShaderInterface()
                       present.VertexInputs.Size() == 2 && present.VertexInputs[1].Location == 8,
                   "presentation declares one native sampler independently of its logical slot");
     }
-
-    const CKFFProgramDesc named = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_BGFX);
-    CKShaderDesc vertex, pixel;
-    vertex.Format = pixel.Format = CKRST_SHADER_FORMAT_BGFX;
-    vertex.Profile = pixel.Profile = CKRST_SHADER_PROFILE_DX11;
-    pixel.Stage = CKRST_SHADER_PIXEL;
-    TestCheck(CKFFValidateProgram(named, vertex, pixel) == CK_OK && named.UniformBuffers.Size() == 0 &&
-                  named.Uniforms[CKRST_BLOCK_MATRICES].Name == "u_ffMatrices" &&
-                  named.Samplers[15].MetadataBufferSlot == ~0u,
-              "named-uniform artifacts need no invented buffer or border layout");
 }
 
 void ShaderCacheOwnsCatalogAndBuildsInterfacesOnlyOnProgramMiss()
@@ -402,10 +392,11 @@ void MissingShaderPayloadFamilyFailsInitialization()
 {
     FFPRecordingDriver driver(CKRST_SHADER_PROFILE_SPIRV, 0,
                               CKRST_SHADER_FORMAT_SPIRV);
+    driver.ArtifactFormat = CKRST_SHADER_FORMAT_DXIL;
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
     TestCheck(!ffp.Init(context.StartedBackend(), context.ShaderSet()),
-              "FFP must not pass bgfx containers to a raw SPIR-V backend");
+              "FFP must not pass DXIL artifacts to a SPIR-V backend");
     TestCheck(context.CreatedShaderCount == 0,
               "missing payload family fails before backend shader creation");
 }
@@ -424,17 +415,15 @@ VXPRIMITIVETYPE DrawStateTopology(const CKDrawState &state) {
 }
 
 struct ShaderProfileCase {
+    CK_SHADER_FORMAT Format;
     CK_SHADER_PROFILE Profile;
     const char *Name;
 };
 
 static const ShaderProfileCase kSamplerLayoutProfiles[] = {
-    {CKRST_SHADER_PROFILE_DX11, "dx11"},
-    {CKRST_SHADER_PROFILE_DX12, "dx12"},
-    {CKRST_SHADER_PROFILE_SPIRV, "spirv"},
-    {CKRST_SHADER_PROFILE_GLSL, "glsl"},
-    {CKRST_SHADER_PROFILE_ESSL, "essl"},
-    {CKRST_SHADER_PROFILE_MSL, "metal"},
+    {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12, "dxil"},
+    {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV, "spirv"},
+    {CKRST_SHADER_FORMAT_MSL, CKRST_SHADER_PROFILE_MSL, "msl"},
 };
 
 CKFFFragmentProgram CurrentDrawFragmentProgram(CKFixedFunctionPipeline &ffp,
@@ -1335,8 +1324,8 @@ void UnsupportedTextureStageStatesApproximateWithDiagnostics() {
                   context.Log.LastTextureSampler.MaxAnisotropy == 4 &&
                   context.Log.LastTextureSampler.ShaderAnisotropy == 1 &&
                   anisoParams.size() >= 8 &&
-                  (((CKDWORD)anisoParams[7]) & (31u << 5)) == 128u,
-              "MAXANISOTROPY reaches the sampler and fixed-function shader");
+                  (((CKDWORD)anisoParams[7]) & (31u << 5)) == 0u,
+              "MAXANISOTROPY reaches the hardware sampler; 2D shaders take no anisotropic taps");
 
     ffp.SetTextureStageState(0, CKRST_TSS_MAXANISOTROPY, 1);
     drawn = ffp.DrawVertexBuffer(
@@ -2162,8 +2151,8 @@ void VolumeTextureStageSevenBindsVolumeSampler() {
     ffp.Shutdown();
 }
 
-void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
-    FFPRecordingDriver driver(profile);
+void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile) {
+    FFPRecordingDriver driver(profile, 0, format);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend(), context.ShaderSet());
@@ -2214,12 +2203,12 @@ void RunVolumeAndCubeBindTheirTypeSlots(CK_SHADER_PROFILE profile) {
 void VolumeAndCubeBindTheirTypeSlots() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunVolumeAndCubeBindTheirTypeSlots(profile.Profile);
+        RunVolumeAndCubeBindTheirTypeSlots(profile.Format, profile.Profile);
     }
 }
 
-void RunArbitrarySingleVolumeCubePlacementSharesTheProgram(CK_SHADER_PROFILE profile) {
-    FFPRecordingDriver driver(profile);
+void RunArbitrarySingleVolumeCubePlacementSharesTheProgram(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile) {
+    FFPRecordingDriver driver(profile, 0, format);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend(), context.ShaderSet());
@@ -2270,12 +2259,12 @@ void RunArbitrarySingleVolumeCubePlacementSharesTheProgram(CK_SHADER_PROFILE pro
 void ArbitrarySingleVolumeCubePlacementSharesTheProgram() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunArbitrarySingleVolumeCubePlacementSharesTheProgram(profile.Profile);
+        RunArbitrarySingleVolumeCubePlacementSharesTheProgram(profile.Format, profile.Profile);
     }
 }
 
-void RunMultipleMixedSamplersUseTypeRankedSlots(CK_SHADER_PROFILE profile) {
-    FFPRecordingDriver driver(profile);
+void RunMultipleMixedSamplersUseTypeRankedSlots(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile) {
+    FFPRecordingDriver driver(profile, 0, format);
     FFPRecordingBackend context(&driver);
     CKFixedFunctionPipeline ffp;
     ffp.Init(context.StartedBackend(), context.ShaderSet());
@@ -2311,7 +2300,7 @@ void RunMultipleMixedSamplersUseTypeRankedSlots(CK_SHADER_PROFILE profile) {
 void MultipleMixedSamplersUseTypeRankedSlots() {
     for (const ShaderProfileCase &profile : kSamplerLayoutProfiles) {
         printf("  profile %s\n", profile.Name);
-        RunMultipleMixedSamplersUseTypeRankedSlots(profile.Profile);
+        RunMultipleMixedSamplersUseTypeRankedSlots(profile.Format, profile.Profile);
     }
 }
 
@@ -2544,7 +2533,7 @@ void InactiveUnsupportedStateDoesNotRejectDraw() {
 }
 
 void DisabledTextureStageIgnoresLaterUnsupportedState() {
-    FFPRecordingDriver driver(CKRST_SHADER_PROFILE_GLSL,
+    FFPRecordingDriver driver(CKRST_SHADER_PROFILE_DX12,
                                CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend context(&driver);
@@ -2672,7 +2661,7 @@ void AlphaBumpOpIsRejected() {
 }
 
 void BottomLeftRenderTargetsSampleWithoutFlip() {
-    FFPRecordingDriver driver(CKRST_SHADER_PROFILE_GLSL,
+    FFPRecordingDriver driver(CKRST_SHADER_PROFILE_DX12,
                                CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend context(&driver);
@@ -2775,7 +2764,7 @@ void ViewportMappingRemapsClipSpaceAndScissors() {
 
     // Render target on a bottom-left backend: the scissor rows are mirrored
     // like the image (spec 5.9).
-    FFPRecordingDriver bottomLeft(CKRST_SHADER_PROFILE_GLSL,
+    FFPRecordingDriver bottomLeft(CKRST_SHADER_PROFILE_DX12,
                                    CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                    CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend rttContext(&bottomLeft);
@@ -2821,7 +2810,7 @@ void TransformedVerticesUseLegacyPixelCenters() {
 }
 
 void RenderTargetOriginFlipsProjectionViewportAndWinding() {
-    FFPRecordingDriver bottomLeft(CKRST_SHADER_PROFILE_GLSL,
+    FFPRecordingDriver bottomLeft(CKRST_SHADER_PROFILE_DX12,
                                    CKRST_SHADER_TARGET_NDC_MINUS_ONE_TO_ONE |
                                    CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT);
     FFPRecordingBackend context(&bottomLeft);
@@ -2939,11 +2928,10 @@ void BorderColorsAreNotQuantizedByTranslation() {
     ffp.SetTexture(0, 77, CKRST_TEXTURE_VALID);
     const CKDWORD borderUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BORDER_COLORS);
     const CKDWORD bumpUniform = context.GetBlockUniformForTests(CKRST_BLOCK_BUMP_ENV);
-    const CKDWORD bgfxSamplerFlags =
-        CKRST_SHADER_TARGET_MANUAL_LOD |
-        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+    const CKDWORD samplerFlags =
+        CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
         CKRST_SHADER_TARGET_MANUAL_BORDER |
-        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
+        CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS;
     for (CKDWORD i = 0; i < 32; ++i) {
         const CKDWORD color = 0x80402000u | i;
         ffp.SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, color);
@@ -2957,7 +2945,7 @@ void BorderColorsAreNotQuantizedByTranslation() {
         const CKFFSamplerShaderState expectedSamplerState =
             CKFFBuildSamplerShaderState(context.Log.LastTextureSampler,
                                         CKRST_TEXTURE_VALID, 0,
-                                        bgfxSamplerFlags);
+                                        samplerFlags);
         const std::vector<float> &border = context.Log.FloatUniforms[borderUniform];
         const std::vector<float> &bump = context.Log.FloatUniforms[bumpUniform];
         TestCheck(border.size() >= 4 && bump.size() >= 8 &&
@@ -2976,7 +2964,7 @@ void BorderColorsAreNotQuantizedByTranslation() {
     const CKFFSamplerShaderState linearSamplerState =
         CKFFBuildSamplerShaderState(context.Log.LastTextureSampler,
                                     CKRST_TEXTURE_VALID, 0,
-                                    bgfxSamplerFlags);
+                                    samplerFlags);
     TestCheck(linearBump.size() >= 8 &&
                   (CKDWORD)linearBump[7] == linearSamplerState.Bits,
               "linear minification and magnification retain the exact border mask");

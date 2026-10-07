@@ -281,7 +281,7 @@ static bool CheckGenericProgram(CKSdlGpuRasterizerContext &backend)
         &shaders.Shaders[CKRST_SHADER_PRESENT_FRAGMENT], &fs);
     if (status != CK_OK)
         return failGeometryStep("create present fragment shader", status);
-    desc = CKFFBuildProgramInterface(vs, fs, backend.GetCaps().ShaderFormat, TRUE);
+    desc = CKFFBuildProgramInterface(vs, fs, TRUE);
     status = backend.CreateProgram(&desc, &program);
     if (status != CK_OK)
         return failGeometryStep("create present program", status);

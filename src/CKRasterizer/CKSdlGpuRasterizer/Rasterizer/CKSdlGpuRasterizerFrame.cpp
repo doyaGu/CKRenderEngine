@@ -502,7 +502,7 @@ CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(
         const CKFFProgramDesc desc = CKFFBuildProgramInterface(
             vertexShader,
             m_NativeFFPixelShaders[fragmentArtifact],
-            m_ShaderCache.GetShaderFormat(), FALSE, positionT,
+            FALSE, positionT,
             layout);
         if (CreateProgram(&desc,
                           &m_NativeFFPrograms[variant]

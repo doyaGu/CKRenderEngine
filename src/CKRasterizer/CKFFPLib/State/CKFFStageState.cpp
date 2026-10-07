@@ -17,7 +17,7 @@ CK_ADDRESS_MODE CKFFTranslateAddressMode(CKDWORD mode) {
     case VXTEXTURE_ADDRESSBORDER:
         return CKRST_ADDRESS_BORDER;
     case VXTEXTURE_ADDRESSMIRRORONCE:
-        // MIRRORONCE is not directly expressible by the current bgfx sampler flags.
+        // The shader mirrors MIRRORONCE coordinates once; the sampler clamps.
         return CKRST_ADDRESS_CLAMP;
     case VXTEXTURE_ADDRESSWRAP:
     default:

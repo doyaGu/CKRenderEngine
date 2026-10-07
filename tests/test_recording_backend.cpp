@@ -35,7 +35,7 @@ static bool HasDisplayMode(CKRasterizerDriver *driver, int width, int height, in
 static int TestBackendShaderTargets()
 {
     const CKFFShaderTarget targets[] = {
-        {CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11},
+        {CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX11},
         {CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12},
         {CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV},
     };
@@ -52,7 +52,7 @@ static int TestBackendShaderTargets()
         backend.Shutdown();
 
         const CKFFShaderTarget rejected[] = {
-            {selected.Format == CKRST_SHADER_FORMAT_BGFX ? CKRST_SHADER_FORMAT_DXIL : CKRST_SHADER_FORMAT_BGFX,
+            {selected.Format == CKRST_SHADER_FORMAT_DXIL ? CKRST_SHADER_FORMAT_SPIRV : CKRST_SHADER_FORMAT_DXIL,
              selected.Profile},
             {selected.Format, selected.Profile == CKRST_SHADER_PROFILE_DX11
                 ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_DX11},
@@ -123,8 +123,13 @@ static int TestGenericBackend()
         return Fail("shader payload target must match the device conventions");
     shader.Format = backend.GetCaps().ShaderFormat;
     shader.Stage = CKRST_SHADER_PIXEL;
+    shader.UniformBufferCount = shader.SamplerCount = 1;
     if (backend.CreateShader(&shader, &programDesc.PixelShader) != CK_OK)
         return Fail("generic fragment shader");
+    CKFFUniformBufferBinding buffer;
+    buffer.Stage = CKRST_SHADER_PIXEL;
+    buffer.Size = 16;
+    programDesc.UniformBuffers.PushBack(buffer);
     CKFFUniformBinding uniform;
     uniform.Slot = 31;
     uniform.Name = "u_customData";
@@ -181,8 +186,8 @@ static int TestConfiguredDriver()
     CKRecordingBackend *backend = driver.CreateBackend();
     if (!backend)
         return Fail("configured backend");
-    driver.Format = CKRST_SHADER_FORMAT_BGFX;
-    driver.Profile = CKRST_SHADER_PROFILE_DX11;
+    driver.Format = CKRST_SHADER_FORMAT_DXIL;
+    driver.Profile = CKRST_SHADER_PROFILE_DX12;
     CKRasterizerInitParameters init;
     init.Width = init.Height = 16;
     if (backend->Init(&init) != CK_OK || backend->GetCaps().ShaderFormat != CKRST_SHADER_FORMAT_SPIRV ||
@@ -265,8 +270,8 @@ int main()
         (caps.Features & CKRST_DEVCAPS_TEXTURE_READBACK) == 0 ||
         caps.MaxPasses != CKRST_MAX_PASSES ||
         caps.MaxTextureBindings != CKFF_TEXTURE_SLOT_COUNT ||
-        caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX ||
-        caps.ShaderProfile != CKRST_SHADER_PROFILE_DX11 ||
+        caps.ShaderFormat != CKRST_SHADER_FORMAT_DXIL ||
+        caps.ShaderProfile != CKRST_SHADER_PROFILE_DX12 ||
         caps.OriginBottomLeft || caps.HomogeneousDepth)
         return Fail("caps");
 

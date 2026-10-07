@@ -318,7 +318,7 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     CKDWORD whiteColor = 0xFFFFFFFF;
     VxFillStructure(4, colorPtr, data->ColorStride, 4, &whiteColor);
 
-    // Sprite source rectangles are stored in bitmap pixels; bgfx samplers expect normalized UVs.
+    // Sprite source rectangles are stored in bitmap pixels; samplers expect normalized UVs.
     const float invBitmapWidth = m_BitmapData.m_Width > 0 ? 1.0f / (float)m_BitmapData.m_Width : 0.0f;
     const float invBitmapHeight = m_BitmapData.m_Height > 0 ? 1.0f / (float)m_BitmapData.m_Height : 0.0f;
     float u0 = m_SrcRect.left * invBitmapWidth;

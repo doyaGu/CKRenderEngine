@@ -59,7 +59,7 @@ int main()
           !CKSdlGpuSupportsSwapchainCopy(nullptr),
           "only the verified D3D12 swapchain path uses transfer copy");
     {
-        const auto program = CKFFBuildProgramInterface(1, 2, CKRST_SHADER_FORMAT_DXIL);
+        const auto program = CKFFBuildProgramInterface(1, 2);
         CKFFProgramLayout layout;
         layout.Init(program);
         CKFFConstantSet constants;
@@ -869,7 +869,6 @@ int main()
             entries = entries && std::strcmp(set.Shaders[role].EntryPoint, entry) == 0;
         check(entries, "native shader family names the entry points of its format");
         const auto payload = set.Shaders[0].Format, profile = set.Shaders[0].Profile;
-        check(payload != CKRST_SHADER_FORMAT_BGFX, "native artifact ownership");
         for (unsigned role = 0; role < CKRST_BUILTIN_SHADER_COUNT; ++role) {
             auto incomplete = set;
             incomplete.Shaders[role].Code = nullptr;
@@ -1034,7 +1033,7 @@ int main()
             const CKBOOL positionT = variant == CKFF_PROGRAM_POSITIONT ||
                 variant == CKFF_PROGRAM_POSITIONT_CLIP;
             const CKFFProgramDesc program = CKFFBuildProgramInterface(
-                1, 2, CKRST_SHADER_FORMAT_DXIL, FALSE, positionT);
+                1, 2, FALSE, positionT);
             check(found && CKFFValidateProgram(program, vertex, fragment) == CK_OK,
                   "DXBC stages form a native fixed-function program");
         }

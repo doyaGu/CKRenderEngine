@@ -155,16 +155,15 @@ const char *CKFFSamplerSlotName(CKDWORD slot, CKFFSamplerLayout layout)
 }
 
 CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelShader,
-                                              CK_SHADER_FORMAT format, CKBOOL present,
+                                              CKBOOL present,
                                               CKBOOL positionT,
                                               CKFFSamplerLayout samplerLayout)
 {
     CKFFProgramDesc result;
     result.VertexShader = vertexShader;
     result.PixelShader = pixelShader;
-    const bool packed = format != CKRST_SHADER_FORMAT_BGFX;
     const CKDWORD stageCount = present ? 1u : 2u;
-    result.UniformBuffers.Reserve((int)(packed ? stageCount * CKFF_UNIFORM_BUFFER_COUNT : 0u));
+    result.UniformBuffers.Reserve((int)(stageCount * CKFF_UNIFORM_BUFFER_COUNT));
     result.Uniforms.Reserve((int)(present ? 1u : CKRST_BLOCK_COUNT * stageCount));
 
     CKDWORD metadataBufferSlot = UINT32_MAX;
@@ -172,57 +171,47 @@ CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelSha
     CKDWORD metadataCount = 0;
     for (CKDWORD stageIndex = 0; stageIndex < stageCount; ++stageIndex) {
         const CK_SHADER_STAGE stage = present ? CKRST_SHADER_PIXEL : static_cast<CK_SHADER_STAGE>(stageIndex);
-        if (packed) {
-            const NativeGroup group = present ? PRESENT : stage == CKRST_SHADER_VERTEX ? VERTEX : FRAGMENT;
-            CKDWORD bufferSizes[CKFF_UNIFORM_BUFFER_COUNT] = {};
-            for (const NativeBlock &entry : NativeBlocks) {
-                if (entry.Group != group)
-                    continue;
-                if (group == VERTEX && positionT && entry.BufferSlot == 0)
-                    continue;
-                if (entry.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
-                    return CKFFProgramDesc();
-                const CKDWORD bufferSlot = group == VERTEX && positionT
-                    ? entry.BufferSlot - 1u : entry.BufferSlot;
-                AppendUniformBinding(result, entry.Block, stage, bufferSlot,
-                                     bufferSizes[bufferSlot]);
-            }
-            for (const auto &entry : NativeMetadataCounts) {
-                if (entry.Group != group)
-                    continue;
-                if (entry.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
-                    return CKFFProgramDesc();
-                metadataBufferSlot = entry.BufferSlot;
-                metadataOffset = bufferSizes[entry.BufferSlot];
-                metadataCount = entry.Count;
-                // One border color and sampler-state vector per native slot.
-                bufferSizes[entry.BufferSlot] += entry.Count * 32u;
-            }
-            CKDWORD bufferCount = 0;
-            for (CKDWORD slot = 0; slot < CKFF_UNIFORM_BUFFER_COUNT; ++slot) {
-                if (!bufferSizes[slot])
-                    continue;
-                if (slot != bufferCount)
-                    return CKFFProgramDesc();
-                CKFFUniformBufferBinding buffer;
-                buffer.Stage = stage;
-                buffer.Slot = slot;
-                buffer.Size = bufferSizes[slot];
-                result.UniformBuffers.PushBack(buffer);
-                ++bufferCount;
-            }
-        } else {
-            // Named uniforms retain their logical identity and do not acquire
-            // a synthetic native buffer layout.
-            CKDWORD offset = 0;
-            for (CKDWORD slot = 0; slot < CKRST_BLOCK_COUNT; ++slot)
-                if (!present || slot == CKRST_BLOCK_PRESENT_PARAMS)
-                    AppendUniformBinding(result, static_cast<CKFFConstantBlock>(slot),
-                                         stage, 0, offset);
+        const NativeGroup group = present ? PRESENT : stage == CKRST_SHADER_VERTEX ? VERTEX : FRAGMENT;
+        CKDWORD bufferSizes[CKFF_UNIFORM_BUFFER_COUNT] = {};
+        for (const NativeBlock &entry : NativeBlocks) {
+            if (entry.Group != group)
+                continue;
+            if (group == VERTEX && positionT && entry.BufferSlot == 0)
+                continue;
+            if (entry.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
+                return CKFFProgramDesc();
+            const CKDWORD bufferSlot = group == VERTEX && positionT
+                ? entry.BufferSlot - 1u : entry.BufferSlot;
+            AppendUniformBinding(result, entry.Block, stage, bufferSlot,
+                                 bufferSizes[bufferSlot]);
+        }
+        for (const auto &entry : NativeMetadataCounts) {
+            if (entry.Group != group)
+                continue;
+            if (entry.BufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
+                return CKFFProgramDesc();
+            metadataBufferSlot = entry.BufferSlot;
+            metadataOffset = bufferSizes[entry.BufferSlot];
+            metadataCount = entry.Count;
+            // One border color and sampler-state vector per native slot.
+            bufferSizes[entry.BufferSlot] += entry.Count * 32u;
+        }
+        CKDWORD bufferCount = 0;
+        for (CKDWORD slot = 0; slot < CKFF_UNIFORM_BUFFER_COUNT; ++slot) {
+            if (!bufferSizes[slot])
+                continue;
+            if (slot != bufferCount)
+                return CKFFProgramDesc();
+            CKFFUniformBufferBinding buffer;
+            buffer.Stage = stage;
+            buffer.Slot = slot;
+            buffer.Size = bufferSizes[slot];
+            result.UniformBuffers.PushBack(buffer);
+            ++bufferCount;
         }
     }
 
-    if (packed && !present)
+    if (!present)
         ShareStageBuffers(result);
 
     const CKDWORD samplerCount = present ? 1u : CKFF_SAMPLER_SLOT_COUNT;
@@ -238,11 +227,9 @@ CKFFProgramDesc CKFFBuildProgramInterface(CKDWORD vertexShader, CKDWORD pixelSha
             CKFF_SAMPLER_VOLUME, samplerLayout);
         sampler.Dimension = present || slot < cubeBase ? CKFF_TEXTURE_2D :
             slot < volumeBase ? CKFF_TEXTURE_CUBE : CKFF_TEXTURE_3D;
-        if (packed) {
-            sampler.MetadataBufferSlot = metadataBufferSlot;
-            sampler.BorderColorOffset = metadataOffset + slot * 16u;
-            sampler.SamplerStateOffset = metadataOffset + metadataCount * 16u + slot * 16u;
-        }
+        sampler.MetadataBufferSlot = metadataBufferSlot;
+        sampler.BorderColorOffset = metadataOffset + slot * 16u;
+        sampler.SamplerStateOffset = metadataOffset + metadataCount * 16u + slot * 16u;
         result.Samplers.PushBack(sampler);
     }
 

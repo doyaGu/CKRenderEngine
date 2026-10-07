@@ -84,7 +84,7 @@ public:
                 m_Rows[buffer][row] = ROW_COUNT;
         }
         // Every sampler layout shares the uniform layout.
-        const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE,
+        const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, FALSE, FALSE,
                                                                CKFF_SAMPLER_LAYOUT_WIDE_2D);
         const struct {
             CKFFConstantBlock Id;
@@ -2497,7 +2497,7 @@ void TestInterface() {
     for (CKFFSamplerLayout layout : kLayouts) {
         CKJitFragmentShader shader;
         TestCheck(Compile(CKFFNativeFragmentKey(), layout, shader), "the empty key compiles");
-        const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE, layout);
+        const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, FALSE, FALSE, layout);
         uint32_t buffers = 0;
         bool sized = true;
         for (int i = 0; i < desc.UniformBuffers.Size(); ++i) {

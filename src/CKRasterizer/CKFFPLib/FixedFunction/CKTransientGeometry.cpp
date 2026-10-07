@@ -1505,7 +1505,7 @@ CKBOOL CKTransientGeometry::Prepare(
 
     // Handle indices and topology conversion
     if (primType == VX_TRIANGLEFAN || primType == VX_TRIANGLESTRIP) {
-        // Must convert to triangle list (bgfx doesn't support fan/strip natively)
+        // Fans have no native topology; strips share the list path.
         int srcCount = (indices && indexCount > 0) ? indexCount : (int)vertexCount;
 
         if (transientIndexCount > 0x7fffffffu / sizeof(CKWORD))

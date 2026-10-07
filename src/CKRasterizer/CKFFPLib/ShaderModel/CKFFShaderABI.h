@@ -10,10 +10,9 @@
 
 // Internal fixed-function shader ABI. These values define the logical C++
 // data consumed by the shared shader calculations. CKFFShaderInterface maps
-// it to named uniforms or native stage buffers for each artifact family.
+// it to native stage buffers.
 // u_bumpEnv[stage * 2 + 1].w carries CKFFSamplerShaderState as an exact
-// 24-bit integer float. bgfx's u_borderSampler[native slot] stores actual mip
-// count and mip filter in xy.
+// 24-bit integer float.
 
 // This enum is also parsed by ShaderModel/shader_abi_codegen.py. Keep every
 // value as a numeric literal so generated shader definitions have this header

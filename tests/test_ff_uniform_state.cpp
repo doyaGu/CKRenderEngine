@@ -89,11 +89,6 @@ void ShaderABIConstantsAreConsistent() {
 }
 
 void SamplerShaderStateResolvesBackendResponsibilities() {
-    const CKDWORD bgfxFlags =
-        CKRST_SHADER_TARGET_MANUAL_LOD |
-        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
-        CKRST_SHADER_TARGET_MANUAL_BORDER |
-        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
     const CKDWORD sdlFlags =
         CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
         CKRST_SHADER_TARGET_MANUAL_BORDER;
@@ -109,24 +104,16 @@ void SamplerShaderStateResolvesBackendResponsibilities() {
     sampler.MaxAnisotropy = 12;
     sampler.ShaderAnisotropy = 1;
 
-    const CKFFSamplerShaderState bgfx = CKFFBuildSamplerShaderState(
-        sampler, 0, 0, bgfxFlags);
     const CKFFSamplerShaderState sdl = CKFFBuildSamplerShaderState(
         sampler, 0, 0, sdlFlags);
-    TestCheck(bgfx.MinimumMipLevel() == 6 &&
-                  bgfx.AnisotropyTapCount() == 12 &&
-                  bgfx.Has(CKFF_SAMPLER_SHADER_MANUAL_LOD) &&
-                  bgfx.Has(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) &&
-                  bgfx.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT),
-              "bgfx must resolve minimum LOD and anisotropy into exact shader work");
     TestCheck(sdl.MinimumMipLevel() == 6 &&
                   sdl.AnisotropyTapCount() == 0 &&
                   !sdl.Has(CKFF_SAMPLER_SHADER_MANUAL_LOD) &&
                   !sdl.Has(CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY) &&
                   !sdl.Has(CKFF_SAMPLER_SHADER_REQUIRES_EXPLICIT_GRADIENT),
               "SDL GPU ordinary 2D sampling must retain native minimum LOD and anisotropy");
-    TestCheck(bgfx.Has(CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR) &&
-                  bgfx.Has(CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR),
+    TestCheck(sdl.Has(CKFF_SAMPLER_SHADER_MIN_FILTER_LINEAR) &&
+                  sdl.Has(CKFF_SAMPLER_SHADER_MAG_FILTER_LINEAR),
               "Anisotropic and linear filters must both expose linear footprint filtering");
 
     const CKFFSamplerShaderState sdlVolume = CKFFBuildSamplerShaderState(
@@ -151,7 +138,7 @@ void SamplerShaderStateResolvesBackendResponsibilities() {
     TestCheck(volumeBorder.BorderAxisMask() == 7,
               "Volume border sampling must preserve all three address axes");
     const CKFFSamplerShaderState cubeBorder = CKFFBuildSamplerShaderState(
-        sampler, CKRST_TEXTURE_CUBEMAP, 0, bgfxFlags);
+        sampler, CKRST_TEXTURE_CUBEMAP, 0, sdlFlags);
     TestCheck(cubeBorder.BorderAxisMask() == 0 &&
                   !cubeBorder.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
               "Cube directions must not acquire 2D/3D border-domain handling");
@@ -161,13 +148,8 @@ void SamplerShaderStateResolvesBackendResponsibilities() {
     sampler.MipFilter = CKRST_FILTER_LINEAR;
     sampler.ShaderAnisotropy = 0;
     sampler.CompareFunc = CKRST_COMPARE_LEQUAL;
-    const CKFFSamplerShaderState bgfxDepth = CKFFBuildSamplerShaderState(
-        sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, bgfxFlags);
     const CKFFSamplerShaderState sdlDepth = CKFFBuildSamplerShaderState(
         sampler, CKRST_TEXTURE_DEPTHSTENCIL, 0, sdlFlags);
-    TestCheck(bgfxDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) &&
-                  bgfxDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
-              "bgfx depth comparison and border filtering must remain shader exact");
     TestCheck(!sdlDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE) &&
                   !sdlDepth.Has(CKFF_SAMPLER_SHADER_MANUAL_BORDER),
               "SDL GPU padded comparison textures must retain native comparison sampling");
@@ -248,10 +230,9 @@ void SamplerRequirementsUseFinalBindingState() {
     state.Reset();
     state.TextureHandles[0] = 17;
     CKFFDrawProbes probes;
-    const CKDWORD targetFlags = CKRST_SHADER_TARGET_MANUAL_LOD |
-        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+    const CKDWORD targetFlags = CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
         CKRST_SHADER_TARGET_MANUAL_BORDER |
-        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
+        CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS;
     CKFFTextureBinder binder(state, targetFlags, probes);
     CKFFShaderKeyFS key;
     key.Stages[0].HasTexture = true;
@@ -299,10 +280,9 @@ void TextureBindingCacheInvalidatesEveryBindingDependency() {
     state.TextureHandles[0] = 17;
     state.TextureFlags[0] = CKRST_TEXTURE_VALID;
     CKFFDrawProbes probes;
-    CKDWORD targetFlags = CKRST_SHADER_TARGET_MANUAL_LOD |
-        CKRST_SHADER_TARGET_MANUAL_ANISOTROPY |
+    CKDWORD targetFlags = CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO |
         CKRST_SHADER_TARGET_MANUAL_BORDER |
-        CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE;
+        CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS;
     CKFFTextureBinder binder(state, targetFlags, probes);
 
     CKFFShaderKeyFS key;
@@ -451,7 +431,7 @@ void MirrorOnceSamplerDescFallsBackToClamp() {
     CKSamplerDesc sampler = CKFFBuildSamplerDesc(stage);
     TestCheck(sampler.AddressU == CKRST_ADDRESS_CLAMP &&
                   sampler.AddressW == CKRST_ADDRESS_CLAMP,
-              "MIRRORONCE must remain a clamp sampler fallback in bgfx sampler desc");
+              "MIRRORONCE must remain a clamp sampler fallback in the sampler desc");
     TestCheck(sampler.AddressV == CKRST_ADDRESS_MIRROR,
               "Explicit non-MIRRORONCE axis override must still win over inherited address mode");
     TestCheck((CKFFResolveMirrorOnceAddressMask(stage) & CKFF_TTF_MIRRORONCE_MASK) ==

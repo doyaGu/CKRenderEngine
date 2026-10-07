@@ -182,7 +182,7 @@ CKBOOL FFPRecordingPresentStage::EnsureResources()
     }
 
     const CKFFProgramDesc program = CKFFBuildProgramInterface(
-        m_ResourceIds.VertexShader, m_ResourceIds.PixelShader, caps.ShaderFormat, TRUE);
+        m_ResourceIds.VertexShader, m_ResourceIds.PixelShader, TRUE);
     if (m_Backend->CreateProgram(&program, &m_ResourceIds.Program) != CK_OK) {
         DestroyResources();
         return FALSE;

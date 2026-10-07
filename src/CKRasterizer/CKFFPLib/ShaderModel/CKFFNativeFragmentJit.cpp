@@ -62,7 +62,7 @@ bool ResolveUniformRows(CKFFSamplerLayout layout, UniformRows &rows) {
     };
 
     // Every packed format shares the native layout; SPIR-V stands for them.
-    const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE, layout);
+    const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, FALSE, FALSE, layout);
     rows.BufferCount = 0;
     std::memset(rows.Counts, 0, sizeof(rows.Counts));
     for (int i = 0; i < desc.UniformBuffers.Size(); ++i) {

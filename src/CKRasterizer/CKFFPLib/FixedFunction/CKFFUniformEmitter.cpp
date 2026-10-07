@@ -327,8 +327,7 @@ void CKFFUniformEmitter::EmitPayloads(CKFFUniformSink *sink,
 
     EmitTextureMatrixUniforms(&context);
 
-    // bgfx uniform bindings are draw state: every draw uploads all of its
-    // constants before the submit.
+    // Every draw uploads all of its static constants before it is submitted.
     int packed = 0;
     CKFFLightData viewLights[CKFF_MAX_LIGHTS];
     if (context.LightingEnabled) {

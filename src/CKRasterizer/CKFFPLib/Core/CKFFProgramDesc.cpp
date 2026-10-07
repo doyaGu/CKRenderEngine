@@ -13,10 +13,6 @@ bool ValidStage(CK_SHADER_STAGE stage)
 bool ValidShaderTarget(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile)
 {
     switch (format) {
-    case CKRST_SHADER_FORMAT_BGFX:
-        return profile == CKRST_SHADER_PROFILE_DX11 || profile == CKRST_SHADER_PROFILE_DX12 ||
-               profile == CKRST_SHADER_PROFILE_SPIRV || profile == CKRST_SHADER_PROFILE_GLSL ||
-               profile == CKRST_SHADER_PROFILE_ESSL || profile == CKRST_SHADER_PROFILE_MSL;
     case CKRST_SHADER_FORMAT_DXBC:
         return profile == CKRST_SHADER_PROFILE_DX11 || profile == CKRST_SHADER_PROFILE_DX12;
     case CKRST_SHADER_FORMAT_DXIL: return profile == CKRST_SHADER_PROFILE_DX12;
@@ -25,19 +21,6 @@ bool ValidShaderTarget(CK_SHADER_FORMAT format, CK_SHADER_PROFILE profile)
     case CKRST_SHADER_FORMAT_METALLIB: return profile == CKRST_SHADER_PROFILE_MSL;
     default: return false;
     }
-}
-
-bool ValidName(const XString &name)
-{
-    if (name.IsEmpty())
-        return false;
-    for (int i = 0; i < name.Length(); ++i) {
-        const char c = name.CStr()[i];
-        if (c != '_' && !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') &&
-            !(i != 0 && c >= '0' && c <= '9'))
-            return false;
-    }
-    return true;
 }
 
 struct BufferRanges {
@@ -105,38 +88,6 @@ bool ReserveShared(XClassArray<SharedBufferRanges> &sharedBuffers,
     return sharedBuffers.Back().Reserve(write);
 }
 
-// bgfx uniform names are shared between shader stages, including samplers.
-// A name cannot designate different native types in the same program.
-struct NameSignature {
-    XString Name;
-    int Type = 0;
-    CKDWORD Count = 0;
-    int MetadataKind = 0;
-    CKDWORD LogicalSlot = UINT32_MAX;
-};
-
-bool RegisterName(XClassArray<NameSignature> &names,
-                  const XString &name, int type, CKDWORD count,
-                  int metadataKind = 0, CKDWORD logicalSlot = UINT32_MAX)
-{
-    if (!ValidName(name))
-        return false;
-    for (int i = 0; i < names.Size(); ++i) {
-        if (strcmp(names[i].Name.CStr(), name.CStr()) == 0)
-            return names[i].Type == type && names[i].Count == count &&
-                   names[i].MetadataKind == metadataKind &&
-                   (metadataKind == 0 || names[i].LogicalSlot == logicalSlot);
-    }
-    NameSignature signature;
-    signature.Name = name;
-    signature.Type = type;
-    signature.Count = count;
-    signature.MetadataKind = metadataKind;
-    signature.LogicalSlot = logicalSlot;
-    names.PushBack(signature);
-    return true;
-}
-
 } // namespace
 
 CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
@@ -152,7 +103,6 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
         pixel.StorageTextureCount || pixel.StorageBufferCount)
         return CKERR_INVALIDPARAMETER;
 
-    const bool namedUniforms = vertex.Format == CKRST_SHADER_FORMAT_BGFX;
     BufferRanges buffers[2][CKFF_UNIFORM_BUFFER_COUNT];
     XClassArray<SharedBufferRanges> sharedBuffers;
     CKDWORD bufferCounts[2] = {};
@@ -193,7 +143,6 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
     }
 
     const CKFFUniformBinding *uniforms[2][CKFF_CONSTANT_SLOT_COUNT] = {};
-    XClassArray<NameSignature> names;
     for (int i = 0; i < desc.Uniforms.Size(); ++i) {
         const CKFFUniformBinding &uniform = desc.Uniforms[i];
         if (!ValidStage(uniform.Stage) || uniform.Slot >= CKFF_CONSTANT_SLOT_COUNT ||
@@ -201,7 +150,7 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
             (uniform.Type != CKFF_UNIFORM_VEC4 && uniform.Type != CKFF_UNIFORM_MAT4))
             return CKERR_INVALIDPARAMETER;
         const CKDWORD elementSize = uniform.Type == CKFF_UNIFORM_MAT4 ? 64u : 16u;
-        // Check the multiplication before calling Size(), including named uniforms.
+        // Check the multiplication before calling Size().
         if (!uniform.Count || uniform.Count > CKFF_MAX_CONSTANT_BYTES / elementSize)
             return CKERR_INVALIDPARAMETER;
         auto &logical = uniforms[uniform.Stage][uniform.Slot];
@@ -210,16 +159,10 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
                        (otherStage->Type != uniform.Type || otherStage->Count != uniform.Count)))
             return CKERR_INVALIDPARAMETER;
         logical = &uniform;
-        // Pure named-uniform programs do not need invented native buffers.
-        // Once a stage declares buffers, all of its ranges must be consistent.
-        if (!namedUniforms || bufferCounts[uniform.Stage]) {
-            auto &buffer = buffers[uniform.Stage][uniform.BufferSlot];
-            if (!buffer.Reserve(uniform.Offset, uniform.Size()) ||
-                !ReserveShared(sharedBuffers, buffer, {SharedWrite::Uniform, uniform.Slot,
-                    uniform.Type, uniform.Count, uniform.Offset, uniform.Size()}))
-                return CKERR_INVALIDPARAMETER;
-        }
-        if (namedUniforms && !RegisterName(names, uniform.Name, uniform.Type, uniform.Count))
+        auto &buffer = buffers[uniform.Stage][uniform.BufferSlot];
+        if (!buffer.Reserve(uniform.Offset, uniform.Size()) ||
+            !ReserveShared(sharedBuffers, buffer, {SharedWrite::Uniform, uniform.Slot,
+                uniform.Type, uniform.Count, uniform.Offset, uniform.Size()}))
             return CKERR_INVALIDPARAMETER;
     }
 
@@ -243,20 +186,7 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
         logicalSamplers[sampler.Stage][sampler.Slot] = &sampler;
         nativeSamplers[sampler.Stage][sampler.NativeSlot] = true;
         ++samplerCounts[sampler.Stage];
-        if (namedUniforms && !RegisterName(names, sampler.Name, 2 + sampler.Dimension, 1))
-            return CKERR_INVALIDPARAMETER;
-        const bool hasBorderColorName = !sampler.BorderColorName.IsEmpty();
-        const bool hasSamplerStateName = !sampler.SamplerStateName.IsEmpty();
-        if (hasBorderColorName != hasSamplerStateName)
-            return CKERR_INVALIDPARAMETER;
-        if (hasBorderColorName) {
-            if (!namedUniforms || sampler.MetadataBufferSlot != UINT32_MAX ||
-                !RegisterName(names, sampler.BorderColorName, CKFF_UNIFORM_VEC4,
-                              1, 1, sampler.Slot) ||
-                !RegisterName(names, sampler.SamplerStateName, CKFF_UNIFORM_VEC4,
-                              1, 2, sampler.Slot))
-                return CKERR_INVALIDPARAMETER;
-        } else if (sampler.MetadataBufferSlot != UINT32_MAX) {
+        if (sampler.MetadataBufferSlot != UINT32_MAX) {
             if (sampler.MetadataBufferSlot >= CKFF_UNIFORM_BUFFER_COUNT)
                 return CKERR_INVALIDPARAMETER;
             auto &buffer = buffers[sampler.Stage][sampler.MetadataBufferSlot];
@@ -275,8 +205,8 @@ CKERROR CKFFValidateProgram(const CKFFProgramDesc &desc,
             if (!nativeSamplers[stage][slot])
                 return CKERR_INVALIDPARAMETER;
         }
-        if (!namedUniforms && (shaders[stage]->SamplerCount != samplerCounts[stage] ||
-                              shaders[stage]->UniformBufferCount != bufferCounts[stage]))
+        if (shaders[stage]->SamplerCount != samplerCounts[stage] ||
+            shaders[stage]->UniformBufferCount != bufferCounts[stage])
             return CKERR_INVALIDPARAMETER;
     }
 

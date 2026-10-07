@@ -1,5 +1,5 @@
 float *UnlitUniform(VertexInputs &input, CKFFConstantBlock block, unsigned row = 0) {
-    static const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, FALSE);
+    static const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, FALSE, FALSE);
     for (const auto &binding : desc.Uniforms) {
         if (binding.Stage == CKRST_SHADER_VERTEX && binding.Slot == (CKDWORD)block) {
             TestCheck(row * 16 < binding.Size() && binding.BufferSlot < 3 && binding.Offset / 16 + row < 128,

@@ -32,9 +32,9 @@ CKERROR CKRecordingBackend::Init(const CKRasterizerInitParameters *Desc)
         return CKERR_INVALIDPARAMETER;
 
     const CK_SHADER_FORMAT shaderFormat = m_Conventions.ShaderFormat != CKRST_SHADER_FORMAT_UNKNOWN
-        ? m_Conventions.ShaderFormat : CKRST_SHADER_FORMAT_BGFX;
+        ? m_Conventions.ShaderFormat : CKRST_SHADER_FORMAT_DXIL;
     const CK_SHADER_PROFILE shaderProfile = m_Conventions.ShaderProfile != CKRST_SHADER_PROFILE_UNKNOWN
-        ? m_Conventions.ShaderProfile : CKRST_SHADER_PROFILE_DX11;
+        ? m_Conventions.ShaderProfile : CKRST_SHADER_PROFILE_DX12;
     bool targetAllowed = Desc->ShaderTargets.Size() == 0;
     for (int i = 0; i < Desc->ShaderTargets.Size(); ++i) {
         const CKFFShaderTarget &target = Desc->ShaderTargets[i];

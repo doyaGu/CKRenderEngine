@@ -51,7 +51,7 @@ struct CKRasterizerDeviceCaps {
     uint64_t Features;             // CKRST_DEVCAPS_* (RENDER_VIEWS / FRAMEBUFFER / TEXTURE_READBACK / BLIT / DEPTH_TEXTURE / TEXTURE_CUBE / ...)
     CKDWORD MaxTextureSize;
     CKDWORD MaxTextureBindings;    // logical texture binding slots
-    CKDWORD MaxPasses;             // passes per frame (bgfx: views)
+    CKDWORD MaxPasses;             // passes per frame
     CKDWORD MaxMSAASamples;        // 0 / 1 = no multisampled targets
     CK_SHADER_FORMAT ShaderFormat; // exact payload accepted by CreateShader
     CK_SHADER_PROFILE ShaderProfile;

@@ -1,7 +1,7 @@
 // Uses the shared IR interpreter, with a direct scalar reference for the
 // POSITIONT shader. Uniforms are packed through the real program interface.
 float *PositionTUniform(VertexInputs &input, CKFFConstantBlock block, unsigned row = 0) {
-    static const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, CKRST_SHADER_FORMAT_SPIRV, FALSE, TRUE);
+    static const CKFFProgramDesc desc = CKFFBuildProgramInterface(0, 0, FALSE, TRUE);
     for (const auto &binding : desc.Uniforms) {
         if (binding.Stage == CKRST_SHADER_VERTEX && binding.Slot == (CKDWORD)block) {
             TestCheck(row * 16 < binding.Size() && binding.BufferSlot < 2 && binding.Offset / 16 + row < 128,

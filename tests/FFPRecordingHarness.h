@@ -102,9 +102,9 @@ class FFPRecordingBackend;
 // framebuffer conventions the backends report.
 class FFPRecordingDriver : public CKRecordingRasterizerDriver {
 public:
-    explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX11,
+    explicit FFPRecordingDriver(CK_SHADER_PROFILE profile = CKRST_SHADER_PROFILE_DX12,
                                 CKDWORD flags = 0,
-                                CK_SHADER_FORMAT format = CKRST_SHADER_FORMAT_BGFX)
+                                CK_SHADER_FORMAT format = CKRST_SHADER_FORMAT_DXIL)
     {
         Format = format;
         Profile = profile;
@@ -119,7 +119,7 @@ public:
         ++ShaderTargetQueries;
         out.Clear();
         CKFFShaderTarget target;
-        target.Format = CKRST_SHADER_FORMAT_BGFX;
+        target.Format = Format;
         target.Profile = Profile;
         out.PushBack(target);
     }
@@ -131,13 +131,15 @@ public:
         }
         if (!CKRecordingShaderSet(caps, out))
             return FALSE;
-        // Deliberately keep this fixture's artifact family independent from
-        // its reported device format, so mismatch tests fail before creation.
-        for (CKShaderDesc &shader : out.Shaders)
-            shader.Format = CKRST_SHADER_FORMAT_BGFX;
+        if (ArtifactFormat != CKRST_SHADER_FORMAT_UNKNOWN)
+            for (CKShaderDesc &shader : out.Shaders)
+                shader.Format = ArtifactFormat;
         return TRUE;
     }
 
+    // The format of the artifacts, the device's when unknown. Another format
+    // makes initialization fail before any shader is created.
+    CK_SHADER_FORMAT ArtifactFormat = CKRST_SHADER_FORMAT_UNKNOWN;
     CKBOOL FailShaderCatalog = FALSE;
     mutable CKDWORD ShaderTargetQueries = 0;
     mutable CKDWORD ShaderCatalogQueries = 0;

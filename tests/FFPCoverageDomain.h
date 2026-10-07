@@ -11,20 +11,6 @@ struct FFPCoverageValue {
     const char *Name;
 };
 
-struct FFPCoverageBackend {
-    CK_SHADER_PROFILE Profile;
-    const char *Name;
-};
-
-static const FFPCoverageBackend kFFPCoverageBackends[] = {
-    {CKRST_SHADER_PROFILE_DX11, "dx11"},
-    {CKRST_SHADER_PROFILE_DX12, "dx12"},
-    {CKRST_SHADER_PROFILE_SPIRV, "spirv"},
-    {CKRST_SHADER_PROFILE_GLSL, "glsl"},
-    {CKRST_SHADER_PROFILE_ESSL, "essl"},
-    {CKRST_SHADER_PROFILE_MSL, "metal"},
-};
-
 static const FFPCoverageValue kFFPCoverageTextureOps[] = {
     {CKRST_TOP_DISABLE, "DISABLE"},
     {CKRST_TOP_SELECTARG1, "SELECTARG1"},

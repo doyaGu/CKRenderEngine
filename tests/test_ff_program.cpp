@@ -138,9 +138,6 @@ void TestFixedFunctionShapedProgram()
     p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = 1;
     p.Pixel.SamplerCount = 12;
     TestCheck(p.Validate() == CK_OK, "shared matrices, stage data and twelve texture bindings fit the backend limits");
-    p.SetTarget(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11);
-    p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = p.Pixel.SamplerCount = 0;
-    TestCheck(p.Validate() == CK_OK, "the same declarations also describe named-uniform shaders");
 }
 
 void TestShaderIdentity()
@@ -282,35 +279,27 @@ void TestNativeResourceCounts()
 
 void TestSamplerDimensionsAcrossStages()
 {
-    const CK_SHADER_FORMAT formats[] = {
-        CKRST_SHADER_FORMAT_DXIL,
-        CKRST_SHADER_FORMAT_BGFX,
-    };
-    for (int i = 0; i < (int)(sizeof(formats) / sizeof(formats[0])); ++i) {
-        const CK_SHADER_FORMAT format = formats[i];
-        Program p;
-        p.SetTarget(format, format == CKRST_SHADER_FORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_DX11);
-        p.Vertex.SamplerCount = 1;
-        p.Pixel.SamplerCount = 2;
-        p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_VERTEX, 23));
-        p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 4));
-        p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 23, 1));
-        p.Desc.Samplers[0].DefaultColor = 0xff112233;
-        p.Desc.Samplers[2].DefaultColor = 0xff445566;
-        p.Desc.Samplers[2].Name = "s_fragmentImage";
-        TestCheck(p.Validate() == CK_OK,
-                  "one logical texture permits different native slots, names and zero-binding defaults");
-        p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_CUBE;
-        ExpectInvalid(p, "one logical nonzero binding cannot be both 2D and cube across stages");
-        const CKFFSamplerBinding first = p.Desc.Samplers[0];
-        p.Desc.Samplers[0] = p.Desc.Samplers[2];
-        p.Desc.Samplers[2] = first;
-        ExpectInvalid(p, "cross-stage dimension conflicts are rejected in either declaration order");
-        p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_CUBE;
-        TestCheck(p.Validate() == CK_OK, "a shared logical cube remains valid with independent native slots");
-        p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_3D;
-        ExpectInvalid(p, "one logical texture cannot be both cube and volume across stages");
-    }
+    Program p;
+    p.Vertex.SamplerCount = 1;
+    p.Pixel.SamplerCount = 2;
+    p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_VERTEX, 23));
+    p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 4));
+    p.Desc.Samplers.PushBack(Sampler(CKRST_SHADER_PIXEL, 23, 1));
+    p.Desc.Samplers[0].DefaultColor = 0xff112233;
+    p.Desc.Samplers[2].DefaultColor = 0xff445566;
+    p.Desc.Samplers[2].Name = "s_fragmentImage";
+    TestCheck(p.Validate() == CK_OK,
+              "one logical texture permits different native slots, names and zero-binding defaults");
+    p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_CUBE;
+    ExpectInvalid(p, "one logical nonzero binding cannot be both 2D and cube across stages");
+    const CKFFSamplerBinding first = p.Desc.Samplers[0];
+    p.Desc.Samplers[0] = p.Desc.Samplers[2];
+    p.Desc.Samplers[2] = first;
+    ExpectInvalid(p, "cross-stage dimension conflicts are rejected in either declaration order");
+    p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_CUBE;
+    TestCheck(p.Validate() == CK_OK, "a shared logical cube remains valid with independent native slots");
+    p.Desc.Samplers[2].Dimension = CKFF_TEXTURE_3D;
+    ExpectInvalid(p, "one logical texture cannot be both cube and volume across stages");
 }
 
 void TestSamplerMetadata()
@@ -334,10 +323,6 @@ void TestSamplerMetadata()
     p = WithMetadata(); p.Desc.Samplers.PushBack(p.Desc.Samplers[0]);
     p.Desc.Samplers[1].Slot = 22; p.Desc.Samplers[1].NativeSlot = 1; p.Pixel.SamplerCount = 2;
     ExpectInvalid(p, "metadata of different samplers cannot overlap");
-    p = WithMetadata();
-    p.Desc.Samplers[0].BorderColorName = "u_border23";
-    p.Desc.Samplers[0].SamplerStateName = "u_sampler23";
-    ExpectInvalid(p, "packed metadata cannot also declare named metadata uniforms");
 }
 
 void TestSharedUniformPacking()
@@ -388,43 +373,6 @@ void TestSharedSamplerMetadata()
     ExpectInvalid(bad, "border color and sampler state have distinct write identities");
     bad = p; bad.Desc.Samplers[1].BorderColorOffset = 0;
     ExpectInvalid(bad, "shared metadata cannot overwrite another stage's uniform");
-}
-
-void TestNamedUniforms()
-{
-    Program p = OneSampler();
-    p.SetTarget(CKRST_SHADER_FORMAT_BGFX, CKRST_SHADER_PROFILE_DX11);
-    p.Desc.UniformBuffers.Clear();
-    p.Vertex.UniformBufferCount = p.Pixel.UniformBufferCount = p.Pixel.SamplerCount = 0;
-    TestCheck(p.Validate() == CK_OK, "named uniforms require no artificial native buffers or reflected counts");
-    p.Desc.Uniforms.PushBack(Uniform(CKRST_SHADER_VERTEX, 31, 0, 2));
-    TestCheck(p.Validate() == CK_OK, "a compatible named uniform can be shared between stages");
-    p.Desc.Samplers[0].BorderColorName = "u_border23";
-    p.Desc.Samplers[0].SamplerStateName = "u_sampler23";
-    TestCheck(p.Validate() == CK_OK,
-              "named samplers can opt into exact shader-assisted border metadata");
-    Program bad = p; bad.Desc.Uniforms[0].Name.Clear();
-    ExpectInvalid(bad, "named uniform cannot have an empty name");
-    bad = p; bad.Desc.Samplers[0].Name = "1sampler";
-    ExpectInvalid(bad, "a native uniform name must be an identifier");
-    bad = p; bad.Desc.Uniforms[0].Name = XString("u_hidden\0suffix", 15);
-    ExpectInvalid(bad, "embedded NUL cannot alias a native name");
-    bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Count = 1;
-    ExpectInvalid(bad, "different logical slots do not permit inconsistent same-name capacities");
-    bad = p; bad.Desc.Uniforms[1].Slot = 30; bad.Desc.Uniforms[1].Type = CKFF_UNIFORM_MAT4;
-    ExpectInvalid(bad, "same-name native uniform types must agree");
-    bad = p; bad.Desc.Samplers[0].Name = bad.Desc.Uniforms[0].Name;
-    ExpectInvalid(bad, "sampler and data uniform names share one native namespace");
-    bad = p; bad.Desc.UniformBuffers.PushBack(Buffer(CKRST_SHADER_PIXEL, 16));
-    ExpectInvalid(bad, "declared native ranges still constrain named-uniform programs");
-    bad = p; bad.Desc.Samplers[0].MetadataBufferSlot = 0;
-    ExpectInvalid(bad, "named samplers do not bypass explicit metadata buffer validation");
-    bad = p; bad.Desc.Samplers[0].SamplerStateName.Clear();
-    ExpectInvalid(bad, "named sampler metadata requires both vec4 uniforms");
-    bad = p; bad.Desc.Samplers[0].SamplerStateName = bad.Desc.Samplers[0].BorderColorName;
-    ExpectInvalid(bad, "border color and sampler state require distinct uniform names");
-    bad = p; bad.Desc.Samplers[0].BorderColorName = bad.Desc.Uniforms[0].Name;
-    ExpectInvalid(bad, "sampler metadata cannot overwrite a caller uniform");
 }
 
 void TestVertexInputs()
@@ -583,7 +531,6 @@ int main()
     framework.Run("sampler metadata", TestSamplerMetadata);
     framework.Run("shared uniform packing", TestSharedUniformPacking);
     framework.Run("shared sampler metadata", TestSharedSamplerMetadata);
-    framework.Run("named uniforms", TestNamedUniforms);
     framework.Run("vertex inputs", TestVertexInputs);
     framework.Run("shared snapshot packing and revisions", TestSharedSnapshotPacking);
     framework.Run("reused constant source address", TestReusedConstantSetAddress);

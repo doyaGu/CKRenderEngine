@@ -132,28 +132,24 @@ CKFFSamplerShaderState CKFFBuildSamplerShaderState(
     }
 
     const bool depthCompare = depth && sampler.CompareFunc != CKRST_COMPARE_NONE;
-    const bool manualDepthCompare = depthCompare &&
-        (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_DEPTH_COMPARE) != 0;
     // SDL GPU pads comparison depth textures before binding them. That path
     // needs neither shader border evaluation nor a second depth comparison.
     const bool manualBorder = borderAxisMask != 0 &&
         (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_BORDER) != 0 &&
-        (!depthCompare || manualDepthCompare);
+        !depthCompare;
     const bool manualAnisotropy = sampler.ShaderAnisotropy != 0 &&
-        (((shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_ANISOTROPY) != 0) ||
-         (volume &&
+        ((volume &&
           (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_VOLUME_ANISO) != 0) ||
          manualBorder);
     const bool mirrorOnce = !cube &&
         (textureTransformFlags & CKFF_TTF_MIRRORONCE_MASK) != 0;
     const bool manualLod = sampler.MinMipLevel != 0 &&
-        (((shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_LOD) != 0) ||
-         manualAnisotropy || manualBorder || manualDepthCompare || mirrorOnce);
+        (manualAnisotropy || manualBorder || mirrorOnce);
     // The explicit-gradient comparison applies the bias the sampler lacks.
     const bool compareBias = depthCompare && sampler.MipLodBias != 0.0f &&
         (shaderTargetFlags & CKRST_SHADER_TARGET_MANUAL_COMPARE_BIAS) != 0;
     const bool explicitGradient = mirrorOnce || manualLod ||
-        manualAnisotropy || manualBorder || manualDepthCompare || compareBias;
+        manualAnisotropy || manualBorder || compareBias;
 
     const CKDWORD minimumMip = sampler.MinMipLevel >
             CKFF_SAMPLER_SHADER_MIN_MIP_MASK
@@ -183,8 +179,6 @@ CKFFSamplerShaderState CKFFBuildSamplerShaderState(
         bits |= CKFF_SAMPLER_SHADER_MANUAL_ANISOTROPY;
     if (manualBorder)
         bits |= CKFF_SAMPLER_SHADER_MANUAL_BORDER;
-    if (manualDepthCompare)
-        bits |= CKFF_SAMPLER_SHADER_MANUAL_DEPTH_COMPARE;
     return CKFFSamplerShaderState(bits);
 }
 

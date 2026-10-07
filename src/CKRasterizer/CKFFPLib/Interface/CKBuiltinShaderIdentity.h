@@ -29,11 +29,4 @@ constexpr CKDWORD CKFFNativeInterfaceHash()
 static constexpr CKDWORD CKFF_SHADER_NATIVE_INTERFACE_HASH =
     CKFFNativeInterfaceHash();
 
-inline CKDWORD CKFFShaderInterfaceHash(CK_SHADER_FORMAT format)
-{
-    return format == CKRST_SHADER_FORMAT_BGFX
-        ? CKFF_SHADER_INTERFACE_HASH
-        : CKFF_SHADER_NATIVE_INTERFACE_HASH;
-}
-
 #endif

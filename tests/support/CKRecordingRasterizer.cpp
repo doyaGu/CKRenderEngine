@@ -1,4 +1,5 @@
 #include "CKRecordingRasterizer.h"
+#include "CKFFShaderInterface.h"
 #include "FFPRecordingContext.h"
 
 #include <new>
@@ -7,7 +8,7 @@
 CKRecordingRasterizerDriver::CKRecordingRasterizerDriver(
     CKRasterizer *owner, CKDWORD index)
     : CKRasterizerDriver(owner, index, "Recording Rasterizer", FALSE),
-      Format(CKRST_SHADER_FORMAT_BGFX), Profile(CKRST_SHADER_PROFILE_DX11),
+      Format(CKRST_SHADER_FORMAT_DXIL), Profile(CKRST_SHADER_PROFILE_DX12),
       OriginBottomLeft(FALSE), HomogeneousDepth(FALSE)
 {
     m_CapsFinal = TRUE;
@@ -215,9 +216,18 @@ void CKRecordingShaderTargets(XClassArray<CKFFShaderTarget> &out)
 {
     out.Clear();
     CKFFShaderTarget target;
-    target.Format = CKRST_SHADER_FORMAT_BGFX;
-    target.Profile = CKRST_SHADER_PROFILE_DX11;
+    target.Format = CKRST_SHADER_FORMAT_DXIL;
+    target.Profile = CKRST_SHADER_PROFILE_DX12;
     out.PushBack(target);
+}
+
+// The uniform buffers one stage of the native fixed-function interface declares.
+static CKDWORD StageBufferCount(const CKFFProgramDesc &program, CK_SHADER_STAGE stage)
+{
+    CKDWORD count = 0;
+    for (int i = 0; i < program.UniformBuffers.Size(); ++i)
+        count += program.UniformBuffers[i].Stage == stage ? 1u : 0u;
+    return count;
 }
 
 CKBOOL CKRecordingShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &out)
@@ -230,7 +240,9 @@ CKBOOL CKRecordingShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &o
         return FALSE;
 
     out.ABIVersion = CKFF_SHADER_ABI_VERSION;
-    out.InterfaceHash = CKFFShaderInterfaceHash(caps.ShaderFormat);
+    out.InterfaceHash = CKFF_SHADER_NATIVE_INTERFACE_HASH;
+    const CKFFProgramDesc programs[3] = {CKFFBuildProgramInterface(0, 0),
+        CKFFBuildProgramInterface(0, 0, FALSE, TRUE), CKFFBuildProgramInterface(0, 0, TRUE)};
     for (unsigned index = 0; index < CKRST_BUILTIN_SHADER_COUNT; ++index) {
         CKShaderDesc &shader = out.Shaders[index];
         shader.Code = token[index];
@@ -241,12 +253,14 @@ CKBOOL CKRecordingShaderSet(const CKRasterizerDeviceCaps &caps, CKFFShaderSet &o
             index == CKRST_SHADER_FF_FRAGMENT || index == CKRST_SHADER_PRESENT_FRAGMENT
                 ? CKRST_SHADER_PIXEL
                 : CKRST_SHADER_VERTEX;
-        if (caps.ShaderFormat != CKRST_SHADER_FORMAT_BGFX) {
-            shader.UniformBufferCount = index == CKRST_SHADER_PRESENT_VERTEX ? 0 : 1;
-            shader.SamplerCount = index == CKRST_SHADER_FF_FRAGMENT
-                                      ? CKFF_SHADER_SAMPLER_SLOT_COUNT
-                                      : index == CKRST_SHADER_PRESENT_FRAGMENT ? 1 : 0;
-        }
+        const CKFFProgramDesc &program =
+            index == CKRST_SHADER_FF_POSITIONT || index == CKRST_SHADER_FF_POSITIONT_CLIP ? programs[1] :
+            index == CKRST_SHADER_PRESENT_VERTEX || index == CKRST_SHADER_PRESENT_FRAGMENT ? programs[2] :
+            programs[0];
+        shader.UniformBufferCount = StageBufferCount(program, shader.Stage);
+        shader.SamplerCount = index == CKRST_SHADER_FF_FRAGMENT
+                                  ? CKFF_SHADER_SAMPLER_SLOT_COUNT
+                                  : index == CKRST_SHADER_PRESENT_FRAGMENT ? 1 : 0;
     }
     return TRUE;
 }

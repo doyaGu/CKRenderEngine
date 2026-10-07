@@ -61,10 +61,15 @@ CKDWORD MakeProgram(CKRecordingBackend *b)
     CKDWORD vs = 0, fs = 0, program = 0;
     TestCheck(b->CreateShader(&shader, &vs) == CK_OK && vs != 0, "vertex shader");
     shader.Stage = CKRST_SHADER_PIXEL;
+    shader.UniformBufferCount = shader.SamplerCount = 1;
     TestCheck(b->CreateShader(&shader, &fs) == CK_OK && fs != 0, "pixel shader");
     CKFFProgramDesc desc;
     desc.VertexShader = vs;
     desc.PixelShader = fs;
+    CKFFUniformBufferBinding buffer;
+    buffer.Stage = CKRST_SHADER_PIXEL;
+    buffer.Size = 32;
+    desc.UniformBuffers.PushBack(buffer);
     CKFFUniformBinding uniform;
     uniform.Slot = 27;
     uniform.Name = "u_customData";
@@ -96,8 +101,8 @@ void TestCapsAndTables()
 {
     Fixture f;
     const CKRasterizerDeviceCaps &caps = f.Backend->GetCaps();
-    TestCheck(caps.ShaderFormat == CKRST_SHADER_FORMAT_BGFX, "caps carry the shader payload format");
-    TestCheck(caps.ShaderProfile == CKRST_SHADER_PROFILE_DX11, "caps carry the shader profile");
+    TestCheck(caps.ShaderFormat == CKRST_SHADER_FORMAT_DXIL, "caps carry the shader payload format");
+    TestCheck(caps.ShaderProfile == CKRST_SHADER_PROFILE_DX12, "caps carry the shader profile");
     TestCheck(caps.MaxTextureSize > 0, "caps carry the texture size limit");
     TestCheck((caps.Features & CKRST_DEVCAPS_TEXTURE_READBACK) != 0, "caps carry the device features");
     TestCheck(f.Backend->GetDeviceStatus() == CK_OK && f.Backend->IsIdle(), "idle after Init");
