@@ -406,7 +406,9 @@ def msl_translate(spirv_cross, spirv: Path, output: Path, vertex: bool) -> bytes
     if vertex:
         command += ["--msl-default-point-size", "1"]
     subprocess.run(command, check=True)
-    return output.read_bytes()
+    # SPIRV-Cross writes text-mode line endings; the pack is the same on
+    # every host.
+    return output.read_bytes().replace(b"\r\n", b"\n")
 
 
 def validate_msl(text, source, vertex, samplers, uniforms, sampler_layout):
