@@ -183,9 +183,10 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
         CKRST_ADDRESS_CLAMP, 0, CKRST_COMPARE_NONE};
     DitherSampler = Sampler(ditherSampler);
     if (!DitherSampler) { Shutdown(); return CKERR_INVALIDOPERATION; }
-    SDL_Log("SDL_gpu ready: driver=%s format=0x%x window=%u thread=%llu size=%ux%u gpu=%s",
+    SDL_Log("SDL_gpu ready: driver=%s format=0x%x window=%u thread=%llu size=%ux%u depth24=%d depth24s8=%d gpu=%s",
         SDL_GetGPUDeviceDriver(Device), unsigned(ShaderFormat), SDL_GetWindowID(Window),
         static_cast<unsigned long long>(Thread), Width, Height,
+        int(CKSdlGpuDepthFormat(Device, CKRST_DEPTHFMT_D24)), int(CKSdlGpuDepthFormat(Device, CKRST_DEPTHFMT_D24S8)),
         SDL_GetStringProperty(SDL_GetGPUDeviceProperties(Device), SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown"));
     return CK_OK;
 }
