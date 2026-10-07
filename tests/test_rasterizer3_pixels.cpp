@@ -2804,8 +2804,8 @@ void CheckWideSamplerLayouts(Backend &b)
 {
     auto *ctx = b.Context;
 #ifdef CKRE_PIXEL_SDL_GPU
-    // The paravirtual Metal device of macOS virtual machines samples other
-    // data from five cube stages; Apple GPUs pass.
+    // The paravirtual Metal device of macOS virtual machines samples no cube
+    // stage of the wide cube layout but the first correctly; Apple GPUs pass.
     const bool paravirtual = strcmp(static_cast<CKSdlGpuRasterizerContext *>(ctx)->GetDeviceNameForTests(),
                                     "Apple Paravirtual device") == 0;
 #else
@@ -2965,7 +2965,10 @@ void CheckWideSamplerLayouts(Backend &b)
         mixedTextures[2], mixedTextures[2], mixedTextures[2], mixedTextures[2],
         mixedTextures[2], mixedTextures[1], mixedTextures[0]};
     runMixed(defaultMixed, 3, 48, "mixed default sampler layout");
-    runMixed(wideCubeMixed, 7, 112, "mixed wide-cube sampler layout");
+    if (paravirtual)
+        printf("  mixed wide-cube sampler layout: skipped on the Apple Paravirtual device\n");
+    else
+        runMixed(wideCubeMixed, 7, 112, "mixed wide-cube sampler layout");
     runMixed(wideVolumeMixed, 7, 144, "mixed wide-volume sampler layout");
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         ctx->SetTexture(0, stage);
