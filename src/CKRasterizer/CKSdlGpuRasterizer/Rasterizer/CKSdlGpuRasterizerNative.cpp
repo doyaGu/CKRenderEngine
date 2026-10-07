@@ -130,7 +130,7 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
         // can support MSAA even when that query reports false.
         SDL_GPUTextureCreateInfo probe = {};
         probe.type = SDL_GPU_TEXTURETYPE_2D;
-        probe.format = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+        probe.format = CKSdlGpuDepthFormat(Device, CKRST_DEPTHFMT_D24S8);
         probe.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
         probe.width = probe.height = 8;
         probe.layer_count_or_depth = probe.num_levels = 1;

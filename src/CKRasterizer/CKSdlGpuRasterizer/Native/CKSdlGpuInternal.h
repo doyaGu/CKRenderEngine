@@ -555,6 +555,9 @@ private:
 SDL_GPUSampleCount CKSdlGpuSampleCount(unsigned samples);
 SDL_GPUVertexElementFormat CKSdlGpuVertexFormat(const CKVertexElementDesc &element);
 SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format);
+// The depth format of the device for a requested one: 24-bit depth is
+// stored as 32-bit float where the device lacks it, as Apple GPUs do.
+SDL_GPUTextureFormat CKSdlGpuDepthFormat(SDL_GPUDevice *device, CK_DEPTH_FORMAT format);
 unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip);
 // The create info of a validly described shader in its SDL format.
 SDL_GPUShaderCreateInfo CKSdlGpuShaderInfo(const CKSdlGpuShader &shader, SDL_GPUShaderFormat format);

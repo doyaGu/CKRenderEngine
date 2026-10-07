@@ -33,6 +33,22 @@ SDL_GPUTextureFormat CKSdlGpuTextureFormat(VX_PIXELFORMAT format)
     }
 }
 
+SDL_GPUTextureFormat CKSdlGpuDepthFormat(SDL_GPUDevice *device, CK_DEPTH_FORMAT format)
+{
+    const SDL_GPUTextureUsageFlags usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    switch (format) {
+    case CKRST_DEPTHFMT_D16: return SDL_GPU_TEXTUREFORMAT_D16_UNORM;
+    case CKRST_DEPTHFMT_D24:
+        return SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_D24_UNORM, SDL_GPU_TEXTURETYPE_2D, usage)
+            ? SDL_GPU_TEXTUREFORMAT_D24_UNORM : SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    case CKRST_DEPTHFMT_D24S8:
+        return SDL_GPUTextureSupportsFormat(device, SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT, SDL_GPU_TEXTURETYPE_2D, usage)
+            ? SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT : SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+    case CKRST_DEPTHFMT_D32F: return SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+    default: return SDL_GPU_TEXTUREFORMAT_INVALID;
+    }
+}
+
 unsigned CKSdlGpuTextureLayers(const CKSdlGpuTexture &texture, unsigned mip)
 {
     return texture.Info.type == SDL_GPU_TEXTURETYPE_3D ? std::max(1u, texture.Info.layer_count_or_depth >> mip)
@@ -382,13 +398,8 @@ CKERROR CKSdlGpuRasterizerContext::CreateDepthTexture(const CKDepthTextureDesc *
     texture->Depth = true; texture->Samples = std::max(1u, unsigned(desc->Samples));
     auto &info = texture->Info;
     info.type = SDL_GPU_TEXTURETYPE_2D;
-    switch (desc->Format) {
-    case CKRST_DEPTHFMT_D16: info.format = SDL_GPU_TEXTUREFORMAT_D16_UNORM; break;
-    case CKRST_DEPTHFMT_D24: info.format = SDL_GPU_TEXTUREFORMAT_D24_UNORM; break;
-    case CKRST_DEPTHFMT_D24S8: info.format = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT; break;
-    case CKRST_DEPTHFMT_D32F: info.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT; break;
-    default: return CKERR_NOTIMPLEMENTED;
-    }
+    info.format = CKSdlGpuDepthFormat(Device, desc->Format);
+    if (info.format == SDL_GPU_TEXTUREFORMAT_INVALID) return CKERR_NOTIMPLEMENTED;
     info.width = desc->Width; info.height = desc->Height; info.num_levels = info.layer_count_or_depth = 1;
     info.sample_count = CKSdlGpuSampleCount(texture->Samples);
     info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
