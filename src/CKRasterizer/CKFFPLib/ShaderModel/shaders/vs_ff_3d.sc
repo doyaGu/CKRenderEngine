@@ -1,10 +1,7 @@
 #ifndef CKFF_VS_CLIP_DISTANCE
 #define CKFF_VS_CLIP_DISTANCE 0
 #endif
-$input a_position, a_normal, a_tangent, a_bitangent, a_indices, a_weight, a_texcoord0, a_texcoord1, a_texcoord2, a_texcoord3, a_texcoord4, a_texcoord5, a_texcoord6, a_texcoord7, a_color0, a_color1
-$output v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_lineOffset, v_clipDistance0, v_clipDistance1
 
-#include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
 
 #ifndef CKFF_NDC_MINUS_ONE_TO_ONE
@@ -18,18 +15,9 @@ void ckffApplyBackendClipSpace(inout vec4 position)
 #endif
 }
 
-uniform mat4 u_ffMatrices[8];
-uniform mat4 u_vertexBlendMatrices[4];
-uniform mat4 u_texMatrix[8];
-uniform vec4 u_ffDrawParams[20];
-uniform vec4 u_lights[56];
-uniform vec4 u_stageParams[16];
-uniform vec4 u_viewport;
 #if CKFF_VS_CLIP_DISTANCE
-uniform vec4 u_clipPlanes[6];
 #endif
 #if CKFF_VS_CLIP_DISTANCE || !CKFF_NATIVE_SDL_GPU
-uniform vec4 u_clipParams;
 #endif
 
 #if !CKFF_NATIVE_SDL_GPU

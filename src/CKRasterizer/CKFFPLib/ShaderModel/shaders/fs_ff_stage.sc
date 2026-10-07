@@ -1,15 +1,7 @@
-$input v_color0, v_color1, v_flatColor0, v_flatColor1, v_texcoord0, v_texcoord1, v_texcoord2, v_texcoord3, v_texcoord4, v_texcoord5, v_texcoord6, v_texcoord7Fog, v_fogPos, v_lineOffset, v_clipDistance0, v_clipDistance1
 
-#include "bgfx_shader.sh"
 #include "ff_fog_common.sc"
 #include "ff_sampler_shader_state.sh"
 
-uniform vec4 u_ffDrawParams[20];
-uniform vec4 u_bumpEnv[16];
-uniform vec4 u_stageParams[16];
-uniform vec4 u_borderColor[8];
-uniform vec4 u_borderSampler[16];
-uniform vec4 u_ffProgram[5];
 
 #include "ff_sampler_layout.sh"
 #include "fs_ff_common.sc"
@@ -31,14 +23,6 @@ uniform vec4 u_ffProgram[5];
 
 void main()
 {
-// CKFF_BGFX_ONLY_BEGIN
-    // Fragment clipping also covers bgfx profiles without native clip-distance state.
-    if (v_clipDistance0.x < 0.0 || v_clipDistance0.y < 0.0 ||
-        v_clipDistance0.z < 0.0 || v_clipDistance0.w < 0.0 ||
-        v_clipDistance1.x < 0.0 || v_clipDistance1.y < 0.0 ||
-        v_clipDistance1.z < 0.0 || v_clipDistance1.w < 0.0)
-        discard;
-// CKFF_BGFX_ONLY_END
     float edgeCoverage = 1.0;
     if (u_ffDrawParams[4].w > 2.5) {
         vec2 lineOffset = v_lineOffset * gl_FragCoord.w;

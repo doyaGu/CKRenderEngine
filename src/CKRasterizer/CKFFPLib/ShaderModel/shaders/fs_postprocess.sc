@@ -1,10 +1,7 @@
-$input v_texcoord0
 
-#include "bgfx_shader.sh"
 
 SAMPLER2D(s_sceneColor, 0);
 
-uniform vec4 u_postParams;
 
 float luma(vec3 color)
 {

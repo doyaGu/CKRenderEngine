@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build SDL-native shaders from the shared FFP calculations using DXC.
 
-Only declarations/entry points are adapted: no bgfx containers are read or
-unwrapped. The native resource ABI is explicit and checked against reflection.
+Only declarations/entry points are adapted. The native resource ABI is
+explicit and checked against reflection.
 Intermediate source, assembly and reflection live in an out-of-source directory.
 
 FXC additionally builds Shader Model 5.1 DXBC variants of the fixed-function
@@ -97,39 +97,21 @@ def varying_type(name: str) -> str:
 
 def source_body(path: Path) -> str:
     result = []
-    bgfx_only = False
-    # Strip bgfx-only branches before DXC sees the source. The native FFP
-    # shader is already near the D3D12 driver's pipeline complexity limit;
-    # leaving even a dead border branch in that source prevents pipeline creation.
     for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip() == "// CKFF_BGFX_ONLY_BEGIN":
-            assert not bgfx_only
-            bgfx_only = True
-            continue
-        if line.strip() == "// CKFF_BGFX_ONLY_END":
-            assert bgfx_only
-            bgfx_only = False
-            continue
-        if bgfx_only:
-            continue
-        if line.startswith("$") or re.match(r"^uniform\s", line):
-            continue
         include = re.fullmatch(r'#include "([^"]+)"', line)
         if include:
-            if include[1] != "bgfx_shader.sh":
-                result.append(source_body(path.parent / include[1]))
-                if include[1] == "ff_sampler_layout.sh":
-                    # Native sampling takes handles of the resources the
-                    # layout declares.
-                    for helper in ("sampler_handles.hlsli",
-                                   "native_cube_sampling.hlsli",
-                                   "native_sampling.hlsli",
-                                   "depth_compare_sampling.hlsli"):
-                        result.append(HERE.joinpath(helper).read_text(
-                            encoding="utf-8"))
+            result.append(source_body(path.parent / include[1]))
+            if include[1] == "ff_sampler_layout.sh":
+                # Native sampling takes handles of the resources the
+                # layout declares.
+                for helper in ("sampler_handles.hlsli",
+                               "native_cube_sampling.hlsli",
+                               "native_sampling.hlsli",
+                               "depth_compare_sampling.hlsli"):
+                    result.append(HERE.joinpath(helper).read_text(
+                        encoding="utf-8"))
         else:
             result.append(line)
-    assert not bgfx_only
     return "\n".join(result).replace("void main()", "void ckffEvaluate()")
 
 
