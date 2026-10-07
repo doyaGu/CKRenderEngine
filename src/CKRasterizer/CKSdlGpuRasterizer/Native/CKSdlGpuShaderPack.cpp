@@ -632,6 +632,45 @@ CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size, CKSdlGpuShaderA
     return FALSE;
 }
 
+namespace {
+
+struct ShaderPayload {
+    SDL_GPUShaderFormat Native;
+    CK_SHADER_FORMAT Format;
+    CK_SHADER_PROFILE Profile;
+    const char *EntryPoint;
+};
+
+const ShaderPayload s_Payloads[] = {
+    {SDL_GPU_SHADERFORMAT_SPIRV, CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_SPIRV, "main"},
+    {SDL_GPU_SHADERFORMAT_DXIL, CKRST_SHADER_FORMAT_DXIL, CKRST_SHADER_PROFILE_DX12, "main"},
+    {SDL_GPU_SHADERFORMAT_DXBC, CKRST_SHADER_FORMAT_DXBC, CKRST_SHADER_PROFILE_DX12, "main"},
+    {SDL_GPU_SHADERFORMAT_MSL, CKRST_SHADER_FORMAT_MSL, CKRST_SHADER_PROFILE_MSL, "main0"},
+};
+
+} // namespace
+
+CKBOOL CKSdlGpuShaderPayload(SDL_GPUShaderFormat Format, CKShaderDesc &Out)
+{
+    for (const ShaderPayload &payload : s_Payloads) {
+        if (payload.Native != Format)
+            continue;
+        Out.Format = payload.Format;
+        Out.Profile = payload.Profile;
+        Out.EntryPoint = payload.EntryPoint;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+SDL_GPUShaderFormat CKSdlGpuShaderPayloadFormat(CK_SHADER_FORMAT Format, CK_SHADER_PROFILE Profile)
+{
+    for (const ShaderPayload &payload : s_Payloads)
+        if (payload.Format == Format && payload.Profile == Profile)
+            return payload.Native;
+    return SDL_GPU_SHADERFORMAT_INVALID;
+}
+
 SDL_GPUShaderFormat CKSdlGpuShaderPackFormats()
 {
     SDL_GPUShaderFormat formats = 0;

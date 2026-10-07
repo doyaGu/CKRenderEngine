@@ -1,6 +1,7 @@
 #ifndef CKSDLGPU_SHADER_PACK_H
 #define CKSDLGPU_SHADER_PACK_H
 
+#include "CKRasterizerContextTypes.h"
 #include "CKTypes.h"
 #include "XArray.h"
 #include "shaders/generated/shaders.h"
@@ -25,12 +26,12 @@ CKBOOL CKSdlGpuDecodeShaderPack(const CKBYTE *Pack, size_t Size,
 // MSL.
 SDL_GPUShaderFormat CKSdlGpuShaderPackFormats();
 
-// The entry point of the shaders of a format. SPIRV-Cross renames the MSL
-// entry point, as main is reserved in Metal.
-inline const char *CKSdlGpuShaderEntryPoint(SDL_GPUShaderFormat Format)
-{
-    return Format == SDL_GPU_SHADERFORMAT_MSL ? "main0" : "main";
-}
+// Sets the payload format, profile and entry point of a descriptor of the
+// shaders of an SDL format; false for other formats. SPIRV-Cross renames the
+// MSL entry point, as main is reserved in Metal.
+CKBOOL CKSdlGpuShaderPayload(SDL_GPUShaderFormat Format, CKShaderDesc &Out);
+// The SDL format of a payload format and profile, invalid for other ones.
+SDL_GPUShaderFormat CKSdlGpuShaderPayloadFormat(CK_SHADER_FORMAT Format, CK_SHADER_PROFILE Profile);
 
 // The embedded packs. The first use of a format decodes its pack once per
 // process and is thread safe; a pack that fails to decode leaves its format

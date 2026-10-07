@@ -129,9 +129,7 @@ public:
         // The compiled shader declares the resources of its artifact.
         CKShaderDesc &desc = Shader->Desc;
         Described = CKSdlGpuFFFragmentShader(context.ShaderFormat, FFJitArtifact(key), desc) != FALSE;
-        const bool dxbc = Format == SDL_GPU_SHADERFORMAT_DXBC;
-        desc.Format = dxbc ? CKRST_SHADER_FORMAT_DXBC : CKRST_SHADER_FORMAT_SPIRV;
-        desc.Profile = dxbc ? CKRST_SHADER_PROFILE_DX12 : CKRST_SHADER_PROFILE_SPIRV;
+        CKSdlGpuShaderPayload(Format, desc);
         desc.Code = nullptr;
         desc.CodeSize = 0;
         if (context.m_FFJitVertexEnabled) {

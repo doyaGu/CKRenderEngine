@@ -863,12 +863,11 @@ int main()
             continue;
         CKFFShaderSet set;
         check(CKSdlGpuShaderSet(format, set) != FALSE, "complete native shader family");
+        const char *entry = format == SDL_GPU_SHADERFORMAT_MSL ? "main0" : "main";
         bool entries = true;
         for (unsigned role = 0; role < CKRST_BUILTIN_SHADER_COUNT; ++role)
-            entries = entries && std::strcmp(set.Shaders[role].EntryPoint, CKSdlGpuShaderEntryPoint(format)) == 0;
-        check(entries && std::strcmp(CKSdlGpuShaderEntryPoint(format),
-                                     format == SDL_GPU_SHADERFORMAT_MSL ? "main0" : "main") == 0,
-              "native shader family names the entry points of its format");
+            entries = entries && std::strcmp(set.Shaders[role].EntryPoint, entry) == 0;
+        check(entries, "native shader family names the entry points of its format");
         const auto payload = set.Shaders[0].Format, profile = set.Shaders[0].Profile;
         check(payload != CKRST_SHADER_FORMAT_BGFX, "native artifact ownership");
         for (unsigned role = 0; role < CKRST_BUILTIN_SHADER_COUNT; ++role) {
@@ -1113,6 +1112,22 @@ int main()
     }
     CKFFShaderSet rejected;
     check(!CKSdlGpuShaderSet(SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, rejected), "ambiguous payload rejected");
+    {
+        // Each SDL format names one payload format and profile and back.
+        bool mapped = true;
+        for (auto format : {SDL_GPU_SHADERFORMAT_DXIL, SDL_GPU_SHADERFORMAT_SPIRV, SDL_GPU_SHADERFORMAT_DXBC,
+                            SDL_GPU_SHADERFORMAT_MSL}) {
+            CKShaderDesc payload;
+            mapped = mapped && CKSdlGpuShaderPayload(format, payload) &&
+                     CKSdlGpuShaderPayloadFormat(payload.Format, payload.Profile) == format;
+        }
+        CKShaderDesc unknown;
+        check(mapped && !CKSdlGpuShaderPayload(SDL_GPU_SHADERFORMAT_METALLIB, unknown) &&
+                  !CKSdlGpuShaderPayload(SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV, unknown) &&
+                  CKSdlGpuShaderPayloadFormat(CKRST_SHADER_FORMAT_SPIRV, CKRST_SHADER_PROFILE_DX12) ==
+                      SDL_GPU_SHADERFORMAT_INVALID,
+              "SDL shader formats map to exactly one payload format and profile");
+    }
     CKShaderDesc invalidVertex, invalidFragment;
     check(!CKSdlGpuNativeClearShaders(SDL_GPU_SHADERFORMAT_INVALID, invalidVertex, invalidFragment) &&
           !CKSdlGpuNativeVolumeShaders(SDL_GPU_SHADERFORMAT_INVALID, invalidVertex, invalidFragment),

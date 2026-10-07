@@ -72,14 +72,12 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     if (!Window) { SDL_SetError("Rasterizer requires a Player-owned SDL_Window"); return Fail("Init.window"); }
     SDL_GPUShaderFormat allowedFormats = desc->ShaderTargets.Size() == 0 ?
         SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL : 0;
+    // DXBC holds only the vertex shaders of compiled programs, no family.
     for (int i = 0; i < desc->ShaderTargets.Size(); ++i) {
         const CKFFShaderTarget &target = desc->ShaderTargets[i];
-        if (target.Format == CKRST_SHADER_FORMAT_DXIL && target.Profile == CKRST_SHADER_PROFILE_DX12)
-            allowedFormats |= SDL_GPU_SHADERFORMAT_DXIL;
-        else if (target.Format == CKRST_SHADER_FORMAT_SPIRV && target.Profile == CKRST_SHADER_PROFILE_SPIRV)
-            allowedFormats |= SDL_GPU_SHADERFORMAT_SPIRV;
-        else if (target.Format == CKRST_SHADER_FORMAT_MSL && target.Profile == CKRST_SHADER_PROFILE_MSL)
-            allowedFormats |= SDL_GPU_SHADERFORMAT_MSL;
+        const SDL_GPUShaderFormat format = CKSdlGpuShaderPayloadFormat(target.Format, target.Profile);
+        if (format != SDL_GPU_SHADERFORMAT_DXBC)
+            allowedFormats |= format;
     }
     allowedFormats &= CKSdlGpuShaderPackFormats();
     if (!allowedFormats) {
@@ -122,10 +120,10 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     Width = unsigned(desc->Width);
     Height = unsigned(desc->Height);
     DebugFlags = desc->DebugFlags;
-    Caps.ShaderFormat = ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_FORMAT_DXIL :
-                        ShaderFormat == SDL_GPU_SHADERFORMAT_MSL ? CKRST_SHADER_FORMAT_MSL : CKRST_SHADER_FORMAT_SPIRV;
-    Caps.ShaderProfile = ShaderFormat == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 :
-                         ShaderFormat == SDL_GPU_SHADERFORMAT_MSL ? CKRST_SHADER_PROFILE_MSL : CKRST_SHADER_PROFILE_SPIRV;
+    CKShaderDesc payload;
+    CKSdlGpuShaderPayload(ShaderFormat, payload);
+    Caps.ShaderFormat = payload.Format;
+    Caps.ShaderProfile = payload.Profile;
     Caps.RequiresIntermediateTarget = TRUE;
     Caps.MaxTextureSize = 16384;
     Caps.MaxTextureBindings = CKFF_TEXTURE_SLOT_COUNT;

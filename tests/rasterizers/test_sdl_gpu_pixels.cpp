@@ -2,6 +2,7 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuNativeShaders.h"
 #include "CKSdlGpuShaders.h"
+#include "CKSdlGpuShaderPack.h"
 #include "CKSdlGpuPresentStage.h"
 #include <SDL3/SDL.h>
 #ifdef min
@@ -174,9 +175,7 @@ static bool CheckExactCopyMatchesBlit(SDL_Window *window)
 // The embedded shader format of the device.
 static SDL_GPUShaderFormat NativeShaderFormat(CKSdlGpuRasterizerContext &backend)
 {
-    const CK_SHADER_FORMAT format = backend.GetCaps().ShaderFormat;
-    return format == CKRST_SHADER_FORMAT_DXIL ? SDL_GPU_SHADERFORMAT_DXIL :
-        format == CKRST_SHADER_FORMAT_MSL ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV;
+    return CKSdlGpuShaderPayloadFormat(backend.GetCaps().ShaderFormat, backend.GetCaps().ShaderProfile);
 }
 
 static bool CheckGenericProgram(CKSdlGpuRasterizerContext &backend)

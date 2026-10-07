@@ -7,23 +7,8 @@ namespace {
 
 CKBOOL SetShaderCode(SDL_GPUShaderFormat format, CKSdlShader shader, CKShaderDesc &out)
 {
-    if (format == SDL_GPU_SHADERFORMAT_DXIL) {
-        out.Format = CKRST_SHADER_FORMAT_DXIL;
-        out.Profile = CKRST_SHADER_PROFILE_DX12;
-    } else if (format == SDL_GPU_SHADERFORMAT_DXBC) {
-        out.Format = CKRST_SHADER_FORMAT_DXBC;
-        out.Profile = CKRST_SHADER_PROFILE_DX12;
-    } else if (format == SDL_GPU_SHADERFORMAT_SPIRV) {
-        out.Format = CKRST_SHADER_FORMAT_SPIRV;
-        out.Profile = CKRST_SHADER_PROFILE_SPIRV;
-    } else if (format == SDL_GPU_SHADERFORMAT_MSL) {
-        out.Format = CKRST_SHADER_FORMAT_MSL;
-        out.Profile = CKRST_SHADER_PROFILE_MSL;
-    } else {
-        return FALSE;
-    }
-    out.EntryPoint = CKSdlGpuShaderEntryPoint(format);
-    return CKSdlGpuShaderCode(format, shader, out.Code, out.CodeSize);
+    return CKSdlGpuShaderPayload(format, out) &&
+           CKSdlGpuShaderCode(format, shader, out.Code, out.CodeSize);
 }
 
 } // namespace
@@ -207,16 +192,10 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
     for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i)
         if (!CKSdlGpuShaderCode(format, shaders[i], out.Shaders[i].Code, out.Shaders[i].CodeSize))
             return FALSE;
-    const CK_SHADER_FORMAT payload = format == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_FORMAT_DXIL :
-        format == SDL_GPU_SHADERFORMAT_MSL ? CKRST_SHADER_FORMAT_MSL : CKRST_SHADER_FORMAT_SPIRV;
-    const CK_SHADER_PROFILE profile = format == SDL_GPU_SHADERFORMAT_DXIL ? CKRST_SHADER_PROFILE_DX12 :
-        format == SDL_GPU_SHADERFORMAT_MSL ? CKRST_SHADER_PROFILE_MSL : CKRST_SHADER_PROFILE_SPIRV;
     for (unsigned i = 0; i < CKRST_BUILTIN_SHADER_COUNT; ++i) {
         auto &shader = out.Shaders[i];
         shader.Stage = i == CKRST_SHADER_FF_FRAGMENT || i == CKRST_SHADER_PRESENT_FRAGMENT ? CKRST_SHADER_PIXEL : CKRST_SHADER_VERTEX;
-        shader.Format = payload;
-        shader.Profile = profile;
-        shader.EntryPoint = CKSdlGpuShaderEntryPoint(format);
+        CKSdlGpuShaderPayload(format, shader);
         switch (i) {
         case CKRST_SHADER_FF_3D:
         case CKRST_SHADER_FF_3D_CLIP:
@@ -246,5 +225,5 @@ CKBOOL CKSdlGpuShaderSet(SDL_GPUShaderFormat format, CKFFShaderSet &out)
         !CKSdlGpuFFFragmentShader(format, fragmentArtifactKey, fragment))
         return FALSE;
     out.Shaders[CKRST_SHADER_FF_FRAGMENT] = fragment;
-    return out.Matches(payload, profile);
+    return out.Matches(fragment.Format, fragment.Profile);
 }
