@@ -35,7 +35,8 @@ CKFF_ROOT = HERE.parent.parent / "CKFFPLib"
 SHARED = CKFF_ROOT / "ShaderModel" / "shaders"
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(CKFF_ROOT / "ShaderModel"))
-from shader_abi_codegen import sampler_layouts, sync_sampler_layout, sync_sampler_shader_state
+from shader_abi_codegen import (sampler_layouts, sync_sampler_layout, sync_sampler_shader_state,
+                                write_if_changed)
 import shader_pack
 SAMPLER_LAYOUT_DEF = CKFF_ROOT / "ShaderModel" / "CKFFSamplerLayout.def"
 SAMPLER_LAYOUT_SHADER = SHARED / "ff_sampler_layout.sh"
@@ -687,10 +688,10 @@ def main() -> None:
         print(f"{format_}: {sum(len(c) for (f, _), c in codes.items() if f == format_)} bytes "
               f"of artifacts packed into {len(pack)}")
     for name, text in headers.items():
-        (args.output_dir / name).write_text(text)
-    (args.output_dir / "shaders.h").write_text(shader_ids_header())
-    (args.output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (args.output_dir / "abi.h").write_text(abi_header(abi, abi_hash))
+        write_if_changed(args.output_dir / name, text)
+    write_if_changed(args.output_dir / "shaders.h", shader_ids_header())
+    write_if_changed(args.output_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
+    write_if_changed(args.output_dir / "abi.h", abi_header(abi, abi_hash))
     print(f"Generated and reflected the {','.join(formats)} native shaders" +
           (f"; kept {','.join(kept)}." if kept else "."))
 

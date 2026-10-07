@@ -9,6 +9,18 @@ import re
 SAMPLER_STATE_ENUM = "CKFFSamplerShaderStateABI"
 
 
+def write_if_changed(path: Path, text: str, newline: str | None = None) -> bool:
+    """Writes text unless the file already holds it, whatever its line endings.
+
+    An unchanged artifact keeps its line endings and timestamp, so a checkout
+    stays clean and nothing that depends on it rebuilds.
+    """
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return False
+    path.write_text(text, encoding="utf-8", newline=newline)
+    return True
+
+
 class SamplerLayout:
     def __init__(self, name: str, value: int, two_d: int,
                  cube: int, volume: int) -> None:
@@ -197,7 +209,7 @@ def sync_sampler_layout(definition: Path, shader: Path,
             raise ValueError(
                 f"{shader}: stale sampler layout; regenerate shader artifacts")
         return
-    shader.write_text(expected, encoding="utf-8", newline="\n")
+    write_if_changed(shader, expected, newline="\n")
 
 
 def sampler_shader_state_constants(header: Path) -> list[tuple[str, int]]:
@@ -254,4 +266,4 @@ def sync_sampler_shader_state(header: Path, shader: Path, verify: bool = False) 
                 f"{shader}: stale sampler shader ABI; regenerate shader artifacts"
             )
         return
-    shader.write_text(expected, encoding="utf-8", newline="\n")
+    write_if_changed(shader, expected, newline="\n")
