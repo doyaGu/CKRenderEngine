@@ -169,8 +169,6 @@ ckre_add_spirv_validation(ShaderJitSpirvValidation test_shader_jit_spirv shader_
 ckre_add_dxbc_validation(ShaderJitDxbcValidation test_shader_jit_dxbc shader_jit_dxbc)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
-add_test(NAME BgfxDependencyDisabled
-    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/check_bgfx_disabled.cmake)
 if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
     add_executable(scene_capture_image_tests test_scene_capture_image.cpp ../tools/scene_capture/ImageIO.cpp)
     target_include_directories(scene_capture_image_tests PRIVATE ../tools/scene_capture)
@@ -358,9 +356,6 @@ ckre_add_ckff_test(draw_state_cache_tests
 ckre_add_ckff_test(ff_uniform_state_tests
     test_ff_uniform_state.cpp
 )
-if (TARGET CKBgfxRasterizerStatic)
-    target_compile_definitions(ff_uniform_state_tests PRIVATE CKRE_TEST_BGFX_ARTIFACTS=1)
-endif ()
 
 ckre_add_ckff_test(ffp_state_matrix_tests
     test_ffp_state_matrix.cpp
@@ -374,25 +369,7 @@ ckre_add_spirv_validation(FFNativeFragmentJitSpirvValidation ff_native_fragment_
 ckre_add_dxbc_validation(FFNativeFragmentJitDxbcValidation ff_native_fragment_jit_tests ff_native_fragment_jit_dxbc)
 
 # Real-backend pixel gate: fixed-function semantics driven through the public
-# rasterizer interface on the bgfx plugin (env-gated, see test_rasterizer3_pixels.cpp).
-if (TARGET CKBgfxRasterizerStatic AND TARGET SDL3::SDL3)
-    ckre_add_recording_context_white_box_test(rasterizer3_pixel_tests
-        test_rasterizer3_pixels.cpp
-    )
-    target_include_directories(rasterizer3_pixel_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer/Native
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKBgfxRasterizer/Rasterizer
-    )
-    target_link_libraries(rasterizer3_pixel_tests PRIVATE
-        CKBgfxRasterizerStatic
-        SDL3::SDL3
-        bgfx
-        bimg
-        bx
-    )
-endif ()
-
+# rasterizer interface on the SDL_gpu plugin (env-gated, see test_rasterizer3_pixels.cpp).
 if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     ckre_add_recording_context_white_box_test(sdl_gpu_ffp_pixel_tests test_rasterizer3_pixels.cpp)
     target_include_directories(sdl_gpu_ffp_pixel_tests PRIVATE
@@ -402,9 +379,6 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
     # Software rasterizers on CI runners (lavapipe, WARP) take several minutes.
     set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
-endif ()
-if (TARGET rasterizer3_pixel_tests)
-    set_tests_properties(rasterizer3_pixel_tests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
 endif ()
 
 ckre_add_recording_ckff_test(rasterizer_backend_tests
@@ -440,7 +414,6 @@ if (TARGET CK2_3DStatic)
         test_static_rasterizer_registration.cpp
     )
     target_compile_definitions(static_rasterizer_registration_tests PRIVATE
-        CKRE_EXPECT_BGFX=$<BOOL:$<TARGET_EXISTS:CKBgfxRasterizerStatic>>
         CKRE_EXPECT_SDL_GPU=$<BOOL:$<TARGET_EXISTS:CKSdlGpuRasterizerStatic>>)
 
 endif ()

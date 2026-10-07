@@ -36,10 +36,10 @@ CK2 draw state
 | Runtime admission, jobs, fallbacks, manifests and statistics | `../CKSdlGpuRasterizer/Rasterizer/CKSdlGpuRasterizerFFJit.cpp` |
 
 CKShaderJit currently emits DXBC on the D3D12 path supported by SDL GPU and
-SPIR-V on Vulkan. It has no DXIL, GLSL or Metal emitter and is not integrated
-into the bgfx runtime. The precompiled fixed-function shaders remain required:
-they provide immediate and failure-safe rendering while asynchronous shader or
-pipeline work is pending, unavailable or rejected.
+SPIR-V on Vulkan. It has no DXIL, GLSL or Metal emitter. The precompiled
+fixed-function shaders remain required: they provide immediate and failure-safe
+rendering while asynchronous shader or pipeline work is pending, unavailable or
+rejected.
 
 ## IR contract
 

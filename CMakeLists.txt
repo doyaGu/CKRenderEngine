@@ -16,7 +16,6 @@ project(CKRenderEngine VERSION 0.1.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(CKREShaderc)
 
 # =============================================================================
 # Determine if this is a top-level project
@@ -36,37 +35,12 @@ endif ()
 # =============================================================================
 option(CKRE_BUILD_SHARED "Build shared library" ON)
 option(CKRE_BUILD_STATIC "Build static library" OFF)
-option(CKRE_BUILD_BGFX_RASTERIZER "Fetch and build the optional bgfx rasterizer" OFF)
 option(CKRE_BUILD_SDL_GPU_RASTERIZER "Build SDL_gpu rasterizer plugin targets" ON)
 # Graphics APIs of the platform. Shader formats and identities are portable;
 # their emitters, embedded shaders and API paths are built for these only.
 include(CMakeDependentOption)
 cmake_dependent_option(CKRE_ENABLE_DIRECTX "Build the Direct3D shaders and backend paths" ON "WIN32" OFF)
 cmake_dependent_option(CKRE_ENABLE_METAL "Build the Metal shaders and backend paths" ON "APPLE" OFF)
-set(CKRE_BGFX_OPENGLES_VERSION "" CACHE STRING
-    "Build bgfx with the requested OpenGL ES renderer version instead of its platform defaults")
-set_property(CACHE CKRE_BGFX_OPENGLES_VERSION PROPERTY STRINGS "" 20 30 31 32)
-# The bgfx renderers of the platform that the rasterizer has shaders for. An
-# OpenGL ES build has only that renderer.
-if (CKRE_BGFX_OPENGLES_VERSION)
-    set(CKRE_BGFX_RENDERERS OPENGLES)
-else ()
-    set(CKRE_BGFX_RENDERERS "")
-    if (CKRE_ENABLE_DIRECTX)
-        list(APPEND CKRE_BGFX_RENDERERS DIRECT3D11 DIRECT3D12)
-    endif ()
-    list(APPEND CKRE_BGFX_RENDERERS VULKAN)
-    if (NOT APPLE)
-        list(APPEND CKRE_BGFX_RENDERERS OPENGL)
-    endif ()
-    if (CKRE_ENABLE_METAL)
-        list(APPEND CKRE_BGFX_RENDERERS METAL)
-    endif ()
-endif ()
-option(CKRE_GENERATE_SHADERS "Regenerate bgfx fixed-function shader headers (requires the bgfx rasterizer)" OFF)
-if(CKRE_GENERATE_SHADERS AND NOT CKRE_BUILD_BGFX_RASTERIZER)
-    message(FATAL_ERROR "CKRE_GENERATE_SHADERS requires CKRE_BUILD_BGFX_RASTERIZER=ON; SDL uses its own offline artifacts")
-endif()
 option(CKRE_BUILD_TESTS "Build tests" OFF)
 option(CKRE_BUILD_TOOLS "Build ckre_scene_capture (needs CKRE_BUILD_SHARED)" ${CKRE_BUILD_TESTS})
 option(CKRE_INSTALL "Generate install target" ${CKRE_IS_TOP_LEVEL})
@@ -304,11 +278,6 @@ endif ()
 # =============================================================================
 # Build library
 # =============================================================================
-include(CKREBgfx)
-ckre_fetch_bgfx_sources()
-ckre_prepare_shaderc()
-add_subdirectory(deps)
-ckre_resolve_shaderc()
 if (CKRE_BUILD_TESTS)
     enable_testing()
 endif ()
@@ -376,10 +345,6 @@ if (CKRE_IS_TOP_LEVEL)
     message(STATUS "  Build Type:           ${CMAKE_BUILD_TYPE}")
     message(STATUS "  Build Shared:         ${CKRE_BUILD_SHARED}")
     message(STATUS "  Build Static:         ${CKRE_BUILD_STATIC}")
-    message(STATUS "  Build bgfx Rasterizer:${CKRE_BUILD_BGFX_RASTERIZER}")
-    if (CKRE_BUILD_BGFX_RASTERIZER)
-        message(STATUS "  bgfx Renderers:       ${CKRE_BGFX_RENDERERS}")
-    endif ()
     message(STATUS "  Build SDL_gpu Rasterizer:${CKRE_BUILD_SDL_GPU_RASTERIZER}")
     message(STATUS "  DirectX:              ${CKRE_ENABLE_DIRECTX}")
     message(STATUS "  Metal:                ${CKRE_ENABLE_METAL}")

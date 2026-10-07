@@ -1,9 +1,8 @@
 # Remove only known plugin binaries left by a previous stage configuration.
 # Keep user configuration, other plugins and assets. External install prefixes
 # are never cleaned automatically.
-if (NOT DEFINED BUILD_ROOT OR NOT DEFINED STAGE_ROOT OR
-        NOT DEFINED CKRE_BUILD_BGFX_RASTERIZER OR NOT DEFINED CKRE_BUILD_SDL_GPU_RASTERIZER)
-    message(FATAL_ERROR "Build/stage roots and both rasterizer options are required")
+if (NOT DEFINED BUILD_ROOT OR NOT DEFINED STAGE_ROOT OR NOT DEFINED CKRE_BUILD_SDL_GPU_RASTERIZER)
+    message(FATAL_ERROR "Build/stage roots and the rasterizer option are required")
 endif ()
 get_filename_component(_build_root "${BUILD_ROOT}" REALPATH)
 get_filename_component(_stage_root "${STAGE_ROOT}" REALPATH)

@@ -2,19 +2,19 @@
 #
 # Arguments (-D): TOOL, ENGINE_DIR, GOLDEN_ROOT, OUT_DIR, SKIP.
 # Environment:
-#   CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1  required, otherwise the test is skipped
-#   CKBGFX_RENDERER_BACKEND=<backend>      golden directory suffix (default "default")
+#   CKRE_RUN_GPU_RUNTIME_TESTS=1           required, otherwise the test is skipped
+#   CKRE_SDL_GPU_DRIVER=<driver>           golden directory suffix (default "default")
 #   CKRE_GOLDEN_RUNNER=<runner>            golden directory prefix (default "local")
 #   CKRE_UPDATE_GOLDEN=1                   write the golden frames instead of comparing
 #   CKRE_SCENE_CAPTURE_SKIP=<a,b>          scenes the GPU of the runner cannot render
 # A line containing SKIPPED marks the test as skipped (SKIP_REGULAR_EXPRESSION).
 
-if (NOT "$ENV{CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS}" STREQUAL "1")
-    message(STATUS "SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the scene capture golden gate")
+if (NOT "$ENV{CKRE_RUN_GPU_RUNTIME_TESTS}" STREQUAL "1")
+    message(STATUS "SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 to run the scene capture golden gate")
     return()
 endif ()
 
-set(_backend "$ENV{CKBGFX_RENDERER_BACKEND}")
+set(_backend "$ENV{CKRE_SDL_GPU_DRIVER}")
 if (_backend STREQUAL "")
     set(_backend "default")
 endif ()

@@ -274,8 +274,7 @@ bool CaptureApp::InitEngine(const CaptureOptions &options)
     int selectedDriver = options.Driver;
     if (!options.Rasterizer.empty()) {
         selectedDriver = -1;
-        const char *wanted = options.Rasterizer == "sdlgpu" ? "SDL_gpu Driver" :
-            (options.Rasterizer == "bgfx" ? "bgfx Driver" : "NULL Rasterizer");
+        const char *wanted = options.Rasterizer == "sdlgpu" ? "SDL_gpu Driver" : "NULL Rasterizer";
         for (int i = 0; i < m_DriverCount; ++i) {
             VxDriverDesc *candidate = m_RenderManager->GetRenderDriverDescription(i);
             if (candidate && EqualsNoCase(candidate->DriverName, wanted)) { selectedDriver = i; break; }

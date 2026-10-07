@@ -3,11 +3,11 @@
 #
 # Arguments (-D): TOOL, ENGINE_DIR, OUT_DIR.
 # Environment:
-#   CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1  required, otherwise the test is skipped
+#   CKRE_RUN_GPU_RUNTIME_TESTS=1           required, otherwise the test is skipped
 #   CKRE_SCENE_CAPTURE_SKIP=<a,b>          scenes the GPU of the runner cannot render
 
-if (NOT "$ENV{CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS}" STREQUAL "1")
-    message(STATUS "SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the multiframe scene gate")
+if (NOT "$ENV{CKRE_RUN_GPU_RUNTIME_TESTS}" STREQUAL "1")
+    message(STATUS "SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 to run the multiframe scene gate")
     return()
 endif ()
 

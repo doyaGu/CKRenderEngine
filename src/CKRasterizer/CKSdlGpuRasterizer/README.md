@@ -71,8 +71,7 @@ and reflected bindings. Runtime device selection intersects complete families
 with driver support; it never invokes a shader compiler. Windows defaults to
 D3D12 and Apple platforms to Metal, whose MSL SPIRV-Cross translates from the
 SPIR-V; the FF JIT emits no MSL and is off there. `CKRE_SDL_GPU_DRIVER=vulkan`
-explicitly selects Vulkan. SDL-only builds do not build or stage bgfx shader
-containers.
+explicitly selects Vulkan.
 
 Run the native and public-interface tests on the interactive desktop with
 `--visible`, `CKRE_GPU_TEST_INTERACTIVE_START=1`, and `CKRE_GPU_TEST_HOLD=1`.

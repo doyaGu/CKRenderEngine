@@ -160,10 +160,6 @@ void EnumerateRasterizers() {
         extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
         RegisterStaticRasterizer(CKSdlGpuRasterizerGetInfo, "CKSdlGpuRasterizer");
 #endif
-#if defined(CKRE_STATIC_BGFX_RASTERIZER)
-        extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
-        RegisterStaticRasterizer(CKBgfxRasterizerGetInfo, "CKBgfxRasterizer");
-#endif
 
 #if defined(CKRE_DYNAMIC_RENDER_ENGINE)
         XString moduleName = CKRenderEngineModulePath();

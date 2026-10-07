@@ -1,9 +1,9 @@
 # CI golden frames
 
-One directory per CI runner and backend, named `<runner>-<backend>`:
+One directory per CI runner and SDL_gpu driver, named `<runner>-<driver>`:
 
-- `ci-windows-x64-d3d11`, `ci-windows-x64-d3d12` (WARP)
-- `ci-linux-x64-opengl`, `ci-linux-x64-opengles`, `ci-linux-x64-vulkan` (llvmpipe under xvfb)
+- `ci-windows-x64-direct3d12` (WARP)
+- `ci-linux-x64-vulkan` (lavapipe under xvfb)
 - `ci-macos-arm64-metal`
 
 Each directory holds `<scene>.png` produced by `ckre_scene_capture` with our

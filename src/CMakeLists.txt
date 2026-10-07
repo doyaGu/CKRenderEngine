@@ -238,11 +238,6 @@ if (CKRE_BUILD_STATIC)
     target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_RENDER_ENGINE=1)
     ckre_configure_target(CK2_3DStatic)
 
-    if (TARGET CKBgfxRasterizerStatic)
-        target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_BGFX_RASTERIZER=1)
-        target_link_libraries(CK2_3DStatic PRIVATE $<BUILD_INTERFACE:CKBgfxRasterizerStatic>)
-    endif ()
-
     if (TARGET CKSdlGpuRasterizerStatic)
         target_compile_definitions(CK2_3DStatic PRIVATE CKRE_STATIC_SDL_GPU_RASTERIZER=1)
         target_link_libraries(CK2_3DStatic PRIVATE $<BUILD_INTERFACE:CKSdlGpuRasterizerStatic>)

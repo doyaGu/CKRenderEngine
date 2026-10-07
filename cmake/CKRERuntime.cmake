@@ -17,11 +17,7 @@ ckre_get_rasterizers(_ckre_unused _ckre_disabled_runtime_providers
         "${CKRE_STATIC_RUNTIME}")
 set_property(GLOBAL PROPERTY CKRE_DISABLED_RUNTIME_OUTPUTS
         "${_ckre_disabled_runtime_providers}")
-set(_ckre_runtime_configs CK2_3D.ini)
-if (CKRE_BUILD_BGFX_RASTERIZER)
-    list(APPEND _ckre_runtime_configs CKBgfxRasterizer.ini)
-endif ()
-set_property(GLOBAL PROPERTY CKRE_RUNTIME_CONFIGS "${_ckre_runtime_configs}")
+set_property(GLOBAL PROPERTY CKRE_RUNTIME_CONFIGS CK2_3D.ini)
 
 if (CKRE_INSTALL)
     set(_ckre_required_files "")
@@ -34,15 +30,8 @@ if (CKRE_INSTALL)
         set(_ckre_config_directory Bin)
         install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/CK2_3D.ini"
                 DESTINATION Bin COMPONENT Runtime)
-        if (CKRE_BUILD_BGFX_RASTERIZER)
-            install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/CKRasterizer/CKBgfxRasterizer/CKBgfxRasterizer.ini"
-                    DESTINATION Bin COMPONENT Runtime)
-        endif ()
     endif ()
     list(APPEND _ckre_required_files "${_ckre_config_directory}/CK2_3D.ini")
-    if (CKRE_BUILD_BGFX_RASTERIZER)
-        list(APPEND _ckre_required_files "${_ckre_config_directory}/CKBgfxRasterizer.ini")
-    endif ()
     configure_file("${CMAKE_CURRENT_LIST_DIR}/CKREInstallRuntime.cmake.in"
             "${CMAKE_CURRENT_BINARY_DIR}/CKREInstallRuntime.cmake.in" @ONLY)
     file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/CKREInstallRuntime-$<CONFIG>.cmake"
@@ -51,8 +40,6 @@ if (CKRE_INSTALL)
 endif ()
 
 if (BUILD_TESTING)
-    add_test(NAME ShaderToolPlatformSelection
-            COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_LIST_DIR}/CKRETestShaderToolPlatform.cmake")
     add_test(NAME RasterizerInstallSelection
             COMMAND "${CMAKE_COMMAND}" "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/install-selection-test"
             -P "${CMAKE_CURRENT_LIST_DIR}/CKRETestRasterizerInstall.cmake")

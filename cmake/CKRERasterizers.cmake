@@ -8,12 +8,13 @@ endfunction()
 # Keep script-mode defaults aligned with configure without changing the caller's
 # cache. Enabled targets participate in both dynamic and static compositions;
 # disabled binaries also include enabled providers when using static registration.
+# Retired providers are always disabled: stages configured before their removal
+# may still hold their binaries, which the engine would load.
 function(ckre_get_rasterizers OUT_ENABLED OUT_DISABLED_BINARIES STATIC_REGISTRATION)
     set(_enabled "")
-    set(_disabled "")
+    set(_disabled CKBgfxRasterizer)
     # Target | build option | default
     foreach (_entry IN ITEMS
-            "CKBgfxRasterizer|CKRE_BUILD_BGFX_RASTERIZER|OFF"
             "CKSdlGpuRasterizer|CKRE_BUILD_SDL_GPU_RASTERIZER|ON")
         string(REPLACE "|" ";" _fields "${_entry}")
         list(GET _fields 0 _target)

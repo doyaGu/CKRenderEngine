@@ -1,20 +1,15 @@
-// rasterizer3_pixel_tests: fixed-function semantics that only a real backend
+// sdl_gpu_ffp_pixel_tests: fixed-function semantics that only a real backend
 // can prove. Most cases drive the private CKRasterizer interface in a
 // visible SDL window; explicit white-box cases verify backend resource and
 // presentation invariants. Pixels come back through CopyToMemoryBuffer, so
 // the readback path is part of the gate.
 //
-// Gated by CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 (or the older
-// CKRE_RUN_OPENGL_RUNTIME_TESTS=1); the backend comes from
-// CKBGFX_RENDERER_BACKEND (default opengl).
+// Gated by CKRE_RUN_GPU_RUNTIME_TESTS=1; CKRE_SDL_GPU_DRIVER selects the
+// SDL_gpu driver.
 
 #include "CKRasterizer.h"
-#ifdef CKRE_PIXEL_SDL_GPU
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKFFNativeFragmentJit.h"
-#else
-#include "CKBgfxRasterizerContext.h"
-#endif
 #include "TestTriangleMultiset.h"
 #include "TestFFImageDiff.h"
 
@@ -28,12 +23,7 @@
 #include <vector>
 
 // Static plugin entry; both executables run the same public rasterizer cases.
-#ifdef CKRE_PIXEL_SDL_GPU
 extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
-#else
-extern void CKBgfxRasterizerGetInfo(CKRasterizerInfo *info);
-
-#endif
 
 namespace {
 
@@ -112,11 +102,7 @@ CKBOOL OpenBackend(Backend &b, int width, int height)
         return FALSE;
     SDL_ShowWindow(b.Window);
     SDL_RaiseWindow(b.Window);
-#ifdef CKRE_PIXEL_SDL_GPU
     CKSdlGpuRasterizerGetInfo(&b.Info);
-#else
-    CKBgfxRasterizerGetInfo(&b.Info);
-#endif
     TestCheck(b.Info.InterfaceRevision == CKRST_INTERFACE_REVISION,
               "plugin reports the current interface revision");
     TestCheck(b.Info.StartFct != NULL && b.Info.CloseFct != NULL, "plugin entry points");
@@ -948,7 +934,6 @@ void RunPixelCases(CKRasterizerContext *ctx, const char *mode, Samples &samples)
     DestroyTextures(ctx, textures);
 }
 
-#ifdef CKRE_PIXEL_SDL_GPU
 void CheckMatchingImage(const char *name, const Pixels &actual, const Pixels &expected,
                         unsigned tolerance = 1, const CKBYTE *clear = nullptr)
 {
@@ -1336,13 +1321,6 @@ void CheckPrewarmedFragmentPrograms(const Samples &precompiled)
            (unsigned)saved.Ready, (unsigned)saved.Programs, (unsigned)saved.Pipelines,
            (unsigned)saved.Precompiled);
 }
-#else
-// Only SDL_gpu compiles fragment programs.
-void CheckCompiled(Backend &b, const char *, void (*check)(Backend &))
-{
-    check(b);
-}
-#endif
 
 // Ordered updates and copies must preserve the values sampled by earlier draws.
 void CheckOrderedTextureUpdates(Backend &b)
@@ -2813,14 +2791,10 @@ void CheckLayeredTextureUpdates(Backend &b)
 void CheckWideSamplerLayouts(Backend &b)
 {
     auto *ctx = b.Context;
-#ifdef CKRE_PIXEL_SDL_GPU
     // The paravirtual Metal device of macOS virtual machines samples no cube
     // stage of the wide cube layout but the first correctly; Apple GPUs pass.
     const bool paravirtual = strcmp(static_cast<CKSdlGpuRasterizerContext *>(ctx)->GetDeviceNameForTests(),
                                     "Apple Paravirtual device") == 0;
-#else
-    const bool paravirtual = false;
-#endif
     for (bool volume : {false, true}) {
         if (!volume && paravirtual) {
             printf("  five cube stages: skipped on the Apple Paravirtual device\n");
@@ -3581,13 +3555,8 @@ void CheckIndependentAttachmentClears(Backend &b)
 
 void CheckFilteredDepthComparison(Backend &b)
 {
-#ifdef CKRE_PIXEL_SDL_GPU
     CKSdlGpuRasterizerContext *backend =
         static_cast<CKSdlGpuRasterizerContext *>(b.Context);
-#else
-    CKBgfxRasterizerContext *backend =
-        static_cast<CKBgfxRasterizerContext *>(b.Context);
-#endif
     CKRasterizerContext *ctx = b.Context;
 
     CKTextureDesc colorDesc;
@@ -4064,21 +4033,17 @@ void CheckOrderedReadbacks(Backend &b)
 
 void CheckReadbackShutdown(Backend &b)
 {
-#ifdef CKRE_PIXEL_SDL_GPU
     const auto depthPad = static_cast<CKSdlGpuRasterizerContext *>(b.Context)->GetDepthPadForTests();
     const bool hadDepthPad = !depthPad.expired();
-#endif
     ReadbackCapture capture;
     BeginFrame(b.Context, CKRST_CTXCLEAR_COLOR);
     TestCheck(DrawColorTriangle(b.Context, kCenterTriangle, kGreen), "draw before shutdown snapshot");
     TestCheck(b.Context->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &capture),
               "readback before shutdown");
     TestCheck(b.Context->BeginShutdown(), "shutdown with an unsubmitted readback");
-#ifdef CKRE_PIXEL_SDL_GPU
     TestCheck(depthPad.expired(), "shutdown releases cached depth textures before destroying their GPU device");
     if (hadDepthPad)
         printf("  cached depth texture released during shutdown: passed\n");
-#endif
     TestCheck(capture.Calls == 1 && !capture.Success, "shutdown cancels the consumer exactly once");
     TestCheck(b.Context->BeginShutdown() && capture.Calls == 1, "repeated shutdown does not repeat the callback");
 }
@@ -4125,14 +4090,6 @@ void CheckResizeAndReadback(Backend &b)
     }, pixels);
     TestCheck(pixels.Width == 48 && pixels.Height == 96, "synchronous readback follows the new size");
     TestCheckf(PixelNear(pixels, 24, 48, 0, 255, 0), "portrait frame centre must be green");
-#ifndef CKRE_PIXEL_SDL_GPU
-    auto *native = static_cast<CKBgfxRasterizerContext *>(ctx);
-    const CKRECT presented = native->GetWindowViewRectForTests();
-    int drawableWidth = 0, drawableHeight = 0;
-    TestCheck(SDL_GetWindowSizeInPixels(b.Window, &drawableWidth, &drawableHeight), "query actual drawable size");
-    TestCheck(presented.left == 0 && presented.top == 0 && presented.right == drawableWidth && presented.bottom == drawableHeight,
-              "bgfx presents the logical image across the whole drawable window");
-#endif
     TestCheck(ctx->IsIdle(), "idle after the readbacks");
     TestCheck(pendingResize.Calls == 1 && pendingResize.Success && pendingResize.Width == 64 && pendingResize.Height == 64,
               "outstanding readback retains its old dimensions across resize");
@@ -4259,7 +4216,7 @@ void CheckViewport(Backend &b)
 }
 
 // The very first frame of a context, engine style: overlay phase, then a
-// present that switches the swap chain to vsync (bgfx::reset). The frame must
+// present that switches the swap chain to vsync (new swapchain parameters). The frame must
 // still be readable right away.
 void CheckFirstFrame(Backend &b)
 {
@@ -4490,12 +4447,8 @@ void CheckDithered16BitTarget(Backend &b)
 
 void CheckTypedPersistentBufferUpdates(Backend &b)
 {
-#ifdef CKRE_PIXEL_SDL_GPU
     CKSdlGpuRasterizerContext *backend =
         static_cast<CKSdlGpuRasterizerContext *>(b.Context);
-#else
-    CKBgfxRasterizerContext *backend = static_cast<CKBgfxRasterizerContext *>(b.Context);
-#endif
     float vertices[9] = {0.0f};
     CKWORD indices[3] = {0, 1, 2};
 
@@ -4537,25 +4490,9 @@ void CheckTypedPersistentBufferUpdates(Backend &b)
 }
 
 
-#ifndef CKRE_PIXEL_SDL_GPU
-void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
-{
-    CKBgfxRasterizerContext *backend = static_cast<CKBgfxRasterizerContext *>(b.Context);
-    const CKDWORD previousView = backend->ExchangeNextViewForTests();
-    CKRenderPassDesc pass;
-    pass.Rect.right = kWidth;
-    pass.Rect.bottom = kHeight;
-    TestCheck(backend->BeginPass(&pass) == CKERR_OUTOFMEMORY,
-              "view exhaustion must reject the new pass");
-    TestCheck(backend->IsIdle(), "rejected pass must not leave a frame in progress");
-    backend->ExchangeNextViewForTests(previousView);
-}
-
-#endif
 
 // ---------------------------------------------------------------------------
 
-#ifdef CKRE_PIXEL_SDL_GPU
 #include "TestFFJitReplay.inl"
 #include "TestFFJitCache.inl"
 #include "TestFFJitPipeline.inl"
@@ -4563,7 +4500,6 @@ void CheckViewExhaustionFailsWithoutOpeningAFrame(Backend &b)
 #include "TestFFPositionTDepth.inl"
 #include "TestFFDepthPadScene.inl"
 #include "TestFFUnlitDepth.inl"
-#endif
 
 void CheckFullImageComparator()
 {
@@ -4588,24 +4524,12 @@ void CheckFullImageComparator()
 
 void BackendRendersFixedFunctionSemantics()
 {
-#ifdef CKRE_PIXEL_SDL_GPU
     const char *requestedBackend = GetEnvValue("CKRE_SDL_GPU_DRIVER");
-    if (!requestedBackend) requestedBackend = CKRE_ENABLE_DIRECTX ? "direct3d12" : "vulkan";
-#else
-    const char *requestedBackend = GetEnvValue("CKRE_RUNTIME_BACKEND");
-    if (!requestedBackend)
-        requestedBackend = GetEnvValue("CKRE_BGFX_RUNTIME_BACKEND");
-    if (!requestedBackend)
-        requestedBackend = GetEnvValue("CKBGFX_RENDERER_BACKEND");
-    if (!requestedBackend)
-        requestedBackend = "opengl";
-    SetEnvValue("CKBGFX_RENDERER_BACKEND", requestedBackend);
-    #endif
+    if (!requestedBackend) requestedBackend = CKRE_ENABLE_DIRECTX ? "direct3d12" : CKRE_ENABLE_METAL ? "metal" : "vulkan";
     printf("  backend: %s\n", requestedBackend);
 
     TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
 
-#ifdef CKRE_PIXEL_SDL_GPU
     if (EnvFlagEnabled("CKRE_FF_DEPTH_PAD_ONLY")) {
         CheckDepthPadScene();
         SDL_Quit();
@@ -4622,9 +4546,7 @@ void BackendRendersFixedFunctionSemantics()
         SDL_Quit();
         return;
     }
-#endif
     Samples samples;
-#ifdef CKRE_PIXEL_SDL_GPU
     Samples precompiled;
     auto replayCases = MakeFFReplayCases();
     const auto replayTextures = MakeFFReplayTextures();
@@ -4651,14 +4573,11 @@ void BackendRendersFixedFunctionSemantics()
     CloseBackend(reference);
     if (hadJitSetting) SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT", savedJitSetting.c_str(), 1);
     else SDL_unsetenv_unsafe("CKRE_SDL_GPU_FF_JIT");
-#endif
     Backend backend;
     const CKBOOL opened = OpenBackend(backend, kWidth, kHeight);
-#ifdef CKRE_PIXEL_SDL_GPU
     // The contexts of the JIT checks below run on the same driver.
     const bool jit = opened &&
         static_cast<CKSdlGpuRasterizerContext *>(backend.Context)->IsFFJitEnabledForTests();
-#endif
     if (opened) {
         if (EnvFlagEnabled("CKRE_GPU_TEST_INTERACTIVE_START")) {
             SDL_SetWindowTitle(backend.Window, "rasterizer3-pixels - press Enter to start");
@@ -4681,12 +4600,10 @@ void BackendRendersFixedFunctionSemantics()
         CheckFirstFrame(backend);
         CheckTypedPersistentBufferUpdates(backend);
         RunPixelCases(backend.Context, "uber", samples);
-#ifdef CKRE_PIXEL_SDL_GPU
         CheckMatchingSamples("cold", samples, precompiled);
         CheckCompiledFragmentPrograms(backend, precompiled);
         CheckFFReplay(backend, replayCases, replayTextures, replayReference);
         CheckCompiledProgramDepthInvariance(backend);
-#endif
         CheckCompiled(backend, "wide sampler layout", CheckWideSamplerLayouts);
         CheckOrderedTextureUpdates(backend);
         CheckPaddedTextureUpload(backend);
@@ -4718,9 +4635,6 @@ void BackendRendersFixedFunctionSemantics()
         CheckViewport(backend);
         CheckRenderTargetReadback(backend);
         CheckDithered16BitTarget(backend);
-#ifndef CKRE_PIXEL_SDL_GPU
-        CheckViewExhaustionFailsWithoutOpeningAFrame(backend);
-#endif
         fflush(stdout);
         if (EnvFlagEnabled("CKRE_GPU_TEST_HOLD")) {
             // Preserve a visible final frame for desktop evidence, still pumping events.
@@ -4735,7 +4649,6 @@ void BackendRendersFixedFunctionSemantics()
         CheckReadbackShutdown(backend);
     }
     CloseBackend(backend);
-#ifdef CKRE_PIXEL_SDL_GPU
     if (jit)
         CheckPrewarmedFragmentPrograms(precompiled);
     if (jit)
@@ -4750,7 +4663,6 @@ void BackendRendersFixedFunctionSemantics()
         CheckUnlitJitDepth();
         CheckUnlitJitTransitions();
     }
-#endif
 
     SDL_QuitSubSystem(SDL_INIT_VIDEO);
     printf("  coverage: pixelCases=%d tolerance=%d\n", (int)SAMPLE_COUNT, kTolerance);
@@ -4762,21 +4674,17 @@ int main(int argc, char **argv)
 {
     TestFramework tests;
     tests.Run("full-image comparator detects color, alpha and coverage differences", &CheckFullImageComparator);
-#ifdef CKRE_PIXEL_SDL_GPU
     tests.Run("JIT usage is bounded and decays after inactivity", &CheckFFJitUsage);
-#endif
     if (tests.ExitCode() != 0 || (argc > 1 && strcmp(argv[1], "--image-diff-only") == 0))
         return tests.ExitCode();
     const bool visible = argc > 1 && strcmp(argv[1], "--visible") == 0;
-    if (!visible && !EnvFlagEnabled("CKRE_RUN_OPENGL_RUNTIME_TESTS") && !EnvFlagEnabled("CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS")) {
-        printf("SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 to run the real-backend pixel gate.\n");
+    if (!visible && !EnvFlagEnabled("CKRE_RUN_GPU_RUNTIME_TESTS")) {
+        printf("SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 to run the real-backend pixel gate.\n");
         return 77;
     }
-#ifdef CKRE_PIXEL_SDL_GPU
     // Earlier runs must not decide what the cases compile, so they use no
     // compiled program manifest unless one is named.
     SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", "0", 0);
-#endif
 
     tests.Run("backend renders the fixed-function semantics through the private interface",
               &BackendRendersFixedFunctionSemantics);

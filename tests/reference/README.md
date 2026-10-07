@@ -1,8 +1,7 @@
 # Render engine visual references
 
 This directory contains portable inputs for rasterizer regression tests. The
-original `CKDX8Rasterizer.dll` is the visual oracle, while bgfx remains a
-same-engine regression target.
+original `CKDX8Rasterizer.dll` is the visual oracle.
 
 ## Versioned assets
 

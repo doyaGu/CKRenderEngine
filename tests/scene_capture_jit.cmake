@@ -1,5 +1,5 @@
-if(NOT "$ENV{CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS}" STREQUAL "1")
-    message(STATUS "SKIPPED: set CKRE_RUN_BGFX_BACKEND_RUNTIME_TESTS=1 for scene JIT parity")
+if(NOT "$ENV{CKRE_RUN_GPU_RUNTIME_TESTS}" STREQUAL "1")
+    message(STATUS "SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 for scene JIT parity")
     return()
 endif()
 set(_drivers "$ENV{CKRE_SDL_GPU_DRIVER}")

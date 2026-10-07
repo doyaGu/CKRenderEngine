@@ -62,7 +62,7 @@ void PrintUsage()
     printf("usage: ckre_scene_capture --render-engine-dir DIR [options]\n"
            "  --render-engine-dir DIR   directory holding CK2_3D.dll and its rasterizer DLLs\n"
            "  --driver N                render driver index (default 0)\n"
-           "  --rasterizer NAME         stable provider: sdlgpu, bgfx or null; excludes --driver\n"
+           "  --rasterizer NAME         stable provider: sdlgpu or null; excludes --driver\n"
            "  --hold-ms N               keep the presented frame visible for desktop inspection\n"
            "  --scene NAME|all          scene to render (default all; see --list-scenes)\n"
            "  --frames K                frames rendered before the capture (default 1)\n"
@@ -110,7 +110,7 @@ bool ParseArgs(int argc, char **argv, Args &args)
         else if (a == "--driver") { if (!value(v)) return false; args.Capture.Driver = atoi(v.c_str()); args.DriverSpecified = true; }
         else if (a == "--rasterizer") {
             if (!value(args.Capture.Rasterizer)) return false;
-            if (args.Capture.Rasterizer != "sdlgpu" && args.Capture.Rasterizer != "bgfx" && args.Capture.Rasterizer != "null") return false;
+            if (args.Capture.Rasterizer != "sdlgpu" && args.Capture.Rasterizer != "null") return false;
         }
         else if (a == "--hold-ms") {
             if (!value(v)) return false;

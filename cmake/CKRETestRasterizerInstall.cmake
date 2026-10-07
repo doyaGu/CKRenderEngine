@@ -2,19 +2,17 @@ if (NOT DEFINED TEST_ROOT)
     message(FATAL_ERROR "TEST_ROOT is required")
 endif ()
 include("${CMAKE_CURRENT_LIST_DIR}/CKRERasterizers.cmake")
-unset(CKRE_BUILD_BGFX_RASTERIZER)
 unset(CKRE_BUILD_SDL_GPU_RASTERIZER)
 unset(CKRE_STATIC_RUNTIME)
 ckre_get_rasterizers(_enabled _disabled "${CKRE_STATIC_RUNTIME}")
 if (NOT _enabled STREQUAL "CKSdlGpuRasterizer" OR NOT _disabled STREQUAL "CKBgfxRasterizer" OR
-        DEFINED CKRE_BUILD_BGFX_RASTERIZER OR DEFINED CKRE_BUILD_SDL_GPU_RASTERIZER)
+        DEFINED CKRE_BUILD_SDL_GPU_RASTERIZER)
     message(FATAL_ERROR "Script defaults or caller option isolation changed")
 endif ()
-set(CKRE_BUILD_BGFX_RASTERIZER ON)
 set(CKRE_BUILD_SDL_GPU_RASTERIZER ON)
 set(CKRE_STATIC_RUNTIME ON)
 ckre_get_rasterizers(_enabled _disabled "${CKRE_STATIC_RUNTIME}")
-if (NOT _enabled STREQUAL "CKBgfxRasterizer;CKSdlGpuRasterizer" OR
+if (NOT _enabled STREQUAL "CKSdlGpuRasterizer" OR
         NOT _disabled STREQUAL "CKBgfxRasterizer;CKSdlGpuRasterizer")
     message(FATAL_ERROR "Static providers must remain registered without dynamic binaries")
 endif ()
@@ -23,17 +21,16 @@ file(MAKE_DIRECTORY "${_stage}/RenderEngines" "${_stage}/Bin")
 foreach (_file IN ITEMS CKBgfxRasterizer.dll CKSdlGpuRasterizer.dll UserRasterizer.dll CKBgfxRasterizer.ini)
     file(WRITE "${_stage}/RenderEngines/${_file}" "test fixture: ${_file}")
 endforeach ()
-file(WRITE "${_stage}/Bin/libCKBgfxRasterizer.so" "old plugin")
+# The retired bgfx provider of an earlier stage configuration.
 ckre_runtime_library_names(_platform_names CKBgfxRasterizer)
 foreach (_filename IN LISTS _platform_names)
     file(WRITE "${_stage}/Bin/${_filename}" "platform fixture")
 endforeach ()
 
-function(_prune bgfx sdl static stage expect_success)
+function(_prune sdl static stage expect_success)
     execute_process(COMMAND "${CMAKE_COMMAND}"
         "-DBUILD_ROOT=${TEST_ROOT}/build" "-DSTAGE_ROOT=${stage}"
-        "-DCKRE_BUILD_BGFX_RASTERIZER=${bgfx}" "-DCKRE_BUILD_SDL_GPU_RASTERIZER=${sdl}"
-        "-DCKRE_STATIC_RUNTIME=${static}"
+        "-DCKRE_BUILD_SDL_GPU_RASTERIZER=${sdl}" "-DCKRE_STATIC_RUNTIME=${static}"
         -P "${CMAKE_CURRENT_LIST_DIR}/CKREPruneRasterizers.cmake"
         RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
     if ((expect_success AND NOT _result EQUAL 0) OR (NOT expect_success AND _result EQUAL 0))
@@ -43,8 +40,8 @@ endfunction()
 
 function(_verify expect_success required)
     execute_process(COMMAND "${CMAKE_COMMAND}" "-DSTAGE_ROOT=${_stage}"
-        -DCKRE_BUILD_BGFX_RASTERIZER=OFF -DCKRE_BUILD_SDL_GPU_RASTERIZER=ON
-        -DCKRE_STATIC_RUNTIME=OFF "-DCKRE_REQUIRED_RUNTIME_FILES=${required}"
+        -DCKRE_BUILD_SDL_GPU_RASTERIZER=ON -DCKRE_STATIC_RUNTIME=OFF
+        "-DCKRE_REQUIRED_RUNTIME_FILES=${required}"
         -P "${CMAKE_CURRENT_LIST_DIR}/CKREVerifyRuntime.cmake"
         RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
     if ((expect_success AND NOT _result EQUAL 0) OR (NOT expect_success AND _result EQUAL 0))
@@ -52,38 +49,32 @@ function(_verify expect_success required)
     endif ()
 endfunction()
 
-_prune(ON ON OFF "${_stage}" TRUE)
-if (NOT EXISTS "${_stage}/RenderEngines/CKBgfxRasterizer.dll")
-    message(FATAL_ERROR "Enabled bgfx was removed")
-endif ()
 _verify(FALSE "RenderEngines/CKSdlGpuRasterizer.dll")
-_prune(OFF ON OFF "${_stage}" TRUE)
+_prune(ON OFF "${_stage}" TRUE)
 foreach (_filename IN LISTS _platform_names)
     if (EXISTS "${_stage}/Bin/${_filename}")
-        message(FATAL_ERROR "Disabled platform binary was retained: ${_filename}")
+        message(FATAL_ERROR "Retired platform binary was retained: ${_filename}")
     endif ()
 endforeach ()
 _verify(TRUE "RenderEngines/CKSdlGpuRasterizer.dll")
 _verify(FALSE "RenderEngines/CK2_3D.ini")
 if (EXISTS "${_stage}/RenderEngines/CKBgfxRasterizer.dll" OR
-        EXISTS "${_stage}/Bin/libCKBgfxRasterizer.so" OR
         NOT EXISTS "${_stage}/RenderEngines/CKSdlGpuRasterizer.dll")
-    message(FATAL_ERROR "SDL-only stage contains the wrong rasterizers")
+    message(FATAL_ERROR "SDL stage contains the wrong rasterizers")
 endif ()
-file(WRITE "${_stage}/RenderEngines/CKBgfxRasterizer.dll" "re-enabled plugin")
-_prune(ON OFF OFF "${_stage}" TRUE)
-if (EXISTS "${_stage}/RenderEngines/CKSdlGpuRasterizer.dll" OR
-        NOT EXISTS "${_stage}/RenderEngines/CKBgfxRasterizer.dll")
-    message(FATAL_ERROR "bgfx-only stage contains the wrong rasterizers")
+_prune(OFF OFF "${_stage}" TRUE)
+if (EXISTS "${_stage}/RenderEngines/CKSdlGpuRasterizer.dll")
+    message(FATAL_ERROR "Disabled SDL_gpu rasterizer was retained")
 endif ()
-_prune(ON ON ON "${_stage}" TRUE)
-if (EXISTS "${_stage}/RenderEngines/CKBgfxRasterizer.dll")
+file(WRITE "${_stage}/RenderEngines/CKSdlGpuRasterizer.dll" "re-enabled plugin")
+_prune(ON ON "${_stage}" TRUE)
+if (EXISTS "${_stage}/RenderEngines/CKSdlGpuRasterizer.dll")
     message(FATAL_ERROR "Static stage retains a dynamic rasterizer")
 endif ()
 if (CMAKE_HOST_WIN32)
     file(WRITE "${_stage}/RenderEngines/libCKBgfxRasterizer.dll" "MinGW fixture")
     string(TOUPPER "${_stage}" _case_variant)
-    _prune(OFF ON OFF "${_case_variant}" TRUE)
+    _prune(ON OFF "${_case_variant}" TRUE)
     if (EXISTS "${_stage}/RenderEngines/libCKBgfxRasterizer.dll")
         message(FATAL_ERROR "Case-variant Windows prefix was not cleaned")
     endif ()
@@ -97,7 +88,7 @@ endforeach ()
 
 file(MAKE_DIRECTORY "${TEST_ROOT}/external/RenderEngines")
 file(WRITE "${TEST_ROOT}/external/RenderEngines/CKBgfxRasterizer.dll" "external plugin")
-_prune(OFF ON OFF "${TEST_ROOT}/external" FALSE)
+_prune(ON OFF "${TEST_ROOT}/external" FALSE)
 file(READ "${TEST_ROOT}/external/RenderEngines/CKBgfxRasterizer.dll" _external)
 if (NOT _external STREQUAL "external plugin")
     message(FATAL_ERROR "External install was changed")
