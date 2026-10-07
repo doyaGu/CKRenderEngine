@@ -193,7 +193,7 @@ CKBOOL FFPRecordingContext::GetCaps(CKRasterizerCapsDesc *Caps) const
     caps.MaxUserClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
     caps.MaxVertexBlendMatrices = CKRST_MAX_WORLD_MATRICES;
     caps.MaxMSAASamples = backend.MaxMSAASamples > 1 ? backend.MaxMSAASamples : 1;
-    caps.MaxPointSize = 15.0f;
+    caps.MaxPointSize = 8192.0f;
     caps.MaxLights = CKRST_MAX_LIGHTS;
     *Caps = caps;
     return TRUE;

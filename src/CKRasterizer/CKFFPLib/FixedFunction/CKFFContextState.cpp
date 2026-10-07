@@ -186,7 +186,9 @@ CKBOOL CKFFGetContextCaps(const CKRasterizerDeviceCaps &DeviceCaps,
     Result.MaxUserClipPlanes = CKRST_MAX_USER_CLIP_PLANES;
     Result.MaxVertexBlendMatrices = CKRST_MAX_WORLD_MATRICES;
     Result.MaxMSAASamples = DeviceCaps.MaxMSAASamples > 1 ? DeviceCaps.MaxMSAASamples : 1;
-    Result.MaxPointSize = 15.0f;
+    // Points larger than a pixel are expanded into quads, so only
+    // POINTSIZE_MAX bounds them; report the common D3D9 device limit.
+    Result.MaxPointSize = 8192.0f;
     Result.MaxLights = CKRST_MAX_LIGHTS;
     *Caps = Result;
     return TRUE;
