@@ -5024,6 +5024,1361 @@ void MergedMorphPreservesNormalOutputs() {
     context.DestroyObject(merged->GetID());
 }
 
+// Pass 24 shared functional regressions.
+// Native Load 0x10058C51: shared references have priority and Clear only resets
+// per-object state. These fixtures exercise live owners, aliases and payloads.
+void SharedLoadMovesOwnerAndPreservesRemainingAlias() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe target(&context, "ReloadOwner"), remaining(&context, "OldAlias"),
+        source(&context, "NewOwner");
+    VxVector oldValue(8, 9, 10), newValue(2, 3, 4);
+    target.AddPositionKey(0, &oldValue); target.SetLength(11);
+    remaining.ShareDataFrom(&target);
+    source.AddPositionKey(0, &newValue); source.SetLength(29);
+    CKKeyframeData *oldData = target.Data();
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMSHARED, &source,
+                             nullptr, nullptr, false, 0);
+    LoadChunk(target, chunk.get());
+    VxVector actual;
+    Check(target.Data() == source.Data() && source.References() == 2 && target.Shared() == &source,
+          "Shared Load did not attach exactly once to the referenced data");
+    Check(remaining.Data() == oldData && remaining.Shared() == &remaining && remaining.References() == 1,
+          "Reloaded owner did not hand its previous data to the remaining alias");
+    Check(remaining.GetLength() == 11 && remaining.EvaluatePosition(0, actual) && Equal(actual, oldValue),
+          "Shared Load changed the old alias payload");
+    Check(target.GetLength() == 29 && target.EvaluatePosition(0, actual) && Equal(actual, newValue),
+          "Shared Load did not use the new owner payload");
+}
+
+void SharedLoadSelfReferenceKeepsDataAndResetsState() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe target(&context, "SelfShared");
+    VxVector value(7, 8, 9); target.AddPositionKey(0, &value); target.SetLength(23);
+    target.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_MERGED);
+    CKKeyframeData *data = target.Data();
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMSHARED, &target,
+                             nullptr, nullptr, false, 0);
+    LoadChunk(target, chunk.get());
+    VxVector actual;
+    Check(target.Data() == data && target.References() == 1 && target.Shared() == &target &&
+          target.GetLength() == 23 && target.EvaluatePosition(0, actual) && Equal(actual, value),
+          "Self shared reference replaced or duplicated existing controller data");
+    Check(!target.IsMerged() && target.GetCurrentStep() == 0 && target.GetMergeFactor() == .5f,
+          "Shared Load did not reset per-object playback state");
+}
+
+void SharedLoadMissingOwnerAllocationFailureKeepsData() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe owner(&context, "MissingSharedOwner"), target(&context, "MissingSharedAlias");
+    VxVector value(3, 5, 7); owner.AddPositionKey(0, &value); owner.SetLength(31);
+    target.ShareDataFrom(&owner);
+    CKKeyframeData *data = target.Data();
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMSHARED, nullptr,
+                             nullptr, nullptr, false, 0);
+    chunk->CloseChunk(); chunk->StartRead();
+    s_ObjectAnimationAllocationFailure = true;
+    const CKERROR result = target.Load(chunk.get(), nullptr);
+    const bool injected = !s_ObjectAnimationAllocationFailure;
+    s_ObjectAnimationAllocationFailure = false;
+    VxVector actual;
+    Check(injected && result == CKERR_OUTOFMEMORY, "Shared Load did not propagate empty-data allocation failure");
+    Check(target.Data() == data && owner.Data() == data && target.References() == 2 && target.Shared() == &owner &&
+          target.EvaluatePosition(0, actual) && Equal(actual, value),
+          "Failed missing-owner Load detached or destroyed shared controller data");
+}
+
+template<bool Merged>
+void SharedLoadRejectsTruncatedIdentifier() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation owner(&context, "ShortSharedOwner"), target(&context, "ShortSharedTarget");
+    VxVector value(3, 4, 5); owner.AddPositionKey(0, &value);
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMSHARED); chunk->WriteObject(&owner);
+    for (int i = 0; i < 7; ++i) chunk->WriteFloat(0);
+    chunk->WriteDword(Merged ? CK_OBJECTANIMATION_MERGED : 0);
+    if (Merged) {
+        chunk->WriteObject(nullptr); chunk->WriteFloat(.25f); chunk->WriteObject(&owner);
+        // The second merged reference is absent.
+    } // Otherwise the entity reference is absent.
+    WriteAnimationStateBlock(chunk.get(), CK_STATESAVE_OBJANIMCONTROLLERS, nullptr,
+                             nullptr, nullptr, false, 99);
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(target.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE,
+          "Shared Load consumed the next identifier as missing state fields");
+    Check(target.Shared() == &target && !target.GetPositionController(),
+          "Truncated shared state attached data before completing its reference fields");
+}
+
+template<bool Merged>
+void SharedLoadRestoresEntityRootAndMergedReferences() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe owner(&context, "StateOwner"), target(&context, "StateTarget"),
+        first(&context, "StateFirst"), second(&context, "StateSecond");
+    RCK3dEntity entity(&context, "StateEntity");
+    VxVector value(9, 2, 3); owner.AddPositionKey(0, &value); owner.SetLength(37);
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMSHARED); chunk->WriteObject(&owner);
+    chunk->WriteVector(VxVector(4, -3, 2));
+    for (int i = 0; i < 4; ++i) chunk->WriteFloat(50.0f + i);
+    const CKDWORD flags = Merged ? CK_OBJECTANIMATION_MERGED | 0x10000u : 0x10000u;
+    chunk->WriteDword(flags); chunk->WriteObject(&entity);
+    if (Merged) { chunk->WriteFloat(.375f); chunk->WriteObject(&first); chunk->WriteObject(&second); }
+    LoadChunk(target, chunk.get());
+    VxVector *root = static_cast<VxVector *>(target.GetAppData());
+    const bool rootMatches = root && Equal(*root, VxVector(4, -3, 2));
+    delete root; target.SetAppData(nullptr);
+    Check(rootMatches && target.Get3dEntity() == reinterpret_cast<CK3dEntity *>(&entity) && target.GetFlags() == flags,
+          "Shared Load did not restore root vector, entity or independent flags");
+    Check(target.Data() == owner.Data() && target.GetLength() == 37 && target.GetCurrentStep() == 0 &&
+          target.First() == (Merged ? &first : nullptr) && target.Second() == (Merged ? &second : nullptr) &&
+          target.GetMergeFactor() == (Merged ? .375f : .5f),
+          "Shared Load changed referenced data or merged field ordering");
+    Check(entity.GetObjectAnimationCount() == 0,
+          "Direct Load unexpectedly added an entity animation-list association");
+}
+
+void AnimationSaveSelectiveFlagsUseNativeMask() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "SelectiveSave");
+    VxVector position(2, 3, 4); animation.AddPositionKey(0, &position); animation.SetLength(17);
+    const CKDWORD flags[] = {0, 0x80000000u, 1, CK_STATESAVE_OBJANIMALL};
+    for (int i = 0; i < 4; ++i) {
+        Chunk saved(animation.Save(nullptr, flags[i]), &DeleteCKStateChunk);
+        Check(saved != nullptr, "Selective Save did not produce a chunk");
+        saved->StartRead();
+        Check(bool(saved->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS)) == (i >= 2),
+              "Save did not apply the native low-27-bit animation-data mask");
+        if (i >= 2) {
+            RCKObjectAnimation reloaded(&context, "SelectiveReload"); saved->StartRead();
+            Check(reloaded.Load(saved.get(), nullptr) == CK_OK && reloaded.GetLength() == 17,
+                  "Selected animation data was not reloadable");
+            VxVector actual;
+            Check(reloaded.EvaluatePosition(0, actual) && Equal(actual, position),
+                  "Selected Save lost key data");
+        }
+    }
+}
+
+void ModernAnimationLoadPropagatesControllerFactoryFailure() {
+    const CKANIMATION_CONTROLLER types[] = {
+        CKANIMATION_LINPOS_CONTROL, CKANIMATION_LINROT_CONTROL,
+        CKANIMATION_LINSCL_CONTROL, CKANIMATION_LINSCLAXIS_CONTROL,
+        CKANIMATION_TCBPOS_CONTROL, CKANIMATION_TCBROT_CONTROL,
+        CKANIMATION_TCBSCL_CONTROL, CKANIMATION_TCBSCLAXIS_CONTROL,
+        CKANIMATION_BEZIERPOS_CONTROL, CKANIMATION_BEZIERSCL_CONTROL,
+        CKANIMATION_MORPH_CONTROL
+    };
+    CKContext context(nullptr, 0, 0);
+    for (CKANIMATION_CONTROLLER type : types) {
+        RCKObjectAnimation animation(&context, "FactoryFailureLoad");
+        WireWords words = type == CKANIMATION_MORPH_CONTROL ? MorphWire<true>() : TransformControllerWire(type);
+        Chunk chunk = AnimationWithController(type, words);
+        chunk->CloseChunk(); chunk->StartRead();
+        s_ObjectAnimationAllocationFailure = true;
+        const CKERROR result = animation.Load(chunk.get(), nullptr);
+        const bool injected = !s_ObjectAnimationAllocationFailure;
+        s_ObjectAnimationAllocationFailure = false;
+        Check(injected && result == CKERR_OUTOFMEMORY,
+              "Modern Load silently skipped a supported controller whose factory allocation failed");
+        Check(!animation.GetPositionController() && !animation.GetRotationController() &&
+              !animation.GetScaleController() && !animation.GetScaleAxisController() && !animation.GetMorphController(),
+              "Modern Load retained a failed factory controller");
+    }
+}
+
+// Pass 24 playback functional regressions.
+void ObjectPlaybackEmptyAndIgnoredValuesFollowNative() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation animation(&context,"EmptyPlayback");
+    VxVector pos(9), scale(9); VxQuaternion rot(1,2,3,4), axis(1,2,3,4);
+    Check(!animation.EvaluateScale(0,scale) && Equal(scale,VxVector(0.0f)), "Native absent scale must write zero");
+    Check(!animation.EvaluatePosition(0,pos) && Equal(pos,VxVector(0.0f)), "Absent position must write zero");
+    Check(!animation.EvaluateRotation(0,rot) && rot == VxQuaternion(), "Absent rotation must write identity");
+    Check(!animation.EvaluateScaleAxis(0,axis) && axis == VxQuaternion(1,2,3,4), "Absent scale axis must retain output");
+    VxVector position(3,4,5), scaling(2,3,4); VxQuaternion rotation(0,0,1,0);
+    animation.AddPositionKey(0,&position); animation.AddScaleKey(0,&scaling);
+    animation.AddRotationKey(0,&rotation); animation.AddScaleAxisKey(0,&rotation);
+    animation.SetFlags(CK_OBJECTANIMATION_IGNOREPOS|CK_OBJECTANIMATION_IGNOREROT|CK_OBJECTANIMATION_IGNORESCALE|CK_OBJECTANIMATION_IGNORESCALEROT);
+    scale = VxVector(9); pos = VxVector(9); axis = VxQuaternion(1,2,3,4);
+    Check(!animation.EvaluateScale(0,scale) && Equal(scale,VxVector(0.0f)), "Ignored native scale must write zero");
+    Check(!animation.EvaluatePosition(0,pos) && Equal(pos,VxVector(0.0f)), "Ignored position must write zero");
+    Check(!animation.EvaluateRotation(0,rot) && rot == VxQuaternion(), "Ignored rotation must write identity");
+    Check(!animation.EvaluateScaleAxis(0,axis) && axis == VxQuaternion(1,2,3,4), "Ignored scale axis must retain output");
+}
+
+void ObjectPlaybackDirectKeysFlagsAndLengthUsePublicAPI() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation animation(&context,"DirectPlayback");
+    Check(!animation.HasPositionInfo() && !animation.HasScaleInfo() && !animation.HasRotationInfo() &&
+          !animation.HasScaleAxisInfo() && !animation.HasMorphInfo() && !animation.HasMorphNormalInfo(), "Empty animation reports controllers");
+    VxVector first(1,2,3), second(11,12,13), scale(2,3,4);
+    VxQuaternion identity, turn(0,0,1,0);
+    animation.AddPositionKey(0,&first); animation.AddPositionKey(10,&second);
+    animation.AddScaleKey(0,&scale); animation.AddRotationKey(0,&identity); animation.AddRotationKey(10,&turn);
+    animation.AddScaleAxisKey(0,&identity); animation.AddScaleAxisKey(10,&turn);
+    animation.SetLength(10);
+    Check(animation.HasPositionInfo() && animation.HasScaleInfo() && animation.HasRotationInfo() && animation.HasScaleAxisInfo(), "Added channels missing");
+    Check(animation.GetLength()==10 && animation.GetPositionController()->GetLength()==10 &&
+          animation.GetScaleController()->GetLength()==10 && animation.GetRotationController()->GetLength()==10 &&
+          animation.GetScaleAxisController()->GetLength()==10, "SetLength did not propagate controller duration");
+    VxVector pos, scl; VxQuaternion rot, axis;
+    Check(animation.EvaluateKeys(0.5f,&rot,&pos,&scl,&axis) && Equal(pos,VxVector(6,7,8)) && Equal(scl,scale), "Direct EvaluateKeys changed normalized phase");
+    Check(std::fabs(std::fabs(rot.z)-0.70710678f)<0.0001f && std::fabs(std::fabs(axis.z)-0.70710678f)<0.0001f, "Rotation/axis public interpolation changed");
+    Check(animation.EvaluateKeys(-1,nullptr,&pos,nullptr,nullptr) && Equal(pos,first), "EvaluateKeys did not clamp negative phase");
+    Check(animation.EvaluateKeys(2,nullptr,&pos,nullptr,nullptr) && Equal(pos,second), "EvaluateKeys did not clamp late phase");
+    Check(animation.EvaluateKeys(0.5f,nullptr,nullptr,nullptr,nullptr), "All optional EvaluateKeys outputs should succeed");
+    animation.SetFlags(0x12340000u); Check(animation.GetFlags()==0x12340000u && !animation.IsMerged(), "Flags were filtered");
+    animation.SetMergeFactor(1.25f); Check(animation.GetMergeFactor()==1.25f, "Merge factor should retain unclamped value");
+    animation.SetLength(20); Check(animation.EvaluatePosition(15,pos) && Equal(pos,second), "SetLength must not rescale keys");
+}
+
+void ObjectPlaybackSetStepComposesScaleAxisAndKeepsPosition() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity entity(&context,"ScaleAxisTarget"); RCKObjectAnimation animation(&context,"ScaleAxisPlayback");
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity)); animation.SetLength(10);
+    VxVector pos(7,8,9), scale(2,3,4); VxQuaternion rot, axis(0,0,0.70710678f,0.70710678f);
+    animation.AddPositionKey(0,&pos); animation.AddScaleKey(0,&scale);
+    animation.AddRotationKey(0,&rot); animation.AddScaleAxisKey(0,&axis);
+    Check(animation.SetStep(0.5f)==CK_OK && animation.GetCurrentStep()==0.5f, "SetStep did not apply full pose");
+    const VxMatrix &m = entity.GetLocalMatrix();
+    Check(std::fabs(m[0][0]-3)<0.0001f && std::fabs(m[1][1]-2)<0.0001f && std::fabs(m[2][2]-4)<0.0001f &&
+          std::fabs(m[0][1])<0.0001f && std::fabs(m[1][0])<0.0001f, "SetStep discarded the animated scale axis");
+    Check(Equal(VxVector(m[3][0],m[3][1],m[3][2]),pos), "Full SetStep lost translation");
+    animation.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackRootCenterOffsetReachesEntity() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity entity(&context,"CenteredTarget"); RCKObjectAnimation object(&context,"CenteredObject");
+    RCKKeyedAnimation parent(&context,"CenteredParent");
+    object.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity)); object.SetLength(10);
+    VxVector first(2,3,4), last(12,13,14);
+    object.AddPositionKey(0,&first); object.AddPositionKey(10,&last);
+    parent.AddAnimation(&object); parent.UpdateRootEntity(); parent.CenterAnimation(0);
+    Check(Equal(parent.GetRootVectorInternal(),-first), "Cannot establish root centering offset");
+    Check(object.SetStep(0.5f)==CK_OK, "Centered root SetStep failed");
+    const VxMatrix &m=entity.GetLocalMatrix();
+    Check(Equal(VxVector(m[3][0],m[3][1],m[3][2]),VxVector(5,5,5)), "Root animation ignored the keyed centering offset");
+    parent.RemoveAnimation(&object); object.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackStepFrameIgnoreAndVelocityUseEntity() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity firstEntity(&context,"FirstPlaybackTarget"), secondEntity(&context,"SecondPlaybackTarget");
+    RCKObjectAnimation animation(&context,"StepPlayback");
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&firstEntity));
+    Check(animation.Get3dEntity()==reinterpret_cast<CK3dEntity *>(&firstEntity) && firstEntity.GetObjectAnimationCount()==1, "Set3dEntity missing reciprocal link");
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&firstEntity)); Check(firstEntity.GetObjectAnimationCount()==1, "Repeated entity binding duplicated membership");
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&secondEntity));
+    Check(firstEntity.GetObjectAnimationCount()==0 && secondEntity.GetObjectAnimationCount()==1, "Rebinding retained old entity membership");
+    VxVector first(0,0,0), last(20,10,0);
+    animation.AddPositionKey(0,&first); animation.AddPositionKey(10,&last); animation.SetLength(10);
+    Check(animation.SetFrame(2.5f)==CK_OK && animation.GetCurrentStep()==0.25f, "SetFrame did not map frame to phase");
+    Check(Equal(VxVector(secondEntity.GetLocalMatrix()[3][0],secondEntity.GetLocalMatrix()[3][1],0),VxVector(5,2.5f,0)), "SetFrame did not move the entity");
+    VxVector velocity; animation.GetVelocity(0.5f,&velocity); Check(Equal(velocity,VxVector(2,1,0)), "Forward velocity sample is incorrect");
+    animation.GetVelocity(1,&velocity); Check(Equal(velocity,VxVector(2,1,0)), "Backward endpoint velocity sample is incorrect");
+    secondEntity.SetMoveableFlags(secondEntity.GetMoveableFlags()|0x400);
+    Check(animation.SetStep(0.75f)==CK_OK && animation.GetCurrentStep()==0.75f && secondEntity.GetLocalMatrix()[3][0]==5, "Ignored entity should retain pose but update phase");
+    Check(animation.SetStep(0.75f,reinterpret_cast<CKKeyedAnimation *>(static_cast<intptr_t>(-1)))==CK_OK && secondEntity.GetLocalMatrix()[3][0]==15,
+          "Force SetStep did not override entity ignore flag");
+    animation.Set3dEntity(nullptr); animation.GetVelocity(0.5f,&velocity); Check(Equal(velocity,VxVector(0.0f)), "Detached animation velocity should be zero");
+    animation.SetLength(0); Check(animation.SetFrame(0)==CKERR_INVALIDOPERATION, "Zero duration SetFrame must report invalid operation");
+}
+
+void ObjectPlaybackTransitionUsesProvidedStartingSet() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation in(&context,"TransitionIn"), out(&context,"TransitionOut"), target(&context,"TransitionTarget");
+    VxVector first(1,2,3), last(11,12,13), scale(2,3,4); VxQuaternion rotation;
+    in.AddPositionKey(0,&first); out.AddPositionKey(0,&last);
+    in.AddScaleKey(0,&scale); out.AddScaleKey(0,&scale);
+    in.AddRotationKey(0,&rotation); out.AddRotationKey(0,&rotation);
+    in.AddScaleAxisKey(0,&rotation); out.AddScaleAxisKey(0,&rotation);
+    in.SetLength(10); out.SetLength(10); target.SetLength(4);
+    CKAnimKey start; start.m_Pos=VxVector(21,22,23); start.m_Scl=VxVector(5,6,7);
+    start.m_Rot=VxQuaternion(0,0,1,0); start.m_SclRot=VxQuaternion(0,1,0,0);
+    target.CreateTransition(4,&in,0,&out,0,FALSE,FALSE,&start);
+    VxVector pos,scl; VxQuaternion rot,axis;
+    Check(target.EvaluateKeys(0,&rot,&pos,&scl,&axis) && Equal(pos,start.m_Pos) && Equal(scl,start.m_Scl) &&
+          rot==start.m_Rot && axis==start.m_SclRot, "Transition ignored supplied starting pose");
+    Check(target.EvaluateKeys(1,&rot,&pos,&scl,&axis) && Equal(pos,last) && Equal(scl,scale) && rot==rotation && axis==rotation,
+          "Transition end pose changed");
+}
+
+void ObjectPlaybackTransitionVelocityBuildsIntegratedKeys() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity inEntity(&context,"VelocityInEntity"),outEntity(&context,"VelocityOutEntity");
+    RCKObjectAnimation in(&context,"VelocityIn"),out(&context,"VelocityOut"),target(&context,"VelocityTransition");
+    in.Set3dEntity(reinterpret_cast<CK3dEntity *>(&inEntity)); out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&outEntity));
+    VxVector zero(0.0f), left(10,0,0), right(30,0,0);
+    in.AddPositionKey(0,&zero); in.AddPositionKey(10,&left); out.AddPositionKey(0,&zero); out.AddPositionKey(10,&right);
+    in.SetLength(10); out.SetLength(10); target.SetLength(4);
+    target.CreateTransition(4,&in,0,&out,0,TRUE,FALSE,nullptr);
+    Check(target.GetPositionController()->GetKeyCount()==5, "Velocity transition did not construct per-frame position keys");
+    VxVector sampled;
+    Check(target.EvaluatePosition(0,sampled) && Equal(sampled,VxVector(0.0f)), "Velocity transition did not start relative displacement at zero");
+    Check(target.EvaluatePosition(4,sampled) && std::fabs(sampled.x-2.8f)<0.0001f && sampled.y==0 && sampled.z==0,
+          "Velocity transition did not integrate native 0.4-scaled velocity ramp");
+    in.Set3dEntity(nullptr); out.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackCheckScaleAndComparePreserveNativeDirectionality() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation first(&context,"CompareFirst"),second(&context,"CompareSecond");
+    VxVector scale(2,3,4), pos(1,2,3); VxQuaternion rotation;
+    first.CheckScaleKeys(scale); Check(!first.HasScaleInfo(), "Scale fixup should require a rotation controller");
+    first.AddRotationKey(0,&rotation); first.CheckScaleKeys(scale);
+    Check(first.HasScaleInfo() && first.GetScaleController()->GetKeyCount()==1, "Rotation fixup did not supply a scale key");
+    VxVector actual; Check(first.EvaluateScale(0,actual) && Equal(actual,scale), "Scale fixup did not use provided scale");
+    first.CheckScaleKeys(pos); Check(first.EvaluateScale(0,actual) && Equal(actual,scale), "Scale fixup replaced an existing key");
+    Check(first.Compare(&first) && !first.Compare(nullptr), "Compare self/null contract changed");
+    Check(!first.Compare(&second), "Compare missed a source controller");
+    second.AddRotationKey(0,&rotation); second.AddScaleKey(0,&scale); second.AddPositionKey(0,&pos);
+    Check(first.Compare(&second) && !second.Compare(&first), "Native Compare is a left-controller subset check");
+    second.SetLength(5); Check(!first.Compare(&second), "Compare did not compare duration");
+}
+
+void ObjectPlaybackTransitionDontTurnUsesInverseSourceYaw() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation in(&context,"TurningIn"),out(&context,"TurningOut"),target(&context,"TurningTransition");
+    VxQuaternion identity, halfTurn(0,1,0,0);
+    in.AddRotationKey(0,&identity); in.AddRotationKey(10,&halfTurn); out.AddRotationKey(0,&halfTurn);
+    in.SetLength(10); out.SetLength(10); target.SetLength(4);
+    target.CreateTransition(4,&in,0.5f,&out,0,FALSE,TRUE,nullptr);
+    VxQuaternion rot;
+    Check(target.EvaluateRotation(0,rot) && std::fabs(rot.y+0.70710678f)<0.0001f && std::fabs(rot.w-0.70710678f)<0.0001f,
+          "DontTurn transition did not remove the source yaw");
+    Check(target.EvaluateRotation(4,rot) && rot==halfTurn, "DontTurn transition changed the destination rotation");
+}
+
+// Pass 24 legacy functional regressions.
+// Independent native Load 0x10058C51 fixtures, produced through CKStateChunk.
+template<int Version, bool Descending>
+Chunk LegacyObjectAnimationFixture() {
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, Version);
+    if (Version >= 1) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMNEWDATA);
+        for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+        chunk->WriteInt(2); chunk->WriteInt(2);
+        chunk->WriteDword(CK_OBJECTANIMATION_MERGED);
+        chunk->WriteObject(nullptr); chunk->WriteFloat(23.0f);
+        chunk->WriteFloat(0.25f); chunk->WriteObject(nullptr); chunk->WriteObject(nullptr);
+    } else {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMMORPHKEYS2);
+        chunk->WriteInt(2); chunk->WriteInt(2);
+    }
+    for (int i = 0; i < 2; ++i) {
+        VxVector positions[] = {VxVector(float(i + 1), 2.0f, 3.0f), VxVector(4.0f, float(i + 5), 6.0f)};
+        chunk->WriteFloat(2.0f); // Native raw loading retains both duplicate Morph keys.
+        chunk->WriteDword(sizeof(positions));
+        chunk->WriteBufferNoSize_LEndian(sizeof(positions), positions);
+    }
+    const float firstTime = Descending ? 10.0f : 2.0f;
+    const float lastTime = Descending ? 2.0f : 10.0f;
+    CKPositionKey position[2], scale[2]; CKRotationKey rotation[2];
+    float axis[12];
+    for (int i = 0; i < 2; ++i) {
+        position[i].TimeStep = scale[i].TimeStep = rotation[i].TimeStep = i ? lastTime : firstTime;
+        position[i].Pos = VxVector(float(i + 1), 2.0f, 3.0f);
+        scale[i].Pos = VxVector(4.0f, float(i + 5), 6.0f);
+        rotation[i].Rot = VxQuaternion(0.0f, 0.0f, i ? 0.6f : 0.0f, i ? 0.8f : 1.0f);
+        axis[i * 6] = i ? lastTime : firstTime;
+        axis[i * 6 + 1] = 123.0f + i; // Native's unused float must not become a quaternion component.
+        axis[i * 6 + 2] = 0.0f; axis[i * 6 + 3] = i ? 0.6f : 0.0f;
+        axis[i * 6 + 4] = 0.0f; axis[i * 6 + 5] = i ? 0.8f : 1.0f;
+    }
+    if (Version == 0) chunk->WriteIdentifier(CK_STATESAVE_OBJANIMPOSKEYS);
+    chunk->WriteDword(sizeof(position)); chunk->WriteDword(2);
+    chunk->WriteBufferNoSize_LEndian(sizeof(position), position);
+    if (Version >= 1) {
+        chunk->WriteDword(sizeof(scale)); chunk->WriteDword(2);
+        chunk->WriteBufferNoSize_LEndian(sizeof(scale), scale);
+    } else chunk->WriteIdentifier(CK_STATESAVE_OBJANIMROTKEYS);
+    chunk->WriteDword(sizeof(rotation)); chunk->WriteDword(2);
+    chunk->WriteBufferNoSize_LEndian(sizeof(rotation), rotation);
+    chunk->WriteDword(sizeof(axis)); chunk->WriteDword(2);
+    chunk->WriteBufferNoSize_LEndian(sizeof(axis), axis);
+    if (Version == 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMSCLKEYS);
+        chunk->WriteDword(sizeof(scale)); chunk->WriteDword(2);
+        chunk->WriteBufferNoSize_LEndian(sizeof(scale), scale);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMFLAGS); chunk->WriteDword(CK_OBJECTANIMATION_MERGED);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMENTITY); chunk->WriteObject(nullptr);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMLENGTH); chunk->WriteFloat(23.0f);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMMERGE);
+        chunk->WriteFloat(0.25f); chunk->WriteInt(TRUE);
+        chunk->WriteObject(nullptr); chunk->WriteObject(nullptr);
+    }
+    return chunk;
+}
+
+template<int Version, bool Descending>
+void LegacyObjectAnimationLoadsAllNativeKeyLayouts() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "LegacyAllKeys");
+    Chunk chunk = LegacyObjectAnimationFixture<Version, Descending>();
+    LoadChunk(animation, chunk.get());
+    Check(animation.GetLength() == 23.0f && animation.IsMerged() && animation.GetMergeFactor() == 0.25f,
+          "Legacy header/settings layout changed");
+    CKAnimController *controllers[] = {animation.GetPositionController(), animation.GetScaleController(),
+        animation.GetRotationController(), animation.GetScaleAxisController(), animation.GetMorphController()};
+    for (CKAnimController *controller : controllers)
+        Check(controller && controller->GetKeyCount() == 2 && controller->GetLength() == (Version == 0 ? 0.0f : 23.0f),
+              "Legacy controller count or version-specific length changed");
+    for (int i = 0; i < 2; ++i) {
+        const float expectedTime = Descending ? (i ? 2.0f : 10.0f) : (i ? 10.0f : 2.0f);
+        for (int slot = 0; slot < 4; ++slot)
+            Check(controllers[slot]->GetKey(i)->TimeStep == expectedTime, "Legacy raw loading sorted the supplied key order");
+        Check(Equal(static_cast<CKPositionKey *>(controllers[0]->GetKey(i))->Pos, VxVector(float(i + 1), 2.0f, 3.0f)),
+              "Legacy position value changed");
+        Check(Equal(static_cast<CKScaleKey *>(controllers[1]->GetKey(i))->Pos, VxVector(4.0f, float(i + 5), 6.0f)),
+              "Legacy scale value changed");
+        const VxQuaternion &rot = static_cast<CKRotationKey *>(controllers[2]->GetKey(i))->Rot;
+        const VxQuaternion &axis = static_cast<CKScaleAxisKey *>(controllers[3]->GetKey(i))->Rot;
+        Check(rot.x == 0.0f && rot.y == 0.0f && rot.z == (i ? 0.6f : 0.0f) && rot.w == (i ? 0.8f : 1.0f) &&
+              axis.x == 0.0f && axis.y == (i ? 0.6f : 0.0f) && axis.z == 0.0f && axis.w == (i ? 0.8f : 1.0f),
+              "Legacy 6-float scale axis conversion used the wrong wire offset");
+        CKMorphKey *morph = static_cast<CKMorphKey *>(controllers[4]->GetKey(i));
+        Check(static_cast<RCKMorphController *>(controllers[4])->GetMorphVertexCount() == 2 &&
+              morph->TimeStep == 2.0f && morph->PosArray && !morph->NormArray &&
+              Equal(morph->PosArray[0], VxVector(float(i + 1), 2.0f, 3.0f)) &&
+              Equal(morph->PosArray[1], VxVector(4.0f, float(i + 5), 6.0f)),
+              "Legacy raw Morph loading collapsed duplicate keys or lost payloads");
+    }
+    if (!Descending) {
+        Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        Check(saved != nullptr, "Legal legacy animation could not be saved in modern format");
+        RCKObjectAnimation reloaded(&context, "LegacyModernReload"); saved->StartRead();
+        Check(reloaded.Load(saved.get(), nullptr) == CK_OK && reloaded.GetLength() == 23.0f &&
+              reloaded.GetMorphController()->GetKeyCount() == 2 &&
+              Equal(static_cast<CKMorphKey *>(reloaded.GetMorphController()->GetKey(1))->PosArray[0], VxVector(2.0f, 2.0f, 3.0f)),
+              "Legacy payloads changed after modern Save/Load");
+    }
+}
+
+template<int Format>
+Chunk LegacyNormalOnlyChunk() {
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, 1);
+    if (Format == 0 || (Format & 1)) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMMORPHCOMP);
+        for (int i = 0; i < 2; ++i) {
+            VxCompressedVector normals[2];
+            normals[0].xa = short(100 + i); normals[0].ya = short(-200 - i);
+            normals[1].xa = short(300 + i); normals[1].ya = short(-400 - i);
+            chunk->WriteDword(Format ? sizeof(normals) : 0);
+            if (Format) chunk->WriteBufferNoSize_LEndian16(sizeof(normals), normals);
+        }
+    }
+    if (Format & 2) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMMORPHNORMALS);
+        for (int i = 0; i < 2; ++i) {
+            CKDWORD words[] = {CKDWORD(0x11220000u + 500 + i), CKDWORD(0x33440000u + 600 + i)};
+            chunk->WriteDword(sizeof(words)); chunk->WriteBufferNoSize_LEndian(sizeof(words), words);
+        }
+    }
+    return chunk;
+}
+
+template<int Format>
+void LegacyNormalOnlySnapshotUpdatesExistingMorph() {
+    CKContext context(nullptr, 0, 0); ObjectCloneProbe animation(&context, "NormalOnlyOwner");
+    Chunk initial = AnimationWithController(CKANIMATION_MORPH_CONTROL, MorphWire<true>());
+    LoadChunk(animation, initial.get());
+    CKMorphController *controller = animation.GetMorphController();
+    CKKeyframeData *data = animation.Data();
+    CKKey *first = controller->GetKey(0);
+    VxVector *positions = static_cast<CKMorphKey *>(first)->PosArray;
+    const float length = animation.GetLength();
+    Chunk chunk = LegacyNormalOnlyChunk<Format>(); LoadChunk(animation, chunk.get());
+    Check(animation.Data() == data && animation.GetMorphController() == controller && controller->GetKey(0) == first &&
+          static_cast<CKMorphKey *>(first)->PosArray == positions && animation.GetLength() == length && animation.Shared() == &animation,
+          "Normal-only partial Load reset existing keys/positions/length/owner");
+    for (int i = 0; i < 2; ++i) {
+        CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(i));
+        if (Format == 0) Check(!key->NormArray, "Empty normal-only record did not clear existing normals");
+        else {
+            Check(key->NormArray != nullptr, "Normal-only record lost normal presence");
+            const short expected0 = short((Format & 2) ? 500 + i : 100 + i);
+            const short expected1 = short((Format & 2) ? 600 + i : -200 - i);
+            Check(key->NormArray[0].xa == expected0 && key->NormArray[0].ya == expected1,
+                  "Normal-only Load ignored the block or used the wrong legacy conversion/priority");
+            Check(key->NormArray[1].xa == ((Format & 2) ? 0 : 300 + i) &&
+                  key->NormArray[1].ya == ((Format & 2) ? 0 : -400 - i),
+                  "Normal-only conversion did not retain native zero-filled tail");
+        }
+    }
+}
+
+template<int Version>
+void LegacyKeyArrayAllocationFailuresReturnErrorAndRemainDestructible() {
+    int failedStages = 0;
+    for (int failure = 0; failure < 20; ++failure) {
+        CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "LegacyArrayFailure");
+        Chunk chunk = LegacyObjectAnimationFixture<Version, false>(); chunk->CloseChunk(); chunk->StartRead();
+        s_MorphArrayAllocationFailure = failure;
+        const CKERROR error = animation.Load(chunk.get(), nullptr);
+        const bool injected = s_MorphArrayAllocationFailure == -1;
+        s_MorphArrayAllocationFailure = -1;
+        if (!injected) {
+            Check(error == CK_OK && failedStages > 0, "Legacy array Load did not use the failure-aware allocation path");
+            return;
+        }
+        ++failedStages;
+        Check(error == CKERR_OUTOFMEMORY, "Legacy array allocation failure was not propagated as OUTOFMEMORY");
+        // Exiting the iteration invokes normal animation/controller destruction,
+        // including every successfully read earlier payload.
+    }
+    Check(false, "Legacy key-array allocation probe exceeded its finite stage budget");
+}
+
+template<int Format>
+void LegacyNormalAllocationFailureKeepsTheFailingKeyPayload() {
+    for (int failure = 0; failure < (Format == 1 ? 1 : 2); ++failure) {
+        CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "NormalOnlyFailure");
+        Chunk initial = AnimationWithController(CKANIMATION_MORPH_CONTROL, MorphWire<true>()); LoadChunk(animation, initial.get());
+        CKMorphController *controller = animation.GetMorphController();
+        CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(0));
+        VxCompressedVector *normals = key->NormArray; VxVector *positions = key->PosArray;
+        Chunk chunk = LegacyNormalOnlyChunk<Format>(); chunk->CloseChunk(); chunk->StartRead();
+        s_MorphArrayAllocationFailure = failure;
+        const CKERROR error = animation.Load(chunk.get(), nullptr);
+        const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+        Check(injected && error == CKERR_OUTOFMEMORY, "Legacy normal allocation failure was not propagated");
+        Check(animation.GetMorphController() == controller && controller->GetKey(0) == key && key->NormArray == normals && key->PosArray == positions,
+              "Failed normal allocation replaced or released the existing failing key payload");
+    }
+}
+
+template<int Version>
+void LegacyScaleAxisPartialPayloadRetainsNativeIdentity() {
+    CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "PartialLegacyAxis");
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, Version);
+    if (Version >= 1) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMNEWDATA);
+        for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+        chunk->WriteInt(0); chunk->WriteInt(0); chunk->WriteDword(0);
+        chunk->WriteObject(nullptr); chunk->WriteFloat(23.0f);
+        for (int i = 0; i < 4; ++i) chunk->WriteDword(0); // empty pos/scale records
+    } else chunk->WriteIdentifier(CK_STATESAVE_OBJANIMROTKEYS);
+    chunk->WriteDword(0); chunk->WriteDword(0); // empty rotation record
+    chunk->WriteDword(8); chunk->WriteDword(1);
+    chunk->WriteFloat(3.0f); chunk->WriteFloat(123.0f);
+    if (Version == 0) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMLENGTH); chunk->WriteFloat(23.0f);
+    }
+    LoadChunk(animation, chunk.get());
+    CKAnimController *controller = animation.GetScaleAxisController();
+    Check(controller && controller->GetKeyCount() == 1 && controller->GetKey(0)->TimeStep == 3.0f,
+          "Partial axis payload lost key time/count");
+    const VxQuaternion &axis = static_cast<CKScaleAxisKey *>(controller->GetKey(0))->Rot;
+    Check(axis.x == 0.0f && axis.y == 0.0f && axis.z == 0.0f && axis.w == 1.0f,
+          "Partial axis payload did not retain native quaternion identity construction");
+}
+
+// Pass 24 lifecycle functional regressions.
+class ObjectLifecycleProbe : public ObjectCloneProbe {
+public:
+    ObjectLifecycleProbe(CKContext *context, const char *name) : ObjectCloneProbe(context, name) {}
+    void SetReserved(CKDWORD value) { m_field_38 = value; }
+    CKDWORD Reserved() const { return m_field_38; }
+    void CheckLayout() const {
+        const char *base = reinterpret_cast<const char *>(this);
+        const size_t offsets[] = {
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_KeyframeData) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_Flags) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_Entity) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_CurrentStep) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_MergeFactor) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_Anim1) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_Anim2) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_field_38) - base),
+            static_cast<size_t>(reinterpret_cast<const char *>(&m_ParentKeyedAnimation) - base)};
+        const size_t native32[] = {28, 32, 36, 40, 44, 48, 52, 56, 60};
+        const size_t portable64[] = {56, 64, 72, 80, 84, 88, 96, 104, 112};
+        const size_t *expected = sizeof(void *) == 4 ? native32 : portable64;
+        Check(sizeof(RCKObjectAnimation) == (sizeof(void *) == 4 ? 64u : 120u) &&
+              alignof(RCKObjectAnimation) == sizeof(void *), "ObjectAnimation size/alignment differs from platform contract");
+        for (int i = 0; i < 9; ++i) Check(offsets[i] == expected[i], "ObjectAnimation field offset differs from platform contract");
+        const CKKeyframeData *data = Data();
+        const char *dataBase = reinterpret_cast<const char *>(data);
+        const size_t dataOffsets[] = {
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_PositionController) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_ScaleController) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_RotationController) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_ScaleAxisController) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_MorphController) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_Length) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_RefCount) - dataBase),
+            static_cast<size_t>(reinterpret_cast<const char *>(&data->m_ObjectAnimation) - dataBase)};
+        const size_t nativeData32[] = {0, 4, 8, 12, 16, 20, 24, 28};
+        const size_t portableData64[] = {0, 8, 16, 24, 32, 40, 44, 48};
+        const size_t *dataExpected = sizeof(void *) == 4 ? nativeData32 : portableData64;
+        Check(sizeof(CKKeyframeData) == (sizeof(void *) == 4 ? 32u : 56u) && alignof(CKKeyframeData) == sizeof(void *),
+              "Keyframe data size/alignment differs from platform contract");
+        for (int i = 0; i < 8; ++i) Check(dataOffsets[i] == dataExpected[i], "Keyframe data offset differs from platform contract");
+    }
+};
+
+class ObjectLifecycleDependencies : public CKDependenciesContext {
+public:
+    explicit ObjectLifecycleDependencies(CKContext *context) : CKDependenciesContext(context) {}
+    void Map(CKObject &source, CKObject &destination) { m_MapID.Insert(source.GetID(), destination.GetID(), TRUE); }
+};
+
+CKAnimController *ObjectLifecycleController(RCKObjectAnimation &animation, CKANIMATION_CONTROLLER type) {
+    if ((type & CKANIMATION_CONTROLLER_MASK) == CKANIMATION_CONTROLLER_MORPH)
+        return animation.GetMorphController();
+    return TransformController(animation, type);
+}
+
+void ObjectAnimationLifecycleDefaultsAndRegistration() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe animation(&context, "LifecycleDefaults");
+    animation.CheckLayout();
+    Check(animation.GetClassID() == CKCID_OBJECTANIMATION && animation.Data() && animation.Shared() == &animation &&
+          animation.References() == 1 && animation.GetLength() == 100.0f && animation.GetFlags() == 0 &&
+          animation.Get3dEntity() == nullptr && animation.First() == nullptr && animation.Second() == nullptr &&
+          animation.GetCurrentStep() == 0.0f && animation.GetMergeFactor() == 0.5f && animation.Reserved() == 0 &&
+          animation.Parent() == nullptr, "ObjectAnimation constructor differs from native defaults");
+    Check(!animation.GetPositionController() && !animation.GetScaleController() && !animation.GetRotationController() &&
+          !animation.GetScaleAxisController() && !animation.GetMorphController(), "Fresh animation contains controllers");
+    Check(std::strcmp(RCKObjectAnimation::GetClassName(), "Object Animation") == 0,
+          "ObjectAnimation class name differs from native");
+    for (int mode = CK_DEPENDENCIES_COPY; mode <= CK_DEPENDENCIES_BUILD; ++mode)
+        Check(RCKObjectAnimation::GetDependenciesCount(mode) == 0 && !RCKObjectAnimation::GetDependencies(0, mode),
+              "ObjectAnimation unexpectedly exposes class dependency options");
+    RCKObjectAnimation::Register();
+    CKClassDesc *descriptor = CKGetClassDesc(CKCID_OBJECTANIMATION);
+    Check(descriptor && descriptor->DefaultOptions == CK_GENERALOPTIONS_NODUPLICATENAMECHECK &&
+          descriptor->Parameter == CKPGUID_OBJECTANIMATION && descriptor->ToBeNotify.IsSet(CKCID_3DENTITY) &&
+          descriptor->ToBeNotify.IsSet(CKCID_OBJECTANIMATION), "ObjectAnimation registration differs from native");
+    CKObjectAnimation *created = RCKObjectAnimation::CreateInstance(&context);
+    Check(created && created->GetClassID() == CKCID_OBJECTANIMATION && created->GetLength() == 100.0f,
+          "ObjectAnimation class creation callback failed");
+    delete created;
+}
+
+template<bool All>
+void ObjectAnimationClearPreservesSharedOwnershipAndReservedState() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe owner(&context, "ClearOwner"), alias(&context, "ClearAlias");
+    RCKObjectAnimation first(&context, "ClearFirst"), second(&context, "ClearSecond");
+    RCK3dEntity entity(&context, "ClearEntity"); RCKKeyedAnimation parent(&context, "ClearParent");
+    AddTimedAnimationKeys(owner, 4.0f); alias.ShareDataFrom(&owner);
+    alias.SetCloneState(&entity, &first, &second, CK_OBJECTANIMATION_MERGED);
+    alias.SetParent(&parent); alias.SetReserved(0x12345678);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(owner);
+    if (All) alias.ClearAll(); else alias.Clear();
+    Check(alias.GetFlags() == 0 && !alias.Get3dEntity() && !alias.First() && !alias.Second() &&
+          alias.GetCurrentStep() == 0.0f && alias.GetMergeFactor() == 0.5f && alias.Parent() == &parent &&
+          alias.Reserved() == 0x12345678 && alias.Data() == before.Data && alias.Shared() == &owner &&
+          owner.References() == 2, "Clear changed keyframe ownership or reserved fields");
+    if (All) {
+        Check(owner.GetLength() == 0 && !owner.GetPositionController() && !owner.GetRotationController() &&
+              !owner.GetScaleController() && !owner.GetScaleAxisController() && !owner.GetMorphController(),
+              "ClearAll did not clear controllers through the shared alias");
+    } else {
+        CheckObjectCloneData(owner, before, &owner); CheckObjectCloneData(alias, before, &owner);
+    }
+}
+
+void ObjectAnimationResetAndLengthPropagateThroughAliases() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe owner(&context, "LengthOwner"), alias(&context, "LengthAlias");
+    AddTimedAnimationKeys(owner, 4.0f); alias.ShareDataFrom(&owner);
+    alias.SetKeyframeLength(27.0f);
+    CKAnimController *controllers[] = {owner.GetPositionController(), owner.GetRotationController(),
+        owner.GetScaleController(), owner.GetScaleAxisController(), owner.GetMorphController()};
+    Check(owner.GetLength() == 27.0f && alias.GetLength() == 27.0f, "Shared keyframe length was not propagated");
+    for (CKAnimController *controller : controllers)
+        Check(controller && controller->GetLength() == 27.0f, "Controller did not receive keyframe length");
+    alias.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREPOS);
+    alias.ResetKeyframeData();
+    Check(owner.GetLength() == 0 && !owner.GetPositionController() && !owner.GetRotationController() &&
+          !owner.GetScaleController() && !owner.GetScaleAxisController() && !owner.GetMorphController() &&
+          alias.Shared() == &owner && alias.References() == 2 && alias.GetFlags() == CK_OBJECTANIMATION_IGNOREPOS &&
+          alias.GetCurrentStep() == 0.625f, "ResetKeyframeData changed ownership or playback state");
+}
+
+void ObjectAnimationNullShareAllocationFailurePreservesAliases() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe owner(&context, "NullShareOwner"), alias(&context, "NullShareAlias");
+    AddTimedAnimationKeys(owner, 4.0f); alias.ShareDataFrom(&owner);
+    owner.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREPOS);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(owner);
+    s_ObjectAnimationAllocationFailure = true;
+    const CKBOOL result = owner.ShareDataFrom(nullptr);
+    s_ObjectAnimationAllocationFailure = false;
+    Check(!result, "Failed ShareDataFrom(nullptr) must report allocation failure");
+    CheckObjectCloneData(owner, before, &owner); CheckObjectCloneData(alias, before, &owner);
+    Check(owner.References() == 2 && owner.GetFlags() == CK_OBJECTANIMATION_IGNOREPOS && owner.GetCurrentStep() == 0.625f,
+          "Failed null sharing changed references or playback fields");
+    Check(owner.ShareDataFrom(nullptr) && owner.Shared() == &owner && owner.References() == 1 && owner.GetLength() == 100.0f,
+          "Null sharing did not restore independent native default data");
+    CheckObjectCloneData(alias, before, &alias);
+}
+
+void ObjectAnimationControllerFactoryAndDeleteFollowNativeDispatch() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe owner(&context, "FactoryOwner"), alias(&context, "FactoryAlias");
+    owner.SetLength(37.0f); alias.ShareDataFrom(&owner);
+    const CKANIMATION_CONTROLLER types[] = {CKANIMATION_CONTROLLER_POS, CKANIMATION_CONTROLLER_ROT,
+        CKANIMATION_CONTROLLER_SCL, CKANIMATION_CONTROLLER_MORPH, CKANIMATION_LINPOS_CONTROL,
+        CKANIMATION_LINROT_CONTROL, CKANIMATION_LINSCL_CONTROL, CKANIMATION_LINSCLAXIS_CONTROL,
+        CKANIMATION_TCBPOS_CONTROL, CKANIMATION_TCBROT_CONTROL, CKANIMATION_TCBSCL_CONTROL,
+        CKANIMATION_TCBSCLAXIS_CONTROL, CKANIMATION_BEZIERPOS_CONTROL, CKANIMATION_BEZIERSCL_CONTROL,
+        CKANIMATION_MORPH_CONTROL};
+    for (CKANIMATION_CONTROLLER type : types) {
+        CKAnimController *controller = alias.CreateController(type);
+        Check(controller && controller->GetLength() == 37.0f && ObjectLifecycleController(owner, type) == controller,
+              "Controller factory did not replace the shared category with native length");
+    }
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(owner);
+    Check(!alias.CreateController(CKANIMATION_CONTROLLER_SCLAXIS) &&
+          !alias.CreateController(static_cast<CKANIMATION_CONTROLLER>(0x12345678)),
+          "Factory accepted a type absent from native dispatch");
+    CheckObjectCloneData(owner, before, &owner);
+    const CKANIMATION_CONTROLLER deleteTypes[] = {CKANIMATION_TCBPOS_CONTROL, CKANIMATION_TCBROT_CONTROL,
+        CKANIMATION_BEZIERSCL_CONTROL, CKANIMATION_TCBSCLAXIS_CONTROL, CKANIMATION_MORPH_CONTROL};
+    for (CKANIMATION_CONTROLLER type : deleteTypes)
+        Check(alias.DeleteController(type) && !ObjectLifecycleController(owner, type) && alias.DeleteController(type),
+              "DeleteController did not use the low-byte category or repeat successfully");
+    Check(alias.DeleteController(static_cast<CKANIMATION_CONTROLLER>(0x12345678)),
+          "Native DeleteController returns TRUE for unsupported categories");
+}
+
+template<CKANIMATION_CONTROLLER Type>
+void ObjectAnimationFactoryAllocationFailureKeepsExistingController() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe owner(&context, "FactoryFailureOwner"), alias(&context, "FactoryFailureAlias");
+    AddTimedAnimationKeys(owner, 4.0f); alias.ShareDataFrom(&owner);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(owner);
+    s_ObjectAnimationAllocationFailure = true;
+    CKAnimController *result = alias.CreateController(Type);
+    s_ObjectAnimationAllocationFailure = false;
+    Check(!result, "Controller factory must report nothrow allocation failure");
+    CheckObjectCloneData(owner, before, &owner); CheckObjectCloneData(alias, before, &owner);
+    Check(owner.References() == 2, "Failed controller replacement changed ownership");
+}
+
+template<bool Share>
+void ObjectAnimationCopyUsesCharacterOptionAndCopiesNativePlaybackFields() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe source(&context, "CopySource"), destination(&context, "CopyDestination"), retained(&context, "CopyRetained");
+    RCKObjectAnimation first(&context, "CopyFirst"), second(&context, "CopySecond");
+    RCK3dEntity entity(&context, "CopyEntity"); RCKKeyedAnimation sourceParent(&context, "SourceParent"), targetParent(&context, "TargetParent");
+    AddTimedAnimationKeys(source, 4.0f); AddTimedAnimationKeys(destination, 40.0f); retained.ShareDataFrom(&destination);
+    source.SetCloneState(&entity, &first, &second, CK_OBJECTANIMATION_MERGED | CK_OBJECTANIMATION_IGNOREMORPH);
+    source.SetParent(&sourceParent); source.SetReserved(17); destination.SetParent(&targetParent); destination.SetReserved(29);
+    const ObjectCloneDataSnapshot oldData = SnapshotObjectCloneData(destination), sourceData = SnapshotObjectCloneData(source);
+    CKDependencies options; options.Resize(CKGetClassCount()); options.m_Flags = CK_DEPENDENCIES_CUSTOM;
+    for (int i = 0; i < options.Size(); ++i) options[i] = 0;
+    options[CKCID_CHARACTER] = Share ? CK_DEPENDENCIES_COPY_CHARACTER_SHAREANIMS : 0;
+    options[CKCID_OBJECTANIMATION] = Share ? 0 : 1; // Deliberately differs from Character: native reads CID40.
+    CKDependenciesContext dependencies(&context); dependencies.StartDependencies(&options);
+    Check(destination.Copy(source, dependencies) == CK_OK, "ObjectAnimation Copy failed");
+    dependencies.StopDependencies();
+    CheckObjectCloneFields(destination, &entity, &first, &second, source.GetFlags(), &targetParent);
+    Check(destination.Reserved() == 29, "Copy changed native reserved/parent state");
+    CheckObjectCloneData(source, sourceData, &source);
+    if (Share) {
+        CheckObjectCloneData(retained, oldData, &retained);
+        CheckObjectCloneData(destination, sourceData, &source);
+        Check(source.References() == 2, "Character SHAREANIMS did not share keyframe data");
+    } else {
+        Check(destination.Data() == oldData.Data && destination.Data() != source.Data() && destination.Shared() == &destination &&
+              destination.References() == 2 && destination.GetLength() == source.GetLength(),
+              "Deep Copy changed native destination data ownership or aliases");
+        CKAnimController *controllers[] = {destination.GetPositionController(), destination.GetRotationController(),
+            destination.GetScaleController(), destination.GetScaleAxisController(), destination.GetMorphController()};
+        for (int i = 0; i < 5; ++i) {
+            Check(controllers[i] && controllers[i] != sourceData.Controllers[i] &&
+                  controllers[i]->GetKey(0) != sourceData.Controllers[i]->GetKey(0), "Deep Copy aliases source controllers/keys");
+            WireWords words(sourceData.Payloads[i].size());
+            Check(controllers[i]->DumpKeysTo(words.data()) == static_cast<int>(words.size() * 4) && words == sourceData.Payloads[i],
+                  "Deep Copy changed typed controller payload");
+        }
+        CKMorphKey *srcKey = static_cast<CKMorphKey *>(source.GetMorphController()->GetKey(0));
+        CKMorphKey *dstKey = static_cast<CKMorphKey *>(destination.GetMorphController()->GetKey(0));
+        Check(srcKey->PosArray != dstKey->PosArray && srcKey->NormArray != dstKey->NormArray,
+              "Deep Copy aliases Morph payload arrays");
+        const ObjectCloneDataSnapshot copied = SnapshotObjectCloneData(destination);
+        CheckObjectCloneData(retained, copied, &destination);
+    }
+}
+
+template<bool ObjectAllocation>
+void ObjectAnimationDeepCopyFailurePreservesAnimationDataAndAliases() {
+    // Four transform key arrays, then Morph keys plus two position/normal pairs.
+    const int attempts = ObjectAllocation ? 1 : 9;
+    for (int failure = 0; failure < attempts; ++failure) {
+        CKContext context(nullptr, 0, 0);
+        ObjectLifecycleProbe source(&context, "FailedCopySource"), destination(&context, "FailedCopyTarget"), alias(&context, "FailedCopyAlias");
+        AddTimedAnimationKeys(source, 4.0f); AddTimedAnimationKeys(destination, 40.0f); alias.ShareDataFrom(&destination);
+        destination.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREPOS);
+        const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(destination), sourceBefore = SnapshotObjectCloneData(source);
+        CKDependencies options; options.Resize(CKGetClassCount()); options.m_Flags = CK_DEPENDENCIES_CUSTOM;
+        for (int i = 0; i < options.Size(); ++i) options[i] = 0;
+        CKDependenciesContext dependencies(&context); dependencies.StartDependencies(&options);
+        if (ObjectAllocation) s_ObjectAnimationAllocationFailure = true; else s_MorphArrayAllocationFailure = failure;
+        CKERROR error = destination.Copy(source, dependencies);
+        s_ObjectAnimationAllocationFailure = false; s_MorphArrayAllocationFailure = -1;
+        dependencies.StopDependencies();
+        Check(error == CKERR_OUTOFMEMORY, "Deep Copy did not propagate allocation failure");
+        CheckObjectCloneData(destination, before, &destination); CheckObjectCloneData(alias, before, &destination);
+        CheckObjectCloneData(source, sourceBefore, &source);
+        Check(destination.References() == 2 && destination.GetFlags() == CK_OBJECTANIMATION_IGNOREPOS &&
+              destination.GetCurrentStep() == 0.625f, "Failed deep Copy changed derived playback fields or references");
+    }
+}
+
+void ObjectAnimationDependenciesFinishAndRemapOnlyNativeReferences() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe animation(&context, "DependencyAnimation");
+    RCKObjectAnimation first(&context, "DepFirst"), second(&context, "DepSecond"), newFirst(&context, "DepNewFirst"), newSecond(&context, "DepNewSecond");
+    RCK3dEntity entity(&context, "DepEntity"), newEntity(&context, "DepNewEntity");
+    RCKKeyedAnimation parent(&context, "DepParent"), newParent(&context, "DepNewParent");
+    animation.SetCloneState(&entity, &first, &second, CK_OBJECTANIMATION_MERGED); animation.SetParent(&parent);
+    ObjectLifecycleDependencies dependencies(&context);
+    Check(animation.PrepareDependencies(dependencies) == CK_OK && dependencies.IsDependenciesHere(animation.GetID()) &&
+          dependencies.m_DynamicObjects.IsEmpty(), "ObjectAnimation PrepareDependencies did not finish its native class stack");
+    Check(animation.PrepareDependencies(dependencies) == CKERR_ALREADYPRESENT,
+          "ObjectAnimation PrepareDependencies did not propagate base duplicate failure");
+    Check(!dependencies.IsDependenciesHere(first.GetID()) && !dependencies.IsDependenciesHere(entity.GetID()),
+          "ObjectAnimation unexpectedly prepared entity/source dependencies");
+    dependencies.Map(first, newFirst); dependencies.Map(second, newSecond); dependencies.Map(entity, newEntity);
+    dependencies.Map(parent, newParent);
+    Check(animation.RemapDependencies(dependencies) == CK_OK, "ObjectAnimation RemapDependencies failed");
+    CheckObjectCloneFields(animation, &newEntity, &newFirst, &newSecond, CK_OBJECTANIMATION_MERGED, &parent);
+}
+
+void ObjectAnimationPreDeletionAndObjectUseMatchNativeReferences() {
+    CKContext context(nullptr, 0, 0);
+    ObjectLifecycleProbe animation(&context, "DeletionAnimation");
+    RCKObjectAnimation first(&context, "DeleteFirst"), second(&context, "KeepSecond"), unrelated(&context, "Unrelated");
+    RCK3dEntity entity(&context, "DeleteEntity"); RCKKeyedAnimation parent(&context, "KeepParent");
+    animation.SetCloneState(&entity, &first, &second, CK_OBJECTANIMATION_MERGED); animation.SetParent(&parent);
+    Check(animation.IsObjectUsed(&first, CKCID_OBJECTANIMATION) && animation.IsObjectUsed(&second, CKCID_OBJECTANIMATION) &&
+          animation.IsObjectUsed(&entity, CKCID_3DENTITY) && !animation.IsObjectUsed(&unrelated, CKCID_OBJECTANIMATION),
+          "IsObjectUsed does not recognize native entity/source references");
+    first.ModifyObjectFlags(CK_OBJECT_TOBEDELETED, 0); entity.ModifyObjectFlags(CK_OBJECT_TOBEDELETED, 0);
+    parent.ModifyObjectFlags(CK_OBJECT_TOBEDELETED, 0); animation.CheckPreDeletion();
+    Check(!animation.First() && animation.Second() == &second && !animation.Get3dEntity() && animation.Parent() == &parent &&
+          animation.GetFlags() == CK_OBJECTANIMATION_MERGED, "PreDeletion changed references outside native deletion scope");
+}
+
+void ObjectAnimationCopyRetainsOriginalControllerFixtures() {
+    CKContext context(nullptr, 0, 0);
+    CKDependencies options; options.m_Flags = CK_DEPENDENCIES_NONE;
+    CKDependenciesContext dependencies(&context); dependencies.StartDependencies(&options);
+    const CKANIMATION_CONTROLLER linearTypes[] = {CKANIMATION_LINPOS_CONTROL, CKANIMATION_LINROT_CONTROL,
+        CKANIMATION_LINSCL_CONTROL, CKANIMATION_LINSCLAXIS_CONTROL};
+    const CKANIMATION_CONTROLLER tcbTypes[] = {CKANIMATION_TCBPOS_CONTROL, CKANIMATION_TCBROT_CONTROL,
+        CKANIMATION_TCBSCL_CONTROL, CKANIMATION_TCBSCLAXIS_CONTROL};
+    for (int category = 0; category < 4; ++category) {
+        const bool rotation = category == 1 || category == 3;
+        for (const LinearReference::Fixture &fixture : LinearReference::Fixtures) {
+            if (fixture.rotation != rotation) continue;
+            WireWords words = {static_cast<CKDWORD>(fixture.keyCount)};
+            AppendWire(words, fixture.keys, fixture.keyCount * (rotation ? 5 : 4) * sizeof(float));
+            ObjectLifecycleProbe source(&context, "NativeLinearCopySource"), destination(&context, "NativeLinearCopyTarget");
+            source.SetLength(20.0f);
+            CKAnimController *controller = source.CreateController(linearTypes[category]);
+            Check(controller && controller->ReadKeysFrom(words.data()) > 0, "Cannot load original Linear Copy fixture");
+            Check(destination.Copy(source, dependencies) == CK_OK, "Native Linear fixture Copy failed");
+            CheckLinearReference(ObjectLifecycleController(destination, linearTypes[category]), fixture);
+        }
+        for (const TCBReference::Fixture &fixture : TCBReference::Fixtures) {
+            if (fixture.rotation != rotation) continue;
+            WireWords words = {static_cast<CKDWORD>(fixture.keyCount)};
+            AppendWire(words, fixture.keys, fixture.keyCount * (rotation ? 10 : 9) * sizeof(float));
+            ObjectLifecycleProbe source(&context, "NativeTCBCopySource"), destination(&context, "NativeTCBCopyTarget");
+            source.SetLength(20.0f);
+            CKAnimController *controller = source.CreateController(tcbTypes[category]);
+            Check(controller && controller->ReadKeysFrom(words.data()) > 0, "Cannot load original TCB Copy fixture");
+            Check(destination.Copy(source, dependencies) == CK_OK, "Native TCB fixture Copy failed");
+            CheckTCBReference(ObjectLifecycleController(destination, tcbTypes[category]), fixture);
+        }
+    }
+    const CKANIMATION_CONTROLLER bezierTypes[] = {CKANIMATION_BEZIERPOS_CONTROL, CKANIMATION_BEZIERSCL_CONTROL};
+    for (CKANIMATION_CONTROLLER type : bezierTypes) {
+        for (const BezierReference::Fixture &fixture : BezierReference::Fixtures) {
+            WireWords words(fixture.words, fixture.words + fixture.wordCount);
+            ObjectLifecycleProbe source(&context, "NativeBezierCopySource"), destination(&context, "NativeBezierCopyTarget");
+            source.SetLength(20.0f);
+            CKAnimController *controller = source.CreateController(type);
+            Check(controller && controller->ReadKeysFrom(words.data()) > 0, "Cannot load original Bezier Copy fixture");
+            Check(destination.Copy(source, dependencies) == CK_OK, "Native Bezier fixture Copy failed");
+            CheckBezierReference(ObjectLifecycleController(destination, type), fixture);
+        }
+    }
+    for (const MorphReference::Fixture &fixture : MorphReference::Fixtures) {
+        WireWords words(fixture.words, fixture.words + fixture.wordCount);
+        ObjectLifecycleProbe source(&context, "NativeMorphCopySource"), destination(&context, "NativeMorphCopyTarget");
+        source.SetLength(20.0f);
+        CKAnimController *controller = source.CreateController(CKANIMATION_MORPH_CONTROL);
+        Check(controller && controller->ReadKeysFrom(words.data()) > 0, "Cannot load original Morph Copy fixture");
+        Check(destination.Copy(source, dependencies) == CK_OK, "Native Morph fixture Copy failed");
+        CheckMorphReference(destination, fixture);
+    }
+    dependencies.StopDependencies();
+}
+
+// Pass 24 playback-extra functional regressions.
+void ObjectPlaybackPartialChannelsPreserveEntityPoseAndHierarchy() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity entity(&context,"PartialTarget"), child(&context,"PartialChild");
+    RCKObjectAnimation animation(&context,"PartialPlayback");
+    VxMatrix initial; Vx3DMatrixIdentity(initial);
+    initial[0][0]=2; initial[1][1]=3; initial[2][2]=4; initial[3][0]=7; initial[3][1]=8; initial[3][2]=9;
+    entity.SetLocalMatrix(initial); child.SetParent(reinterpret_cast<CK3dEntity *>(&entity),FALSE);
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    VxQuaternion identity; animation.AddRotationKey(0,&identity);
+    Check(animation.SetStep(0)==CK_OK, "Rotation-only playback failed");
+    const VxMatrix &m=entity.GetLocalMatrix();
+    Check(std::fabs(m[0][0]-2)<0.0001f && std::fabs(m[1][1]-3)<0.0001f && std::fabs(m[2][2]-4)<0.0001f &&
+          Equal(VxVector(m[3][0],m[3][1],m[3][2]),VxVector(7,8,9)), "Rotation-only playback lost unanimated scale/translation");
+    VxVector moved(17,18,19); animation.AddPositionKey(0,&moved);
+    Check(animation.SetStep(0)==CK_OK && entity.GetWorldMatrix()[3][0]==17 && child.GetWorldMatrix()[3][0]==17,
+          "Playback notification did not update entity and child world transforms");
+    animation.DeleteController(CKANIMATION_LINROT_CONTROL);
+    animation.DeleteController(CKANIMATION_LINPOS_CONTROL);
+    entity.SetLocalMatrix(initial);
+    VxQuaternion axis(0,0,0.38268343f,0.92387953f); animation.AddScaleAxisKey(0,&axis);
+    Check(animation.SetStep(0)==CK_OK, "Scale-axis-only playback failed");
+    const VxMatrix &a=entity.GetLocalMatrix();
+    Check(std::fabs(a[0][0]-2.5f)<0.0002f && std::fabs(a[1][1]-2.5f)<0.0002f && std::fabs(std::fabs(a[0][1])-0.5f)<0.0002f &&
+          std::fabs(a[2][2]-4)<0.0002f && a[3][0]==7 && a[3][1]==8 && a[3][2]==9,
+          "Scale-axis-only playback did not preserve missing channels through total decomposition");
+    animation.Set3dEntity(nullptr); child.SetParent(nullptr,FALSE);
+}
+
+void ObjectPlaybackExclusiveBodyPartAndCharacterBatchRespectPose() {
+    CKContext context(nullptr,0,0);
+    RCKBodyPart body(&context,"ExclusiveBody"); RCKCharacter character(&context,"PlaybackCharacter");
+    RCKKeyedAnimation exclusive(&context,"ExclusiveDriver"), other(&context,"OtherDriver");
+    RCKObjectAnimation object(&context,"ExclusiveObject");
+    object.Set3dEntity(reinterpret_cast<CK3dEntity *>(&body));
+    VxVector pos(5,6,7); object.AddPositionKey(0,&pos);
+    body.SetExclusiveAnimation(reinterpret_cast<CKAnimation *>(&exclusive));
+    Check(object.SetStep(0.25f)==CK_OK && body.GetLocalMatrix()[3][0]==0 && object.GetCurrentStep()==0.25f,
+          "Exclusive body part accepted unrelated playback");
+    Check(object.SetStep(0.5f,reinterpret_cast<CKKeyedAnimation *>(&other))==CK_OK && body.GetLocalMatrix()[3][0]==0,
+          "Exclusive body part accepted a different keyed driver");
+    body.SetMoveableFlags(body.GetMoveableFlags()|0x400);
+    Check(object.SetStep(0.75f,reinterpret_cast<CKKeyedAnimation *>(static_cast<intptr_t>(-1)))==CK_OK && body.GetLocalMatrix()[3][0]==0,
+          "Force playback should bypass ignore but retain exclusive-animation ownership");
+    body.SetMoveableFlags(body.GetMoveableFlags()&~0x400u);
+    Check(object.SetStep(0.75f,reinterpret_cast<CKKeyedAnimation *>(&exclusive))==CK_OK && body.GetWorldMatrix()[3][0]==5,
+          "Matching exclusive driver did not propagate pose");
+    character.AddAnimation(reinterpret_cast<CKAnimation *>(&exclusive));
+    Check(exclusive.GetCharacter()==reinterpret_cast<CKCharacter *>(&character), "Cannot establish actual character driver");
+    pos=VxVector(15,16,17); object.AddPositionKey(0,&pos);
+    Check(object.SetStep(1,reinterpret_cast<CKKeyedAnimation *>(&exclusive))==CK_OK && body.GetLocalMatrix()[3][0]==15 &&
+          body.GetWorldMatrix()[3][0]==5, "Character batch playback notified before its hierarchy pass");
+    body.LocalMatrixChanged(FALSE,FALSE);
+    Check(body.GetWorldMatrix()[3][0]==15, "Character hierarchy notification failed to publish playback pose");
+    character.RemoveAnimation(reinterpret_cast<CKAnimation *>(&exclusive)); body.SetExclusiveAnimation(nullptr); object.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackMorphSetStepPublishesVerticesAndNormals() {
+    CKContext context(nullptr,0,0);
+    RCKMesh mesh(&context,"PlaybackMorphMesh"); RCK3dEntity entity(&context,"PlaybackMorphEntity");
+    RCKObjectAnimation animation(&context,"PlaybackMorph");
+    Check(mesh.SetVertexCount(3), "Cannot allocate Morph playback mesh");
+    entity.SetCurrentMesh(reinterpret_cast<CKMesh *>(&mesh)); animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    AddMorphRequestKeys(animation);
+    Check(animation.HasMorphInfo() && animation.HasMorphNormalInfo() && animation.GetMorphVertexCount()==3, "Morph public info/count changed");
+    Check(animation.SetStep(0.5f)==CK_OK && (mesh.GetFlags()&0x40000), "Morph playback did not mark mesh changes");
+    CKDWORD stride=0, normalStride=0;
+    CKBYTE *vertices=mesh.GetModifierVertices(&stride); CKBYTE *normals=static_cast<CKBYTE *>(mesh.GetNormalsPtr(&normalStride));
+    VxCompressedVector packed; packed.xa=600; packed.ya=300; VxVector expectedNormal; expectedNormal=packed;
+    for(int i=0;i<3;++i) {
+        Check(Equal(*reinterpret_cast<VxVector *>(vertices+i*stride),VxVector(6.0f+i,5,6)), "Morph SetStep did not publish actual mesh positions");
+        Check(Equal(*reinterpret_cast<VxVector *>(normals+i*normalStride),expectedNormal), "Morph SetStep did not publish decompressed normals");
+    }
+    animation.SetFlags(CK_OBJECTANIMATION_IGNOREMORPH);
+    Check(animation.SetStep(1)==CK_OK && Equal(*reinterpret_cast<VxVector *>(vertices),VxVector(6,5,6)), "Ignored Morph changed mesh vertices");
+    animation.SetFlags(0); entity.CreateSkin();
+    Check(animation.SetStep(1)==CK_OK && Equal(*reinterpret_cast<VxVector *>(vertices),VxVector(6,5,6)), "Skinned entity accepted unskinned Morph playback path");
+    animation.Set3dEntity(nullptr); entity.SetCurrentMesh(nullptr);
+}
+
+void ObjectPlaybackTransitionReusesTypedChannelsAndRebuildsTangents() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity entity(&context,"ReuseTargetEntity");
+    RCKObjectAnimation in(&context,"ReuseIn"),out(&context,"ReuseOut"),target(&context,"ReuseTarget");
+    VxVector first(2,3,4),last(12,13,14),scl(2,3,4),zero(0.0f); VxQuaternion identity;
+    in.AddPositionKey(0,&first); out.AddPositionKey(0,&last);
+    in.AddScaleKey(0,&scl); out.AddScaleKey(0,&scl);
+    in.AddRotationKey(0,&identity); out.AddRotationKey(0,&identity);
+    in.AddScaleAxisKey(0,&identity); out.AddScaleAxisKey(0,&identity);
+    out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity)); in.SetLength(10); out.SetLength(10); target.SetLength(4);
+    CKAnimController *pos=target.CreateController(CKANIMATION_TCBPOS_CONTROL);
+    CKTCBPositionKey p0(0,zero,0.2f,0.3f,0.4f),p1(4,zero,0.2f,0.3f,0.4f); pos->AddKey(&p0); pos->AddKey(&p1);
+    CKAnimController *scale=target.CreateController(CKANIMATION_TCBSCL_CONTROL);
+    CKTCBScaleKey s0(0,scl),s1(4,scl); scale->AddKey(&s0); scale->AddKey(&s1);
+    CKAnimController *rot=target.CreateController(CKANIMATION_TCBROT_CONTROL);
+    CKTCBRotationKey r0(0,identity),r1(4,identity); rot->AddKey(&r0); rot->AddKey(&r1);
+    CKAnimController *axis=target.CreateController(CKANIMATION_TCBSCLAXIS_CONTROL);
+    CKTCBScaleAxisKey a0(0,identity),a1(4,identity); axis->AddKey(&a0); axis->AddKey(&a1);
+    VxVector sampled; VxQuaternion sampledRot; pos->Evaluate(2,&sampled); scale->Evaluate(2,&sampled); rot->Evaluate(2,&sampledRot); axis->Evaluate(2,&sampledRot);
+    target.CreateTransition(4,&in,0,&out,0,FALSE,FALSE,nullptr);
+    Check(target.GetPositionController()==pos && target.GetScaleController()==scale && target.GetRotationController()==rot && target.GetScaleAxisController()==axis,
+          "Transition discarded matching typed controller interpolation");
+    CKTCBPositionKey *kept=static_cast<CKTCBPositionKey *>(pos->GetKey(0));
+    Check(kept->tension==0.2f && kept->continuity==0.3f && kept->bias==0.4f, "Transition changed retained TCB settings");
+    Check(target.EvaluatePosition(0,sampled) && Equal(sampled,first) && target.EvaluatePosition(4,sampled) && Equal(sampled,last), "Reused controller endpoints retained old pose");
+    Check(target.SetStep(0.5f)==CK_OK && entity.GetLocalMatrix()[3][0]>2 && entity.GetLocalMatrix()[3][0]<12,
+          "Reused controller tangent cache did not publish transition pose");
+    target.Set3dEntity(nullptr); out.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackTransitionMissingAndEmptyChannelsFollowIntersection() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity entity(&context,"SparseTransitionEntity");
+    RCKObjectAnimation in(&context,"SparseIn"),out(&context,"SparseOut"),target(&context,"SparseTarget");
+    VxVector first(1,2,3),last(11,12,13),scale(2,3,4); VxQuaternion rot;
+    in.AddPositionKey(0,&first); out.AddPositionKey(0,&last); in.AddScaleKey(0,&scale);
+    target.CreateController(CKANIMATION_LINPOS_CONTROL); target.AddScaleKey(0,&scale); target.AddRotationKey(0,&rot); target.AddScaleAxisKey(0,&rot);
+    out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity)); target.SetLength(4);
+    target.CreateTransition(4,&in,0,&out,0,FALSE,FALSE,nullptr);
+    Check(target.HasPositionInfo() && !target.HasScaleInfo() && !target.HasRotationInfo() && !target.HasScaleAxisInfo(),
+          "Transition did not replace empty position/delete absent intersection channels");
+    Check(target.GetPositionController()->GetKeyCount()==2 && target.SetStep(0.5f)==CK_OK && entity.GetLocalMatrix()[3][0]==6,
+          "Sparse transition failed actual positional playback");
+    target.Set3dEntity(nullptr); out.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackTransitionMorphReuseResetsTimelineAndMeshFallbackNormals() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation in(&context,"MorphTransitionIn"),out(&context,"MorphTransitionOut"),target(&context,"MorphTransitionTarget");
+    AddMorphRequestKeys(in); AddMorphRequestKeys(out); AddMorphRequestKeys(target); target.SetLength(4);
+    CKMorphController *old=target.GetMorphController();
+    target.CreateTransition(4,&in,0,&out,1,FALSE,FALSE,nullptr);
+    VxVector result[3]; VxCompressedVector normals[3];
+    Check(target.GetMorphController()==old && target.EvaluateMorphTarget(2,3,result,sizeof(VxVector),normals) && Equal(result[0],VxVector(6,5,6)),
+          "Reused Morph transition retained old timeline instead of transition duration");
+    RCKObjectAnimation empty(&context,"MorphlessIn"); RCKMesh mesh(&context,"MorphFallbackMesh"); RCK3dEntity entity(&context,"MorphFallbackEntity");
+    mesh.SetVertexCount(3); entity.SetCurrentMesh(reinterpret_cast<CKMesh *>(&mesh)); out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    CKDWORD pStride=0,nStride=0; CKBYTE *p=mesh.GetModifierVertices(&pStride),*n=static_cast<CKBYTE *>(mesh.GetNormalsPtr(&nStride));
+    for(int i=0;i<3;++i) { *reinterpret_cast<VxVector *>(p+i*pStride)=VxVector(20.0f+i,30,40); *reinterpret_cast<VxVector *>(n+i*nStride)=VxVector(0,1,0); }
+    target.CreateTransition(4,&empty,0,&out,1,FALSE,FALSE,nullptr);
+    Check(target.HasMorphNormalInfo() && target.EvaluateMorphTarget(0,3,result,sizeof(VxVector),normals) && Equal(result[0],VxVector(20,30,40)),
+          "Mesh fallback transition lost source mesh position/normal channel");
+    VxVector decoded; decoded=normals[0];
+    Check(std::fabs(decoded.x)<0.0002f && std::fabs(decoded.z)<0.0002f && std::fabs(decoded.y-1)<0.0002f,
+          "Mesh fallback transition did not preserve mesh normal direction within angular quantization");
+    Check(target.SetStep(1)==CK_OK && Equal(*reinterpret_cast<VxVector *>(mesh.GetModifierVertices(&pStride)),VxVector(10,7,8)),
+          "Morph transition destination did not reach actual mesh");
+    target.Set3dEntity(nullptr); out.Set3dEntity(nullptr); entity.SetCurrentMesh(nullptr);
+}
+
+void ObjectPlaybackMergedPublicAPIBlendsControllersAndTracksInfo() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity entity(&context,"MergedTarget"); RCKObjectAnimation first(&context,"MergedFirst"),second(&context,"MergedSecond");
+    AddTimedAnimationKeys(first,2,10); AddTimedAnimationKeys(second,12,20); first.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    Check(first.CreateMergedAnimation(nullptr)==nullptr, "Merged factory accepted absent second source");
+    CKObjectAnimation *merged=first.CreateMergedAnimation(&second,FALSE);
+    Check(merged && merged->IsMerged() && merged->GetLength()==20 && merged->Get3dEntity()==reinterpret_cast<CK3dEntity *>(&entity) &&
+          entity.GetObjectAnimationCount()==2, "Merged public factory did not establish length/entity membership");
+    Check(merged->HasPositionInfo() && merged->HasScaleInfo() && merged->HasRotationInfo() && merged->HasScaleAxisInfo() &&
+          merged->HasMorphInfo() && merged->HasMorphNormalInfo() && merged->GetMorphVertexCount()==1, "Merged source info/count missing");
+    const float factors[]={0,0.5f,1};
+    for(int i=0;i<3;++i) {
+        merged->SetMergeFactor(factors[i]); VxVector pos,scale,morph; VxQuaternion rot,axis; VxCompressedVector normal;
+        Check(merged->GetMergeFactor()==factors[i] && merged->EvaluateKeys(0.5f,&rot,&pos,&scale,&axis) &&
+              Equal(pos,VxVector(7+10*factors[i],2,3)) && Equal(scale,pos), "Merged source time normalization/blend changed");
+        Check(std::fabs(std::fabs(rot.z)-0.70710678f)<0.0001f && std::fabs(std::fabs(axis.z)-0.70710678f)<0.0001f,
+              "Merged rotation/axis interpolation changed");
+        Check(merged->EvaluateMorphTarget(10,1,&morph,sizeof(morph),&normal) && Equal(morph,pos), "Merged Morph public path differed from transform phase");
+        Check(merged->SetStep(0.5f)==CK_OK && entity.GetLocalMatrix()[3][0]==pos.x, "Merged SetStep did not reach real entity");
+    }
+    second.SetFlags(CK_OBJECTANIMATION_IGNOREPOS|CK_OBJECTANIMATION_IGNORESCALE|CK_OBJECTANIMATION_IGNOREROT|CK_OBJECTANIMATION_IGNORESCALEROT);
+    merged->SetMergeFactor(0.5f); VxVector pos; VxQuaternion rot;
+    Check(merged->HasPositionInfo() && merged->EvaluatePosition(10,pos) && Equal(pos,VxVector(7,2,3)) && merged->EvaluateRotation(10,rot),
+          "Merged fallback or presence independent of ignore flags changed");
+    merged->Set3dEntity(nullptr); first.Set3dEntity(nullptr); context.DestroyObject(merged);
+}
+
+void ObjectPlaybackInfoEmptyControllersAndKeyShortcutsUseContracts() {
+    CKContext context(nullptr,0,0); RCKObjectAnimation animation(&context,"InfoContracts"),same(&context,"CompareChannels");
+    animation.AddPositionKey(0,nullptr); animation.AddScaleKey(0,nullptr); animation.AddRotationKey(0,nullptr); animation.AddScaleAxisKey(0,nullptr);
+    Check(!animation.HasPositionInfo() && !animation.HasScaleInfo() && !animation.HasRotationInfo() && !animation.HasScaleAxisInfo(), "Null shortcut materialized controllers");
+    animation.CreateController(CKANIMATION_LINPOS_CONTROL); animation.CreateController(CKANIMATION_LINROT_CONTROL);
+    animation.CreateController(CKANIMATION_LINSCL_CONTROL); animation.CreateController(CKANIMATION_LINSCLAXIS_CONTROL);
+    CKMorphController *morph=static_cast<CKMorphController *>(animation.CreateController(CKANIMATION_MORPH_CONTROL));
+    Check(animation.HasPositionInfo() && animation.HasScaleInfo() && animation.HasRotationInfo() && animation.HasScaleAxisInfo() &&
+          animation.HasMorphInfo() && !animation.HasMorphNormalInfo(), "Presence checks should test controller rather than nonempty keys");
+    morph->SetMorphVertexCount(1); morph->AddKey(0.0f,FALSE); morph->AddKey(10,TRUE);
+    Check(!animation.HasMorphNormalInfo(), "Morph normal presence should inspect first key");
+    animation.SetFlags(CK_OBJECTANIMATION_IGNOREPOS|CK_OBJECTANIMATION_IGNOREROT|CK_OBJECTANIMATION_IGNORESCALE|CK_OBJECTANIMATION_IGNORESCALEROT|CK_OBJECTANIMATION_IGNOREMORPH);
+    Check(animation.HasPositionInfo() && animation.HasScaleInfo() && animation.HasRotationInfo() && animation.HasScaleAxisInfo() && animation.HasMorphInfo(),
+          "Ignore flags should not change controller-presence query");
+    animation.SetFlags(0); VxVector scale(2,3,4); animation.CheckScaleKeys(scale);
+    Check(animation.GetScaleController()->GetKeyCount()==1, "CheckScaleKeys failed an existing empty scale controller");
+    animation.ClearAll(); AddTimedAnimationKeys(animation,2); AddTimedAnimationKeys(same,2);
+    Check(animation.HasMorphNormalInfo() && animation.Compare(&same), "All-channel comparison/normal info failed");
+    static_cast<CKPositionKey *>(same.GetPositionController()->GetKey(0))->Pos.x+=0.1f;
+    Check(!animation.Compare(&same) && animation.Compare(&same,100), "Compare vector threshold was not delegated to channel controllers");
+    static_cast<CKPositionKey *>(same.GetPositionController()->GetKey(0))->Pos=
+        static_cast<CKPositionKey *>(animation.GetPositionController()->GetKey(0))->Pos;
+    static_cast<CKMorphKey *>(same.GetMorphController()->GetKey(0))->PosArray[0].x+=1;
+    Check(!animation.Compare(&same), "Compare did not include Morph controller payload");
+}
+
+void ObjectPlaybackTransitionInPlaceMorphCapturesBeforeReplacement() {
+    CKContext context(nullptr,0,0);
+    RCKObjectAnimation target(&context,"InPlaceMorph"),out(&context,"InPlaceOut");
+    AddMorphRequestKeys(target); AddMorphRequestKeys(out);
+    target.CreateTransition(4,&target,0.5f,&out,1,FALSE,FALSE,nullptr); target.SetLength(4);
+    VxVector actual[3]; VxCompressedVector normals[3];
+    Check(target.EvaluateMorphTarget(0,3,actual,sizeof(VxVector),normals) && Equal(actual[0],VxVector(6,5,6)),
+          "In-place Morph transition read its starting pose after replacing data");
+    Check(target.EvaluateMorphTarget(4,3,actual,sizeof(VxVector),normals) && Equal(actual[0],VxVector(10,7,8)),
+          "In-place Morph transition did not end at outgoing source");
+}
+
+// Pass 24 legacy-boundary functional regressions.
+// Real identifier adjacency: the following block is not this record's payload.
+template<int Version>
+void LegacyTransformRecordsStopAtTheirIdentifier() {
+    for (int stage = 0; stage < (Version ? 3 : 2); ++stage) {
+        CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "LegacyBoundary");
+        Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, Version);
+        if (Version) {
+            chunk->WriteIdentifier(CK_STATESAVE_OBJANIMNEWDATA);
+            for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+            chunk->WriteInt(0); chunk->WriteInt(0); chunk->WriteDword(0); chunk->WriteObject(nullptr);
+            if (stage != 0) {
+                chunk->WriteFloat(23.0f);
+                chunk->WriteDword(16);
+                if (stage == 2) chunk->WriteDword(1);
+            }
+        } else {
+            chunk->WriteIdentifier(CK_STATESAVE_OBJANIMPOSKEYS);
+            chunk->WriteDword(16);
+            if (stage == 1) chunk->WriteDword(1);
+        }
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMLENGTH);
+        for (int i = 0; i < 8; ++i) chunk->WriteFloat(23.0f + i);
+        chunk->CloseChunk(); chunk->StartRead();
+        Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE,
+              "Legacy header/position reader consumed an adjacent identifier as payload");
+        Check(!animation.GetPositionController(), "Rejected legacy position record published neighboring bytes as a key");
+    }
+}
+
+void LegacyV0RotationAxisStopsAtItsIdentifier() {
+    CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "LegacyAxisBoundary");
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, 0);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMROTKEYS);
+    chunk->WriteDword(0); chunk->WriteDword(0);
+    chunk->WriteDword(24); chunk->WriteDword(1);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMLENGTH);
+    for (int i = 0; i < 8; ++i) chunk->WriteFloat(23.0f + i);
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE && !animation.GetScaleAxisController(),
+          "Legacy axis reader consumed its next identifier as a six-float record");
+}
+
+template<int Version>
+void LegacyMorphPositionsCoverDeclaredVertices() {
+    CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "LegacyShortPositions");
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, Version);
+    if (Version) {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMNEWDATA);
+        for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+        chunk->WriteInt(2); chunk->WriteInt(1); chunk->WriteDword(0);
+        chunk->WriteObject(nullptr); chunk->WriteFloat(23.0f);
+    } else {
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMMORPHKEYS2);
+        chunk->WriteInt(1); chunk->WriteInt(2);
+    }
+    VxVector position(1.0f, 2.0f, 3.0f);
+    chunk->WriteFloat(2.0f); chunk->WriteDword(sizeof(position));
+    chunk->WriteBufferNoSize_LEndian(sizeof(position), &position);
+    if (Version) for (int i = 0; i < 8; ++i) chunk->WriteDword(0);
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE && !animation.GetMorphController(),
+          "Legacy Morph accepted a nonempty position allocation smaller than its declared vertex count");
+}
+
+template<int Format>
+void LegacyNormalsCoverDeclaredVertices() {
+    CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "LegacyShortNormals");
+    Chunk initial = AnimationWithController(CKANIMATION_MORPH_CONTROL, MorphWire<true>()); LoadChunk(animation, initial.get());
+    CKMorphKey *key = static_cast<CKMorphKey *>(animation.GetMorphController()->GetKey(0));
+    VxCompressedVector *old = key->NormArray;
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, 1);
+    chunk->WriteIdentifier(Format == 1 ? CK_STATESAVE_OBJANIMMORPHCOMP : CK_STATESAVE_OBJANIMMORPHNORMALS);
+    chunk->WriteDword(4); chunk->WriteDword(0x12345678);
+    chunk->WriteDword(0);
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE && key->NormArray == old,
+          "Legacy normals accepted an allocation smaller than the declared Morph vertex count");
+}
+
+template<int Format>
+void LegacyNormalRecordsStopAtTheirIdentifier() {
+    for (int stage = 0; stage < 2; ++stage) {
+        CKContext context(nullptr, 0, 0); RCKObjectAnimation animation(&context, "LegacyNormalBoundary");
+        Chunk initial = AnimationWithController(CKANIMATION_MORPH_CONTROL, MorphWire<true>()); LoadChunk(animation, initial.get());
+        CKMorphKey *key = static_cast<CKMorphKey *>(animation.GetMorphController()->GetKey(0));
+        VxCompressedVector *old = key->NormArray;
+        Chunk chunk = NewChunk(CKCID_OBJECTANIMATION, 1);
+        chunk->WriteIdentifier(Format == 1 ? CK_STATESAVE_OBJANIMMORPHCOMP : CK_STATESAVE_OBJANIMMORPHNORMALS);
+        if (stage) chunk->WriteDword(8);
+        chunk->WriteIdentifier(CK_STATESAVE_OBJANIMLENGTH);
+        for (int i = 0; i < 8; ++i) chunk->WriteDword(0x12345678);
+        chunk->CloseChunk(); chunk->StartRead();
+        Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE && key->NormArray == old,
+              "Legacy normal header/payload reader consumed an adjacent identifier");
+    }
+}
+
+// Pass 24 playback-final functional regressions.
+void ObjectPlaybackTransitionVelocityReusesMatchingTypedController() {
+    CKContext context(nullptr,0,0);
+    RCK3dEntity inEntity(&context,"ReuseVelocityIn"),outEntity(&context,"ReuseVelocityOut");
+    RCKObjectAnimation in(&context,"ReuseVelocitySource"),out(&context,"ReuseVelocityDestination"),target(&context,"ReuseVelocityTarget");
+    in.Set3dEntity(reinterpret_cast<CK3dEntity *>(&inEntity)); out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&outEntity));
+    VxVector zero(0.0f),left(10,0,0),right(30,0,0);
+    in.AddPositionKey(0,&zero); in.AddPositionKey(10,&left); out.AddPositionKey(0,&zero); out.AddPositionKey(10,&right);
+    in.SetLength(10); out.SetLength(10); target.SetLength(4);
+    CKAnimController *controller=target.CreateController(CKANIMATION_TCBPOS_CONTROL);
+    for(int i=0;i<5;++i) { CKTCBPositionKey key(static_cast<float>(i),zero,0.25f,0.3f,0.4f); controller->AddKey(&key); }
+    VxVector sampled; controller->Evaluate(2.5f,&sampled);
+    target.CreateTransition(4,&in,0,&out,0,TRUE,FALSE,nullptr);
+    Check(target.GetPositionController()==controller && controller->GetKeyCount()==5, "Velocity transition replaced a matching typed controller");
+    const float expected[]={0,0.4f,1,1.8f,2.8f};
+    for(int i=0;i<5;++i) {
+        CKTCBPositionKey *key=static_cast<CKTCBPositionKey *>(controller->GetKey(i));
+        Check(key->tension==0.25f && key->continuity==0.3f && key->bias==0.4f && key->TimeStep==i,
+              "Velocity transition changed retained per-key interpolation settings");
+        Check(target.SetStep(i/4.0f)==CK_OK && std::fabs(outEntity.GetLocalMatrix()[3][0]-expected[i])<0.0002f,
+              "Reused velocity transition did not publish integrated actual pose");
+    }
+    target.Set3dEntity(nullptr); in.Set3dEntity(nullptr); out.Set3dEntity(nullptr);
+}
+
+void ObjectPlaybackTransitionMorphUnsupportedSourcesRetainPreviousChannel() {
+    for(int mode=0;mode<3;++mode) {
+        CKContext context(nullptr,0,0);
+        RCKObjectAnimation in(&context,"UnavailableMorphIn"),out(&context,"UnavailableMorphOut"),target(&context,"UnavailableMorphTarget");
+        RCKMesh mesh(&context,"UnavailableMorphMesh"); RCK3dEntity entity(&context,"UnavailableMorphEntity");
+        AddMorphRequestKeys(out); AddMorphRequestKeys(target);
+        for(int k=0;k<2;++k) {
+            CKMorphKey *key=static_cast<CKMorphKey *>(target.GetMorphController()->GetKey(k));
+            key->PosArray[0]=VxVector(k?19.0f:9.0f,0,0);
+            static_cast<CKMorphKey *>(out.GetMorphController()->GetKey(k))->PosArray[0].x+=100;
+        }
+        if(mode==0) AddTimedAnimationKeys(in,2); // one incoming vertex vs three outgoing vertices
+        if(mode==2) { mesh.SetVertexCount(4); entity.SetCurrentMesh(reinterpret_cast<CKMesh *>(&mesh)); out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity)); }
+        CKMorphController *old=target.GetMorphController();
+        target.CreateTransition(4,&in,0,&out,1,FALSE,FALSE,nullptr);
+        VxVector actual;
+        Check(target.GetMorphController()==old && target.EvaluateMorphTarget(5,1,&actual,sizeof(actual),nullptr) && Equal(actual,VxVector(14,0,0)),
+              "Unavailable/mismatched Morph transition should retain native previous channel");
+        target.Set3dEntity(nullptr); out.Set3dEntity(nullptr); entity.SetCurrentMesh(nullptr);
+    }
+    CKContext context(nullptr,0,0); RCKObjectAnimation in(&context,"NoOutgoingIn"),out(&context,"NoOutgoingOut"),target(&context,"NoOutgoingTarget");
+    AddMorphRequestKeys(target); target.CreateTransition(4,&in,0,&out,0,FALSE,FALSE,nullptr);
+    Check(!target.HasMorphInfo() && !target.GetMorphController(), "Absent outgoing Morph should delete previous transition channel");
+}
+
+void ObjectPlaybackMergedCreationFlagsAndDetachedPhaseRespectContract() {
+    CKContext context(nullptr,0,0); RCKObjectAnimation first(&context,"DynamicMergedFirst"),second(&context,"DynamicMergedSecond");
+    VxVector p(1,2,3); first.AddPositionKey(0,&p); second.AddPositionKey(0,&p);
+    first.SetLength(10); second.SetLength(20);
+    first.SetFlags(0x20000000u);
+    CKObjectAnimation *dynamic=first.CreateMergedAnimation(&second,FALSE);
+    Check(dynamic && dynamic->IsDynamic() && dynamic->GetLength()==20 && std::strcmp(dynamic->GetName(),first.GetName())==0,
+          "Merged creation lost native source-flag dynamic option/name");
+    Check(dynamic->HasPositionInfo() && !dynamic->HasScaleInfo() && !dynamic->HasRotationInfo() && !dynamic->HasScaleAxisInfo() &&
+          !dynamic->HasMorphInfo() && !dynamic->HasMorphNormalInfo() && dynamic->GetMorphVertexCount()==0,
+          "Merged presence queries did not preserve absent channels");
+    context.DestroyObject(dynamic);
+    first.SetFlags(0); CKObjectAnimation *extension=first.CreateMergedAnimation(&second,TRUE);
+    Check(extension && !extension->IsDynamic(), "SDL extra Dynamic parameter should retain native source-flag semantics");
+    context.DestroyObject(extension);
+    Check(first.SetStep(0.375f)==CKERR_NOTINITIALIZED && first.GetCurrentStep()==0.375f,
+          "Detached SetStep should record requested phase then report missing target");
+}
+
+void ObjectPlaybackDurationAndMergedMorphMaximumUseExistingControllers() {
+    CKContext context(nullptr,0,0); RCKObjectAnimation first(&context,"LengthAllChannels"),second(&context,"LengthSecondChannels");
+    AddTimedAnimationKeys(first,2); AddMorphRequestKeys(first); AddTimedAnimationKeys(second,12,20);
+    first.SetLength(37);
+    CKAnimController *controllers[]={first.GetPositionController(),first.GetRotationController(),first.GetScaleController(),first.GetScaleAxisController(),first.GetMorphController()};
+    for(int i=0;i<5;++i) {
+        Check(controllers[i]->GetLength()==37 && controllers[i]->GetKey(0)->TimeStep==0 && controllers[i]->GetKey(1)->TimeStep==10,
+              "SetLength did not update every existing controller duration without rescaling keys");
+    }
+    CKObjectAnimation *merged=first.CreateMergedAnimation(&second);
+    Check(merged && merged->GetLength()==37 && merged->GetMorphVertexCount()==3, "Merged Morph count did not choose maximum unequal source count");
+    VxVector positions[3]; Check(merged->EvaluateMorphTarget(5,3,positions,sizeof(VxVector),nullptr) && Equal(positions[0],VxVector(6,5,6)),
+          "Unequal Morph source counts did not retain native unscaled first-source time fallback");
+    context.DestroyObject(merged);
+}
+
+void ObjectPlaybackMergedInPlaceTransitionCapturesLiveSourcePose() {
+    CKContext context(nullptr,0,0); RCK3dEntity entity(&context,"MergedTransitionEntity");
+    RCKObjectAnimation first(&context,"MergedTransitionFirst"),second(&context,"MergedTransitionSecond"),out(&context,"MergedTransitionOut");
+    AddTimedAnimationKeys(first,2); AddTimedAnimationKeys(second,12); AddTimedAnimationKeys(out,22);
+    out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    CKObjectAnimation *target=first.CreateMergedAnimation(&second); Check(target!=nullptr,"Cannot create merged in-place transition source");
+    target->SetMergeFactor(0.5f); target->CreateTransition(4,target,0.5f,&out,1,FALSE,FALSE,nullptr); target->SetLength(4);
+    VxVector pos,morph; VxCompressedVector normal;
+    Check(!target->IsMerged() && target->EvaluatePosition(0,pos) && Equal(pos,VxVector(12,2,3)),
+          "In-place transition retained stale merged dispatch instead of captured starting pose");
+    Check(target->EvaluateMorphTarget(0,1,&morph,sizeof(morph),&normal) && Equal(morph,VxVector(12,2,3)),
+          "Merged in-place Morph capture happened after clearing live sources");
+    Check(target->SetStep(0.5f)==CK_OK && entity.GetLocalMatrix()[3][0]==22,
+          "Merged-to-transition did not publish actual interpolated entity pose");
+    target->Set3dEntity(nullptr); out.Set3dEntity(nullptr); context.DestroyObject(target);
+}
+
+// Pass 24 duration functional regressions.
+template<bool ZeroDuration>
+void ObjectTransitionVelocityHandlesShortDuration() {
+    CKContext context(nullptr, 0, 0);
+    RCK3dEntity inEntity(&context, "ShortVelocityIn"), outEntity(&context, "ShortVelocityOut");
+    RCKObjectAnimation in(&context, "ShortVelocitySource"), out(&context, "ShortVelocityDestination"),
+        target(&context, "ShortVelocityTransition");
+    in.Set3dEntity(reinterpret_cast<CK3dEntity *>(&inEntity));
+    out.Set3dEntity(reinterpret_cast<CK3dEntity *>(&outEntity));
+    VxVector zero(0.0f), firstEnd(10, 0, 0), secondEnd(30, 0, 0);
+    in.AddPositionKey(0, &zero); in.AddPositionKey(10, &firstEnd); in.SetLength(10);
+    out.AddPositionKey(0, &zero); out.AddPositionKey(10, &secondEnd); out.SetLength(10);
+    const float duration = ZeroDuration ? 0.0f : 0.5f;
+    target.SetLength(duration);
+    target.CreateTransition(duration, &in, 0, &out, 0, TRUE, FALSE, nullptr);
+    CKAnimController *controller = target.GetPositionController();
+    Check(controller && controller->GetKeyCount() == (ZeroDuration ? 1 : 2),
+          "Short velocity transition did not represent its duration with finite key intervals");
+    Check(controller->GetKey(0)->TimeStep == 0 &&
+          controller->GetKey(controller->GetKeyCount() - 1)->TimeStep == duration,
+          "Short velocity transition generated an undefined key time");
+    Check(target.SetStep(.5f) == CK_OK &&
+          std::fabs(outEntity.GetLocalMatrix()[3][0] - (ZeroDuration ? 0.0f : .1f)) < 0.00001f,
+          "Short velocity transition did not publish its integrated midpoint pose");
+    Check(target.SetStep(1) == CK_OK &&
+          std::fabs(outEntity.GetLocalMatrix()[3][0] - (ZeroDuration ? 0.0f : .2f)) < 0.00001f,
+          "Short velocity transition did not scale its left-endpoint velocity by duration");
+    Chunk saved(target.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(saved != nullptr, "Short velocity transition produced unsaveable key data");
+    RCKObjectAnimation reloaded(&context, "ShortVelocityReloaded");
+    LoadChunk(reloaded, saved.get());
+    VxVector actual;
+    Check(reloaded.EvaluatePosition(duration, actual) &&
+          Equal(actual, VxVector(ZeroDuration ? 0.0f : .2f, 0, 0)),
+          "Saved short velocity transition changed its final displacement");
+    target.Set3dEntity(nullptr); in.Set3dEntity(nullptr); out.Set3dEntity(nullptr);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -5094,15 +6449,96 @@ int main(int argc, char **argv) {
 
 
 
+        {"Object transition velocity handles zero duration", ObjectTransitionVelocityHandlesShortDuration<true>},
+        {"Object transition velocity handles subframe duration", ObjectTransitionVelocityHandlesShortDuration<false>},
 
 
 
 
+        {"Object playback existing duration and merged Morph maximum", ObjectPlaybackDurationAndMergedMorphMaximumUseExistingControllers},
+        {"Object playback merged in-place transition source capture", ObjectPlaybackMergedInPlaceTransitionCapturesLiveSourcePose},
+        {"Object playback transition typed velocity reuse", ObjectPlaybackTransitionVelocityReusesMatchingTypedController},
+        {"Object playback transition unsupported Morph sources", ObjectPlaybackTransitionMorphUnsupportedSourcesRetainPreviousChannel},
+        {"Object playback native merged creation flags detached phase", ObjectPlaybackMergedCreationFlagsAndDetachedPhaseRespectContract},
+
+        {"Legacy snapshot stops at identifier", &LegacyTransformRecordsStopAtTheirIdentifier<1>},
+        {"Legacy v0 position stops at identifier", &LegacyTransformRecordsStopAtTheirIdentifier<0>},
+        {"Legacy v0 axis stops at identifier", &LegacyV0RotationAxisStopsAtItsIdentifier},
+        {"Legacy snapshot Morph positions cover declared vertices", &LegacyMorphPositionsCoverDeclaredVertices<1>},
+        {"Legacy v0 Morph positions cover declared vertices", &LegacyMorphPositionsCoverDeclaredVertices<0>},
+        {"Legacy compressed normals cover declared vertices", &LegacyNormalsCoverDeclaredVertices<1>},
+        {"Legacy converted normals cover declared vertices", &LegacyNormalsCoverDeclaredVertices<2>},
+        {"Legacy compressed normals stop at identifier", &LegacyNormalRecordsStopAtTheirIdentifier<1>},
+        {"Legacy converted normals stop at identifier", &LegacyNormalRecordsStopAtTheirIdentifier<2>},
+        {"Object playback empty info key shortcuts comparison", ObjectPlaybackInfoEmptyControllersAndKeyShortcutsUseContracts},
+        {"Object playback transition in-place Morph", ObjectPlaybackTransitionInPlaceMorphCapturesBeforeReplacement},
+
+        {"Object playback partial pose and child hierarchy", ObjectPlaybackPartialChannelsPreserveEntityPoseAndHierarchy},
+        {"Object playback exclusive body part and character batch", ObjectPlaybackExclusiveBodyPartAndCharacterBatchRespectPose},
+        {"Object playback Morph mesh vertices and normals", ObjectPlaybackMorphSetStepPublishesVerticesAndNormals},
+        {"Object playback transition typed controller reuse", ObjectPlaybackTransitionReusesTypedChannelsAndRebuildsTangents},
+        {"Object playback transition sparse and empty channels", ObjectPlaybackTransitionMissingAndEmptyChannelsFollowIntersection},
+        {"Object playback transition Morph timeline and mesh fallback", ObjectPlaybackTransitionMorphReuseResetsTimelineAndMeshFallbackNormals},
+        {"Object playback merged public factory and channels", ObjectPlaybackMergedPublicAPIBlendsControllersAndTracksInfo},
 
 
+        {"ObjectAnimation Copy original controller fixtures", ObjectAnimationCopyRetainsOriginalControllerFixtures},
+        {"Object playback transition removes source yaw", ObjectPlaybackTransitionDontTurnUsesInverseSourceYaw},
+        {"Modern ObjectAnimation Load propagates factory allocation failure", ModernAnimationLoadPropagatesControllerFactoryFailure},
 
-
-
+        {"Legacy snapshot partial axis uses native identity", LegacyScaleAxisPartialPayloadRetainsNativeIdentity<1>},
+        {"Legacy v0 partial axis uses native identity", LegacyScaleAxisPartialPayloadRetainsNativeIdentity<0>},
+        {"ObjectAnimation lifecycle defaults and registration", ObjectAnimationLifecycleDefaultsAndRegistration},
+        {"ObjectAnimation Clear shared data and reserved state", ObjectAnimationClearPreservesSharedOwnershipAndReservedState<false>},
+        {"ObjectAnimation ClearAll shared data and reserved state", ObjectAnimationClearPreservesSharedOwnershipAndReservedState<true>},
+        {"ObjectAnimation Reset and shared length", ObjectAnimationResetAndLengthPropagateThroughAliases},
+        {"ObjectAnimation null sharing allocation failure", ObjectAnimationNullShareAllocationFailurePreservesAliases},
+        {"ObjectAnimation native factory and Delete dispatch", ObjectAnimationControllerFactoryAndDeleteFollowNativeDispatch},
+        {"ObjectAnimation LINPOS factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_LINPOS_CONTROL>},
+        {"ObjectAnimation LINROT factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_LINROT_CONTROL>},
+        {"ObjectAnimation LINSCL factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_LINSCL_CONTROL>},
+        {"ObjectAnimation LINAXIS factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"ObjectAnimation TCBPOS factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_TCBPOS_CONTROL>},
+        {"ObjectAnimation TCBROT factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_TCBROT_CONTROL>},
+        {"ObjectAnimation TCBSCL factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_TCBSCL_CONTROL>},
+        {"ObjectAnimation TCBAXIS factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"ObjectAnimation BEZIERPOS factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"ObjectAnimation BEZIERSCL factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"ObjectAnimation MORPH factory allocation failure", ObjectAnimationFactoryAllocationFailureKeepsExistingController<CKANIMATION_MORPH_CONTROL>},
+        {"ObjectAnimation Copy Character SHAREANIMS fields", ObjectAnimationCopyUsesCharacterOptionAndCopiesNativePlaybackFields<true>},
+        {"ObjectAnimation Copy independent typed data fields", ObjectAnimationCopyUsesCharacterOptionAndCopiesNativePlaybackFields<false>},
+        {"ObjectAnimation Copy data allocation failure", ObjectAnimationDeepCopyFailurePreservesAnimationDataAndAliases<true>},
+        {"ObjectAnimation Copy transform and Morph allocation failures", ObjectAnimationDeepCopyFailurePreservesAnimationDataAndAliases<false>},
+        {"ObjectAnimation dependency finish and native remapping", ObjectAnimationDependenciesFinishAndRemapOnlyNativeReferences},
+        {"ObjectAnimation PreDeletion and object references", ObjectAnimationPreDeletionAndObjectUseMatchNativeReferences},
+        {"Legacy snapshot all native key layouts", LegacyObjectAnimationLoadsAllNativeKeyLayouts<1, false>},
+        {"Legacy v0 all native key layouts", LegacyObjectAnimationLoadsAllNativeKeyLayouts<0, false>},
+        {"Legacy snapshot preserves supplied raw key order", LegacyObjectAnimationLoadsAllNativeKeyLayouts<1, true>},
+        {"Legacy v0 preserves supplied raw key order", LegacyObjectAnimationLoadsAllNativeKeyLayouts<0, true>},
+        {"Legacy normal-only empty clears payload", LegacyNormalOnlySnapshotUpdatesExistingMorph<0>},
+        {"Legacy normal-only compressed payload", LegacyNormalOnlySnapshotUpdatesExistingMorph<1>},
+        {"Legacy normal-only converted payload", LegacyNormalOnlySnapshotUpdatesExistingMorph<2>},
+        {"Legacy normal-only converted precedence", LegacyNormalOnlySnapshotUpdatesExistingMorph<3>},
+        {"Legacy snapshot array allocation stages", LegacyKeyArrayAllocationFailuresReturnErrorAndRemainDestructible<1>},
+        {"Legacy v0 array allocation stages", LegacyKeyArrayAllocationFailuresReturnErrorAndRemainDestructible<0>},
+        {"Legacy compressed normal allocation retains payload", LegacyNormalAllocationFailureKeepsTheFailingKeyPayload<1>},
+        {"Legacy converted normal allocation retains payload", LegacyNormalAllocationFailureKeepsTheFailingKeyPayload<2>},
+        {"Object playback native empty and ignored values", ObjectPlaybackEmptyAndIgnoredValuesFollowNative},
+        {"Object playback direct keys flags and duration", ObjectPlaybackDirectKeysFlagsAndLengthUsePublicAPI},
+        {"Object playback animated scale axis", ObjectPlaybackSetStepComposesScaleAxisAndKeepsPosition},
+        {"Object playback keyed root centering", ObjectPlaybackRootCenterOffsetReachesEntity},
+        {"Object playback frame phase velocity and binding", ObjectPlaybackStepFrameIgnoreAndVelocityUseEntity},
+        {"Object playback transition starting pose", ObjectPlaybackTransitionUsesProvidedStartingSet},
+        {"Object playback transition integrated velocity", ObjectPlaybackTransitionVelocityBuildsIntegratedKeys},
+        {"Object playback scale fixup and directed comparison", ObjectPlaybackCheckScaleAndComparePreserveNativeDirectionality},
+        {"Shared reload transfers owner and preserves old alias", SharedLoadMovesOwnerAndPreservesRemainingAlias},
+        {"Shared self reference preserves keys and clears state", SharedLoadSelfReferenceKeepsDataAndResetsState},
+        {"Shared missing-owner Load propagates allocation failure", SharedLoadMissingOwnerAllocationFailureKeepsData},
+        {"Shared Load rejects short entity header", SharedLoadRejectsTruncatedIdentifier<false>},
+        {"Shared Load rejects short merged references", SharedLoadRejectsTruncatedIdentifier<true>},
+        {"Shared Load restores root and entity", SharedLoadRestoresEntityRootAndMergedReferences<false>},
+        {"Shared Load restores root entity and merged references", SharedLoadRestoresEntityRootAndMergedReferences<true>},
+        {"ObjectAnimation Save applies native selective mask", AnimationSaveSelectiveFlagsUseNativeMask},
         {"LINPOS rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearPositionController, CKANIMATION_LINPOS_CONTROL>},
         {"LINROT rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearRotationController, CKANIMATION_LINROT_CONTROL>},
         {"LINSCL rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearScaleController, CKANIMATION_LINSCL_CONTROL>},
