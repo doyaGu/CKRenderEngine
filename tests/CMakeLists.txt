@@ -435,3 +435,8 @@ target_compile_definitions(test_render_profile_disabled PRIVATE CKRE_ENABLE_PROF
 set_target_properties(test_render_profile_disabled PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" FOLDER "Tests")
 add_test(NAME RenderProfileDisabled COMMAND $<TARGET_FILE:test_render_profile_disabled>)
+
+if (TARGET gtest_main)
+    ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
+    target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
+endif ()
