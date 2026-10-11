@@ -3502,6 +3502,986 @@ CKAnimController *TransformController(RCKObjectAnimation &animation, CKANIMATION
     }
 }
 
+// Fixture metadata is independent of the production reader. The Bezier
+// fixture covers neither, in-only, out-only and both explicit tangents.
+std::vector<size_t> TransformWireTimeOffsets(CKANIMATION_CONTROLLER type, const WireWords &words) {
+    std::vector<size_t> offsets;
+    const bool bezier = type == CKANIMATION_BEZIERPOS_CONTROL || type == CKANIMATION_BEZIERSCL_CONTROL;
+    const bool rotation = (type & CKANIMATION_CONTROLLER_MASK) == CKANIMATION_CONTROLLER_ROT ||
+                          (type & CKANIMATION_CONTROLLER_MASK) == CKANIMATION_CONTROLLER_SCLAXIS;
+    const bool tcb = type == CKANIMATION_TCBPOS_CONTROL || type == CKANIMATION_TCBROT_CONTROL ||
+                     type == CKANIMATION_TCBSCL_CONTROL || type == CKANIMATION_TCBSCLAXIS_CONTROL;
+    size_t offset = 1;
+    for (CKDWORD i = 0; i < words[0]; ++i) {
+        offsets.push_back(offset);
+        if (bezier) {
+            CKBezierKeyFlags flags;
+            std::memcpy(&flags, words.data() + offset + 4, sizeof(flags));
+            offset += 5;
+            if (flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) offset += 3;
+            if (flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) offset += 3;
+        } else {
+            offset += rotation ? 5 : 4;
+            if (tcb) offset += 5;
+        }
+    }
+    Check(offset == words.size(), "Transform fixture has an incorrect independent layout");
+    return offsets;
+}
+
+Chunk TransformRecordWithDeclaredSize(CKANIMATION_CONTROLLER type, const WireWords &words, CKDWORD declared) {
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
+    for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+    chunk->WriteDword(0); chunk->WriteObject(nullptr); chunk->WriteFloat(20.0f);
+    chunk->WriteDword(type); chunk->WriteDword(declared);
+    chunk->WriteBufferNoSize_LEndian(static_cast<int>(words.size() * 4), const_cast<CKDWORD *>(words.data()));
+    chunk->WriteDword(0);
+    // Retain a complete physical backing while varying the record's logical
+    // capacity; pre-fix readers need not touch unallocated memory.
+    chunk->WriteIdentifier(0x7FFFFFFFu);
+    for (int i = 0; i < 64; ++i) chunk->WriteDword(0);
+    chunk->CloseChunk(); chunk->StartRead();
+    return chunk;
+}
+
+template<CKANIMATION_CONTROLLER Type>
+void LoadedTransformRespectsEveryRecordBoundary() {
+    CKContext context(nullptr, 0, 0);
+    WireWords words = TransformControllerWire(Type);
+    words[1] = 0; // First key's time doubles as a benign early terminator pre-fix.
+    {
+        RCKObjectAnimation animation(&context, "TransformHeaderOnlyRecord");
+        Chunk chunk = TransformRecordWithDeclaredSize(Type, words, 1);
+        Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE,
+              "Transform Load accepted a header-only record with nonempty keys");
+    }
+    for (CKDWORD declared = 0; declared < words.size(); ++declared) {
+        RCKObjectAnimation animation(&context, "TransformTruncatedRecord");
+        Chunk chunk = TransformRecordWithDeclaredSize(Type, words, declared);
+        Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE,
+              "Transform Load accepted a record shorter than its keys or explicit tangents");
+    }
+    const CKDWORD invalidCounts[] = {0xFFFFFFFFu, 0x7FFFFFFFu, words[0] + 1};
+    for (CKDWORD count : invalidCounts) {
+        // Only reached after bounded-load rejection above succeeds.
+        WireWords invalid = words; invalid[0] = count;
+        RCKObjectAnimation animation(&context, "TransformInvalidCount");
+        Chunk chunk = TransformRecordWithDeclaredSize(Type, invalid, static_cast<CKDWORD>(invalid.size()));
+        Check(animation.Load(chunk.get(), nullptr) == CKERR_INVALIDFILE, "Transform Load accepted an invalid inner key count");
+        Check(!TransformController(animation, Type), "Failed transform reader left a partial controller attached");
+    }
+}
+
+template<CKANIMATION_CONTROLLER Type>
+void TransformRawReadRejectsInvalidStateAtomically() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "TransformInvalidRawRead");
+    WireWords words = TransformControllerWire(Type);
+    Chunk chunk = AnimationWithController(Type, words); LoadChunk(animation, chunk.get());
+    CKAnimController *controller = TransformController(animation, Type);
+    CKKey *oldKey = controller->GetKey(0);
+    VxQuaternion before, after;
+    Check(controller->Evaluate(5.0f, &before), "Cannot prime transform tangent cache");
+    const std::vector<size_t> offsets = TransformWireTimeOffsets(Type, words);
+    for (int invalidKind = 0; invalidKind < 5; ++invalidKind) {
+        WireWords invalid = words;
+        if (invalidKind == 0) invalid[0] = 0xFFFFFFFFu;
+        if (invalidKind == 1) invalid[offsets[0]] = 0x7FC00000u;
+        if (invalidKind == 2) invalid[offsets[0]] = 0x7F800000u;
+        if (invalidKind == 3) invalid[offsets[1]] = 0xBF800000u;
+        Check(controller->ReadKeysFrom(invalidKind == 4 ? nullptr : invalid.data()) == 0,
+              "Transform raw reader accepted a negative count or invalid key time");
+        Check(controller->GetKey(0) == oldKey && controller->GetKeyCount() == static_cast<int>(words[0]) &&
+              controller->GetLength() == 20.0f, "Rejected transform read changed key storage or length");
+        Check(controller->Evaluate(5.0f, &after) && after == before, "Rejected transform read changed cached evaluation");
+        CheckSavedController(animation, Type, words);
+    }
+}
+
+template<CKANIMATION_CONTROLLER Type>
+void TransformRawReadPreservesStateOnAllocationFailure() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "TransformFailedRawRead");
+    WireWords words = TransformControllerWire(Type);
+    Chunk chunk = AnimationWithController(Type, words); LoadChunk(animation, chunk.get());
+    CKAnimController *controller = TransformController(animation, Type);
+    CKKey *oldKey = controller->GetKey(0);
+    VxQuaternion before, after;
+    Check(controller->Evaluate(5.0f, &before), "Cannot prime transform cache before failed read");
+    WireWords replacement = words;
+    replacement[TransformWireTimeOffsets(Type, words)[0]] = 0xBF800000u;
+    s_MorphArrayAllocationFailure = 0;
+    const int result = controller->ReadKeysFrom(replacement.data());
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(!result && injected, "Transform reader ignored allocation failure");
+    Check(controller->GetKey(0) == oldKey && controller->GetKeyCount() == static_cast<int>(words[0]) &&
+          controller->GetLength() == 20.0f, "Failed transform read changed owned keys");
+    Check(controller->Evaluate(5.0f, &after) && after == before, "Failed transform read changed cached evaluation");
+    CheckSavedController(animation, Type, words);
+    Check(controller->ReadKeysFrom(replacement.data()) == static_cast<int>(replacement.size() * 4),
+          "Transform read did not recover after allocation failure");
+    CheckSavedController(animation, Type, replacement);
+}
+
+template<CKANIMATION_CONTROLLER Type>
+void TransformReadRetainsValidWireAndLengthContracts() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "TransformValidRead");
+    WireWords words = TransformControllerWire(Type);
+    // Padding belongs to the envelope rather than the controller's wire data.
+    WireWords padded = words; padded.push_back(0xAABBCCDDu); padded.push_back(0u);
+    Chunk chunk = TransformRecordWithDeclaredSize(Type, padded, static_cast<CKDWORD>(padded.size()));
+    Check(animation.Load(chunk.get(), nullptr) == CK_OK, "Transform Load rejected valid record padding");
+    CheckSavedController(animation, Type, words);
+    CKAnimController *controller = TransformController(animation, Type);
+    controller->SetLength(37.0f);
+    std::vector<unsigned char> unaligned(words.size() * 4 + 1);
+    std::memcpy(unaligned.data() + 1, words.data(), words.size() * 4);
+    Check(controller->ReadKeysFrom(unaligned.data() + 1) == static_cast<int>(words.size() * 4) &&
+          controller->GetLength() == 37.0f, "Transform read changed byte count or length on unaligned input");
+    WireWords output(words.size(), 0u);
+    Check(controller->DumpKeysTo(output.data()) == static_cast<int>(output.size() * 4) && output == words,
+          "Unaligned transform read changed original wire bytes");
+    WireWords duplicates = words;
+    const std::vector<size_t> offsets = TransformWireTimeOffsets(Type, words);
+    duplicates[offsets[1]] = duplicates[offsets[0]];
+    Check(controller->ReadKeysFrom(duplicates.data()) == static_cast<int>(duplicates.size() * 4),
+          "Transform reader rejected native-compatible duplicate key times");
+    Check(controller->DumpKeysTo(output.data()) == static_cast<int>(output.size() * 4) && output == duplicates,
+          "Transform read changed duplicate-time wire bytes");
+    CKDWORD empty = 0;
+    Check(controller->ReadKeysFrom(&empty) == 4 && controller->GetKeyCount() == 0 &&
+          !controller->GetKey(0) && controller->GetLength() == 37.0f, "Empty transform read changed the native length contract");
+}
+
+void LoadedTransformReportsKeyAllocationFailure() {
+    const CKANIMATION_CONTROLLER types[] = {
+        CKANIMATION_LINPOS_CONTROL, CKANIMATION_LINROT_CONTROL,
+        CKANIMATION_LINSCL_CONTROL, CKANIMATION_LINSCLAXIS_CONTROL,
+        CKANIMATION_TCBPOS_CONTROL, CKANIMATION_TCBROT_CONTROL,
+        CKANIMATION_TCBSCL_CONTROL, CKANIMATION_TCBSCLAXIS_CONTROL,
+        CKANIMATION_BEZIERPOS_CONTROL, CKANIMATION_BEZIERSCL_CONTROL
+    };
+    CKContext context(nullptr, 0, 0);
+    for (CKANIMATION_CONTROLLER type : types) {
+        RCKObjectAnimation animation(&context, "TransformLoadAllocationFailure");
+        WireWords words = TransformControllerWire(type);
+        Chunk chunk = AnimationWithController(type, words);
+        chunk->CloseChunk(); chunk->StartRead();
+        s_MorphArrayAllocationFailure = 0;
+        const CKERROR result = animation.Load(chunk.get(), nullptr);
+        const bool injected = s_MorphArrayAllocationFailure == -1;
+        s_MorphArrayAllocationFailure = -1;
+        Check(result == CKERR_INVALIDFILE && injected, "Transform Load did not report reader allocation failure");
+        Check(!TransformController(animation, type), "Failed transform Load retained a partial controller");
+    }
+}
+
+void LoadedTransformCanonicalizesSupportedBaseTypes() {
+    const CKANIMATION_CONTROLLER aliases[] = {
+        CKANIMATION_CONTROLLER_POS, CKANIMATION_CONTROLLER_ROT, CKANIMATION_CONTROLLER_SCL
+    };
+    const CKANIMATION_CONTROLLER canonical[] = {
+        CKANIMATION_LINPOS_CONTROL, CKANIMATION_LINROT_CONTROL, CKANIMATION_LINSCL_CONTROL
+    };
+    CKContext context(nullptr, 0, 0);
+    for (int i = 0; i < 3; ++i) {
+        RCKObjectAnimation animation(&context, "TransformBaseTypeLoad");
+        WireWords words = TransformControllerWire(canonical[i]);
+        Chunk chunk = AnimationWithController(aliases[i], words);
+        LoadChunk(animation, chunk.get());
+        CKAnimController *controller = TransformController(animation, canonical[i]);
+        Check(controller && controller->GetType() == canonical[i] && controller->GetLength() == 20.0f,
+              "Transform base type did not load as its canonical controller");
+        CheckSavedController(animation, canonical[i], words);
+    }
+    // Native factory 0x1004A922 accepts bare 1, 2, 4 and 16, but not
+    // SCLAXIS mask 8. Its record is skipped; the complete axis type is required.
+    RCKObjectAnimation animation(&context, "TransformUnsupportedAxisMask");
+    WireWords words = TransformControllerWire(CKANIMATION_LINSCLAXIS_CONTROL);
+    Chunk chunk = AnimationWithController(CKANIMATION_CONTROLLER_SCLAXIS, words);
+    LoadChunk(animation, chunk.get());
+    Check(!animation.GetScaleAxisController() && animation.GetLength() == 20.0f,
+          "Unsupported bare scale-axis mask created a controller or changed length");
+}
+
+void LoadedTransformSkipsUnknownRecordsAndPadding() {
+    CKContext context(nullptr, 0, 0);
+    RCKObjectAnimation animation(&context, "TransformRecordProgress");
+    WireWords position = TransformControllerWire(CKANIMATION_BEZIERPOS_CONTROL);
+    WireWords scale = TransformControllerWire(CKANIMATION_LINSCL_CONTROL);
+    Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
+    chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
+    for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
+    chunk->WriteDword(0); chunk->WriteObject(nullptr); chunk->WriteFloat(20.0f);
+    chunk->WriteDword(CKANIMATION_BEZIERPOS_CONTROL);
+    chunk->WriteDword(static_cast<CKDWORD>(position.size() + 2));
+    chunk->WriteBufferNoSize_LEndian(static_cast<int>(position.size() * 4), position.data());
+    chunk->WriteDword(0); chunk->WriteDword(CKANIMATION_LINROT_CONTROL);
+    chunk->WriteDword(0x7FFF1234u); chunk->WriteDword(3);
+    chunk->WriteDword(0); chunk->WriteDword(CKANIMATION_TCBROT_CONTROL); chunk->WriteDword(0xAABBCCDDu);
+    chunk->WriteDword(CKANIMATION_LINSCL_CONTROL);
+    chunk->WriteDword(static_cast<CKDWORD>(scale.size()));
+    chunk->WriteBufferNoSize_LEndian(static_cast<int>(scale.size() * 4), scale.data());
+    chunk->WriteDword(0);
+    LoadChunk(animation, chunk.get());
+    CKAnimController *first = animation.GetPositionController();
+    CKAnimController *next = animation.GetScaleController();
+    Check(first && first->GetType() == CKANIMATION_BEZIERPOS_CONTROL &&
+          next && next->GetType() == CKANIMATION_LINSCL_CONTROL &&
+          !animation.GetRotationController(), "Transform envelope did not skip padding and unknown records");
+    WireWords output(position.size(), 0u);
+    Check(first->DumpKeysTo(output.data()) == static_cast<int>(position.size() * 4) && output == position,
+          "Padding changed the first transform payload");
+    output.assign(scale.size(), 0u);
+    Check(next->DumpKeysTo(output.data()) == static_cast<int>(scale.size() * 4) && output == scale,
+          "Unknown record changed the following transform payload");
+    Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    saved->StartRead();
+    Check(saved->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS), "Missing saved transform envelope");
+    saved->Skip(10);
+    Check(saved->ReadDword() == CKANIMATION_BEZIERPOS_CONTROL && saved->ReadDword() == position.size(),
+          "Save retained position padding in the controller size");
+    saved->Skip(static_cast<int>(position.size()));
+    Check(saved->ReadDword() == CKANIMATION_LINSCL_CONTROL && saved->ReadDword() == scale.size(),
+          "Save retained the unknown transform record");
+    saved->Skip(static_cast<int>(scale.size()));
+    Check(saved->ReadDword() == 0, "Saved transform envelope lost its terminator");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TransformDumpRejectsInvalidStateBeforeWriting() {
+    Controller controller;
+    WireWords words = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4), "Cannot prepare transform dump fixture");
+    controller.SetLength(37.0f);
+    const int count = controller.GetKeyCount();
+    CKKey *first = controller.GetKey(0), *last = controller.GetKey(count - 1);
+    const float firstTime = first->TimeStep, lastTime = last->TimeStep;
+    struct RestoreCount {
+        CKAnimController &ControllerRef;
+        int Count;
+        ~RestoreCount() { ControllerRef.m_NbKeys = Count; }
+    } restore = {controller, count};
+    for (int invalid = 0; invalid < 5; ++invalid) {
+        controller.m_NbKeys = count; first->TimeStep = firstTime; last->TimeStep = lastTime;
+        if (invalid == 0) controller.m_NbKeys = -1;
+        if (invalid == 1) controller.m_NbKeys = INT_MAX;
+        if (invalid == 2) first->TimeStep = FloatWithBits(0x7FC00000u);
+        if (invalid == 3) first->TimeStep = FloatWithBits(0x7F800000u);
+        if (invalid == 4) last->TimeStep = firstTime - 1.0f;
+        // Query rejection precedes all writes or impossible-sized traversal.
+        Check(controller.DumpKeysTo(nullptr) == 0, "Transform dump query accepted invalid count or key times");
+        CKDWORD output[64];
+        for (CKDWORD &word : output) word = 0xAABBCCDDu;
+        Check(controller.DumpKeysTo(output) == 0, "Transform dump wrote rejected state");
+        for (CKDWORD word : output) Check(word == 0xAABBCCDDu, "Rejected transform dump changed caller bytes");
+        Check(controller.GetLength() == 37.0f && controller.m_NbKeys == (invalid < 2 ? (invalid ? INT_MAX : -1) : count),
+              "Transform dump changed metadata");
+    }
+    controller.m_NbKeys = count; first->TimeStep = firstTime; last->TimeStep = lastTime;
+    Check(controller.GetKey(0) == first && controller.GetKey(count - 1) == last, "Transform dump replaced key storage");
+    WireWords output(words.size(), 0u);
+    Check(controller.DumpKeysTo(output.data()) == static_cast<int>(words.size() * 4) && output == words,
+          "Rejected transform dump corrupted valid keys");
+    Controller missing;
+    missing.m_NbKeys = 1;
+    Check(missing.DumpKeysTo(nullptr) == 0, "Transform dump accepted absent nonempty storage");
+    for (CKDWORD &word : output) word = 0xAABBCCDDu;
+    Check(missing.DumpKeysTo(output.data()) == 0, "Transform dump wrote absent key storage");
+    for (CKDWORD word : output) Check(word == 0xAABBCCDDu, "Missing-key dump changed caller bytes");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TransformDumpPreservesValidWireAndOutputBounds() {
+    Controller controller;
+    WireWords words = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4), "Cannot read valid dump fixture");
+    controller.SetLength(37.0f);
+    CKKey *first = controller.GetKey(0);
+    VxQuaternion before, after;
+    Check(controller.Evaluate(5.0f, &before), "Cannot prime transform dump cache");
+    std::vector<unsigned char> output(words.size() * 4 + 2, 0xCD);
+    const int size = controller.DumpKeysTo(nullptr);
+    Check(size == static_cast<int>(words.size() * 4) && controller.DumpKeysTo(output.data() + 1) == size &&
+          !std::memcmp(output.data() + 1, words.data(), words.size() * 4) && output.front() == 0xCD && output.back() == 0xCD,
+          "Transform dump changed native bytes or unaligned output guards");
+    Check(controller.GetKey(0) == first && controller.GetLength() == 37.0f &&
+          controller.Evaluate(5.0f, &after) && before == after, "Transform dump changed playback or its cache");
+    // Preserve duplicate-time and unrelated value bits accepted by Read.
+    const std::vector<size_t> offsets = TransformWireTimeOffsets(Type, words);
+    words[offsets[1]] = words[offsets[0]];
+    words[offsets[0] + 1] = 0x7FC00000u;
+    Check(controller.ReadKeysFrom(words.data()) == size && controller.DumpKeysTo(output.data() + 1) == size &&
+          !std::memcmp(output.data() + 1, words.data(), words.size() * 4), "Transform dump changed valid duplicate-time/value bits");
+    CKDWORD empty = 0;
+    Check(controller.ReadKeysFrom(&empty) == 4, "Cannot clear transform dump fixture");
+    unsigned char emptyOutput[6] = {0xCD, 0xCD, 0xCD, 0xCD, 0xCD, 0xCD};
+    Check(controller.DumpKeysTo(nullptr) == 4 && controller.DumpKeysTo(emptyOutput + 1) == 4 &&
+          !std::memcmp(emptyOutput + 1, &empty, 4) && emptyOutput[0] == 0xCD && emptyOutput[5] == 0xCD &&
+          controller.GetLength() == 37.0f, "Empty transform dump changed output or length");
+}
+
+// Synthetic controller results stay within a four-byte physical write, even
+// when the reported size is wrong. These fixtures test error propagation.
+template<class Controller>
+class SaveDumpResultProbe : public Controller {
+public:
+    SaveDumpResultProbe(CKDWORD type, int query, int result) : Query(query), Result(result), Writes(0) { this->m_Type = type; }
+    int DumpKeysTo(void *buffer) override {
+        if (!buffer) return Query;
+        ++Writes;
+        const CKDWORD empty = 0;
+        std::memcpy(buffer, &empty, sizeof(empty));
+        return Result;
+    }
+    int Query, Result, Writes;
+};
+
+class AnimationSaveProbe : public ObjectCloneProbe {
+public:
+    AnimationSaveProbe(CKContext *context, const char *name) : ObjectCloneProbe(context, name) {}
+    void AllocateSceneBits(int index) { m_Scenes.Set(index); }
+    int SceneBytes() const { return m_Scenes.GetMemoryOccupation(); }
+    void ReplaceController(int slot, CKAnimController *replacement) {
+        switch (slot) {
+        case 0: delete m_KeyframeData->m_PositionController; m_KeyframeData->m_PositionController = replacement; break;
+        case 1: delete m_KeyframeData->m_RotationController; m_KeyframeData->m_RotationController = replacement; break;
+        case 2: delete m_KeyframeData->m_ScaleController; m_KeyframeData->m_ScaleController = replacement; break;
+        case 3: delete m_KeyframeData->m_ScaleAxisController; m_KeyframeData->m_ScaleAxisController = replacement; break;
+        case 4: delete m_KeyframeData->m_MorphController; m_KeyframeData->m_MorphController = static_cast<CKMorphController *>(replacement); break;
+        }
+    }
+};
+
+const CKANIMATION_CONTROLLER SaveProbeTypes[] = {
+    CKANIMATION_LINPOS_CONTROL, CKANIMATION_LINROT_CONTROL, CKANIMATION_LINSCL_CONTROL,
+    CKANIMATION_LINSCLAXIS_CONTROL, CKANIMATION_MORPH_CONTROL
+};
+
+template<int Slot>
+void AnimationSaveRejectsControllerFailuresAndPreservesOwner() {
+    const int queries[] = {0, -4, 2, 6, 4, 4, 4, INT_MAX - 3};
+    const int results[] = {0, -4, 2, 6, 0, -4, 8, 4};
+    for (int failure = 0; failure < 8; ++failure) {
+        CKContext context(nullptr, 0, 0);
+        AnimationSaveProbe owner(&context, "SaveFailureOwner"), target(&context, "SaveFailureTarget");
+        AddTimedAnimationKeys(owner, 4.0f); target.ShareDataFrom(&owner);
+        CKAnimController *probe;
+        if (Slot == 4) probe = new SaveDumpResultProbe<RCKMorphController>(SaveProbeTypes[Slot], queries[failure], results[failure]);
+        else probe = new SaveDumpResultProbe<RCKLinearPositionController>(SaveProbeTypes[Slot], queries[failure], results[failure]);
+        owner.ReplaceController(Slot, probe);
+        CKKeyframeData *data = owner.Data();
+        CKFile file(&context); // Original owner has not been serialized.
+        Chunk saved(target.Save(&file, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+        Check(!saved, "ObjectAnimation Save accepted invalid query or failed controller dump");
+        Check(target.Data() == data && owner.Data() == data && target.Shared() == &owner && owner.Shared() == &owner &&
+              target.References() == 2 && target.GetLength() == 10.0f,
+              "Failed ObjectAnimation Save changed shared ownership or source metadata");
+        if (Slot == 4) Check(static_cast<SaveDumpResultProbe<RCKMorphController> *>(probe)->Writes == (failure >= 4 && failure < 7 ? 1 : 0),
+                             "Invalid Morph query was written or a valid query was not exercised");
+        else Check(static_cast<SaveDumpResultProbe<RCKLinearPositionController> *>(probe)->Writes == (failure >= 4 && failure < 7 ? 1 : 0),
+                   "Invalid transform query was written or a valid query was not exercised");
+    }
+}
+
+void AnimationSaveRejectsAggregateControllerOverflow() {
+    // Benign zero-size failure first keeps the pre-fix regression away from
+    // large allocations. After that is handled, exercise arithmetic only.
+    CKContext context(nullptr, 0, 0);
+    AnimationSaveProbe owner(&context, "SaveAggregateOwner"), target(&context, "SaveAggregateTarget");
+    AddTimedAnimationKeys(owner, 4.0f); target.ShareDataFrom(&owner);
+    auto *position = new SaveDumpResultProbe<RCKLinearPositionController>(CKANIMATION_LINPOS_CONTROL, 0, 4);
+    auto *rotation = new SaveDumpResultProbe<RCKLinearPositionController>(CKANIMATION_LINROT_CONTROL, 0x40000000, 4);
+    owner.ReplaceController(0, position); owner.ReplaceController(1, rotation);
+    CKFile file(&context);
+    Chunk first(target.Save(&file, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(!first, "ObjectAnimation Save omitted an invalid controller before aggregate checks");
+    position->Query = 0x40000000;
+    Chunk overflow(target.Save(&file, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(!overflow && position->Writes == 0 && rotation->Writes == 0 && target.Shared() == &owner,
+          "ObjectAnimation Save accepted overflowing aggregate controller bytes");
+}
+
+void AnimationSaveCommitsOwnerOnlyForFullSuccessfulData() {
+    CKContext context(nullptr, 0, 0);
+    AnimationSaveProbe owner(&context, "SaveCommitOwner"), target(&context, "SaveCommitTarget");
+    AddTimedAnimationKeys(owner, 4.0f); target.ShareDataFrom(&owner);
+    CKFile file(&context);
+    Chunk saved(target.Save(&file, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(saved && target.Shared() == &target && owner.Shared() == &target && target.References() == 2,
+          "Successful full Save did not commit the new shared owner");
+    saved->StartRead(); Check(saved->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS), "Unsaved owner did not force full data");
+    // A subsequent reference to an owner already saved needs no controller dump.
+    file.m_FileObjects.Resize(1);
+    file.m_FileObjects[0].ObjPtr = &target;
+    file.m_FileObjects[0].Data = saved.release();
+    auto *invalid = new SaveDumpResultProbe<RCKLinearPositionController>(CKANIMATION_LINPOS_CONTROL, 0, 0);
+    target.ReplaceController(0, invalid);
+    Chunk reference(owner.Save(&file, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(reference && invalid->Writes == 0 && target.Shared() == &target && owner.Shared() == &target,
+          "Shared Save dumped unused keys or changed owner");
+    reference->StartRead(); Check(reference->SeekIdentifier(CK_STATESAVE_OBJANIMSHARED), "Shared Save did not keep the native reference branch");
+}
+
+void AnimationMemoryEstimateRejectsInvalidOrOverflowingControllerSizes() {
+    CKContext context(nullptr, 0, 0);
+    AnimationSaveProbe animation(&context, "MemoryEstimateProbe");
+    const int objectOnly = animation.GetMemoryOccupation();
+    auto *first = new SaveDumpResultProbe<RCKLinearPositionController>(CKANIMATION_LINPOS_CONTROL, -4, 4);
+    animation.ReplaceController(0, first);
+    Check(animation.GetMemoryOccupation() == objectOnly, "Invalid controller size corrupted the object memory estimate");
+    auto *second = new SaveDumpResultProbe<RCKLinearPositionController>(CKANIMATION_LINROT_CONTROL, 0x40000000, 4);
+    animation.ReplaceController(1, second); first->Query = 0x40000000;
+    Check(animation.GetMemoryOccupation() == objectOnly, "Aggregate controller bytes overflowed the memory estimate");
+    first->Query = 4; second->Query = 4;
+    Check(animation.GetMemoryOccupation() == objectOnly + 8, "Valid controller memory estimate changed");
+    ObjectCloneProbe alias(&context, "MemoryEstimateAlias");
+    const int aliasOnly = alias.GetMemoryOccupation(); alias.ShareDataFrom(&animation);
+    Check(alias.GetMemoryOccupation() == aliasOnly - static_cast<int>(sizeof(CKKeyframeData)),
+          "Non-owner memory estimate included shared data or controller bytes");
+}
+
+void AnimationMemoryEstimateCountsOwnedDataAndSceneStorage() {
+    CKContext context(nullptr, 0, 0);
+    AnimationSaveProbe owner(&context, "MemoryOwner"), alias(&context, "MemoryAlias");
+    const int ownerBase = owner.CKObject::GetMemoryOccupation() +
+        static_cast<int>(sizeof(RCKObjectAnimation) - sizeof(CKObject));
+    Check(owner.GetMemoryOccupation() == ownerBase + owner.SceneBytes() + static_cast<int>(sizeof(CKKeyframeData)),
+          "Owner memory estimate omitted the owned keyframe data container");
+    owner.AllocateSceneBits(127);
+    Check(owner.SceneBytes() > 0 && owner.GetMemoryOccupation() ==
+          ownerBase + owner.SceneBytes() + static_cast<int>(sizeof(CKKeyframeData)),
+          "Owner memory estimate omitted dynamic scene storage");
+    alias.AllocateSceneBits(64);
+    alias.ShareDataFrom(&owner);
+    const int aliasBase = alias.CKObject::GetMemoryOccupation() +
+        static_cast<int>(sizeof(RCKObjectAnimation) - sizeof(CKObject));
+    Check(alias.GetMemoryOccupation() == aliasBase + alias.SceneBytes(),
+          "Shared animation double-counted the owned keyframe container or omitted its own scenes");
+}
+
+// Pass 23 controller editing regressions.
+template<class Controller, class Key>
+void LinearEditAllocationFailuresPreserveState() {
+    Controller controller;
+    Key key;
+    float values[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::memcpy(reinterpret_cast<char *>(&key) + 4, values, sizeof(Key) - 4);
+    key.TimeStep = 2.0f;
+    Check(controller.AddKey(&key) == 0, "Cannot prepare Linear edit fixture");
+    controller.SetLength(37.0f);
+    CKKey *first = controller.GetKey(0);
+    WireWords before((4 + sizeof(Key)) / 4, 0);
+    Check(controller.DumpKeysTo(before.data()) == static_cast<int>(before.size() * 4), "Cannot snapshot Linear edit fixture");
+    key.TimeStep = 5.0f;
+    s_MorphArrayAllocationFailure = 0;
+    const int added = controller.AddKey(&key);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(added == -1 && injected, "Linear AddKey did not propagate allocation failure");
+    Check(controller.GetKeyCount() == 1 && controller.GetKey(0) == first && controller.GetLength() == 37.0f,
+          "Failed Linear AddKey changed owned state");
+    WireWords after(before.size(), 0);
+    Check(controller.DumpKeysTo(after.data()) == static_cast<int>(after.size() * 4) && after == before,
+          "Failed Linear AddKey changed key bytes");
+    Check(controller.AddKey(&key) == 1, "Cannot prepare Linear removal fixture");
+    first = controller.GetKey(0);
+    before.resize((4 + 2 * sizeof(Key)) / 4);
+    controller.DumpKeysTo(before.data());
+    s_MorphArrayAllocationFailure = 0;
+    controller.RemoveKey(0);
+    const bool removalInjected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(removalInjected && controller.GetKeyCount() == 2 && controller.GetKey(0) == first && controller.GetLength() == 37.0f,
+          "Failed Linear RemoveKey changed owned state");
+    after.resize(before.size());
+    Check(controller.DumpKeysTo(after.data()) == static_cast<int>(after.size() * 4) && after == before,
+          "Failed Linear RemoveKey changed key bytes");
+}
+
+template<class Controller, class Key>
+void LinearEditUpdatesFirstLoadedDuplicateAndPreservesPayload() {
+    Key expected[3];
+    for (int i = 0; i < 3; ++i) {
+        const float values[4] = {float(i + 1), float(i + 2), float(i + 3), float(i + 4)};
+        std::memcpy(reinterpret_cast<char *>(&expected[i]) + 4, values, sizeof(Key) - 4);
+        expected[i].TimeStep = i < 2 ? 2.0f : 10.0f;
+    }
+    WireWords words((4 + sizeof(expected)) / 4);
+    words[0] = 3;
+    std::memcpy(words.data() + 1, expected, sizeof(expected));
+    Controller controller;
+    Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4),
+          "Cannot load Linear duplicate-time fixture");
+    controller.SetLength(37.0f);
+    CKKey *first = controller.GetKey(0), *second = controller.GetKey(1);
+    Check(controller.AddKey(nullptr) == -1 && controller.GetKeyCount() == 3,
+          "Null Linear AddKey changed state");
+    // A key owned by this controller must update the first matching key,
+    // without reallocating or modifying the later duplicate.
+    s_MorphArrayAllocationFailure = 0;
+    const int updated = controller.AddKey(second);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(updated == 0 && noAllocation && controller.GetKey(0) == first && controller.GetKey(1) == second &&
+          controller.GetKeyCount() == 3 && controller.GetLength() == 37.0f,
+          "Linear owned duplicate update changed storage or metadata");
+    std::memcpy(reinterpret_cast<char *>(&expected[0]) + 4,
+                reinterpret_cast<char *>(&expected[1]) + 4, sizeof(Key) - 4);
+    std::memcpy(words.data() + 1, expected, sizeof(expected));
+    WireWords output(words.size());
+    Check(controller.DumpKeysTo(output.data()) == static_cast<int>(output.size() * 4) && output == words,
+          "Linear duplicate update lost value fields or modified another key");
+    controller.RemoveKey(0);
+    Check(controller.GetKeyCount() == 2 && std::memcmp(controller.GetKey(0), &expected[1], sizeof(Key)) == 0 &&
+          std::memcmp(controller.GetKey(1), &expected[2], sizeof(Key)) == 0 && controller.GetLength() == 37.0f,
+          "Linear removal lost surviving duplicate payloads");
+    Controller reloaded;
+    output.resize((4 + 2 * sizeof(Key)) / 4);
+    Check(controller.DumpKeysTo(output.data()) == static_cast<int>(output.size() * 4) &&
+          reloaded.ReadKeysFrom(output.data()) == static_cast<int>(output.size() * 4) &&
+          std::memcmp(reloaded.GetKey(0), &expected[1], sizeof(Key)) == 0 &&
+          std::memcmp(reloaded.GetKey(1), &expected[2], sizeof(Key)) == 0,
+          "Linear edited payloads changed after wire reload");
+}
+
+template<class Controller, class Key>
+void LinearEditPreservesOrderingDuplicatesAndLength() {
+    Controller controller;
+    controller.SetLength(37.0f);
+    Key key;
+    float values[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    std::memcpy(reinterpret_cast<char *>(&key) + 4, values, sizeof(Key) - 4);
+    key.TimeStep = 10.0f; Check(controller.AddKey(&key) == 0, "Linear initial insertion failed");
+    key.TimeStep = 0.0f; Check(controller.AddKey(&key) == 0, "Linear prepend failed");
+    key.TimeStep = 5.0f; Check(controller.AddKey(&key) == 1, "Linear middle insertion failed");
+    Check(controller.GetKeyCount() == 3 && controller.GetKey(0)->TimeStep == 0.0f &&
+          controller.GetKey(1)->TimeStep == 5.0f && controller.GetKey(2)->TimeStep == 10.0f && controller.GetLength() == 37.0f,
+          "Linear insertion changed native ordering or length");
+    CKKey *first = controller.GetKey(0);
+    key.TimeStep = -0.0f; values[0] = 9.0f;
+    std::memcpy(reinterpret_cast<char *>(&key) + 4, values, sizeof(Key) - 4);
+    s_MorphArrayAllocationFailure = 0;
+    const int duplicate = controller.AddKey(&key);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(duplicate == 0 && noAllocation && controller.GetKey(0) == first && controller.GetKeyCount() == 3,
+          "Linear duplicate time allocated or replaced storage");
+    CKDWORD timeBits; std::memcpy(&timeBits, &first->TimeStep, 4);
+    Check(timeBits == 0 && std::memcmp(reinterpret_cast<char *>(first) + 4, values, sizeof(Key) - 4) == 0,
+          "Linear duplicate changed existing time bits or lost value");
+    Check(controller.AddKey(controller.GetKey(1)) == 1 && controller.GetKeyCount() == 3,
+          "Linear self-key update failed");
+    controller.RemoveKey(-1); controller.RemoveKey(3); controller.RemoveKey(INT_MAX);
+    Check(controller.GetKeyCount() == 3 && controller.GetKey(0) == first, "Invalid Linear removal changed state");
+    controller.RemoveKey(1);
+    Check(controller.GetKeyCount() == 2 && controller.GetKey(0)->TimeStep == 0.0f && controller.GetKey(1)->TimeStep == 10.0f,
+          "Linear middle removal changed surviving keys");
+    controller.RemoveKey(0);
+    Check(controller.GetKeyCount() == 1 && controller.GetKey(0)->TimeStep == 10.0f, "Linear first removal failed");
+    s_MorphArrayAllocationFailure = 0;
+    controller.RemoveKey(0);
+    const bool emptyNoAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(emptyNoAllocation && controller.GetKeyCount() == 0 && controller.GetKey(0) == nullptr && controller.GetLength() == 37.0f,
+          "Linear final removal allocated or changed length");
+}
+
+// Pass 23 TCB tests; independent wire fixture and executable-only allocation faults.
+template<class Controller> struct TCBEditTraits;
+template<> struct TCBEditTraits<RCKTCBPositionController> { typedef CKTCBPositionKey Key; };
+template<> struct TCBEditTraits<RCKTCBRotationController> { typedef CKTCBRotationKey Key; };
+template<> struct TCBEditTraits<RCKTCBScaleController> { typedef CKTCBScaleKey Key; };
+template<> struct TCBEditTraits<RCKTCBScaleAxisController> { typedef CKTCBScaleAxisKey Key; };
+
+template<class Controller>
+class TCBEditProbe : public Controller {
+public:
+    void *Keys() const { return this->m_Keys; }
+    void *Tangents() const { return this->m_Tangents; }
+};
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TCBAddAllocationFailureIsAtomic() {
+    TCBEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4), "TCB fixture read failed");
+    controller.SetLength(37.0f);
+    VxQuaternion before, after;
+    Check(controller.Evaluate(5.0f, &before), "TCB cache prime failed");
+    void *keys = controller.Keys(), *cache = controller.Tangents();
+    const size_t keySize = (original.size()*4-sizeof(int))/2;
+    typename TCBEditTraits<Controller>::Key keyStorage;
+    std::memcpy(&keyStorage, controller.GetKey(0), keySize);
+    CKKey *input = &keyStorage; input->TimeStep = 6.0f;
+    s_MorphArrayAllocationFailure = 0;
+    int result = controller.AddKey(input);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && result == -1, "TCB Add did not report key allocation failure");
+    Check(controller.GetKeyCount() == 2 && controller.GetLength() == 37.0f && controller.Keys() == keys &&
+          controller.Tangents() == cache, "Failed TCB Add changed complete state");
+    Check(controller.Evaluate(5.0f, &after) && after == before, "Failed TCB Add changed sampled output");
+    WireWords actual(original.size());
+    Check(controller.DumpKeysTo(actual.data()) == static_cast<int>(actual.size()*4) && actual == original,
+          "Failed TCB Add changed serialized keys");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TCBRemoveAllocationFailureIsAtomic() {
+    TCBEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4), "TCB fixture read failed");
+    controller.SetLength(37.0f);
+    VxQuaternion before, after;
+    Check(controller.Evaluate(5.0f, &before), "TCB cache prime failed");
+    void *keys = controller.Keys(), *cache = controller.Tangents();
+    for (int index : {0, 1}) {
+        s_MorphArrayAllocationFailure = 0;
+        controller.RemoveKey(index);
+        const bool injected = s_MorphArrayAllocationFailure == -1;
+        s_MorphArrayAllocationFailure = -1;
+        Check(injected, "TCB Remove did not use failure-reporting allocation");
+        Check(controller.GetKeyCount() == 2 && controller.GetLength() == 37.0f && controller.Keys() == keys &&
+              controller.Tangents() == cache, "Failed TCB Remove changed complete state");
+        Check(controller.Evaluate(5.0f, &after) && after == before, "Failed TCB Remove changed sampled output");
+    }
+    WireWords actual(original.size());
+    Check(controller.DumpKeysTo(actual.data()) == static_cast<int>(actual.size()*4) && actual == original,
+          "Failed TCB Remove changed serialized keys");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TCBValidEditsPreserveNativeDuplicateParametersAndLength() {
+    TCBEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4), "TCB fixture read failed");
+    controller.SetLength(37.0f);
+    const size_t keySize = (original.size()*4-sizeof(int))/2;
+    typename TCBEditTraits<Controller>::Key keyStorage;
+    std::memcpy(&keyStorage, controller.GetKey(0), keySize);
+    CKKey *input = &keyStorage;
+    input->TimeStep = 6.0f;
+    VxQuaternion sample;
+    Check(controller.Evaluate(5.0f, &sample) && controller.Tangents(), "Cannot prime TCB edit cache");
+    Check(controller.AddKey(input) == 1 && controller.GetKeyCount() == 3 && controller.GetLength() == 37.0f,
+          "TCB sorted insertion changed count or length");
+    Check(!controller.Tangents(), "Successful TCB insertion retained stale cache");
+    Check(!std::memcmp(controller.GetKey(1), &keyStorage, keySize), "TCB insertion lost complete typed key");
+    Check(controller.AddKey(controller.GetKey(1)) == 1 && controller.GetKeyCount() == 3,
+          "TCB equal-time self-alias replacement changed count");
+    typename TCBEditTraits<Controller>::Key expectedDuplicate = *static_cast<typename TCBEditTraits<Controller>::Key *>(controller.GetKey(1));
+    keyStorage.tension = -0.625f;
+    keyStorage.continuity = 0.375f;
+    keyStorage.bias = -0.125f;
+    keyStorage.easeto = 0.75f;
+    keyStorage.easefrom = 0.875f;
+    const float replacedValue = 7.25f;
+    std::memcpy(reinterpret_cast<unsigned char *>(&keyStorage)+sizeof(float), &replacedValue, sizeof(float));
+    std::memcpy(reinterpret_cast<unsigned char *>(&expectedDuplicate)+sizeof(float), &replacedValue, sizeof(float));
+    Check(controller.Evaluate(5.0f, &sample) && controller.Tangents(), "Cannot re-prime TCB replacement cache");
+    s_MorphArrayAllocationFailure = 0;
+    const int replaced = controller.AddKey(input);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(replaced == 1 && noAllocation && !std::memcmp(controller.GetKey(1), &expectedDuplicate, keySize),
+          "TCB equal-time replacement allocated or changed native spline parameters");
+    Check(!controller.Tangents(), "Successful TCB replacement retained stale cache");
+    controller.RemoveKey(-1); controller.RemoveKey(3);
+    Check(controller.GetKeyCount() == 3, "TCB invalid Remove index changed count");
+    controller.RemoveKey(1);
+    WireWords actual(original.size());
+    Check(controller.DumpKeysTo(actual.data()) == static_cast<int>(actual.size()*4) && actual == original,
+          "TCB insertion/removal did not restore wire keys");
+    controller.RemoveKey(0);
+    Check(controller.GetKeyCount() == 1 && controller.GetKey(0)->TimeStep == 10.0f,
+          "TCB Remove changed retained key ordering");
+    s_MorphArrayAllocationFailure = 0; controller.RemoveKey(0);
+    const bool noFinalAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(noFinalAllocation && controller.GetKeyCount() == 0 && !controller.Keys() && !controller.Tangents() &&
+          controller.GetLength() == 37.0f, "TCB final Remove allocated or left keys/cache");
+    input->TimeStep = FloatWithBits(0x80000000u);
+    Check(controller.AddKey(input) == 0, "TCB signed-zero insertion failed");
+    input->TimeStep = 0.0f;
+    Check(controller.AddKey(input) == 0, "TCB equal signed-zero replacement failed");
+    CKDWORD timeBits; std::memcpy(&timeBits, &controller.GetKey(0)->TimeStep, sizeof(timeBits));
+    Check(timeBits == 0x80000000u, "TCB replacement changed existing equal-time bits");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TCBTangentRebuildAllocationFailurePreservesCache() {
+    TCBEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4), "TCB fixture read failed");
+    controller.SetLength(37.0f);
+    VxQuaternion before, after;
+    Check(controller.Evaluate(5.0f, &before), "TCB cache prime failed");
+    void *keys = controller.Keys(), *cache = controller.Tangents();
+    s_MorphArrayAllocationFailure = 0;
+    controller.ComputeTangents();
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && controller.Tangents() == cache && controller.Keys() == keys &&
+          controller.GetKeyCount() == 2 && controller.GetLength() == 37.0f,
+          "Failed TCB tangent rebuild destroyed previous cache or keys");
+    Check(controller.Evaluate(5.0f, &after) && after == before, "Failed tangent rebuild changed sample");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TCBEvaluatePropagatesTangentFailureWithoutWritingOutput() {
+    TCBEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4), "TCB fixture read failed");
+    controller.SetLength(37.0f);
+    VxQuaternion output(11,12,13,14); const VxQuaternion sentinel = output;
+    s_MorphArrayAllocationFailure = 0;
+    const bool evaluated = !!controller.Evaluate(5.0f, &output);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && !evaluated && output == sentinel && !controller.Tangents() && controller.GetKeyCount() == 2 &&
+          controller.GetLength() == 37.0f, "TCB Evaluate did not propagate tangent allocation failure atomically");
+    s_MorphArrayAllocationFailure = 0;
+    const bool endpoint = !!controller.Evaluate(2.0f, &output);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(endpoint && noAllocation && !controller.Tangents(), "TCB endpoint unnecessarily requires tangent allocation");
+    Check(controller.Evaluate(5.0f, &output) && controller.Tangents(), "TCB Evaluate did not recover after allocation failure");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void TCBEvaluateRetainsFinitePhaseAcrossOverflowingTimeDifference() {
+    TCBEditProbe<Controller> reference, wide;
+    WireWords original = TransformControllerWire(Type);
+    Check(reference.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4) &&
+          wide.ReadKeysFrom(original.data()) == static_cast<int>(original.size()*4), "TCB affine-time fixture read failed");
+    for (int i=0; i<2; ++i) {
+        typename TCBEditTraits<Controller>::Key *a = static_cast<typename TCBEditTraits<Controller>::Key *>(reference.GetKey(i));
+        typename TCBEditTraits<Controller>::Key *b = static_cast<typename TCBEditTraits<Controller>::Key *>(wide.GetKey(i));
+        a->easefrom = a->easeto = b->easefrom = b->easeto = 0.0f;
+        b->TimeStep = i ? FLT_MAX : -FLT_MAX;
+    }
+    VxQuaternion expected, actual;
+    Check(reference.Evaluate(6.0f, &expected) && wide.Evaluate(0.0f, &actual),
+          "TCB finite affine time interval failed evaluation");
+    Check(std::fabs(expected.x-actual.x) < 0.00001f && std::fabs(expected.y-actual.y) < 0.00001f &&
+          std::fabs(expected.z-actual.z) < 0.00001f && std::fabs(expected.w-actual.w) < 0.00001f,
+          "TCB lost midpoint phase when finite time subtraction overflowed");
+}
+
+template<class Controller>
+class BezierEditProbe : public Controller {
+public:
+    CKBezierPositionKey *Keys() { return this->m_Keys; }
+    CKBOOL TangentsComputed() const { return this->m_TangentsComputed; }
+    void SetTangentsComputed(CKBOOL computed) { this->m_TangentsComputed = computed; }
+};
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void BezierAddAllocationFailurePreservesState() {
+    BezierEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) > 0, "Cannot initialize Bezier Add failure test");
+    controller.SetLength(37.0f);
+    VxVector sampled;
+    Check(controller.Evaluate(5.0f, &sampled), "Cannot prime Bezier tangent cache");
+    const int count = controller.GetKeyCount();
+    CKBezierPositionKey *keys = controller.Keys();
+    std::vector<CKBezierPositionKey> snapshot(keys, keys + count);
+    const CKBOOL computed = controller.TangentsComputed();
+    CKBezierPositionKey added = *keys; added.TimeStep = -2.0f;
+    s_MorphArrayAllocationFailure = 0;
+    int index = controller.AddKey(&added);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(index == -1 && injected, "Bezier Add did not report injected allocation failure");
+    Check(controller.GetKeyCount() == count && controller.Keys() == keys && controller.GetLength() == 37.0f &&
+          controller.TangentsComputed() == computed && !std::memcmp(keys, snapshot.data(), snapshot.size()*sizeof(*keys)),
+          "Failed Bezier Add changed key storage, length, or tangent cache");
+}
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void BezierRemoveAllocationFailurePreservesState() {
+    BezierEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) > 0, "Cannot initialize Bezier Remove failure test");
+    controller.SetLength(37.0f);
+    controller.ComputeBezierPts();
+    const int count = controller.GetKeyCount();
+    CKBezierPositionKey *keys = controller.Keys();
+    std::vector<CKBezierPositionKey> snapshot(keys, keys + count);
+    const CKBOOL computed = controller.TangentsComputed();
+    s_MorphArrayAllocationFailure = 0;
+    controller.RemoveKey(1);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && controller.GetKeyCount() == count && controller.Keys() == keys &&
+          controller.GetLength() == 37.0f && controller.TangentsComputed() == computed &&
+          !std::memcmp(keys, snapshot.data(), snapshot.size()*sizeof(*keys)),
+          "Failed Bezier Remove changed key storage, length, or tangent cache");
+}
+
+
+template<class Controller, CKANIMATION_CONTROLLER Type>
+void BezierLegalEditsFollowNativeValueAndTangentContract() {
+    BezierEditProbe<Controller> controller;
+    WireWords original = TransformControllerWire(Type);
+    Check(controller.ReadKeysFrom(original.data()) > 0, "Cannot initialize native Bezier edit test");
+    controller.SetLength(37.0f);
+    CKBezierPositionKey added = *controller.Keys(); added.TimeStep = -2.0f;
+    Check(controller.AddKey(&added) == 0 && controller.GetKeyCount() == 5 && controller.GetLength() == 37.0f,
+          "Bezier insertion changed sorting, count, or length");
+    Check(!std::memcmp(controller.Keys(),&added,sizeof(added)), "Bezier insertion lost fields or tangent flags");
+    controller.ComputeBezierPts();
+    Check(controller.TangentsComputed(), "Bezier tangent calculation did not finish");
+    Check(controller.AddKey(controller.GetKey(2)) == 2 && !controller.TangentsComputed() && controller.GetKeyCount() == 5,
+          "Bezier self-alias replacement changed count or retained stale tangents");
+    controller.ComputeBezierPts();
+    CKBezierPositionKey expected = *controller.Keys();
+    CKBezierPositionKey replacement = expected;
+    replacement.Pos = VxVector(7,8,9);
+    replacement.In = VxVector(101,102,103); replacement.Out = VxVector(104,105,106);
+    replacement.Flags.SetInTangentMode(BEZIER_KEY_STEP);
+    replacement.Flags.SetOutTangentMode(BEZIER_KEY_SLOW);
+    expected.Pos = replacement.Pos;
+    Check(controller.AddKey(&replacement) == 0 && controller.GetKeyCount() == 5 && !controller.TangentsComputed() &&
+          !std::memcmp(controller.Keys(),&expected,sizeof(expected)),
+          "Native Bezier duplicate must change only position and invalidate calculation");
+    CKBezierPositionKey zeroReplacement = *static_cast<CKBezierPositionKey *>(controller.GetKey(1));
+    const CKBezierPositionKey oldZero = zeroReplacement;
+    zeroReplacement.TimeStep = -0.0f; zeroReplacement.Pos = VxVector(3,4,5);
+    Check(controller.AddKey(&zeroReplacement) == 1 && !std::signbit(controller.Keys()[1].TimeStep) &&
+          !(controller.Keys()[1].Flags != oldZero.Flags) && controller.Keys()[1].In == oldZero.In &&
+          controller.Keys()[1].Out == oldZero.Out, "Bezier duplicate changed existing time bits or tangent fields");
+    // The shared in-place tangent helper does not allocate a second cache.
+    s_MorphArrayAllocationFailure = 0;
+    controller.ComputeBezierPts(); controller.ComputeBezierPts(1);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(noAllocation && controller.TangentsComputed(), "Native Bezier tangent calculation allocated a scratch cache");
+    VxVector output;
+    Check(controller.Evaluate(2.5f,&output), "Edited Bezier controller could not evaluate");
+    // A targeted smoothing update preserves the global calculation flag.
+    Check(controller.AddKey(controller.GetKey(2)) == 2 && !controller.TangentsComputed(), "Cannot invalidate Bezier calculation");
+    controller.ComputeBezierPts(1);
+    Check(!controller.TangentsComputed(), "Targeted Bezier smoothing claimed a complete tangent calculation");
+    while (controller.GetKeyCount() > 0) {
+        controller.ComputeBezierPts();
+        controller.RemoveKey(controller.GetKeyCount()-1);
+        Check(!controller.TangentsComputed() && controller.GetLength() == 37.0f,
+              "Bezier removal retained stale calculation state or changed length");
+    }
+    Check(!controller.Keys() && !controller.GetKey(0), "Bezier final removal retained storage");
+}
+
+void MorphEditInsertionFailuresPreserveEveryOwnedArray() {
+    for (int failedAllocation = 0; failedAllocation < 3; ++failedAllocation) {
+        RCKMorphController controller;
+        WireWords words = MorphWire<true>();
+        Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4), "Cannot prepare Morph edit fixture");
+        controller.SetLength(37.0f);
+        CKMorphKey *first = static_cast<CKMorphKey *>(controller.GetKey(0));
+        VxVector *positions = first->PosArray;
+        VxCompressedVector *normals = first->NormArray;
+        CKMorphKey source = *first; source.TimeStep = 5.0f;
+        s_MorphArrayAllocationFailure = failedAllocation;
+        const int inserted = controller.AddKey(&source, FALSE);
+        const bool injected = s_MorphArrayAllocationFailure == -1;
+        s_MorphArrayAllocationFailure = -1;
+        Check(inserted == -1 && injected, "Morph insertion did not propagate a selected array allocation failure");
+        Check(controller.GetKeyCount() == 2 && controller.GetKey(0) == first && first->PosArray == positions &&
+              first->NormArray == normals && controller.GetLength() == 37.0f && controller.GetMorphVertexCount() == 2,
+              "Failed Morph insertion changed owned pointers or metadata");
+        WireWords after(words.size(), 0u);
+        Check(controller.DumpKeysTo(after.data()) == static_cast<int>(words.size() * 4) && after == words,
+              "Failed Morph insertion changed payload bytes");
+        Check(controller.AddKey(&source, FALSE) == 1, "Morph insertion could not recover after allocation failure");
+        CKMorphKey *added = static_cast<CKMorphKey *>(controller.GetKey(1));
+        Check(added->PosArray != positions && added->NormArray != normals && added->NormArray &&
+              Equal(added->PosArray[0], positions[0]) && added->NormArray[0].xa == normals[0].xa,
+              "Morph insertion did not independently copy aliased source payloads");
+    }
+}
+
+void MorphEditRemovalFailurePreservesPayloads() {
+    RCKMorphController controller;
+    WireWords words = MorphWire<true>();
+    Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4), "Cannot prepare Morph removal fixture");
+    controller.SetLength(37.0f);
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller.GetKey(0));
+    VxVector *positions = first->PosArray; VxCompressedVector *normals = first->NormArray;
+    s_MorphArrayAllocationFailure = 0;
+    controller.RemoveKey(0);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && controller.GetKeyCount() == 2 && controller.GetKey(0) == first &&
+          first->PosArray == positions && first->NormArray == normals && controller.GetLength() == 37.0f,
+          "Failed Morph removal released payloads or changed count");
+    WireWords after(words.size(), 0u);
+    Check(controller.DumpKeysTo(after.data()) == static_cast<int>(words.size() * 4) && after == words,
+          "Failed Morph removal changed payload bytes");
+    controller.RemoveKey(0);
+    Check(controller.GetKeyCount() == 1 && controller.GetKey(0)->TimeStep == 10.0f, "Morph removal recovery lost surviving key");
+    s_MorphArrayAllocationFailure = 0;
+    controller.RemoveKey(0);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    Check(noAllocation && controller.GetKeyCount() == 0 && controller.GetKey(0) == nullptr && controller.GetLength() == 37.0f,
+          "Final Morph removal allocated or changed length");
+}
+
+void MorphEditPreservesNativeDuplicateAndMixedPayloadContract() {
+    RCKMorphController controller;
+    WireWords words = MorphWire<true>();
+    Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4), "Cannot prepare Morph functional edit fixture");
+    controller.SetLength(37.0f);
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller.GetKey(0));
+    CKMorphKey duplicate; duplicate.TimeStep = first->TimeStep; duplicate.PosArray = nullptr; duplicate.NormArray = nullptr;
+    s_MorphArrayAllocationFailure = 0;
+    const int existing = controller.AddKey(&duplicate, FALSE);
+    const bool noAllocation = s_MorphArrayAllocationFailure == 0;
+    s_MorphArrayAllocationFailure = -1;
+    WireWords after(words.size(), 0u);
+    Check(existing == 0 && noAllocation && controller.GetKey(0) == first &&
+          controller.DumpKeysTo(after.data()) == static_cast<int>(words.size() * 4) && after == words,
+          "Morph duplicate changed the existing key or payload presence");
+    Check(controller.AddKey(controller.GetKey(1), FALSE) == 1, "Morph owned-key duplicate changed its index");
+    Check(controller.AddKey(-5.0f, FALSE) == 0, "Morph prepend changed native time ordering");
+    CKMorphKey *added = static_cast<CKMorphKey *>(controller.GetKey(0));
+    Check(added->PosArray && !added->NormArray && Equal(added->PosArray[0], VxVector(0.0f)) &&
+          controller.GetLength() == 37.0f, "Morph time-only insertion changed allocation or length semantics");
+    controller.RemoveKey(-1); controller.RemoveKey(3);
+    Check(controller.GetKeyCount() == 3, "Invalid Morph removal index changed state");
+    controller.RemoveKey(0);
+    Check(controller.DumpKeysTo(after.data()) == static_cast<int>(words.size() * 4) && after == words,
+          "Morph prepend/remove changed surviving payloads");
+}
+
+template<bool TimeOnly>
+void MorphEditWrapperPropagatesAllocationFailure() {
+    for (int allocation = 0; allocation < 3; ++allocation) {
+        RCKMorphController controller;
+        controller.SetMorphVertexCount(2); controller.SetLength(37.0f);
+        CKMorphKey key; key.TimeStep = 5.0f; key.PosArray = nullptr; key.NormArray = nullptr;
+        s_MorphArrayAllocationFailure = allocation;
+        const int inserted = TimeOnly ? controller.AddKey(5.0f, TRUE) : controller.AddKey(&key);
+        const bool injected = s_MorphArrayAllocationFailure == -1;
+        s_MorphArrayAllocationFailure = -1;
+        Check(inserted == -1 && injected && controller.GetKeyCount() == 0 && !controller.GetKey(0) &&
+              controller.GetLength() == 37.0f && controller.GetMorphVertexCount() == 2,
+              "Morph insertion wrapper did not preserve state or propagate allocation failure");
+        Check((TimeOnly ? controller.AddKey(5.0f, TRUE) : controller.AddKey(&key)) == 0,
+              "Morph insertion wrapper failed to recover after allocation failure");
+        CKMorphKey *added = static_cast<CKMorphKey *>(controller.GetKey(0));
+        Check(added->PosArray && added->NormArray && Equal(added->PosArray[0], VxVector(0.0f)) &&
+              added->NormArray[0].xa == 0 && added->NormArray[0].ya == 0,
+              "Morph insertion wrapper lost its allocation/default payload contract");
+    }
+}
+
 template<CKANIMATION_CONTROLLER Type>
 void TransformClonePreservesTypedSerializedKeys() {
     CKContext context(nullptr, 0, 0);
@@ -4123,8 +5103,127 @@ int main(int argc, char **argv) {
 
 
 
+        {"LINPOS rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearPositionController, CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearRotationController, CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearScaleController, CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKLinearScaleAxisController, CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL rejects invalid dump", TransformDumpRejectsInvalidStateBeforeWriting<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
+        {"LINPOS retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKLinearPositionController, CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKLinearRotationController, CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKLinearScaleController, CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKLinearScaleAxisController, CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL retains valid dump", TransformDumpPreservesValidWireAndOutputBounds<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
+        {"Animation Save rejects slot 0 failure without changing owner", AnimationSaveRejectsControllerFailuresAndPreservesOwner<0>},
+        {"Animation Save rejects slot 1 failure without changing owner", AnimationSaveRejectsControllerFailuresAndPreservesOwner<1>},
+        {"Animation Save rejects slot 2 failure without changing owner", AnimationSaveRejectsControllerFailuresAndPreservesOwner<2>},
+        {"Animation Save rejects slot 3 failure without changing owner", AnimationSaveRejectsControllerFailuresAndPreservesOwner<3>},
+        {"Animation Save rejects slot 4 failure without changing owner", AnimationSaveRejectsControllerFailuresAndPreservesOwner<4>},
+        {"Animation Save rejects aggregate controller overflow", AnimationSaveRejectsAggregateControllerOverflow},
+        {"Animation Save commits ownership only for successful full data", AnimationSaveCommitsOwnerOnlyForFullSuccessfulData},
+        {"Animation memory estimate rejects invalid or overflowing sizes", AnimationMemoryEstimateRejectsInvalidOrOverflowingControllerSizes},
+        {"Animation memory estimate counts owned data and scene storage", AnimationMemoryEstimateCountsOwnedDataAndSceneStorage},
+        {"Linear position edit allocation failures", LinearEditAllocationFailuresPreserveState<RCKLinearPositionController, CKPositionKey>},
+        {"Linear rotation edit allocation failures", LinearEditAllocationFailuresPreserveState<RCKLinearRotationController, CKRotationKey>},
+        {"Linear scale edit allocation failures", LinearEditAllocationFailuresPreserveState<RCKLinearScaleController, CKScaleKey>},
+        {"Linear scale-axis edit allocation failures", LinearEditAllocationFailuresPreserveState<RCKLinearScaleAxisController, CKScaleAxisKey>},
+        {"Linear position edit loaded duplicates and payloads", LinearEditUpdatesFirstLoadedDuplicateAndPreservesPayload<RCKLinearPositionController, CKPositionKey>},
+        {"Linear rotation edit loaded duplicates and payloads", LinearEditUpdatesFirstLoadedDuplicateAndPreservesPayload<RCKLinearRotationController, CKRotationKey>},
+        {"Linear scale edit loaded duplicates and payloads", LinearEditUpdatesFirstLoadedDuplicateAndPreservesPayload<RCKLinearScaleController, CKScaleKey>},
+        {"Linear scale-axis edit loaded duplicates and payloads", LinearEditUpdatesFirstLoadedDuplicateAndPreservesPayload<RCKLinearScaleAxisController, CKScaleAxisKey>},
+        {"Linear position edit ordering duplicates and length", LinearEditPreservesOrderingDuplicatesAndLength<RCKLinearPositionController, CKPositionKey>},
+        {"Linear rotation edit ordering duplicates and length", LinearEditPreservesOrderingDuplicatesAndLength<RCKLinearRotationController, CKRotationKey>},
+        {"Linear scale edit ordering duplicates and length", LinearEditPreservesOrderingDuplicatesAndLength<RCKLinearScaleController, CKScaleKey>},
+        {"Linear scale-axis edit ordering duplicates and length", LinearEditPreservesOrderingDuplicatesAndLength<RCKLinearScaleAxisController, CKScaleAxisKey>},
 
+        {"TCBPOS Add allocation atomicity", TCBAddAllocationFailureIsAtomic<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBPOS Remove allocation atomicity", TCBRemoveAllocationFailureIsAtomic<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBPOS native duplicate parameters and length", TCBValidEditsPreserveNativeDuplicateParametersAndLength<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBPOS tangent rebuild allocation atomicity", TCBTangentRebuildAllocationFailurePreservesCache<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBPOS Evaluate tangent failure and endpoints", TCBEvaluatePropagatesTangentFailureWithoutWritingOutput<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBPOS finite overflowing time phase", TCBEvaluateRetainsFinitePhaseAcrossOverflowingTimeDifference<RCKTCBPositionController, CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT Add allocation atomicity", TCBAddAllocationFailureIsAtomic<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBROT Remove allocation atomicity", TCBRemoveAllocationFailureIsAtomic<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBROT native duplicate parameters and length", TCBValidEditsPreserveNativeDuplicateParametersAndLength<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBROT tangent rebuild allocation atomicity", TCBTangentRebuildAllocationFailurePreservesCache<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBROT Evaluate tangent failure and endpoints", TCBEvaluatePropagatesTangentFailureWithoutWritingOutput<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBROT finite overflowing time phase", TCBEvaluateRetainsFinitePhaseAcrossOverflowingTimeDifference<RCKTCBRotationController, CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL Add allocation atomicity", TCBAddAllocationFailureIsAtomic<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCL Remove allocation atomicity", TCBRemoveAllocationFailureIsAtomic<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCL native duplicate parameters and length", TCBValidEditsPreserveNativeDuplicateParametersAndLength<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCL tangent rebuild allocation atomicity", TCBTangentRebuildAllocationFailurePreservesCache<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCL Evaluate tangent failure and endpoints", TCBEvaluatePropagatesTangentFailureWithoutWritingOutput<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCL finite overflowing time phase", TCBEvaluateRetainsFinitePhaseAcrossOverflowingTimeDifference<RCKTCBScaleController, CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS Add allocation atomicity", TCBAddAllocationFailureIsAtomic<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"TCBSCLAXIS Remove allocation atomicity", TCBRemoveAllocationFailureIsAtomic<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"TCBSCLAXIS native duplicate parameters and length", TCBValidEditsPreserveNativeDuplicateParametersAndLength<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"TCBSCLAXIS tangent rebuild allocation atomicity", TCBTangentRebuildAllocationFailurePreservesCache<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"TCBSCLAXIS Evaluate tangent failure and endpoints", TCBEvaluatePropagatesTangentFailureWithoutWritingOutput<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"TCBSCLAXIS finite overflowing time phase", TCBEvaluateRetainsFinitePhaseAcrossOverflowingTimeDifference<RCKTCBScaleAxisController, CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS Add preserves OOM state", BezierAddAllocationFailurePreservesState<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL Add preserves OOM state", BezierAddAllocationFailurePreservesState<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
+        {"BEZIERPOS Remove preserves OOM state", BezierRemoveAllocationFailurePreservesState<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL Remove preserves OOM state", BezierRemoveAllocationFailurePreservesState<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
+        {"BEZIERPOS native duplicate and tangent contract", BezierLegalEditsFollowNativeValueAndTangentContract<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL native duplicate and tangent contract", BezierLegalEditsFollowNativeValueAndTangentContract<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
+        {"Morph edit insertion failures preserve owned arrays", MorphEditInsertionFailuresPreserveEveryOwnedArray},
+        {"Morph edit removal failure preserves payloads", MorphEditRemovalFailurePreservesPayloads},
+        {"Morph native duplicate and mixed payload contract", MorphEditPreservesNativeDuplicateAndMixedPayloadContract},
+        {"Morph time-only insertion propagates allocation failure", MorphEditWrapperPropagatesAllocationFailure<true>},
+        {"Morph generic insertion propagates allocation failure", MorphEditWrapperPropagatesAllocationFailure<false>},
 
+        {"LINPOS bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL bounded record", LoadedTransformRespectsEveryRecordBoundary<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"LINPOS invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL invalid raw read", TransformRawReadRejectsInvalidStateAtomically<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"LINPOS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"LINPOS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"Transform Load reports key allocation failure", LoadedTransformReportsKeyAllocationFailure},
+        {"Transform Load canonicalizes supported base types", LoadedTransformCanonicalizesSupportedBaseTypes},
+        {"Transform Load skips unknown records and padding", LoadedTransformSkipsUnknownRecordsAndPadding},
         {"Object self-Clone retains state and controllers", ObjectAnimationSelfClonePreservesState<false>},
         {"Merged Object self-Clone retains playback and controllers", ObjectAnimationSelfClonePreservesState<true>},
         {"Object Clone from owner preserves all shared keys", ObjectAnimationClonePreservesSameDataAliases<0>},
