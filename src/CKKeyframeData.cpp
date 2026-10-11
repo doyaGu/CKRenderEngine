@@ -985,6 +985,95 @@ CKBOOL RCKLinearScaleAxisController::Clone(CKAnimController *control) {
 // RCKTCBPositionController Implementation
 //===================================================================
 
+// Native duplicate edits change only the value, retaining time and spline parameters.
+static void TCBReplaceKeyValue(CKTCBPositionKey &destination, const CKTCBPositionKey &source) {
+    destination.Pos = source.Pos;
+}
+
+static void TCBReplaceKeyValue(CKTCBRotationKey &destination, const CKTCBRotationKey &source) {
+    destination.Rot = source.Rot;
+}
+
+// Snapshot the typed input before any reallocation: it may be controller-owned.
+// Equal-time replacement keeps the original time bits and spline parameters.
+template <class Key>
+static int TCBAddControllerKey(Key *&keys, int &count, const Key *key) {
+    if (!key)
+        return -1;
+    Key value = *key;
+    int insertion = count;
+    for (int i = 0; i < count; ++i) {
+        if (keys[i].TimeStep == value.TimeStep) {
+            TCBReplaceKeyValue(keys[i], value);
+            return i;
+        }
+        if (keys[i].TimeStep > value.TimeStep) {
+            insertion = i;
+            break;
+        }
+    }
+    if (count < 0 || count == INT_MAX ||
+        static_cast<size_t>(count) + 1 > static_cast<size_t>(-1) / sizeof(Key))
+        return -1;
+    Key *replacement = new(std::nothrow) Key[count + 1];
+    if (!replacement)
+        return -1;
+    if (insertion > 0)
+        memcpy(replacement, keys, static_cast<size_t>(insertion) * sizeof(Key));
+    if (insertion < count)
+        memcpy(replacement + insertion + 1, keys + insertion, static_cast<size_t>(count - insertion) * sizeof(Key));
+    replacement[insertion] = value;
+    delete[] keys;
+    keys = replacement;
+    ++count;
+    return insertion;
+}
+
+// Preserve current storage if replacement allocation fails.
+template <class Key>
+static bool TCBRemoveControllerKey(Key *&keys, int &count, int index) {
+    if (index < 0 || index >= count)
+        return false;
+    const int newCount = count - 1;
+    Key *replacement = nullptr;
+    if (newCount > 0) {
+        if (static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(Key))
+            return false;
+        replacement = new(std::nothrow) Key[newCount];
+        if (!replacement)
+            return false;
+        if (index > 0)
+            memcpy(replacement, keys, static_cast<size_t>(index) * sizeof(Key));
+        if (index < newCount)
+            memcpy(replacement + index, keys + index + 1, static_cast<size_t>(newCount - index) * sizeof(Key));
+    }
+    delete[] keys;
+    keys = replacement;
+    count = newCount;
+    return true;
+}
+
+static void TCBComputeTangentValues(const CKTCBPositionKey *keys, int count, VxVector *tangents) {
+    ComputeTCBVectorTangents(keys, count, tangents);
+}
+
+static void TCBComputeTangentValues(const CKTCBRotationKey *keys, int count, VxQuaternion *tangents) {
+    ComputeTCBQuaternionTangents(keys, count, tangents);
+}
+
+template <class Key, class Tangent>
+static bool TCBPrepareTangentArray(const Key *keys, int count, Tangent *&replacement) {
+    replacement = nullptr;
+    if (count < 2 || count > INT_MAX / 2 ||
+        static_cast<size_t>(count) > static_cast<size_t>(-1) / (sizeof(Tangent) * 2))
+        return false;
+    replacement = new(std::nothrow) Tangent[count * 2];
+    if (!replacement)
+        return false;
+    TCBComputeTangentValues(keys, count, replacement);
+    return true;
+}
+
 RCKTCBPositionController::RCKTCBPositionController()
     : CKAnimController(CKANIMATION_TCBPOS_CONTROL), m_Keys(nullptr), m_Tangents(nullptr) {
     m_Length = 0.0f;
@@ -996,12 +1085,16 @@ RCKTCBPositionController::~RCKTCBPositionController() {
 }
 
 void RCKTCBPositionController::ComputeTangents() {
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-    if (m_NbKeys < 2)
+    if (m_NbKeys < 2) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
         return;
-    m_Tangents = new VxVector[m_NbKeys * 2];
-    ComputeTCBVectorTangents(m_Keys, m_NbKeys, m_Tangents);
+    }
+    VxVector *replacement;
+    if (!TCBPrepareTangentArray(m_Keys, m_NbKeys, replacement))
+        return;
+    delete[] m_Tangents;
+    m_Tangents = replacement;
 }
 
 CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
@@ -1009,10 +1102,6 @@ CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
         return FALSE;
 
     VxVector *result = static_cast<VxVector *>(res);
-
-    // Compute tangents if not already computed
-    if (!m_Tangents)
-        ComputeTangents();
 
     // Before first key
     if (TimeStep <= m_Keys[0].TimeStep) {
@@ -1027,10 +1116,17 @@ CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
     }
 
     // Binary search for interval
+    // Endpoint copies need no tangent allocation. Interior interpolation
+    // must not proceed if lazy cache construction fails.
+    if (!m_Tangents)
+        ComputeTangents();
+    if (!m_Tangents)
+        return FALSE;
+
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
-        int mid = (low + high) >> 1;
+        int mid = low + ((high - low) >> 1);
         if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
@@ -1040,7 +1136,11 @@ CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
     // Hermite spline interpolation
     float t1 = m_Keys[low].TimeStep;
     float t2 = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    const float interval = t2 - t1;
+    const float elapsed = TimeStep - t1;
+    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
+        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
+        : elapsed / interval;
 
     // Apply ease parameters
     t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
@@ -1067,46 +1167,12 @@ CKBOOL RCKTCBPositionController::Evaluate(float TimeStep, void *res) {
 }
 
 int RCKTCBPositionController::AddKey(CKKey *key) {
-    if (!key)
-        return -1;
-
-    CKTCBPositionKey *tcbKey = static_cast<CKTCBPositionKey *>(key);
-    float time = tcbKey->TimeStep;
-
-    int insertIdx = m_NbKeys;
-    for (int i = 0; i < m_NbKeys; ++i) {
-        if (m_Keys[i].TimeStep == time) {
-            m_Keys[i] = *tcbKey;
-            // Invalidate tangents
-            delete[] m_Tangents;
-            m_Tangents = nullptr;
-            return i;
-        }
-        if (m_Keys[i].TimeStep > time) {
-            insertIdx = i;
-            break;
-        }
+    const int index = TCBAddControllerKey(m_Keys, m_NbKeys, static_cast<CKTCBPositionKey *>(key));
+    if (index >= 0) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
     }
-
-    ++m_NbKeys;
-    CKTCBPositionKey *newKeys = new CKTCBPositionKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKTCBPositionKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKTCBPositionKey));
-        delete[] m_Keys;
-    }
-
-    m_Keys = newKeys;
-    m_Keys[insertIdx] = *tcbKey;
-
-    // Invalidate tangents
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-
-    return insertIdx;
+    return index;
 }
 
 CKKey *RCKTCBPositionController::GetKey(int index) {
@@ -1116,62 +1182,33 @@ CKKey *RCKTCBPositionController::GetKey(int index) {
 }
 
 void RCKTCBPositionController::RemoveKey(int index) {
-    if (index < 0 || index >= m_NbKeys)
-        return;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
-        delete[] m_Keys;
-        m_Keys = nullptr;
+    if (TCBRemoveControllerKey(m_Keys, m_NbKeys, index)) {
         delete[] m_Tangents;
         m_Tangents = nullptr;
-        return;
     }
-
-    CKTCBPositionKey *newKeys = new CKTCBPositionKey[m_NbKeys];
-
-    if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKTCBPositionKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKTCBPositionKey));
-
-    delete[] m_Keys;
-    m_Keys = newKeys;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
 }
 
 int RCKTCBPositionController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKTCBPositionKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKTCBPositionKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKTCBPositionController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKTCBPositionController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKTCBPositionKey *keys = nullptr;
+    int count = 0;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
 
     delete[] m_Keys;
-    m_Keys = nullptr;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKTCBPositionKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKTCBPositionKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKTCBPositionKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKTCBPositionController::Compare(CKAnimController *control, float Threshold) {
@@ -1226,12 +1263,16 @@ RCKTCBRotationController::~RCKTCBRotationController() {
 }
 
 void RCKTCBRotationController::ComputeTangents() {
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-    if (m_NbKeys < 2)
+    if (m_NbKeys < 2) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
         return;
-    m_Tangents = new VxQuaternion[m_NbKeys * 2];
-    ComputeTCBQuaternionTangents(m_Keys, m_NbKeys, m_Tangents);
+    }
+    VxQuaternion *replacement;
+    if (!TCBPrepareTangentArray(m_Keys, m_NbKeys, replacement))
+        return;
+    delete[] m_Tangents;
+    m_Tangents = replacement;
 }
 
 CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
@@ -1239,9 +1280,6 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
         return FALSE;
 
     VxQuaternion *result = static_cast<VxQuaternion *>(res);
-
-    if (!m_Tangents)
-        ComputeTangents();
 
     if (TimeStep <= m_Keys[0].TimeStep) {
         *result = m_Keys[0].Rot;
@@ -1255,10 +1293,17 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
 
     // At an interior key, the original evaluates the segment ending there.
     // Slerp can preserve a different quaternion sign on the adjacent segment.
+    // Endpoint copies need no tangent allocation. Interior interpolation
+    // must not proceed if lazy cache construction fails.
+    if (!m_Tangents)
+        ComputeTangents();
+    if (!m_Tangents)
+        return FALSE;
+
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
-        int mid = (low + high) >> 1;
+        int mid = low + ((high - low) >> 1);
         if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
@@ -1267,7 +1312,11 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
 
     float t1 = m_Keys[low].TimeStep;
     float t2 = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    const float interval = t2 - t1;
+    const float elapsed = TimeStep - t1;
+    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
+        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
+        : elapsed / interval;
 
     // Apply ease parameters
     t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
@@ -1283,44 +1332,12 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
 }
 
 int RCKTCBRotationController::AddKey(CKKey *key) {
-    if (!key)
-        return -1;
-
-    CKTCBRotationKey *tcbKey = static_cast<CKTCBRotationKey *>(key);
-    float time = tcbKey->TimeStep;
-
-    int insertIdx = m_NbKeys;
-    for (int i = 0; i < m_NbKeys; ++i) {
-        if (m_Keys[i].TimeStep == time) {
-            m_Keys[i] = *tcbKey;
-            delete[] m_Tangents;
-            m_Tangents = nullptr;
-            return i;
-        }
-        if (m_Keys[i].TimeStep > time) {
-            insertIdx = i;
-            break;
-        }
+    const int index = TCBAddControllerKey(m_Keys, m_NbKeys, static_cast<CKTCBRotationKey *>(key));
+    if (index >= 0) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
     }
-
-    ++m_NbKeys;
-    CKTCBRotationKey *newKeys = new CKTCBRotationKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKTCBRotationKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKTCBRotationKey));
-        delete[] m_Keys;
-    }
-
-    m_Keys = newKeys;
-    m_Keys[insertIdx] = *tcbKey;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-
-    return insertIdx;
+    return index;
 }
 
 CKKey *RCKTCBRotationController::GetKey(int index) {
@@ -1330,62 +1347,33 @@ CKKey *RCKTCBRotationController::GetKey(int index) {
 }
 
 void RCKTCBRotationController::RemoveKey(int index) {
-    if (index < 0 || index >= m_NbKeys)
-        return;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
-        delete[] m_Keys;
-        m_Keys = nullptr;
+    if (TCBRemoveControllerKey(m_Keys, m_NbKeys, index)) {
         delete[] m_Tangents;
         m_Tangents = nullptr;
-        return;
     }
-
-    CKTCBRotationKey *newKeys = new CKTCBRotationKey[m_NbKeys];
-
-    if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKTCBRotationKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKTCBRotationKey));
-
-    delete[] m_Keys;
-    m_Keys = newKeys;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
 }
 
 int RCKTCBRotationController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKTCBRotationKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKTCBRotationKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKTCBRotationController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKTCBRotationController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKTCBRotationKey *keys = nullptr;
+    int count = 0;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
 
     delete[] m_Keys;
-    m_Keys = nullptr;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKTCBRotationKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKTCBRotationKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKTCBRotationKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKTCBRotationController::Compare(CKAnimController *control, float Threshold) {
@@ -1440,12 +1428,16 @@ RCKTCBScaleController::~RCKTCBScaleController() {
 }
 
 void RCKTCBScaleController::ComputeTangents() {
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-    if (m_NbKeys < 2)
+    if (m_NbKeys < 2) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
         return;
-    m_Tangents = new VxVector[m_NbKeys * 2];
-    ComputeTCBVectorTangents(m_Keys, m_NbKeys, m_Tangents);
+    }
+    VxVector *replacement;
+    if (!TCBPrepareTangentArray(m_Keys, m_NbKeys, replacement))
+        return;
+    delete[] m_Tangents;
+    m_Tangents = replacement;
 }
 
 CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
@@ -1453,9 +1445,6 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
         return FALSE;
 
     VxVector *result = static_cast<VxVector *>(res);
-
-    if (!m_Tangents)
-        ComputeTangents();
 
     if (TimeStep <= m_Keys[0].TimeStep) {
         *result = m_Keys[0].Pos;
@@ -1467,10 +1456,17 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
         return TRUE;
     }
 
+    // Endpoint copies need no tangent allocation. Interior interpolation
+    // must not proceed if lazy cache construction fails.
+    if (!m_Tangents)
+        ComputeTangents();
+    if (!m_Tangents)
+        return FALSE;
+
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
-        int mid = (low + high) >> 1;
+        int mid = low + ((high - low) >> 1);
         if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
@@ -1479,7 +1475,11 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
 
     float t1 = m_Keys[low].TimeStep;
     float t2 = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    const float interval = t2 - t1;
+    const float elapsed = TimeStep - t1;
+    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
+        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
+        : elapsed / interval;
 
     t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
@@ -1504,44 +1504,12 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
 }
 
 int RCKTCBScaleController::AddKey(CKKey *key) {
-    if (!key)
-        return -1;
-
-    CKTCBScaleKey *tcbKey = static_cast<CKTCBScaleKey *>(key);
-    float time = tcbKey->TimeStep;
-
-    int insertIdx = m_NbKeys;
-    for (int i = 0; i < m_NbKeys; ++i) {
-        if (m_Keys[i].TimeStep == time) {
-            m_Keys[i] = *tcbKey;
-            delete[] m_Tangents;
-            m_Tangents = nullptr;
-            return i;
-        }
-        if (m_Keys[i].TimeStep > time) {
-            insertIdx = i;
-            break;
-        }
+    const int index = TCBAddControllerKey(m_Keys, m_NbKeys, static_cast<CKTCBPositionKey *>(key));
+    if (index >= 0) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
     }
-
-    ++m_NbKeys;
-    CKTCBScaleKey *newKeys = new CKTCBScaleKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKTCBScaleKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKTCBScaleKey));
-        delete[] m_Keys;
-    }
-
-    m_Keys = newKeys;
-    m_Keys[insertIdx] = *tcbKey;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-
-    return insertIdx;
+    return index;
 }
 
 CKKey *RCKTCBScaleController::GetKey(int index) {
@@ -1551,63 +1519,33 @@ CKKey *RCKTCBScaleController::GetKey(int index) {
 }
 
 void RCKTCBScaleController::RemoveKey(int index) {
-    if (index < 0 || index >= m_NbKeys)
-        return;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
-        delete[] m_Keys;
-        m_Keys = nullptr;
+    if (TCBRemoveControllerKey(m_Keys, m_NbKeys, index)) {
         delete[] m_Tangents;
         m_Tangents = nullptr;
-        return;
     }
-
-    CKTCBScaleKey *newKeys = new CKTCBScaleKey[m_NbKeys];
-
-    if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKTCBScaleKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1],
-               (m_NbKeys - index) * sizeof(CKTCBScaleKey));
-
-    delete[] m_Keys;
-    m_Keys = newKeys;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
 }
 
 int RCKTCBScaleController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKTCBScaleKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKTCBScaleKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKTCBScaleController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKTCBScaleController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKTCBScaleKey *keys = nullptr;
+    int count = 0;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
 
     delete[] m_Keys;
-    m_Keys = nullptr;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKTCBScaleKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKTCBScaleKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKTCBScaleKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKTCBScaleController::Compare(CKAnimController *control, float Threshold) {
@@ -1662,12 +1600,16 @@ RCKTCBScaleAxisController::~RCKTCBScaleAxisController() {
 }
 
 void RCKTCBScaleAxisController::ComputeTangents() {
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-    if (m_NbKeys < 2)
+    if (m_NbKeys < 2) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
         return;
-    m_Tangents = new VxQuaternion[m_NbKeys * 2];
-    ComputeTCBQuaternionTangents(m_Keys, m_NbKeys, m_Tangents);
+    }
+    VxQuaternion *replacement;
+    if (!TCBPrepareTangentArray(m_Keys, m_NbKeys, replacement))
+        return;
+    delete[] m_Tangents;
+    m_Tangents = replacement;
 }
 
 CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
@@ -1675,9 +1617,6 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
         return FALSE;
 
     VxQuaternion *result = static_cast<VxQuaternion *>(res);
-
-    if (!m_Tangents)
-        ComputeTangents();
 
     if (TimeStep <= m_Keys[0].TimeStep) {
         *result = m_Keys[0].Rot;
@@ -1691,10 +1630,17 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
 
     // At an interior key, the original evaluates the segment ending there.
     // Slerp can preserve a different quaternion sign on the adjacent segment.
+    // Endpoint copies need no tangent allocation. Interior interpolation
+    // must not proceed if lazy cache construction fails.
+    if (!m_Tangents)
+        ComputeTangents();
+    if (!m_Tangents)
+        return FALSE;
+
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
-        int mid = (low + high) >> 1;
+        int mid = low + ((high - low) >> 1);
         if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
@@ -1703,7 +1649,11 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
 
     float t1 = m_Keys[low].TimeStep;
     float t2 = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    const float interval = t2 - t1;
+    const float elapsed = TimeStep - t1;
+    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
+        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
+        : elapsed / interval;
 
     t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
@@ -1716,45 +1666,12 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
 }
 
 int RCKTCBScaleAxisController::AddKey(CKKey *key) {
-    if (!key)
-        return -1;
-
-    CKTCBScaleAxisKey *tcbKey = static_cast<CKTCBScaleAxisKey *>(key);
-    float time = tcbKey->TimeStep;
-
-
-    int insertIdx = m_NbKeys;
-    for (int i = 0; i < m_NbKeys; ++i) {
-        if (m_Keys[i].TimeStep == time) {
-            m_Keys[i] = *tcbKey;
-            delete[] m_Tangents;
-            m_Tangents = nullptr;
-            return i;
-        }
-        if (m_Keys[i].TimeStep > time) {
-            insertIdx = i;
-            break;
-        }
+    const int index = TCBAddControllerKey(m_Keys, m_NbKeys, static_cast<CKTCBRotationKey *>(key));
+    if (index >= 0) {
+        delete[] m_Tangents;
+        m_Tangents = nullptr;
     }
-
-    ++m_NbKeys;
-    CKTCBScaleAxisKey *newKeys = new CKTCBScaleAxisKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKTCBScaleAxisKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKTCBScaleAxisKey));
-        delete[] m_Keys;
-    }
-
-    m_Keys = newKeys;
-    m_Keys[insertIdx] = *tcbKey;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
-
-    return insertIdx;
+    return index;
 }
 
 CKKey *RCKTCBScaleAxisController::GetKey(int index) {
@@ -1764,62 +1681,33 @@ CKKey *RCKTCBScaleAxisController::GetKey(int index) {
 }
 
 void RCKTCBScaleAxisController::RemoveKey(int index) {
-    if (index < 0 || index >= m_NbKeys)
-        return;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
-        delete[] m_Keys;
-        m_Keys = nullptr;
+    if (TCBRemoveControllerKey(m_Keys, m_NbKeys, index)) {
         delete[] m_Tangents;
         m_Tangents = nullptr;
-        return;
     }
-
-    CKTCBScaleAxisKey *newKeys = new CKTCBScaleAxisKey[m_NbKeys];
-
-    if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKTCBScaleAxisKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKTCBScaleAxisKey));
-
-    delete[] m_Keys;
-    m_Keys = newKeys;
-
-    delete[] m_Tangents;
-    m_Tangents = nullptr;
 }
 
 int RCKTCBScaleAxisController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKTCBScaleAxisKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKTCBScaleAxisKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKTCBScaleAxisController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKTCBScaleAxisController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKTCBScaleAxisKey *keys = nullptr;
+    int count = 0;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
 
     delete[] m_Keys;
-    m_Keys = nullptr;
     delete[] m_Tangents;
     m_Tangents = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKTCBScaleAxisKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKTCBScaleAxisKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKTCBScaleAxisKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKTCBScaleAxisController::Compare(CKAnimController *control, float Threshold) {
