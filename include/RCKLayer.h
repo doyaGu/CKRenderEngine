@@ -38,6 +38,8 @@ public:
     CKStateChunk *Save(CKFile *file, CKDWORD flags) override;
     CKERROR Load(CKStateChunk *chunk, CKFile *file) override;
 
+    void CheckPreDeletion() override;
+
     int GetMemoryOccupation() override;
 
     CKERROR PrepareDependencies(CKDependenciesContext &context) override;
@@ -57,13 +59,17 @@ public:
     // dimensions may be known; value access and Save index by the grid.
     void FitSquareArray();
 
+private:
+    friend class RCKGrid;
+    CKERROR FitSquareArrayForLoad();
+
 protected:
     CKGrid *m_Grid;
     int m_Type;
     int m_Format;
     CKDWORD m_Flags;
     CKSquare *m_SquareArray;
-    int m_SquareCount; // Allocated cells, or -1 for an array from SetSquareArray.
+    int m_SquareCount; // Owned capacity, or -1 for SetSquareArray's transferred pointer of unknown capacity.
 };
 
 #endif // RCKLAYER_H

@@ -10,6 +10,18 @@
 #include <climits>
 #include <new>
 
+static CKBOOL LayerCellCount(CKGrid *grid, int &count) {
+    count = 0;
+    if (!grid)
+        return TRUE;
+    const int width = grid->GetWidth();
+    const int length = grid->GetLength();
+    if (width < 0 || length < 0 || (length && width > INT_MAX / length))
+        return FALSE;
+    count = width * length;
+    return static_cast<size_t>(count) <= static_cast<size_t>(-1) / sizeof(CKSquare);
+}
+
 /**
  * @brief RCKLayer constructor
  * @param Context The CKContext instance
@@ -27,16 +39,11 @@ RCKLayer::RCKLayer(CKContext *Context, CKSTRING name, CK_ID owner)
     // Get owner grid from context
     m_Grid = reinterpret_cast<CKGrid *>(m_Context->GetObject(owner));
 
-    // Allocate square array if grid exists
-    if (m_Grid) {
-        const int width = m_Grid->GetWidth();
-        const int length = m_Grid->GetLength();
-        const int count = width * length;
-        m_SquareArray = (count > 0) ? new CKSquare[count] : nullptr;
-        if (m_SquareArray) {
-            memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
+    int count;
+    if (LayerCellCount(m_Grid, count) && count > 0) {
+        m_SquareArray = new(std::nothrow) CKSquare[count]();
+        if (m_SquareArray)
             m_SquareCount = count;
-        }
     }
 }
 
@@ -117,32 +124,38 @@ CKSquare *RCKLayer::GetSquareArray() {
 }
 
 void RCKLayer::SetSquareArray(CKSquare *sqarray) {
-    // Original simply assigns without deleting old
+    // Native transfers the current pointer to the layer without releasing
+    // the prior pointer. A replacing caller manages that previous allocation.
     m_SquareArray = sqarray;
     // The caller's array size is unknown; it must match the grid, as before.
     m_SquareCount = -1;
 }
 
 void RCKLayer::FitSquareArray() {
+    FitSquareArrayForLoad();
+}
+
+CKERROR RCKLayer::FitSquareArrayForLoad() {
     if (!m_Grid || m_Format != 0 || m_SquareCount < 0)
-        return;
-    const int width = m_Grid->GetWidth();
-    const int length = m_Grid->GetLength();
+        return CK_OK;
     // Zero dimensions mean the owner grid has not been loaded yet.
-    if (width <= 0 || length <= 0 || width > INT_MAX / length)
-        return;
-    const int count = width * length;
+    int count;
+    if (!LayerCellCount(m_Grid, count))
+        return CKERR_INVALIDPARAMETER;
+    if (count == 0)
+        return CK_OK;
     if (count == m_SquareCount)
-        return;
+        return CK_OK;
     CKSquare *squares = new(std::nothrow) CKSquare[count]();
     if (!squares)
-        return;
+        return CKERR_OUTOFMEMORY;
     const int kept = m_SquareCount < count ? m_SquareCount : count;
     if (kept > 0)
         memcpy(squares, m_SquareArray, static_cast<size_t>(kept) * sizeof(CKSquare));
     delete[] m_SquareArray;
     m_SquareArray = squares;
     m_SquareCount = count;
+    return CK_OK;
 }
 
 void RCKLayer::SetVisible(CKBOOL vis) {
@@ -157,25 +170,18 @@ CKBOOL RCKLayer::IsVisible() {
 }
 
 void RCKLayer::InitOwner(CK_ID owner) {
-    // Get owner grid from context
-    m_Grid = reinterpret_cast<CKGrid *>(m_Context->GetObject(owner));
-
-    // Delete existing square array
+    CKGrid *grid = reinterpret_cast<CKGrid *>(m_Context->GetObject(owner));
+    int count;
+    if (!LayerCellCount(grid, count))
+        return;
+    CKSquare *squares = count > 0 ? new(std::nothrow) CKSquare[count]() : nullptr;
+    if (count > 0 && !squares)
+        return;
+    // Prepare the new owner's cells before committing its dimensions/owner.
     delete[] m_SquareArray;
-    m_SquareArray = nullptr;
-    m_SquareCount = 0;
-
-    // Allocate new square array if grid exists
-    if (m_Grid) {
-        const int width = m_Grid->GetWidth();
-        const int length = m_Grid->GetLength();
-        const int count = width * length;
-        m_SquareArray = (count > 0) ? new CKSquare[count] : nullptr;
-        if (m_SquareArray) {
-            memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
-            m_SquareCount = count;
-        }
-    }
+    m_Grid = grid;
+    m_SquareArray = squares;
+    m_SquareCount = count;
 }
 
 void RCKLayer::SetOwner(CK_ID owner) {
@@ -185,6 +191,11 @@ void RCKLayer::SetOwner(CK_ID owner) {
 
 CK_ID RCKLayer::GetOwner() {
     return m_Grid ? m_Grid->GetID() : 0;
+}
+
+void RCKLayer::CheckPreDeletion() {
+    if (m_Grid && m_Grid->IsToBeDeleted())
+        m_Grid = nullptr;
 }
 
 /**
@@ -204,9 +215,12 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
     // Add the base class chunk
     chunk->AddChunkAndDelete(baseChunk);
 
-    // Grid manager is used for file metadata (associated color/param).
-    // When unavailable, we still write a structurally valid payload.
+    // Native Save requires the grid manager even for memory-only saves.
     CKGridManager *gridMgr = reinterpret_cast<CKGridManager *>(m_Context->GetManagerByGuid(GRID_MANAGER_GUID));
+    if (!gridMgr) {
+        DeleteCKStateChunk(chunk);
+        return nullptr;
+    }
 
     // Only write layer payload if saving to file or flag 0x10 is set
     if (file || (flags & 0x10u) != 0) {
@@ -240,18 +254,30 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
 
         // Write square array data if format is 0 and grid exists
         if (m_Format == 0 && m_Grid) {
-            const int gridWidth = m_Grid->GetWidth();
-            const int gridLength = m_Grid->GetLength();
-            const int count = gridLength * gridWidth;
+            int count;
+            if (!LayerCellCount(m_Grid, count) || count > INT_MAX / static_cast<int>(sizeof(CKDWORD)) - 1) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
+            }
             // CKSquare also contains a pointer; its host size can exceed the
             // four-byte values stored by the original Win32 engine.
-            XArray<CKDWORD> values;
-            values.Resize(count);
+            CKDWORD *values = count > 0 ? new(std::nothrow) CKDWORD[count] : nullptr;
+            if (count > 0 && !values) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
+            }
             // Cells loaded before the grid was resized may be fewer than count.
             const int stored = m_SquareArray ? (m_SquareCount < 0 ? count : m_SquareCount) : 0;
             for (int i = 0; i < count; ++i)
                 values[i] = i < stored ? m_SquareArray[i].dval : 0;
-            chunk->WriteBuffer_LEndian(count * sizeof(CKDWORD), values.Begin());
+            try {
+                chunk->WriteBuffer_LEndian(count * sizeof(CKDWORD), values);
+            } catch (const std::bad_alloc &) {
+                delete[] values;
+                DeleteCKStateChunk(chunk);
+                return nullptr;
+            }
+            delete[] values;
         }
 
         // Mark type as used in file
@@ -329,45 +355,54 @@ CKERROR RCKLayer::Load(CKStateChunk *chunk, CKFile *file) {
             m_Flags = static_cast<CKDWORD>(chunk->ReadInt());
         }
 
-        // Cleanup existing square array
-        delete[] m_SquareArray;
-        m_SquareArray = nullptr;
-        m_SquareCount = 0;
-
-        // Load square array data if format is 0
+        // Prepare the complete owner-sized array before replacing old cells.
+        CKSquare *squares = nullptr;
+        int count = 0;
         if (!m_Format) {
             void *raw = nullptr;
-            const int bufferSize = chunk->ReadBuffer(&raw);
-            if (raw && bufferSize > 0) {
-                // Layers can be loaded before their owner grid's dimensions.
-                const int count = bufferSize / sizeof(CKDWORD);
-                CKDWORD *values = static_cast<CKDWORD *>(raw);
-                CKConvertEndianArray32(values, count);
-                m_SquareArray = count > 0 ? new CKSquare[count]() : nullptr;
-                m_SquareCount = m_SquareArray ? count : 0;
-                for (int i = 0; i < count; ++i)
-                    m_SquareArray[i].dval = values[i];
+            int bufferSize;
+            try {
+                bufferSize = chunk->ReadBuffer(&raw);
+            } catch (const std::bad_alloc &) {
+                return CKERR_OUTOFMEMORY;
             }
-            if (raw)
+            const int stored = raw && bufferSize > 0 ? bufferSize / sizeof(CKDWORD) : 0;
+            count = stored;
+            int ownerCount;
+            if (!LayerCellCount(m_Grid, ownerCount)) {
                 CKDeletePointer(raw);
-            // A grid loaded first already has its dimensions; otherwise its
-            // Load fits this layer.
-            FitSquareArray();
+                return CKERR_INVALIDPARAMETER;
+            }
+            // Pending grid dimensions leave the serialized capacity intact.
+            // Known dimensions retain the prefix and zero-fill its extension.
+            if (ownerCount > 0)
+                count = ownerCount;
+            if (count > 0) {
+                squares = new(std::nothrow) CKSquare[count]();
+                if (!squares) {
+                    CKDeletePointer(raw);
+                    return CKERR_OUTOFMEMORY;
+                }
+                CKDWORD *values = static_cast<CKDWORD *>(raw);
+                const int copied = stored < count ? stored : count;
+                CKConvertEndianArray32(values, copied);
+                for (int i = 0; i < copied; ++i)
+                    squares[i].dval = values[i];
+            }
+            CKDeletePointer(raw);
         }
+        delete[] m_SquareArray;
+        m_SquareArray = squares;
+        m_SquareCount = count;
     }
 
     return CK_OK;
 }
 
 CKERROR RCKLayer::PrepareDependencies(CKDependenciesContext &context) {
-    CKERROR err = CKObject::PrepareDependencies(context);
-    if (err != CK_OK)
-        return err;
-
-    if (m_Grid)
-        m_Grid->PrepareDependencies(context);
-
-    return context.FinishPrepareDependencies(this, m_ClassID);
+    // The native layer uses CKObject's implementation. Its owner is a
+    // reference to remap, not an object to copy or delete with the layer.
+    return CKObject::PrepareDependencies(context);
 }
 
 CKERROR RCKLayer::RemapDependencies(CKDependenciesContext &context) {
@@ -394,53 +429,48 @@ int RCKLayer::GetMemoryOccupation() {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKLayer::Copy(CKObject &o, CKDependenciesContext &context) {
-    // In Virtools, Copy is called on the destination object, with 'o' being the source.
-    CKERROR err = CKObject::Copy(o, context);
-    if (err != CK_OK)
-        return err;
-
-    CKDWORD classDeps = context.GetClassDependencies(CKCID_LAYER);
-
+    if (this == &o)
+        return CK_OK;
     RCKLayer *src = static_cast<RCKLayer *>(&o);
-
+    int count;
+    if (!LayerCellCount(src->m_Grid, count))
+        return CKERR_INVALIDPARAMETER;
+    CKSquare *squares = count > 0 ? new(std::nothrow) CKSquare[count]() : nullptr;
+    if (count > 0 && !squares)
+        return CKERR_OUTOFMEMORY;
+    const CKDWORD classDeps = context.GetClassDependencies(CKCID_LAYER);
+    if (squares) {
+        const int stored = !src->m_SquareArray ? 0 : (src->m_SquareCount < 0 ? count : src->m_SquareCount);
+        const int copied = stored < count ? stored : count;
+        if ((classDeps & 1) && copied > 0)
+            memcpy(squares, src->m_SquareArray, static_cast<size_t>(copied) * sizeof(CKSquare));
+    }
+    const CKERROR err = CKObject::Copy(o, context);
+    if (err != CK_OK) {
+        delete[] squares;
+        return err;
+    }
+    delete[] m_SquareArray;
     m_Grid = src->m_Grid;
     m_Type = src->m_Type;
     m_Format = src->m_Format;
     m_Flags = src->m_Flags;
-    m_SquareArray = nullptr;
-    m_SquareCount = 0;
-
-    // Original always allocates based on this->m_Grid after assignment
-    if (m_Grid) {
-        const int width = m_Grid->GetWidth();
-        const int length = m_Grid->GetLength();
-        const int count = width * length;
-        m_SquareArray = new CKSquare[count];
-        m_SquareCount = count;
-
-        // Copy data if classDeps & 1, otherwise zero. The source may hold
-        // fewer cells than the grid, or none.
-        memset(m_SquareArray, 0, static_cast<size_t>(count) * sizeof(CKSquare));
-        const int stored = !src->m_SquareArray ? 0 : (src->m_SquareCount < 0 ? count : src->m_SquareCount);
-        const int copied = stored < count ? stored : count;
-        if ((classDeps & 1) && copied > 0)
-            memcpy(m_SquareArray, src->m_SquareArray, static_cast<size_t>(copied) * sizeof(CKSquare));
-    }
-
+    m_SquareArray = squares;
+    m_SquareCount = count;
     return CK_OK;
 }
 
 // Static class registration methods
 CKSTRING RCKLayer::GetClassName() {
-    return "Layer";
+    return "Grid Layer";
 }
 
 int RCKLayer::GetDependenciesCount(int mode) {
-    return 0; // No dependencies
+    return mode == CK_DEPENDENCIES_COPY ? 1 : 0;
 }
 
 CKSTRING RCKLayer::GetDependencies(int i, int mode) {
-    return nullptr;
+    return mode == CK_DEPENDENCIES_COPY && i == 0 ? "Layer Data" : nullptr;
 }
 
 void RCKLayer::Register() {
@@ -451,7 +481,7 @@ void RCKLayer::Register() {
 }
 
 CKLayer *RCKLayer::CreateInstance(CKContext *Context) {
-    return reinterpret_cast<CKLayer *>(new RCKLayer(Context, nullptr, 0));
+    return new(std::nothrow) RCKLayer(Context, nullptr, 0);
 }
 
 // Static class ID
