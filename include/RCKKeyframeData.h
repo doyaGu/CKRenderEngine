@@ -45,6 +45,10 @@ public:
 
 protected:
     CKPositionKey *m_Keys;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -67,6 +71,10 @@ public:
 
 protected:
     CKRotationKey *m_Keys;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -89,6 +97,10 @@ public:
 
 protected:
     CKScaleKey *m_Keys;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -111,6 +123,10 @@ public:
 
 protected:
     CKScaleAxisKey *m_Keys;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -138,6 +154,10 @@ protected:
     CKTCBPositionKey *m_Keys;
     // Precomputed tangent data (2 tangents per key)
     VxVector *m_Tangents;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -165,6 +185,10 @@ protected:
     CKTCBRotationKey *m_Keys;
     // Precomputed tangent data
     VxQuaternion *m_Tangents;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -190,6 +214,10 @@ public:
 protected:
     CKTCBScaleKey *m_Keys;
     VxVector *m_Tangents;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -215,6 +243,10 @@ public:
 protected:
     CKTCBScaleAxisKey *m_Keys;
     VxQuaternion *m_Tangents;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -245,6 +277,10 @@ protected:
 
     CKBezierPositionKey *m_Keys;
     CKBOOL m_TangentsComputed;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================
@@ -273,6 +309,10 @@ protected:
 
     CKBezierScaleKey *m_Keys;
     CKBOOL m_TangentsComputed;
+
+private:
+    friend class RCKObjectAnimation;
+    int ReadKeysFromBuffer(void *Buffer, int BufferSize);
 };
 
 //===================================================================

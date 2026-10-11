@@ -34,6 +34,65 @@ static bool CopyControllerKeys(const Key *source, int count, Key *&copy) {
 // Helper functions for TCB spline interpolation
 //===================================================================
 
+// Validate the complete record before writing. The public Dump API requires
+// an output buffer of at least the size returned by the null-buffer query.
+template <class Key>
+static int DumpFixedControllerKeys(const Key *keys, int count, void *buffer) {
+    const int headerSize = static_cast<int>(sizeof(int));
+    const int keySize = static_cast<int>(sizeof(Key));
+    if (count < 0 || count > (INT_MAX - headerSize) / keySize ||
+        (count > 0 && !keys))
+        return 0;
+    float previousTime = 0.0f;
+    for (int i = 0; i < count; ++i) {
+        const float time = keys[i].TimeStep;
+        if (!std::isfinite(time) || (i > 0 && time < previousTime))
+            return 0;
+        previousTime = time;
+    }
+    const int size = headerSize + count * keySize;
+    if (buffer) {
+        memcpy(buffer, &count, sizeof(count));
+        if (count > 0)
+            memcpy(static_cast<char *>(buffer) + headerSize, keys,
+                   static_cast<size_t>(count) * sizeof(Key));
+    }
+    return size;
+}
+
+// The public raw API still requires a complete buffer. File Load supplies the
+// actual record capacity through the private bounded readers. Prepare keys
+// first so rejected input and allocation failure retain all existing state.
+template <class Key>
+static int ReadFixedControllerKeys(void *buffer, int bufferSize, Key *&copy, int &count) {
+    copy = nullptr;
+    count = 0;
+    if (!buffer || bufferSize < static_cast<int>(sizeof(int)))
+        return 0;
+    int keyCount;
+    memcpy(&keyCount, buffer, sizeof(keyCount));
+    const int keySize = static_cast<int>(sizeof(Key));
+    if (keyCount < 0 || keyCount > (bufferSize - static_cast<int>(sizeof(int))) / keySize)
+        return 0;
+    const char *keys = static_cast<const char *>(buffer) + sizeof(int);
+    float previousTime = 0.0f;
+    for (int i = 0; i < keyCount; ++i) {
+        float time;
+        memcpy(&time, keys + static_cast<size_t>(i) * sizeof(Key), sizeof(time));
+        if (!std::isfinite(time) || (i > 0 && time < previousTime))
+            return 0;
+        previousTime = time;
+    }
+    if (keyCount > 0) {
+        copy = new(std::nothrow) Key[keyCount];
+        if (!copy)
+            return 0;
+        memcpy(copy, keys, static_cast<size_t>(keyCount) * sizeof(Key));
+    }
+    count = keyCount;
+    return static_cast<int>(sizeof(int)) + keyCount * keySize;
+}
+
 // 0x10050AB1 remaps normalized segment time with quadratic ends and a
 // linear middle. Arguments are the left key's easefrom and right key's easeto.
 static float ApplyEaseParameters(float t, float easeFrom, float easeTo) {
@@ -169,40 +228,40 @@ CKAnimController *CKKeyframeData::CreateController(CKANIMATION_CONTROLLER type) 
     switch (type) {
     case CKANIMATION_CONTROLLER_POS:
     case CKANIMATION_LINPOS_CONTROL:
-        controller = new RCKLinearPositionController();
+        controller = new (std::nothrow) RCKLinearPositionController();
         break;
     case CKANIMATION_CONTROLLER_ROT:
     case CKANIMATION_LINROT_CONTROL:
-        controller = new RCKLinearRotationController();
+        controller = new (std::nothrow) RCKLinearRotationController();
         break;
     case CKANIMATION_CONTROLLER_SCL:
     case CKANIMATION_LINSCL_CONTROL:
-        controller = new RCKLinearScaleController();
+        controller = new (std::nothrow) RCKLinearScaleController();
         break;
     case CKANIMATION_LINSCLAXIS_CONTROL:
-        controller = new RCKLinearScaleAxisController();
+        controller = new (std::nothrow) RCKLinearScaleAxisController();
         break;
     case CKANIMATION_TCBPOS_CONTROL:
-        controller = new RCKTCBPositionController();
+        controller = new (std::nothrow) RCKTCBPositionController();
         break;
     case CKANIMATION_TCBROT_CONTROL:
-        controller = new RCKTCBRotationController();
+        controller = new (std::nothrow) RCKTCBRotationController();
         break;
     case CKANIMATION_TCBSCL_CONTROL:
-        controller = new RCKTCBScaleController();
+        controller = new (std::nothrow) RCKTCBScaleController();
         break;
     case CKANIMATION_TCBSCLAXIS_CONTROL:
-        controller = new RCKTCBScaleAxisController();
+        controller = new (std::nothrow) RCKTCBScaleAxisController();
         break;
     case CKANIMATION_BEZIERPOS_CONTROL:
-        controller = new RCKBezierPositionController();
+        controller = new (std::nothrow) RCKBezierPositionController();
         break;
     case CKANIMATION_BEZIERSCL_CONTROL:
-        controller = new RCKBezierScaleController();
+        controller = new (std::nothrow) RCKBezierScaleController();
         break;
     case CKANIMATION_CONTROLLER_MORPH:
     case CKANIMATION_MORPH_CONTROL:
-        controller = new RCKMorphController();
+        controller = new (std::nothrow) RCKMorphController();
         break;
     default:
         return nullptr;
@@ -276,15 +335,12 @@ int RCKLinearPositionController::AddKey(CKKey *key) {
     if (!key)
         return -1;
 
-    CKPositionKey *posKey = static_cast<CKPositionKey *>(key);
-    float time = posKey->TimeStep;
-
-    // Find insertion position (maintain sorted order)
+    const CKPositionKey newKey = *static_cast<CKPositionKey *>(key);
+    const float time = newKey.TimeStep;
     int insertIdx = m_NbKeys;
     for (int i = 0; i < m_NbKeys; ++i) {
-        // If key already exists at this time, update it
         if (m_Keys[i].TimeStep == time) {
-            m_Keys[i].Pos = posKey->Pos;
+            m_Keys[i].Pos = newKey.Pos;
             return i;
         }
         if (m_Keys[i].TimeStep > time) {
@@ -292,26 +348,23 @@ int RCKLinearPositionController::AddKey(CKKey *key) {
             break;
         }
     }
+    if (m_NbKeys < 0 || m_NbKeys == INT_MAX ||
+        static_cast<size_t>(m_NbKeys + 1) > static_cast<size_t>(-1) / sizeof(CKPositionKey))
+        return -1;
 
-    // Allocate new array and copy existing keys
-    ++m_NbKeys;
-    CKPositionKey *newKeys = new CKPositionKey[m_NbKeys];
-
-    if (m_Keys) {
-        // Copy keys before insertion point
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKPositionKey));
-
-        // Copy keys after insertion point
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKPositionKey));
-
-        delete[] m_Keys;
-    }
-
+    const int newCount = m_NbKeys + 1;
+    CKPositionKey *newKeys = new(std::nothrow) CKPositionKey[newCount];
+    if (!newKeys)
+        return -1;
+    if (insertIdx > 0)
+        memcpy(newKeys, m_Keys, static_cast<size_t>(insertIdx) * sizeof(CKPositionKey));
+    if (insertIdx < m_NbKeys)
+        memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx],
+               static_cast<size_t>(m_NbKeys - insertIdx) * sizeof(CKPositionKey));
+    newKeys[insertIdx] = newKey;
+    delete[] m_Keys;
     m_Keys = newKeys;
-    m_Keys[insertIdx] = *posKey;
-
+    m_NbKeys = newCount;
     return insertIdx;
 }
 
@@ -325,52 +378,46 @@ void RCKLinearPositionController::RemoveKey(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
 
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
+    const int newCount = m_NbKeys - 1;
+    if (newCount == 0) {
         delete[] m_Keys;
         m_Keys = nullptr;
+        m_NbKeys = 0;
         return;
     }
 
-    CKPositionKey *newKeys = new CKPositionKey[m_NbKeys];
-
+    if (static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(CKPositionKey))
+        return;
+    CKPositionKey *newKeys = new(std::nothrow) CKPositionKey[newCount];
+    if (!newKeys)
+        return;
     if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKPositionKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKPositionKey));
-
+        memcpy(newKeys, m_Keys, static_cast<size_t>(index) * sizeof(CKPositionKey));
+    if (index < newCount)
+        memcpy(&newKeys[index], &m_Keys[index + 1], static_cast<size_t>(newCount - index) * sizeof(CKPositionKey));
     delete[] m_Keys;
     m_Keys = newKeys;
+    m_NbKeys = newCount;
 }
 
 int RCKLinearPositionController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKPositionKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKPositionKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKLinearPositionController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKLinearPositionController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKPositionKey *keys;
+    int count;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
-
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKPositionKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKPositionKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKPositionKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKLinearPositionController::Compare(CKAnimController *control, float Threshold) {
@@ -465,13 +512,12 @@ int RCKLinearRotationController::AddKey(CKKey *key) {
     if (!key)
         return -1;
 
-    CKRotationKey *rotKey = static_cast<CKRotationKey *>(key);
-    float time = rotKey->TimeStep;
-
+    const CKRotationKey newKey = *static_cast<CKRotationKey *>(key);
+    const float time = newKey.TimeStep;
     int insertIdx = m_NbKeys;
     for (int i = 0; i < m_NbKeys; ++i) {
         if (m_Keys[i].TimeStep == time) {
-            m_Keys[i].Rot = rotKey->Rot;
+            m_Keys[i].Rot = newKey.Rot;
             return i;
         }
         if (m_Keys[i].TimeStep > time) {
@@ -479,21 +525,23 @@ int RCKLinearRotationController::AddKey(CKKey *key) {
             break;
         }
     }
+    if (m_NbKeys < 0 || m_NbKeys == INT_MAX ||
+        static_cast<size_t>(m_NbKeys + 1) > static_cast<size_t>(-1) / sizeof(CKRotationKey))
+        return -1;
 
-    ++m_NbKeys;
-    CKRotationKey *newKeys = new CKRotationKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKRotationKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKRotationKey));
-        delete[] m_Keys;
-    }
-
+    const int newCount = m_NbKeys + 1;
+    CKRotationKey *newKeys = new(std::nothrow) CKRotationKey[newCount];
+    if (!newKeys)
+        return -1;
+    if (insertIdx > 0)
+        memcpy(newKeys, m_Keys, static_cast<size_t>(insertIdx) * sizeof(CKRotationKey));
+    if (insertIdx < m_NbKeys)
+        memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx],
+               static_cast<size_t>(m_NbKeys - insertIdx) * sizeof(CKRotationKey));
+    newKeys[insertIdx] = newKey;
+    delete[] m_Keys;
     m_Keys = newKeys;
-    m_Keys[insertIdx] = *rotKey;
-
+    m_NbKeys = newCount;
     return insertIdx;
 }
 
@@ -507,52 +555,46 @@ void RCKLinearRotationController::RemoveKey(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
 
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
+    const int newCount = m_NbKeys - 1;
+    if (newCount == 0) {
         delete[] m_Keys;
         m_Keys = nullptr;
+        m_NbKeys = 0;
         return;
     }
 
-    CKRotationKey *newKeys = new CKRotationKey[m_NbKeys];
-
+    if (static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(CKRotationKey))
+        return;
+    CKRotationKey *newKeys = new(std::nothrow) CKRotationKey[newCount];
+    if (!newKeys)
+        return;
     if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKRotationKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKRotationKey));
-
+        memcpy(newKeys, m_Keys, static_cast<size_t>(index) * sizeof(CKRotationKey));
+    if (index < newCount)
+        memcpy(&newKeys[index], &m_Keys[index + 1], static_cast<size_t>(newCount - index) * sizeof(CKRotationKey));
     delete[] m_Keys;
     m_Keys = newKeys;
+    m_NbKeys = newCount;
 }
 
 int RCKLinearRotationController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKRotationKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKRotationKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKLinearRotationController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKLinearRotationController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKRotationKey *keys;
+    int count;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
-
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKRotationKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKRotationKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKRotationKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKLinearRotationController::Compare(CKAnimController *control, float Threshold) {
@@ -647,13 +689,12 @@ int RCKLinearScaleController::AddKey(CKKey *key) {
     if (!key)
         return -1;
 
-    CKScaleKey *scaleKey = static_cast<CKScaleKey *>(key);
-    float time = scaleKey->TimeStep;
-
+    const CKScaleKey newKey = *static_cast<CKScaleKey *>(key);
+    const float time = newKey.TimeStep;
     int insertIdx = m_NbKeys;
     for (int i = 0; i < m_NbKeys; ++i) {
         if (m_Keys[i].TimeStep == time) {
-            m_Keys[i].Pos = scaleKey->Pos;
+            m_Keys[i].Pos = newKey.Pos;
             return i;
         }
         if (m_Keys[i].TimeStep > time) {
@@ -661,21 +702,23 @@ int RCKLinearScaleController::AddKey(CKKey *key) {
             break;
         }
     }
+    if (m_NbKeys < 0 || m_NbKeys == INT_MAX ||
+        static_cast<size_t>(m_NbKeys + 1) > static_cast<size_t>(-1) / sizeof(CKScaleKey))
+        return -1;
 
-    ++m_NbKeys;
-    CKScaleKey *newKeys = new CKScaleKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKScaleKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKScaleKey));
-        delete[] m_Keys;
-    }
-
+    const int newCount = m_NbKeys + 1;
+    CKScaleKey *newKeys = new(std::nothrow) CKScaleKey[newCount];
+    if (!newKeys)
+        return -1;
+    if (insertIdx > 0)
+        memcpy(newKeys, m_Keys, static_cast<size_t>(insertIdx) * sizeof(CKScaleKey));
+    if (insertIdx < m_NbKeys)
+        memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx],
+               static_cast<size_t>(m_NbKeys - insertIdx) * sizeof(CKScaleKey));
+    newKeys[insertIdx] = newKey;
+    delete[] m_Keys;
     m_Keys = newKeys;
-    m_Keys[insertIdx] = *scaleKey;
-
+    m_NbKeys = newCount;
     return insertIdx;
 }
 
@@ -689,52 +732,46 @@ void RCKLinearScaleController::RemoveKey(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
 
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
+    const int newCount = m_NbKeys - 1;
+    if (newCount == 0) {
         delete[] m_Keys;
         m_Keys = nullptr;
+        m_NbKeys = 0;
         return;
     }
 
-    CKScaleKey *newKeys = new CKScaleKey[m_NbKeys];
-
+    if (static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(CKScaleKey))
+        return;
+    CKScaleKey *newKeys = new(std::nothrow) CKScaleKey[newCount];
+    if (!newKeys)
+        return;
     if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKScaleKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKScaleKey));
-
+        memcpy(newKeys, m_Keys, static_cast<size_t>(index) * sizeof(CKScaleKey));
+    if (index < newCount)
+        memcpy(&newKeys[index], &m_Keys[index + 1], static_cast<size_t>(newCount - index) * sizeof(CKScaleKey));
     delete[] m_Keys;
     m_Keys = newKeys;
+    m_NbKeys = newCount;
 }
 
 int RCKLinearScaleController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKScaleKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKScaleKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKLinearScaleController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKLinearScaleController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKScaleKey *keys;
+    int count;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
-
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKScaleKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKScaleKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKScaleKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKLinearScaleController::Compare(CKAnimController *control, float Threshold) {
@@ -824,13 +861,12 @@ int RCKLinearScaleAxisController::AddKey(CKKey *key) {
     if (!key)
         return -1;
 
-    CKScaleAxisKey *scaleAxisKey = static_cast<CKScaleAxisKey *>(key);
-    float time = scaleAxisKey->TimeStep;
-
+    const CKScaleAxisKey newKey = *static_cast<CKScaleAxisKey *>(key);
+    const float time = newKey.TimeStep;
     int insertIdx = m_NbKeys;
     for (int i = 0; i < m_NbKeys; ++i) {
         if (m_Keys[i].TimeStep == time) {
-            m_Keys[i].Rot = scaleAxisKey->Rot;
+            m_Keys[i].Rot = newKey.Rot;
             return i;
         }
         if (m_Keys[i].TimeStep > time) {
@@ -838,21 +874,23 @@ int RCKLinearScaleAxisController::AddKey(CKKey *key) {
             break;
         }
     }
+    if (m_NbKeys < 0 || m_NbKeys == INT_MAX ||
+        static_cast<size_t>(m_NbKeys + 1) > static_cast<size_t>(-1) / sizeof(CKScaleAxisKey))
+        return -1;
 
-    ++m_NbKeys;
-    CKScaleAxisKey *newKeys = new CKScaleAxisKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKScaleAxisKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKScaleAxisKey));
-        delete[] m_Keys;
-    }
-
+    const int newCount = m_NbKeys + 1;
+    CKScaleAxisKey *newKeys = new(std::nothrow) CKScaleAxisKey[newCount];
+    if (!newKeys)
+        return -1;
+    if (insertIdx > 0)
+        memcpy(newKeys, m_Keys, static_cast<size_t>(insertIdx) * sizeof(CKScaleAxisKey));
+    if (insertIdx < m_NbKeys)
+        memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx],
+               static_cast<size_t>(m_NbKeys - insertIdx) * sizeof(CKScaleAxisKey));
+    newKeys[insertIdx] = newKey;
+    delete[] m_Keys;
     m_Keys = newKeys;
-    m_Keys[insertIdx] = *scaleAxisKey;
-
+    m_NbKeys = newCount;
     return insertIdx;
 }
 
@@ -866,52 +904,46 @@ void RCKLinearScaleAxisController::RemoveKey(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
 
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
+    const int newCount = m_NbKeys - 1;
+    if (newCount == 0) {
         delete[] m_Keys;
         m_Keys = nullptr;
+        m_NbKeys = 0;
         return;
     }
 
-    CKScaleAxisKey *newKeys = new CKScaleAxisKey[m_NbKeys];
-
+    if (static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(CKScaleAxisKey))
+        return;
+    CKScaleAxisKey *newKeys = new(std::nothrow) CKScaleAxisKey[newCount];
+    if (!newKeys)
+        return;
     if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKScaleAxisKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKScaleAxisKey));
-
+        memcpy(newKeys, m_Keys, static_cast<size_t>(index) * sizeof(CKScaleAxisKey));
+    if (index < newCount)
+        memcpy(&newKeys[index], &m_Keys[index + 1], static_cast<size_t>(newCount - index) * sizeof(CKScaleAxisKey));
     delete[] m_Keys;
     m_Keys = newKeys;
+    m_NbKeys = newCount;
 }
 
 int RCKLinearScaleAxisController::DumpKeysTo(void *Buffer) {
-    int size = sizeof(int) + m_NbKeys * sizeof(CKScaleAxisKey);
-
-    if (Buffer) {
-        int *buf = static_cast<int *>(Buffer);
-        *buf++ = m_NbKeys;
-        memcpy(buf, m_Keys, m_NbKeys * sizeof(CKScaleAxisKey));
-    }
-
-    return size;
+    return DumpFixedControllerKeys(m_Keys, m_NbKeys, Buffer);
 }
 
 int RCKLinearScaleAxisController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKLinearScaleAxisController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    CKScaleAxisKey *keys;
+    int count;
+    const int size = ReadFixedControllerKeys(Buffer, BufferSize, keys, count);
+    if (!size)
         return 0;
-
     delete[] m_Keys;
-    m_Keys = nullptr;
-
-    int *buf = static_cast<int *>(Buffer);
-    m_NbKeys = *buf++;
-
-    if (m_NbKeys > 0) {
-        m_Keys = new CKScaleAxisKey[m_NbKeys];
-        memcpy(m_Keys, buf, m_NbKeys * sizeof(CKScaleAxisKey));
-    }
-
-    return sizeof(int) + m_NbKeys * sizeof(CKScaleAxisKey);
+    m_Keys = keys;
+    m_NbKeys = count;
+    return size;
 }
 
 CKBOOL RCKLinearScaleAxisController::Compare(CKAnimController *control, float Threshold) {
