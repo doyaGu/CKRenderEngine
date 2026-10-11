@@ -964,22 +964,70 @@ CKERROR RCKObjectAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
 
     RCKObjectAnimation *src = (RCKObjectAnimation *) &o;
 
-    // Check if we should copy controllers or share data
-    CKDWORD deps = context.GetClassDependencies(CKCID_OBJECTANIMATION);
-    if (deps & 1) {
-        // Deep copy - clone the keyframe data
-        Clone(src);
+    // Native 0x1005C387 uses the Character SHAREANIMS option, not this class.
+    CKDWORD deps = context.GetClassDependencies(CKCID_CHARACTER);
+    if (deps & CK_DEPENDENCIES_COPY_CHARACTER_SHAREANIMS) {
+        if (src != this && !ShareDataFrom(src))
+            return CKERR_OUTOFMEMORY;
     } else {
-        // Share data
-        ShareDataFrom(src);
+        // Prepare every typed Clone before replacing the controllers. Native
+        // 0x1004B267 mutates the existing data, so destination aliases must see
+        // the committed copy and retain their owner/reference count.
+        CKKeyframeData *replacement = new (std::nothrow) CKKeyframeData();
+        if (!replacement)
+            return CKERR_OUTOFMEMORY;
+        replacement->m_Length = src->m_KeyframeData->m_Length;
+        CKAnimController *controllers[] = {src->m_KeyframeData->m_PositionController,
+            src->m_KeyframeData->m_RotationController, src->m_KeyframeData->m_ScaleController,
+            src->m_KeyframeData->m_ScaleAxisController, src->m_KeyframeData->m_MorphController};
+        for (int i = 0; i < 5; ++i) {
+            if (!controllers[i])
+                continue;
+            CKAnimController *controller = replacement->CreateController(
+                static_cast<CKANIMATION_CONTROLLER>(controllers[i]->GetType()));
+            if (!controller || !controller->Clone(controllers[i])) {
+                delete controller;
+                delete replacement;
+                return CKERR_OUTOFMEMORY;
+            }
+            switch (i) {
+            case 0: replacement->m_PositionController = controller; break;
+            case 1: replacement->m_RotationController = controller; break;
+            case 2: replacement->m_ScaleController = controller; break;
+            case 3: replacement->m_ScaleAxisController = controller; break;
+            case 4: replacement->m_MorphController = static_cast<CKMorphController *>(controller); break;
+            }
+        }
+
+        // Retire the old controllers only after the shared data has a complete
+        // new payload; oldData releases them when this scope ends.
+        CKKeyframeData oldData;
+        oldData.m_PositionController = m_KeyframeData->m_PositionController;
+        oldData.m_RotationController = m_KeyframeData->m_RotationController;
+        oldData.m_ScaleController = m_KeyframeData->m_ScaleController;
+        oldData.m_ScaleAxisController = m_KeyframeData->m_ScaleAxisController;
+        oldData.m_MorphController = m_KeyframeData->m_MorphController;
+        m_KeyframeData->m_PositionController = replacement->m_PositionController;
+        m_KeyframeData->m_RotationController = replacement->m_RotationController;
+        m_KeyframeData->m_ScaleController = replacement->m_ScaleController;
+        m_KeyframeData->m_ScaleAxisController = replacement->m_ScaleAxisController;
+        m_KeyframeData->m_MorphController = replacement->m_MorphController;
+        m_KeyframeData->m_Length = replacement->m_Length;
+        replacement->m_PositionController = nullptr;
+        replacement->m_RotationController = nullptr;
+        replacement->m_ScaleController = nullptr;
+        replacement->m_ScaleAxisController = nullptr;
+        replacement->m_MorphController = nullptr;
+        delete replacement;
     }
 
-    // Copy remaining fields
+    // Native copies these six playback fields and leaves reserved/parent alone.
     m_Flags = src->m_Flags;
+    m_Entity = src->m_Entity;
     m_MergeFactor = src->m_MergeFactor;
     m_CurrentStep = src->m_CurrentStep;
-    m_field_38 = src->m_field_38;
-    m_ParentKeyedAnimation = src->m_ParentKeyedAnimation;
+    m_Anim1 = src->m_Anim1;
+    m_Anim2 = src->m_Anim2;
 
     return CK_OK;
 }
@@ -1010,6 +1058,14 @@ CKBOOL RCKObjectAnimation::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
     if (obj == (CKObject *)m_Entity)
         return TRUE;
     return CKObject::IsObjectUsed(obj, cid);
+}
+
+// Native 0x1005C2E1 prepares only the base object and closes this class's stack.
+CKERROR RCKObjectAnimation::PrepareDependencies(CKDependenciesContext &context) {
+    CKERROR err = CKObject::PrepareDependencies(context);
+    if (err != CK_OK)
+        return err;
+    return context.FinishPrepareDependencies(this, m_ClassID);
 }
 
 // Based on IDA decompilation at 0x1005c31d
@@ -1157,7 +1213,7 @@ CKBOOL RCKObjectAnimation::DeleteController(CKANIMATION_CONTROLLER ControlType) 
         break;
 
     default:
-        return FALSE;
+        return TRUE;
     }
 
     return TRUE;
@@ -1821,6 +1877,14 @@ CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
     if (srcAnim && srcAnim->m_KeyframeData == m_KeyframeData)
         return TRUE;
 
+    CKKeyframeData *emptyData = nullptr;
+    if (!srcAnim) {
+        emptyData = new (std::nothrow) CKKeyframeData();
+        if (!emptyData)
+            return FALSE;
+        emptyData->m_ObjectAnimation = this;
+    }
+
     // Native 0x100566B9 only decrements the reference count, so an owner that
     // switches away leaves remaining sharers pointing at it. Their shared Save
     // then references this object's new data, or a destroyed object. Hand
@@ -1834,9 +1898,8 @@ CKBOOL RCKObjectAnimation::ShareDataFrom(CKObjectAnimation *anim) {
         if (m_KeyframeData)
             ++m_KeyframeData->m_RefCount; // Increment reference count
     } else {
-        // Create new keyframe data using constructor (not memset)
-        m_KeyframeData = new CKKeyframeData();
-        m_KeyframeData->m_ObjectAnimation = this;
+        // Commit the prepared native default only after allocation succeeded.
+        m_KeyframeData = emptyData;
     }
 
     return TRUE;
@@ -2484,16 +2547,30 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
 }
 
 void RCKObjectAnimation::Clone(CKObjectAnimation *anim) {
-    // Based on IDA decompilation at 0x10056C1F
-    // Clear current data first
-    ClearAll();
+    if (anim == this)
+        return;
 
-    RCKObjectAnimation *srcAnim = (RCKObjectAnimation *) anim;
-    if (srcAnim) {
-        // Share data from source - this copies the keyframe data reference
+    RCKObjectAnimation *srcAnim = static_cast<RCKObjectAnimation *>(anim);
+    if (srcAnim && srcAnim->m_KeyframeData) {
+        // Native 0x10056C1F clears shared controllers first, destroying the
+        // source when it aliases the target. Release only this object's share.
         ShareDataFrom(srcAnim);
+    } else {
+        // Prepare independent empty data before releasing the current share;
+        // a failed allocation must preserve the target and all other sharers.
+        CKKeyframeData *emptyData = new (std::nothrow) CKKeyframeData();
+        if (!emptyData)
+            return;
+        emptyData->m_Length = 0.0f;
+        emptyData->m_ObjectAnimation = this;
+        ReleaseKeyframeData();
+        m_KeyframeData = emptyData;
+    }
 
-        // Copy other members
+    Clear();
+    if (srcAnim) {
+        // Preserve merged/ignore behavior as well as the native playback fields.
+        m_Flags = srcAnim->m_Flags;
         m_Entity = srcAnim->m_Entity;
         m_Anim1 = srcAnim->m_Anim1;
         m_Anim2 = srcAnim->m_Anim2;
@@ -2547,7 +2624,7 @@ void RCKObjectAnimation::SetKeyframeLength(float length) {
 }
 
 CKSTRING RCKObjectAnimation::GetClassName() {
-    return "ObjectAnimation";
+    return "Object Animation";
 }
 
 int RCKObjectAnimation::GetDependenciesCount(int mode) {

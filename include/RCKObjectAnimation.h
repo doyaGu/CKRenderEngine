@@ -21,6 +21,7 @@ public:
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
     void CheckPreDeletion() override;
     CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
     // CKObjectAnimation virtual methods
