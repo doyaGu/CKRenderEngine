@@ -1751,6 +1751,65 @@ CKBOOL RCKTCBScaleAxisController::Clone(CKAnimController *control) {
 // RCKBezierPositionController Implementation
 //===================================================================
 
+// Snapshot the input before any replacement or release: callers may pass an
+// owned key. Commit count and storage only after allocation succeeds.
+static int AddBezierKey(CKBezierPositionKey *&keys, int &count, CKKey *input) {
+    if (!input || count < 0 || count == INT_MAX ||
+        static_cast<size_t>(count) >= static_cast<size_t>(-1) / sizeof(CKBezierPositionKey))
+        return -1;
+    CKBezierPositionKey key = *static_cast<CKBezierPositionKey *>(input);
+    int index = count;
+    for (int i = 0; i < count; ++i) {
+        if (keys[i].TimeStep == key.TimeStep) {
+            // 0x1004DC9B changes only the value. Existing tangent modes,
+            // derivatives and the exact time bits remain attached to the key.
+            keys[i].Pos = key.Pos;
+            return i;
+        }
+        if (keys[i].TimeStep > key.TimeStep) {
+            index = i;
+            break;
+        }
+    }
+    CKBezierPositionKey *replacement = new(std::nothrow) CKBezierPositionKey[count + 1];
+    if (!replacement)
+        return -1;
+    if (index > 0)
+        memcpy(replacement, keys, static_cast<size_t>(index) * sizeof(*keys));
+    replacement[index] = key;
+    if (index < count)
+        memcpy(replacement + index + 1, keys + index,
+               static_cast<size_t>(count - index) * sizeof(*keys));
+    delete[] keys;
+    keys = replacement;
+    ++count;
+    return index;
+}
+
+// Prepare the shorter key array before releasing the old storage.
+static bool RemoveBezierKey(CKBezierPositionKey *&keys, int &count, int index) {
+    if (index < 0 || index >= count)
+        return false;
+    if (count == 1) {
+        delete[] keys;
+        keys = nullptr;
+        count = 0;
+        return true;
+    }
+    CKBezierPositionKey *replacement = new(std::nothrow) CKBezierPositionKey[count - 1];
+    if (!replacement)
+        return false;
+    if (index > 0)
+        memcpy(replacement, keys, static_cast<size_t>(index) * sizeof(*keys));
+    if (index < count - 1)
+        memcpy(replacement + index, keys + index + 1,
+               static_cast<size_t>(count - index - 1) * sizeof(*keys));
+    delete[] keys;
+    keys = replacement;
+    --count;
+    return true;
+}
+
 // 0x1004DFE5 measures time, including the wrap interval at either endpoint.
 static float BezierKeyTimeSpan(const CKBezierPositionKey *keys, float length, int first, int second) {
     return second <= first ? keys[second].TimeStep + length - keys[first].TimeStep
@@ -1987,41 +2046,10 @@ CKBOOL RCKBezierPositionController::Evaluate(float TimeStep, void *res) {
 }
 
 int RCKBezierPositionController::AddKey(CKKey *key) {
-    if (!key)
-        return -1;
-
-    CKBezierPositionKey *bezKey = static_cast<CKBezierPositionKey *>(key);
-    float time = bezKey->TimeStep;
-
-    int insertIdx = m_NbKeys;
-    for (int i = 0; i < m_NbKeys; ++i) {
-        if (m_Keys[i].TimeStep == time) {
-            m_Keys[i] = *bezKey;
-            m_TangentsComputed = FALSE;
-            return i;
-        }
-        if (m_Keys[i].TimeStep > time) {
-            insertIdx = i;
-            break;
-        }
-    }
-
-    ++m_NbKeys;
-    CKBezierPositionKey *newKeys = new CKBezierPositionKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKBezierPositionKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKBezierPositionKey));
-        delete[] m_Keys;
-    }
-
-    m_Keys = newKeys;
-    m_Keys[insertIdx] = *bezKey;
-    m_TangentsComputed = FALSE;
-
-    return insertIdx;
+    const int index = AddBezierKey(m_Keys, m_NbKeys, key);
+    if (index >= 0)
+        m_TangentsComputed = FALSE;
+    return index;
 }
 
 CKKey *RCKBezierPositionController::GetKey(int index) {
@@ -2031,68 +2059,117 @@ CKKey *RCKBezierPositionController::GetKey(int index) {
 }
 
 void RCKBezierPositionController::RemoveKey(int index) {
-    if (index < 0 || index >= m_NbKeys)
-        return;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
-        delete[] m_Keys;
-        m_Keys = nullptr;
-        return;
-    }
-
-    CKBezierPositionKey *newKeys = new CKBezierPositionKey[m_NbKeys];
-
-    if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKBezierPositionKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKBezierPositionKey));
-
-    delete[] m_Keys;
-    m_Keys = newKeys;
-    m_TangentsComputed = FALSE;
+    if (RemoveBezierKey(m_Keys, m_NbKeys, index))
+        m_TangentsComputed = FALSE;
 }
 
 // Position and scale share these routines in the original DLL (0x1004F4BE,
 // 0x1004F65A). Each key has a 20-byte prefix and only explicit tangent vectors.
 static int DumpBezierKeys(CKBezierPositionKey *keys, int count, void *buffer) {
+    if (count < 0 || (count > 0 && !keys) ||
+        count > (INT_MAX - static_cast<int>(sizeof(int))) / 20 ||
+        static_cast<size_t>(count) > static_cast<size_t>(-1) / sizeof(CKBezierPositionKey))
+        return 0;
+
+    // Validate every variable-size key before touching the caller's output.
+    // The raw API requires a complete output buffer; optional tangent flags
+    // determine its size without computing or changing cached tangents.
     int size = sizeof(int);
-    char *bytes = static_cast<char *>(buffer);
-    if (bytes) memcpy(bytes, &count, sizeof(count));
+    float previousTime = 0.0f;
     for (int i = 0; i < count; ++i) {
-        if (bytes) memcpy(bytes + size, &keys[i], 20);
-        size += 20;
+        if (!std::isfinite(keys[i].TimeStep) || (i > 0 && keys[i].TimeStep < previousTime))
+            return 0;
+        previousTime = keys[i].TimeStep;
+        int keySize = 20;
+        if (keys[i].Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS)
+            keySize += sizeof(VxVector);
+        if (keys[i].Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS)
+            keySize += sizeof(VxVector);
+        if (keySize > INT_MAX - size)
+            return 0;
+        size += keySize;
+    }
+
+    char *bytes = static_cast<char *>(buffer);
+    if (!bytes)
+        return size;
+    memcpy(bytes, &count, sizeof(count));
+    int offset = sizeof(int);
+    for (int i = 0; i < count; ++i) {
+        memcpy(bytes + offset, &keys[i], 20);
+        offset += 20;
         if (keys[i].Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) {
-            if (bytes) memcpy(bytes + size, &keys[i].In, sizeof(VxVector));
-            size += sizeof(VxVector);
+            memcpy(bytes + offset, &keys[i].In, sizeof(VxVector));
+            offset += sizeof(VxVector);
         }
         if (keys[i].Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) {
-            if (bytes) memcpy(bytes + size, &keys[i].Out, sizeof(VxVector));
-            size += sizeof(VxVector);
+            memcpy(bytes + offset, &keys[i].Out, sizeof(VxVector));
+            offset += sizeof(VxVector);
         }
     }
     return size;
 }
 
-static int ReadBezierKeys(CKBezierPositionKey *&keys, int &count, void *buffer) {
+static int ReadBezierKeys(CKBezierPositionKey *&keys, int &count, void *buffer, int bufferSize) {
+    if (!buffer || bufferSize < static_cast<int>(sizeof(int)))
+        return 0;
     const char *bytes = static_cast<const char *>(buffer);
-    delete[] keys;
-    keys = nullptr;
-    memcpy(&count, bytes, sizeof(count));
+    int newCount;
+    memcpy(&newCount, bytes, sizeof(newCount));
+    if (newCount < 0 || newCount > (bufferSize - static_cast<int>(sizeof(int))) / 20 ||
+        static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(CKBezierPositionKey))
+        return 0;
+
+    // Optional tangents change the stride. Validate the complete payload before
+    // allocating or replacing existing keys; memcpy also permits unaligned data.
     int size = sizeof(int);
-    if (count > 0) keys = new CKBezierPositionKey[count];
-    for (int i = 0; i < count; ++i) {
-        memcpy(&keys[i], bytes + size, 20);
+    float previousTime = 0.0f;
+    for (int i = 0; i < newCount; ++i) {
+        if (bufferSize - size < 20)
+            return 0;
+        CKBezierPositionKey prefix;
+        memcpy(&prefix, bytes + size, 20);
         size += 20;
-        if (keys[i].Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) {
-            memcpy(&keys[i].In, bytes + size, sizeof(VxVector));
+        if (!std::isfinite(prefix.TimeStep) || (i > 0 && prefix.TimeStep < previousTime))
+            return 0;
+        previousTime = prefix.TimeStep;
+        if (prefix.Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) {
+            if (bufferSize - size < static_cast<int>(sizeof(VxVector)))
+                return 0;
             size += sizeof(VxVector);
         }
-        if (keys[i].Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) {
-            memcpy(&keys[i].Out, bytes + size, sizeof(VxVector));
+        if (prefix.Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) {
+            if (bufferSize - size < static_cast<int>(sizeof(VxVector)))
+                return 0;
             size += sizeof(VxVector);
         }
     }
+
+    CKBezierPositionKey *replacement = nullptr;
+    if (newCount > 0) {
+        replacement = new(std::nothrow) CKBezierPositionKey[newCount];
+        if (!replacement)
+            return 0;
+    }
+    int offset = sizeof(int);
+    for (int i = 0; i < newCount; ++i) {
+        CKBezierPositionKey &key = replacement[i];
+        memcpy(&key, bytes + offset, 20);
+        offset += 20;
+        key.In = VxVector(0.0f, 0.0f, 0.0f);
+        key.Out = VxVector(0.0f, 0.0f, 0.0f);
+        if (key.Flags.GetInTangentMode() & BEZIER_KEY_TANGENTS) {
+            memcpy(&key.In, bytes + offset, sizeof(VxVector));
+            offset += sizeof(VxVector);
+        }
+        if (key.Flags.GetOutTangentMode() & BEZIER_KEY_TANGENTS) {
+            memcpy(&key.Out, bytes + offset, sizeof(VxVector));
+            offset += sizeof(VxVector);
+        }
+    }
+    delete[] keys;
+    keys = replacement;
+    count = newCount;
     return size;
 }
 
@@ -2101,10 +2178,14 @@ int RCKBezierPositionController::DumpKeysTo(void *Buffer) {
 }
 
 int RCKBezierPositionController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
-        return 0;
-    m_TangentsComputed = FALSE;
-    return ReadBezierKeys(m_Keys, m_NbKeys, Buffer);
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
+
+int RCKBezierPositionController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    const int size = ReadBezierKeys(m_Keys, m_NbKeys, Buffer, BufferSize);
+    if (size)
+        m_TangentsComputed = FALSE;
+    return size;
 }
 
 CKBOOL RCKBezierPositionController::Compare(CKAnimController *control, float Threshold) {
@@ -2233,41 +2314,10 @@ CKBOOL RCKBezierScaleController::Evaluate(float TimeStep, void *res) {
 }
 
 int RCKBezierScaleController::AddKey(CKKey *key) {
-    if (!key)
-        return -1;
-
-    CKBezierScaleKey *bezKey = static_cast<CKBezierScaleKey *>(key);
-    float time = bezKey->TimeStep;
-
-    int insertIdx = m_NbKeys;
-    for (int i = 0; i < m_NbKeys; ++i) {
-        if (m_Keys[i].TimeStep == time) {
-            m_Keys[i] = *bezKey;
-            m_TangentsComputed = FALSE;
-            return i;
-        }
-        if (m_Keys[i].TimeStep > time) {
-            insertIdx = i;
-            break;
-        }
-    }
-
-    ++m_NbKeys;
-    CKBezierScaleKey *newKeys = new CKBezierScaleKey[m_NbKeys];
-
-    if (m_Keys) {
-        if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKBezierScaleKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKBezierScaleKey));
-        delete[] m_Keys;
-    }
-
-    m_Keys = newKeys;
-    m_Keys[insertIdx] = *bezKey;
-    m_TangentsComputed = FALSE;
-
-    return insertIdx;
+    const int index = AddBezierKey(m_Keys, m_NbKeys, key);
+    if (index >= 0)
+        m_TangentsComputed = FALSE;
+    return index;
 }
 
 CKKey *RCKBezierScaleController::GetKey(int index) {
@@ -2277,26 +2327,8 @@ CKKey *RCKBezierScaleController::GetKey(int index) {
 }
 
 void RCKBezierScaleController::RemoveKey(int index) {
-    if (index < 0 || index >= m_NbKeys)
-        return;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
-        delete[] m_Keys;
-        m_Keys = nullptr;
-        return;
-    }
-
-    CKBezierScaleKey *newKeys = new CKBezierScaleKey[m_NbKeys];
-
-    if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKBezierScaleKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKBezierScaleKey));
-
-    delete[] m_Keys;
-    m_Keys = newKeys;
-    m_TangentsComputed = FALSE;
+    if (RemoveBezierKey(m_Keys, m_NbKeys, index))
+        m_TangentsComputed = FALSE;
 }
 
 int RCKBezierScaleController::DumpKeysTo(void *Buffer) {
@@ -2304,11 +2336,14 @@ int RCKBezierScaleController::DumpKeysTo(void *Buffer) {
 }
 
 int RCKBezierScaleController::ReadKeysFrom(void *Buffer) {
-    if (!Buffer)
-        return 0;
+    return ReadKeysFromBuffer(Buffer, INT_MAX);
+}
 
-    m_TangentsComputed = FALSE;
-    return ReadBezierKeys(m_Keys, m_NbKeys, Buffer);
+int RCKBezierScaleController::ReadKeysFromBuffer(void *Buffer, int BufferSize) {
+    const int size = ReadBezierKeys(m_Keys, m_NbKeys, Buffer, BufferSize);
+    if (size)
+        m_TangentsComputed = FALSE;
+    return size;
 }
 
 CKBOOL RCKBezierScaleController::Compare(CKAnimController *control, float Threshold) {
@@ -2501,28 +2536,51 @@ int RCKMorphController::AddKey(CKKey *key, CKBOOL AllocateNormals) {
         }
     }
 
-    ++m_NbKeys;
-    CKMorphKey *newKeys = new CKMorphKey[m_NbKeys];
+    // Prepare all new storage before changing the key count or releasing old
+    // keys. The source payload may alias any of the existing owned arrays.
+    if (m_NbKeys == INT_MAX || static_cast<size_t>(m_NbKeys + 1) >
+        static_cast<size_t>(-1) / sizeof(CKMorphKey) || static_cast<size_t>(m_VertexCount) >
+        static_cast<size_t>(-1) / sizeof(VxVector))
+        return -1;
+    const int newCount = m_NbKeys + 1;
+    CKMorphKey *newKeys = new(std::nothrow) CKMorphKey[newCount];
+    if (!newKeys)
+        return -1;
+    VxVector *positions = new(std::nothrow) VxVector[m_VertexCount];
+    if (!positions) {
+        delete[] newKeys;
+        return -1;
+    }
+    VxCompressedVector *normals = nullptr;
+    if (AllocateNormals || source.NormArray) {
+        normals = new(std::nothrow) VxCompressedVector[m_VertexCount];
+        if (!normals) {
+            delete[] positions;
+            delete[] newKeys;
+            return -1;
+        }
+    }
+    if (source.PosArray && m_VertexCount > 0)
+        memcpy(positions, source.PosArray, static_cast<size_t>(m_VertexCount) * sizeof(VxVector));
+    if (source.NormArray && m_VertexCount > 0)
+        memcpy(normals, source.NormArray, static_cast<size_t>(m_VertexCount) * sizeof(VxCompressedVector));
 
     if (m_Keys) {
         if (insertIdx > 0)
-            memcpy(newKeys, m_Keys, insertIdx * sizeof(CKMorphKey));
-        if (insertIdx < m_NbKeys - 1)
-            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], (m_NbKeys - 1 - insertIdx) * sizeof(CKMorphKey));
-        delete[] m_Keys;
+            memcpy(newKeys, m_Keys, static_cast<size_t>(insertIdx) * sizeof(CKMorphKey));
+        if (insertIdx < m_NbKeys)
+            memcpy(&newKeys[insertIdx + 1], &m_Keys[insertIdx], static_cast<size_t>(m_NbKeys - insertIdx) * sizeof(CKMorphKey));
     }
 
-    m_Keys = newKeys;
-    CKMorphKey &inserted = m_Keys[insertIdx];
+    CKMorphKey &inserted = newKeys[insertIdx];
     inserted.TimeStep = time;
     // The controller owns independent arrays. Source normals imply storage
     // even when AllocateNormals is false; zero-sized arrays retain presence.
-    inserted.PosArray = new VxVector[m_VertexCount];
-    inserted.NormArray = (AllocateNormals || source.NormArray) ? new VxCompressedVector[m_VertexCount] : nullptr;
-    if (source.PosArray && m_VertexCount > 0)
-        memcpy(inserted.PosArray, source.PosArray, m_VertexCount * sizeof(VxVector));
-    if (source.NormArray && m_VertexCount > 0)
-        memcpy(inserted.NormArray, source.NormArray, m_VertexCount * sizeof(VxCompressedVector));
+    inserted.PosArray = positions;
+    inserted.NormArray = normals;
+    delete[] m_Keys;
+    m_Keys = newKeys;
+    m_NbKeys = newCount;
 
     return insertIdx;
 }
@@ -2537,26 +2595,34 @@ void RCKMorphController::RemoveKey(int index) {
     if (index < 0 || index >= m_NbKeys)
         return;
 
-    // Free memory for the key being removed
-    delete[] m_Keys[index].PosArray;
-    delete[] m_Keys[index].NormArray;
-
-    --m_NbKeys;
-    if (m_NbKeys == 0) {
+    const int newCount = m_NbKeys - 1;
+    if (newCount == 0) {
+        delete[] m_Keys[index].PosArray;
+        delete[] m_Keys[index].NormArray;
         delete[] m_Keys;
         m_Keys = nullptr;
+        m_NbKeys = 0;
         return;
     }
 
-    CKMorphKey *newKeys = new CKMorphKey[m_NbKeys];
+    if (static_cast<size_t>(newCount) > static_cast<size_t>(-1) / sizeof(CKMorphKey))
+        return;
+    CKMorphKey *newKeys = new(std::nothrow) CKMorphKey[newCount];
+    if (!newKeys)
+        return;
 
     if (index > 0)
-        memcpy(newKeys, m_Keys, index * sizeof(CKMorphKey));
-    if (index < m_NbKeys)
-        memcpy(&newKeys[index], &m_Keys[index + 1], (m_NbKeys - index) * sizeof(CKMorphKey));
+        memcpy(newKeys, m_Keys, static_cast<size_t>(index) * sizeof(CKMorphKey));
+    if (index < newCount)
+        memcpy(&newKeys[index], &m_Keys[index + 1], static_cast<size_t>(newCount - index) * sizeof(CKMorphKey));
 
+    // Only the removed key's payloads are released; surviving payload pointers
+    // are transferred after the replacement key array is complete.
+    delete[] m_Keys[index].PosArray;
+    delete[] m_Keys[index].NormArray;
     delete[] m_Keys;
     m_Keys = newKeys;
+    m_NbKeys = newCount;
 }
 
 static int MorphWireSize(int keyCount, int vertexCount, CKBOOL normals) {
