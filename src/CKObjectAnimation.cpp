@@ -1326,7 +1326,7 @@ CKBOOL RCKObjectAnimation::EvaluatePosition(float Time, VxVector &Pos) {
 CKBOOL RCKObjectAnimation::EvaluateScale(float Time, VxVector &Scl) {
     // Flag 0x10 disables scale evaluation
     if (m_Flags & CK_OBJECTANIMATION_IGNORESCALE) {
-        Scl.Set(1.0f, 1.0f, 1.0f);
+        Scl.Set(0.0f, 0.0f, 0.0f);
         return FALSE;
     }
 
@@ -1365,7 +1365,7 @@ CKBOOL RCKObjectAnimation::EvaluateScale(float Time, VxVector &Scl) {
         return ctrl->Evaluate(Time, &Scl);
     }
 
-    Scl.Set(1.0f, 1.0f, 1.0f);
+    Scl.Set(0.0f, 0.0f, 0.0f);
     return FALSE;
 }
 
@@ -2100,6 +2100,11 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
     if (EvaluateScaleAxis(frame, scaleAxis))
         transformFlags |= 2; // Has scale axis
 
+    // Native 0x100578CA adds the keyed animation's centering offset to
+    // its root channel before composing the entity's local pose.
+    if (m_ParentKeyedAnimation && m_ParentKeyedAnimation->GetRootAnimationInternal() == this)
+        pos += m_ParentKeyedAnimation->GetRootVectorInternal();
+
     // Apply transforms to entity
     if (transformFlags) {
         VxMatrix localMatrix = m_Entity->GetLocalMatrix();
@@ -2110,8 +2115,17 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
             localMatrix[3][1] = pos.y;
             localMatrix[3][2] = pos.z;
         } else {
-            // Need to decompose current matrix to fill missing components
-            if ((transformFlags & 0xF) != 0xF) {
+            const CKBOOL hasScaleAxis = (transformFlags & 2) &&
+                std::fabs(scaleAxis.w - 1.0f) >= FLT_EPSILON;
+            // Preserve channels that this animation does not supply. A
+            // nonidentity scale-axis channel needs the total decomposition.
+            if (hasScaleAxis && (transformFlags & 0xF) != 0xF) {
+                Vx3DDecomposeMatrixTotalPtr(localMatrix,
+                    (transformFlags & 8) ? nullptr : &rot,
+                    (transformFlags & 4) ? nullptr : &pos,
+                    (transformFlags & 1) ? nullptr : &scale,
+                    (transformFlags & 2) ? nullptr : &scaleAxis);
+            } else if (!hasScaleAxis && (transformFlags & 0xD) != 0xD) {
                 VxQuaternion tempRot;
                 VxVector tempPos, tempScale;
                 Vx3DDecomposeMatrix(localMatrix, tempRot, tempPos, tempScale);
@@ -2124,12 +2138,25 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
             VxMatrix rotMatrix;
             rot.ToMatrix(rotMatrix);
 
-            // Apply scale
+            // Native 0x1000C2E0 forms the symmetric stretch U*S*U^T,
+            // then multiplies it by the object rotation.
             VxMatrix scaleMatrix;
             Vx3DMatrixIdentity(scaleMatrix);
-            scaleMatrix[0][0] = scale.x;
-            scaleMatrix[1][1] = scale.y;
-            scaleMatrix[2][2] = scale.z;
+            if (hasScaleAxis) {
+                VxMatrix axisMatrix;
+                scaleAxis.ToMatrix(axisMatrix);
+                for (int i = 0; i < 3; ++i) {
+                    for (int j = 0; j < 3; ++j) {
+                        scaleMatrix[i][j] = axisMatrix[i][0] * axisMatrix[j][0] * scale.x +
+                                            axisMatrix[i][1] * axisMatrix[j][1] * scale.y +
+                                            axisMatrix[i][2] * axisMatrix[j][2] * scale.z;
+                    }
+                }
+            } else {
+                scaleMatrix[0][0] = scale.x;
+                scaleMatrix[1][1] = scale.y;
+                scaleMatrix[2][2] = scale.z;
+            }
 
             // Combine: result = scale * rotation
             Vx3DMultiplyMatrix(localMatrix, scaleMatrix, rotMatrix);
@@ -2140,7 +2167,7 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
             localMatrix[3][2] = pos.z;
         }
 
-        m_Entity->SetLocalMatrix(localMatrix);
+        m_Entity->m_LocalMatrix = localMatrix;
 
         // Notify matrix change if not driven by character animation
         if (!anim || !anim->GetCharacter())
@@ -2313,13 +2340,27 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
         if (hasScale) animIn->EvaluateScale(frameFrom, startScale);
         if (hasScaleAxis) animIn->EvaluateScaleAxis(frameFrom, startScaleAxis);
     } else {
-        // Use provided starting set
-        // startingset is CKAnimKey* which should point to a structure containing pos, rot, scale, scaleAxis
-        // For now just evaluate from AnimIn if we don't know the exact structure
-        if (hasPosition) animIn->EvaluatePosition(frameFrom, startPos);
-        if (hasRotation) animIn->EvaluateRotation(frameFrom, startRot);
-        if (hasScale) animIn->EvaluateScale(frameFrom, startScale);
-        if (hasScaleAxis) animIn->EvaluateScaleAxis(frameFrom, startScaleAxis);
+        startPos = startingset->m_Pos;
+        startScale = startingset->m_Scl;
+        startRot = startingset->m_Rot;
+        startScaleAxis = startingset->m_SclRot;
+    }
+
+    if (DontTurn) {
+        // 0x10011D81 isolates source yaw relative to its first rotation;
+        // 0x1005A5EE uses its inverse for the transition's starting rotation.
+        VxQuaternion firstRotation, heading;
+        animIn->EvaluateRotation(0.0f, firstRotation);
+        animIn->EvaluateRotation(frameFrom, heading);
+        firstRotation.w = -firstRotation.w;
+        heading.Multiply(firstRotation);
+        heading.x = 0.0f;
+        heading.z = 0.0f;
+        heading.Normalize();
+        heading.w = -heading.w;
+        startRot = heading;
+        if (startingset)
+            startingset->m_Rot = heading;
     }
 
     // Evaluate end values from AnimOut
@@ -2328,27 +2369,95 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
     if (hasScale) animOut->EvaluateScale(frameTo, endScale);
     if (hasScaleAxis) animOut->EvaluateScaleAxis(frameTo, endScaleAxis);
 
+    VxVector startVelocity, endVelocity;
+    if (Veloc) {
+        animIn->GetVelocity(StepFrom, &startVelocity);
+        animOut->GetVelocity(StepTo, &endVelocity);
+        startVelocity *= 0.4f;
+        endVelocity *= 0.4f;
+    }
+
+    // Native captures an in-place Morph source before clearing merged
+    // references or replacing controllers (0x1005A5EE).
+    const CKBOOL hasInMorph = animIn->HasMorphInfo();
+    const CKBOOL hasOutMorph = animOut->HasMorphInfo();
+    const int inMorphVertexCount = hasInMorph ? animIn->GetMorphVertexCount() : 0;
+    const int outMorphVertexCount = hasOutMorph ? animOut->GetMorphVertexCount() : 0;
+    CKBOOL hasMorphNormals = animIn->HasMorphNormalInfo() && animOut->HasMorphNormalInfo();
+    if (!hasInMorph)
+        hasMorphNormals = animOut->HasMorphNormalInfo();
+    int bufferSize = outMorphVertexCount * sizeof(VxVector);
+    if (hasMorphNormals)
+        bufferSize += outMorphVertexCount * sizeof(VxCompressedVector);
+    CKMemoryPool memPool(m_Context, bufferSize);
+    VxVector *tempMorphBuffer = (VxVector *) memPool.Mem();
+    VxCompressedVector *tempNormalBuffer = hasMorphNormals
+        ? (VxCompressedVector *) ((CKBYTE *) tempMorphBuffer + outMorphVertexCount * sizeof(VxVector))
+        : nullptr;
+    CKBOOL hasStartData = FALSE;
+    if (animIn == this && hasInMorph && hasOutMorph && inMorphVertexCount == outMorphVertexCount) {
+        animIn->EvaluateMorphTarget(frameFrom, outMorphVertexCount,
+                                   tempMorphBuffer, sizeof(VxVector), tempNormalBuffer);
+        hasStartData = TRUE;
+    }
+
     // Reset transition animation state
     m_Anim1 = nullptr;
     m_Anim2 = nullptr;
+    // A transition owns real controllers; retaining the native stale merged
+    // flag would dispatch playback to the cleared source pointers.
+    m_Flags &= ~CK_OBJECTANIMATION_MERGED;
     m_MergeFactor = 0.5f;
     m_CurrentStep = 0.0f;
     m_Entity = animOut->m_Entity;
 
-    // Create position controller with 2 keys (start and end)
+    // Preserve a controller with the native key count; its interpolation
+    // settings remain attached to each key while transition values change.
     if (hasPosition) {
-        // Delete existing controller
-        if (m_KeyframeData->m_PositionController) {
-            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
-            m_KeyframeData->m_PositionController = nullptr;
-        }
-
-        CKAnimController *posCtrl = CreateController(CKANIMATION_LINPOS_CONTROL);
-        if (posCtrl) {
-            CKPositionKey startKey(0.0f, startPos);
-            CKPositionKey endKey(length, endPos);
-            posCtrl->AddKey(&startKey);
-            posCtrl->AddKey(&endKey);
+        CKAnimController *posCtrl = m_KeyframeData->m_PositionController;
+        if (Veloc) {
+            int intervals = static_cast<int>(length);
+            // A positive subframe duration still has two endpoints. Keep
+            // native frame sampling for longer transitions and integrate this
+            // shorter interval over its actual duration.
+            if (intervals == 0 && length > 0.0f)
+                intervals = 1;
+            const float intervalDuration = length < 1.0f ? length : 1.0f;
+            const CKBOOL reuse = posCtrl && posCtrl->GetKeyCount() == intervals + 1;
+            if (!reuse)
+                posCtrl = CreateController(CKANIMATION_LINPOS_CONTROL);
+            if (posCtrl) {
+                VxVector displacement(0.0f);
+                for (int i = 0; i <= intervals; ++i) {
+                    const float phase = intervals ? static_cast<float>(i) / intervals : 0.0f;
+                    const float time = phase * length;
+                    if (reuse) {
+                        CKPositionKey *key = static_cast<CKPositionKey *>(posCtrl->GetKey(i));
+                        key->TimeStep = time;
+                        key->Pos = displacement;
+                    } else {
+                        CKPositionKey key(time, displacement);
+                        posCtrl->AddKey(&key);
+                    }
+                    displacement += intervalDuration * (startVelocity + phase * (endVelocity - startVelocity));
+                }
+                if (reuse)
+                    posCtrl->AddKey(posCtrl->GetKey(0));
+            }
+        } else if (posCtrl && posCtrl->GetKeyCount() == 2) {
+            CKPositionKey *first = static_cast<CKPositionKey *>(posCtrl->GetKey(0));
+            CKPositionKey *last = static_cast<CKPositionKey *>(posCtrl->GetKey(1));
+            first->TimeStep = 0.0f; first->Pos = startPos;
+            last->TimeStep = length; last->Pos = endPos;
+            posCtrl->AddKey(first);
+        } else {
+            posCtrl = CreateController(CKANIMATION_LINPOS_CONTROL);
+            if (posCtrl) {
+                CKPositionKey startKey(0.0f, startPos);
+                CKPositionKey endKey(length, endPos);
+                posCtrl->AddKey(&startKey);
+                posCtrl->AddKey(&endKey);
+            }
         }
     } else {
         // Delete position controller if exists
@@ -2360,17 +2469,21 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
 
     // Create scale controller with 2 keys
     if (hasScale) {
-        if (m_KeyframeData->m_ScaleController) {
-            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
-            m_KeyframeData->m_ScaleController = nullptr;
-        }
-
-        CKAnimController *sclCtrl = CreateController(CKANIMATION_LINSCL_CONTROL);
-        if (sclCtrl) {
-            CKScaleKey startKey(0.0f, startScale);
-            CKScaleKey endKey(length, endScale);
-            sclCtrl->AddKey(&startKey);
-            sclCtrl->AddKey(&endKey);
+        CKAnimController *sclCtrl = m_KeyframeData->m_ScaleController;
+        if (sclCtrl && sclCtrl->GetKeyCount() == 2) {
+            CKScaleKey *first = static_cast<CKScaleKey *>(sclCtrl->GetKey(0));
+            CKScaleKey *last = static_cast<CKScaleKey *>(sclCtrl->GetKey(1));
+            first->TimeStep = 0.0f; first->Pos = startScale;
+            last->TimeStep = length; last->Pos = endScale;
+            sclCtrl->AddKey(first);
+        } else {
+            sclCtrl = CreateController(CKANIMATION_LINSCL_CONTROL);
+            if (sclCtrl) {
+                CKScaleKey startKey(0.0f, startScale);
+                CKScaleKey endKey(length, endScale);
+                sclCtrl->AddKey(&startKey);
+                sclCtrl->AddKey(&endKey);
+            }
         }
     } else {
         if (m_KeyframeData->m_ScaleController) {
@@ -2381,17 +2494,21 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
 
     // Create rotation controller with 2 keys
     if (hasRotation) {
-        if (m_KeyframeData->m_RotationController) {
-            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
-            m_KeyframeData->m_RotationController = nullptr;
-        }
-
-        CKAnimController *rotCtrl = CreateController(CKANIMATION_LINROT_CONTROL);
-        if (rotCtrl) {
-            CKRotationKey startKey(0.0f, startRot);
-            CKRotationKey endKey(length, endRot);
-            rotCtrl->AddKey(&startKey);
-            rotCtrl->AddKey(&endKey);
+        CKAnimController *rotCtrl = m_KeyframeData->m_RotationController;
+        if (rotCtrl && rotCtrl->GetKeyCount() == 2) {
+            CKRotationKey *first = static_cast<CKRotationKey *>(rotCtrl->GetKey(0));
+            CKRotationKey *last = static_cast<CKRotationKey *>(rotCtrl->GetKey(1));
+            first->TimeStep = 0.0f; first->Rot = startRot;
+            last->TimeStep = length; last->Rot = endRot;
+            rotCtrl->AddKey(first);
+        } else {
+            rotCtrl = CreateController(CKANIMATION_LINROT_CONTROL);
+            if (rotCtrl) {
+                CKRotationKey startKey(0.0f, startRot);
+                CKRotationKey endKey(length, endRot);
+                rotCtrl->AddKey(&startKey);
+                rotCtrl->AddKey(&endKey);
+            }
         }
     } else {
         if (m_KeyframeData->m_RotationController) {
@@ -2402,17 +2519,21 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
 
     // Create scale axis controller with 2 keys
     if (hasScaleAxis) {
-        if (m_KeyframeData->m_ScaleAxisController) {
-            delete reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
-            m_KeyframeData->m_ScaleAxisController = nullptr;
-        }
-
-        CKAnimController *sclAxisCtrl = CreateController(CKANIMATION_LINSCLAXIS_CONTROL);
-        if (sclAxisCtrl) {
-            CKScaleAxisKey startKey(0.0f, startScaleAxis);
-            CKScaleAxisKey endKey(length, endScaleAxis);
-            sclAxisCtrl->AddKey(&startKey);
-            sclAxisCtrl->AddKey(&endKey);
+        CKAnimController *sclAxisCtrl = m_KeyframeData->m_ScaleAxisController;
+        if (sclAxisCtrl && sclAxisCtrl->GetKeyCount() == 2) {
+            CKScaleAxisKey *first = static_cast<CKScaleAxisKey *>(sclAxisCtrl->GetKey(0));
+            CKScaleAxisKey *last = static_cast<CKScaleAxisKey *>(sclAxisCtrl->GetKey(1));
+            first->TimeStep = 0.0f; first->Rot = startScaleAxis;
+            last->TimeStep = length; last->Rot = endScaleAxis;
+            sclAxisCtrl->AddKey(first);
+        } else {
+            sclAxisCtrl = CreateController(CKANIMATION_LINSCLAXIS_CONTROL);
+            if (sclAxisCtrl) {
+                CKScaleAxisKey startKey(0.0f, startScaleAxis);
+                CKScaleAxisKey endKey(length, endScaleAxis);
+                sclAxisCtrl->AddKey(&startKey);
+                sclAxisCtrl->AddKey(&endKey);
+            }
         }
     } else {
         if (m_KeyframeData->m_ScaleAxisController) {
@@ -2425,36 +2546,15 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
     // Based on IDA decompilation at 0x1005A5EE (lines 391-665)
     // This creates morph transition between two animations
 
-    // Check if both animations have morph normal info
-    CKBOOL hasMorphNormals = animIn->HasMorphNormalInfo() && animOut->HasMorphNormalInfo();
-
-    if (animOut->HasMorphInfo()) {
-        int outMorphVertexCount = animOut->GetMorphVertexCount();
-
-        // Allocate temporary buffer for morph data if needed
-        int bufferSize = outMorphVertexCount * sizeof(VxVector);
-        if (hasMorphNormals)
-            bufferSize += outMorphVertexCount * sizeof(VxCompressedVector);
-        CKMemoryPool memPool(m_Context, bufferSize);
-        VxVector *tempMorphBuffer = (VxVector *) memPool.Mem();
-        VxCompressedVector *tempNormalBuffer = hasMorphNormals
-                                                   ? (VxCompressedVector *) ((CKBYTE *) tempMorphBuffer +
-                                                       outMorphVertexCount * sizeof(VxVector))
-                                                   : nullptr;
-
-        // Check if AnimIn is this animation (special case for in-place transition)
-        CKBOOL inPlaceTransition = (animIn == this);
-        CKBOOL hasStartData = FALSE;
-
-        // Case 1: AnimIn == this and both have morph with matching vertex counts
-        if (inPlaceTransition && animIn->HasMorphInfo()) {
-            int inMorphVertexCount = animIn->GetMorphVertexCount();
-            if (outMorphVertexCount == inMorphVertexCount) {
-                // Evaluate morph from AnimIn into temp buffer
-                animIn->EvaluateMorphTarget(frameFrom, outMorphVertexCount,
-                                            tempMorphBuffer, sizeof(VxVector), tempNormalBuffer);
-                hasStartData = TRUE;
-            }
+    if (hasOutMorph) {
+        if (hasInMorph) {
+            // Native keeps the previous Morph channel when the two vertex
+            // sets cannot form a transition.
+            if (inMorphVertexCount != outMorphVertexCount)
+                return;
+        } else if (!m_Entity || !m_Entity->m_CurrentMesh ||
+                   m_Entity->m_CurrentMesh->GetModifierVertexCount() > outMorphVertexCount) {
+            return;
         }
 
         // Create or reuse morph controller
@@ -2477,6 +2577,10 @@ void RCKObjectAnimation::CreateTransition(float length, CKObjectAnimation *AnimI
             CKMorphKey *endKey = (CKMorphKey *) morphCtrl->GetKey(1);
 
             if (startKey && endKey) {
+                // Native reuse leaves old times behind. A new transition
+                // must reach its endpoints over the requested duration.
+                startKey->TimeStep = 0.0f;
+                endKey->TimeStep = length;
                 // Ensure normal buffers match expectations
                 if (hasMorphNormals) {
                     if (!startKey->NormArray)
