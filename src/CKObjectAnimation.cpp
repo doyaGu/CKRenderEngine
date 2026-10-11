@@ -285,22 +285,9 @@ CK_CLASSID RCKObjectAnimation::GetClassID() {
 //=============================================================================
 
 CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
-    // Call base class save first
-    CKStateChunk *baseChunk = CKObject::Save(file, flags);
-
-    // If no file and no flags set, just return base chunk
+    // Preserve the base-only save when animation data was not requested.
     if (!file && !(flags & CK_STATESAVE_OBJANIMALL))
-        return baseChunk;
-
-    // Create new chunk for ObjectAnimation data
-    CKStateChunk *chunk = CreateCKStateChunk(CKCID_OBJECTANIMATION, file);
-    chunk->StartWrite();
-    chunk->AddChunkAndDelete(baseChunk);
-
-    // Root position vector (stored in parent keyed animation when this is the root animation)
-    VxVector rootPos(0.0f);
-    if (m_ParentKeyedAnimation && m_ParentKeyedAnimation->GetRootAnimationInternal() == this)
-        rootPos = m_ParentKeyedAnimation->GetRootVectorInternal();
+        return CKObject::Save(file, flags);
 
     // Check if we should share animation data with another ObjectAnimation
     RCKObjectAnimation *sharedAnim = nullptr;
@@ -320,6 +307,54 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
             sharedAnim = static_cast<RCKObjectAnimation *>(owner);
         }
     }
+
+    CKAnimController *controllers[5] = {};
+    int controllerBytes[5] = {};
+    const int maxWords = INT_MAX / 4;
+    if (!sharedAnim && m_KeyframeData) {
+        controllers[0] = m_KeyframeData->m_PositionController;
+        controllers[1] = m_KeyframeData->m_RotationController;
+        controllers[2] = m_KeyframeData->m_ScaleController;
+        controllers[3] = m_KeyframeData->m_ScaleAxisController;
+        controllers[4] = m_KeyframeData->m_MorphController;
+
+        // Include the base identifier, merged header and terminator before
+        // allocating a chunk. Its byte size must also fit the signed API.
+        int totalWords = 18;
+        for (int i = 0; i < 5; ++i) {
+            if (!controllers[i])
+                continue;
+            const int bytes = controllers[i]->DumpKeysTo(nullptr);
+            if (bytes <= 0 || (bytes & 3))
+                return nullptr;
+            const int size = bytes / 4;
+            if (size > maxWords - totalWords - 2)
+                return nullptr;
+            totalWords += size + 2;
+            controllerBytes[i] = bytes;
+        }
+    }
+
+    CKStateChunk *baseChunk = CKObject::Save(file, flags);
+    if (!baseChunk)
+        return nullptr;
+    CKStateChunk *chunk = CreateCKStateChunk(CKCID_OBJECTANIMATION, file);
+    if (!chunk) {
+        DeleteCKStateChunk(baseChunk);
+        return nullptr;
+    }
+    chunk->StartWrite();
+    chunk->AddChunkAndDelete(baseChunk);
+    const int startWord = chunk->GetCurrentPos();
+    if (startWord < 0 || startWord > maxWords - 16) {
+        DeleteCKStateChunk(chunk);
+        return nullptr;
+    }
+
+    // Root position vector (stored in parent keyed animation when this is the root animation)
+    VxVector rootPos(0.0f);
+    if (m_ParentKeyedAnimation && m_ParentKeyedAnimation->GetRootAnimationInternal() == this)
+        rootPos = m_ParentKeyedAnimation->GetRootVectorInternal();
 
     if (sharedAnim) {
         // Write reference to shared animation data (identifier 0x2000000)
@@ -343,11 +378,6 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
             chunk->WriteObject(m_Anim2);
         }
     } else {
-        // Mark this as the owner of the keyframe data when saving
-        if (file && m_KeyframeData) {
-            m_KeyframeData->m_ObjectAnimation = this;
-        }
-
         // Write full keyframe data (identifier 0x4000000)
         chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
         chunk->WriteFloat(rootPos.x);
@@ -374,78 +404,28 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
             chunk->WriteObject(m_Anim2);
         }
 
-        // Write controller data (position, rotation, scale, scaleAxis, morph)
-        if (m_KeyframeData) {
-            // Position controller
-            if (m_KeyframeData->m_PositionController) {
-                CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
-                int size = ctrl->DumpKeysTo(nullptr) >> 2;
-                if (size > 0) {
-                    chunk->WriteDword(ctrl->m_Type);
-                    chunk->WriteDword(size);
-                    void *buffer = chunk->LockWriteBuffer(size);
-                    ctrl->DumpKeysTo(buffer);
-                    chunk->Skip(size);
-                }
+        // Preserve the native slot order and propagate every controller failure.
+        for (int i = 0; i < 5; ++i) {
+            CKAnimController *ctrl = controllers[i];
+            if (!ctrl)
+                continue;
+            const int bytes = controllerBytes[i];
+            const int size = bytes / 4;
+            const int currentWord = chunk->GetCurrentPos();
+            // Leave room for this record's two words and the final terminator.
+            if (currentWord < 0 || currentWord > maxWords - 3 ||
+                size > maxWords - currentWord - 3) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
             }
-
-            // Rotation controller
-            if (m_KeyframeData->m_RotationController) {
-                CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
-                int size = ctrl->DumpKeysTo(nullptr) >> 2;
-                if (size > 0) {
-                    chunk->WriteDword(ctrl->m_Type);
-                    chunk->WriteDword(size);
-                    void *buffer = chunk->LockWriteBuffer(size);
-                    ctrl->DumpKeysTo(buffer);
-                    chunk->Skip(size);
-                }
+            chunk->WriteDword(ctrl->m_Type);
+            chunk->WriteDword(size);
+            void *buffer = chunk->LockWriteBuffer(size);
+            if (!buffer || ctrl->DumpKeysTo(buffer) != bytes) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
             }
-
-            // Scale controller
-            if (m_KeyframeData->m_ScaleController) {
-                CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
-                int size = ctrl->DumpKeysTo(nullptr) >> 2;
-                if (size > 0) {
-                    chunk->WriteDword(ctrl->m_Type);
-                    chunk->WriteDword(size);
-                    void *buffer = chunk->LockWriteBuffer(size);
-                    ctrl->DumpKeysTo(buffer);
-                    chunk->Skip(size);
-                }
-            }
-
-            // Scale axis controller
-            if (m_KeyframeData->m_ScaleAxisController) {
-                CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
-                int size = ctrl->DumpKeysTo(nullptr) >> 2;
-                if (size > 0) {
-                    chunk->WriteDword(ctrl->m_Type);
-                    chunk->WriteDword(size);
-                    void *buffer = chunk->LockWriteBuffer(size);
-                    ctrl->DumpKeysTo(buffer);
-                    chunk->Skip(size);
-                }
-            }
-
-            // Morph controller
-            if (m_KeyframeData->m_MorphController) {
-                CKMorphController *ctrl = reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
-                const int bytes = ctrl->DumpKeysTo(nullptr);
-                if (bytes <= 0 || (bytes & 3)) {
-                    DeleteCKStateChunk(chunk);
-                    return nullptr;
-                }
-                const int size = bytes / 4;
-                chunk->WriteDword(ctrl->m_Type);
-                chunk->WriteDword(size);
-                void *buffer = chunk->LockWriteBuffer(size);
-                if (!buffer || ctrl->DumpKeysTo(buffer) != bytes) {
-                    DeleteCKStateChunk(chunk);
-                    return nullptr;
-                }
-                chunk->Skip(size);
-            }
+            chunk->Skip(size);
         }
 
         // Write terminator
@@ -453,6 +433,9 @@ CKStateChunk *RCKObjectAnimation::Save(CKFile *file, CKDWORD flags) {
     }
 
     chunk->CloseChunk();
+    // A failed full save must not change the owner used by shared animations.
+    if (!sharedAnim && file && m_KeyframeData)
+        m_KeyframeData->m_ObjectAnimation = this;
     return chunk;
 }
 
@@ -936,39 +919,42 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
 }
 
 int RCKObjectAnimation::GetMemoryOccupation() {
-    // Call base class first to get base size
-    int size = CKObject::GetMemoryOccupation();
+    const int baseSize = CKObject::GetMemoryOccupation();
+    const int fieldsSize = static_cast<int>(sizeof(RCKObjectAnimation) - sizeof(CKObject));
+    if (baseSize < 0 || baseSize > INT_MAX - fieldsSize)
+        return static_cast<int>(sizeof(RCKObjectAnimation));
+    int objectSize = baseSize + fieldsSize;
+    const int sceneBytes = m_Scenes.GetMemoryOccupation();
+    if (sceneBytes < 0 || sceneBytes > INT_MAX - objectSize)
+        return objectSize;
+    objectSize += sceneBytes;
 
-    // Add RCKObjectAnimation-specific fields
-    size += sizeof(RCKObjectAnimation) - sizeof(CKObject);
-
-    // If we own the keyframe data, add its size
+    // This estimate is also used by CKObject::Save to reserve its buffer.
+    // Invalid or unrepresentable controller storage must not produce a negative
+    // estimate or force a saturated allocation; retain the object-only estimate.
     if (m_KeyframeData && m_KeyframeData->m_ObjectAnimation == this) {
-        // Add sizes of all controllers using a helper function
-        // This matches the DLL's call to sub_1004B397(&this->m_KeyframeData->m_PositionController)
-        if (m_KeyframeData->m_PositionController) {
-            CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_PositionController);
-            size += ctrl->DumpKeysTo(nullptr);
+        const int dataBytes = static_cast<int>(sizeof(CKKeyframeData));
+        if (dataBytes > INT_MAX - objectSize)
+            return objectSize;
+        objectSize += dataBytes;
+        int size = objectSize;
+        CKAnimController *controllers[] = {
+            m_KeyframeData->m_PositionController, m_KeyframeData->m_RotationController,
+            m_KeyframeData->m_ScaleController, m_KeyframeData->m_ScaleAxisController,
+            m_KeyframeData->m_MorphController
+        };
+        for (int i = 0; i < 5; ++i) {
+            if (!controllers[i])
+                continue;
+            const int bytes = controllers[i]->DumpKeysTo(nullptr);
+            if (bytes <= 0 || (bytes & 3) || bytes > INT_MAX - size)
+                return objectSize;
+            size += bytes;
         }
-        if (m_KeyframeData->m_RotationController) {
-            CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_RotationController);
-            size += ctrl->DumpKeysTo(nullptr);
-        }
-        if (m_KeyframeData->m_ScaleController) {
-            CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleController);
-            size += ctrl->DumpKeysTo(nullptr);
-        }
-        if (m_KeyframeData->m_ScaleAxisController) {
-            CKAnimController *ctrl = reinterpret_cast<CKAnimController *>(m_KeyframeData->m_ScaleAxisController);
-            size += ctrl->DumpKeysTo(nullptr);
-        }
-        if (m_KeyframeData->m_MorphController) {
-            CKMorphController *ctrl = reinterpret_cast<CKMorphController *>(m_KeyframeData->m_MorphController);
-            size += ctrl->DumpKeysTo(nullptr);
-        }
+        return size;
     }
 
-    return size;
+    return objectSize;
 }
 
 CKERROR RCKObjectAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
