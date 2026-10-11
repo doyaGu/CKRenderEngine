@@ -6379,6 +6379,2276 @@ void ObjectTransitionVelocityHandlesShortDuration() {
     target.Set3dEntity(nullptr); in.Set3dEntity(nullptr); out.Set3dEntity(nullptr);
 }
 
+// Pass 25 runtime-grid functional regressions.
+template<bool Compressed>
+void RuntimeGridRecreationPreservesDimensionsAndFileCells() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    CKGridManager *manager = InitializeRuntimeGridContext(source);
+    CKGridManager *loadedManager = InitializeRuntimeGridContext(destination);
+    const int type = manager->RegisterType("RecreatedLayer");
+    loadedManager->RegisterType("UnrelatedDestinationLayer");
+    RCKGrid grid(&source, "RecreatedGrid");
+    grid.SetDimensions(2, 3, 4.0f, 12.0f);
+    CKLayer *oldLayer = grid.AddLayer(type);
+    Check(oldLayer != nullptr, "Initial runtime layer was not created");
+    const CK_ID oldID = oldLayer->GetID();
+    int oldValue = 91;
+    oldLayer->SetValue(1, 2, &oldValue);
+    Check(grid.RemoveAllLayers() == CK_OK && grid.GetLayerCount() == 0 && !source.GetObject(oldID),
+          "SDK dimension-change workflow did not remove previous layer objects");
+    grid.SetDimensions(3, 1, 9.0f, 5.0f);
+    grid.SetHeightValidity(7.0f);
+    grid.SetGridPriority(17);
+    grid.SetOrientationMode(CKGRID_YZ);
+    CKLayer *layer = grid.AddLayer(type);
+    Check(layer && layer->GetOwner() == grid.GetID(), "Recreated layer did not bind its grid");
+    layer->SetVisible(FALSE);
+    VxVector scale;
+    grid.GetScale(&scale, TRUE);
+    Check(std::fabs(scale.x - 3.0f) < 1e-4f && std::fabs(scale.y - 7.0f) < 1e-4f && std::fabs(scale.z - 5.0f) < 1e-4f,
+          "SetDimensions changed total-size scaling or height validity");
+    const CKDWORD values[] = {0x10203040u, 0x80000000u, 0xFFFFFFFFu};
+    for (int x = 0; x < 3; ++x) {
+        CKDWORD actual = 99;
+        Check(layer->GetValue2(x, 0, &actual) && actual == 0,
+              "Recreated layer kept the removed layer's cell data");
+        Check(layer->SetValue2(x, 0, const_cast<CKDWORD *>(&values[x])),
+              "Recreated layer rejected an in-range cell");
+    }
+    TemporarySerializationFile temporary;
+    source.SetFileWriteMode(Compressed ? CKFILE_WHOLECOMPRESSED : CKFILE_UNCOMPRESSED);
+    CKFile saved(&source), loaded(&destination);
+    Check(saved.StartSave(temporary.Path) == CK_OK, "Recreated Grid StartSave failed");
+    saved.SaveObject(&grid);
+    Check(saved.EndSave() == CK_OK, "Recreated Grid EndSave failed");
+    Check(loaded.Load(temporary.Path, nullptr) == CK_OK, "Recreated Grid file load failed");
+    RCKGrid *result = nullptr;
+    for (int i = 0; i < loaded.m_FileObjects.Size(); ++i)
+        if (loaded.m_FileObjects[i].ObjectCid == CKCID_GRID)
+            result = static_cast<RCKGrid *>(loaded.m_FileObjects[i].ObjPtr);
+    Check(result && result->GetWidth() == 3 && result->GetLength() == 1 && result->GetLayerCount() == 1,
+          "Recreated Grid dimensions/layer list changed in a complete file");
+    Check(result->GetGridPriority() == 17 && result->GetOrientationMode() == CKGRID_YZ &&
+          std::fabs(result->GetHeightValidity() - 7.0f) < 1e-4f,
+          "Recreated Grid priority/orientation/height changed in a complete file");
+    CKLayer *loadedLayer = result->GetLayerByName("RecreatedLayer");
+    Check(loadedLayer && loadedLayer->GetOwner() == result->GetID() &&
+          loadedLayer->GetType() == loadedManager->GetTypeFromName("RecreatedLayer") && !loadedLayer->IsVisible(),
+          "Recreated layer owner/type was not restored by the runtime manager");
+    for (int x = 0; x < 3; ++x) {
+        CKDWORD actual = 0;
+        Check(loadedLayer->GetValue2(x, 0, &actual) && actual == values[x],
+              "Recreated layer's four-byte cell values changed in a complete file");
+    }
+    result->GetScale(&scale, TRUE);
+    Check(std::fabs(scale.x - 3.0f) < 1e-4f && std::fabs(scale.y - 7.0f) < 1e-4f && std::fabs(scale.z - 5.0f) < 1e-4f,
+          "Recreated Grid world-size scaling changed in a complete file");
+}
+
+// Pass 25 layer-wire functional regressions.
+// Independent Layer identifier fixtures; native Save 0x1001A559 / Load 0x1001A742.
+class Pass25LayerWireRegistry : public LayerRegistry {
+public:
+    explicit Pass25LayerWireRegistry(CKContext *context) : LayerRegistry(context) {
+        m_Remap = wireRemap;
+        m_RemapCount = 1;
+        parameter = CKGUID(0x10203040, 0x50607080);
+        color.Set(0.25f, 0.5f, 0.75f, 1.0f);
+    }
+    int GetTypeFromName(CKSTRING name) override {
+        ++lookups;
+        incomingName = name ? name : "";
+        return foundType;
+    }
+    int RegisterType(CKSTRING name) override {
+        ++registrations;
+        registeredName = name ? name : "";
+        return 2;
+    }
+    int GetLayerTypeCount() override { return 5; }
+    int foundType = 3;
+    int lookups = 0;
+    int registrations = 0;
+    const char *incomingName = "";
+    const char *registeredName = "";
+    int wireRemap[5] = {};
+};
+
+class Pass25LayerWireProbe : public RCKLayer {
+public:
+    Pass25LayerWireProbe(CKContext *context, CKSTRING name, CK_ID owner = 0)
+        : RCKLayer(context, name, owner) {}
+    void SetRawFlags(CKDWORD flags) { m_Flags = flags; }
+    CKDWORD RawFlags() const { return m_Flags; }
+};
+
+void Pass25CheckLayerBuffer(CKStateChunk *chunk, const CKDWORD *values, int count) {
+    void *data = nullptr;
+    const int bytes = chunk->ReadBuffer(&data);
+    const bool matched = bytes == count * 4 && (count == 0 ||
+        (data && std::memcmp(data, values, static_cast<size_t>(count) * 4) == 0));
+    CKDeletePointer(data);
+    Check(matched, "Layer payload changed independent four-byte square words");
+}
+
+template<bool FileSave>
+void LayerWireSaveRequiresManagerBeforeSelectivePayload() {
+    CKContext context(nullptr, 0, 0);
+    RCKLayer layer(&context, "NoManager", 0);
+    CKFile file(&context);
+    const CKDWORD flags[] = {0, CK_STATESAVE_LAYERDATA};
+    for (int i = 0; i < 2; ++i) {
+        Chunk saved(layer.Save(FileSave ? &file : nullptr, flags[i]), &DeleteCKStateChunk);
+        Check(saved.get() == nullptr, "Native Layer Save without GridManager must return null");
+    }
+}
+
+template<int Format>
+void LayerWireMemorySaveUsesNativeSelectiveHeader() {
+    CKContext context(nullptr, 0, 0);
+    new Pass25LayerWireRegistry(&context);
+    RCKGrid grid(&context, "WireGrid");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    Pass25LayerWireProbe layer(&context, "WireLayer", grid.GetID());
+    layer.SetType(3);
+    layer.SetFormat(Format);
+    layer.SetRawFlags(0xA5);
+    const CKDWORD values[] = {0x7F800001u, 0x80000000u};
+    for (int i = 0; i < 2; ++i) layer.GetSquareArray()[i].dval = values[i];
+    const CKDWORD masks[] = {0, 1, 8, 16, 17, CK_STATESAVE_ALL};
+    for (int i = 0; i < 6; ++i) {
+        Chunk saved(layer.Save(nullptr, masks[i]), &DeleteCKStateChunk);
+        Check(saved != nullptr, "Layer selective memory Save failed with manager");
+        saved->StartRead();
+        const bool hasData = saved->SeekIdentifier(CK_STATESAVE_LAYERDATA) != FALSE;
+        Check(hasData == ((masks[i] & 16) != 0), "Layer Save changed native bit0x10 selection");
+        if (!hasData) continue;
+        Check(saved->SeekIdentifierAndReturnSize(CK_STATESAVE_LAYERDATA) == (Format == 0 ? 28 : 16),
+              "Layer memory identifier contains unexpected metadata or cell data");
+        Check(saved->ReadObjectID() == grid.GetID(), "Layer memory owner ID changed");
+        Check(saved->ReadInt() == 3, "Layer memory raw type index missing");
+        Check(saved->ReadInt() == Format, "Layer memory format changed");
+        Check(saved->ReadDword() == 0xA5, "Layer memory raw flags changed");
+        if (Format == 0) Pass25CheckLayerBuffer(saved.get(), values, 2);
+    }
+    if (Format == 0) {
+        layer.SetOwner(0);
+        Chunk detached(layer.Save(nullptr, CK_STATESAVE_LAYERDATA), &DeleteCKStateChunk);
+        detached->StartRead();
+        Check(detached->SeekIdentifierAndReturnSize(CK_STATESAVE_LAYERDATA) == 16,
+              "Detached Layer Save must omit cells even if it retains old square storage");
+        Check(detached->ReadObjectID() == 0, "Detached Layer Save retained an owner reference");
+    }
+}
+
+template<int Format>
+void LayerWireFileSaveOmitsTypeAndWritesVersion3Metadata() {
+    CKContext context(nullptr, 0, 0);
+    Pass25LayerWireRegistry *registry = new Pass25LayerWireRegistry(&context);
+    RCKGrid grid(&context, "FileGrid");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    Pass25LayerWireProbe layer(&context, "FileLayer", grid.GetID());
+    layer.SetType(3);
+    layer.SetFormat(Format);
+    layer.SetRawFlags(0xA4);
+    const CKDWORD values[] = {0x12345678u, 0xFEDCBA98u};
+    for (int i = 0; i < 2; ++i) layer.GetSquareArray()[i].dval = values[i];
+    CKFile file(&context);
+    file.m_FileObjects.Resize(1);
+    file.m_FileObjects[0].Object = file.m_FileObjects[0].CreatedObject = grid.GetID();
+    file.m_FileObjects[0].ObjPtr = &grid;
+    file.m_ObjectsHashTable.Insert(grid.GetID(), 0);
+    const CKDWORD masks[] = {0, 1, 16};
+    for (int i = 0; i < 3; ++i) {
+        Chunk saved(layer.Save(&file, masks[i]), &DeleteCKStateChunk);
+        Check(saved != nullptr, "Layer file Save failed with manager");
+        saved->StartRead();
+        Check(saved->SeekIdentifier(CK_STATESAVE_LAYERDATA), "File Save must include Layer regardless of mask");
+        Check(saved->SeekIdentifierAndReturnSize(CK_STATESAVE_LAYERDATA) == (Format == 0 ? 40 : 28),
+              "File Layer identifier contains memory-only type or unexpected cell payload");
+        Check(saved->ReadObjectID() == grid.GetID(), "Layer file owner did not use object remapping");
+        Check(saved->ReadInt() == Format, "File Layer must omit the memory-only type word");
+        Check(saved->ReadInt() == 3, "Layer file metadata version must be3");
+        Check(saved->ReadDword() == registry->color.GetRGBA(), "Layer file color word changed");
+        Check(saved->ReadGuid() == registry->parameter, "Layer file parameter GUID changed");
+        Check(saved->ReadDword() == 0xA4, "Layer file raw flags changed");
+        if (Format == 0) Pass25CheckLayerBuffer(saved.get(), values, 2);
+        Check(registry->wireRemap[3] == 1 && registry->m_RemapCount == 2,
+              "Layer file remap must register a type only once");
+    }
+}
+
+template<int Version>
+void LayerWireLoadVersionedMetadataUsesNativeFieldOrder() {
+    CKContext context(nullptr, 0, 0);
+    Pass25LayerWireRegistry *registry = new Pass25LayerWireRegistry(&context);
+    RCKGrid grid(&context, "LoadedOwner");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    Pass25LayerWireProbe layer(&context, "IncomingLayer", grid.GetID());
+    layer.SetRawFlags(0xA6);
+    const CKGUID oldParam = registry->parameter;
+    const CKDWORD oldColor = registry->color.GetRGBA();
+    const CKGUID incomingParam(0x31415926, 0x27182818);
+    const CKDWORD incomingColor = 0xD17F3F1Fu;
+    const CKDWORD values[] = {0x80000000u, 0xFFFFFFFFu};
+    Chunk chunk = NewChunk(CKCID_LAYER);
+    chunk->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    chunk->WriteObject(&grid);
+    chunk->WriteInt(0);
+    chunk->WriteInt(Version);
+    if (Version >= 1) chunk->WriteDword(incomingColor);
+    if (Version >= 3) chunk->WriteGuid(incomingParam);
+    if (Version >= 2) chunk->WriteDword(0xB4);
+    chunk->WriteBuffer_LEndian(sizeof(values), const_cast<CKDWORD *>(values));
+    chunk->CloseChunk();
+    CKFile file(&context);
+    Check(layer.Load(chunk.get(), &file) == CK_OK, "Independent legacy Layer fixture failed");
+    Check(layer.GetOwner() == grid.GetID() && layer.GetFormat() == 0 && layer.GetType() == 3,
+          "Legacy Layer owner/type/format field order changed");
+    Check(std::strcmp(registry->incomingName, "IncomingLayer") == 0 && registry->lookups == 1 &&
+          registry->registrations == 0, "Legacy Layer type must be resolved from loaded object's name");
+    Check(layer.RawFlags() == (Version == 0 ? 0xA6u : Version == 1 ? 1u : 0xB4u),
+          "Legacy Layer version-specific flags changed");
+    Check(registry->color.GetRGBA() == (Version == 0 ? oldColor : incomingColor),
+          "Legacy Layer version-specific color changed");
+    const CKGUID expectedParam = Version < 2 ? oldParam : Version == 2 ?
+        CKGUID(0x5A5716FD, 0x44E276D7) : incomingParam;
+    Check(registry->parameter == expectedParam, "Legacy Layer version-specific GUID changed");
+    for (int i = 0; i < 2; ++i)
+        Check(layer.GetSquareArray()[i].dval == values[i], "Legacy Layer lost raw cell values");
+}
+
+template<bool ExistingType>
+void LayerWireMemoryLoadIgnoresRawTypeAndRegistersName() {
+    CKContext context(nullptr, 0, 0);
+    Pass25LayerWireRegistry *registry = new Pass25LayerWireRegistry(&context);
+    registry->foundType = ExistingType ? 3 : 0;
+    Pass25LayerWireProbe layer(&context, "IncomingMemoryLayer");
+    Chunk chunk = NewChunk(CKCID_LAYER);
+    chunk->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    chunk->WriteObject(nullptr);
+    chunk->WriteInt(0x1234);
+    chunk->WriteInt(1);
+    chunk->WriteDword(0x80000005u);
+    LoadChunk(layer, chunk.get());
+    Check(layer.GetType() == (ExistingType ? 3 : 2) && layer.GetOwner() == 0 && layer.GetFormat() == 1,
+          "Memory Layer raw type must be discarded in favor of registry name mapping");
+    Check(layer.RawFlags() == 0x80000005u, "Memory Layer raw flags must retain all bits");
+    Check(registry->lookups == 1 && registry->registrations == (ExistingType ? 0 : 1),
+          "Memory Layer name registration must happen only when lookup returns0");
+    Check(std::strcmp(registry->incomingName, "IncomingMemoryLayer") == 0,
+          "Memory Layer did not resolve its object name");
+    if (!ExistingType) Check(std::strcmp(registry->registeredName, "IncomingMemoryLayer") == 0,
+                             "Layer registered a different name");
+}
+
+void LayerWireNoIdentifierPreservesDerivedState() {
+    CKContext context(nullptr, 0, 0);
+    Pass25LayerWireRegistry *registry = new Pass25LayerWireRegistry(&context);
+    RCKGrid grid(&context, "RetainedOwner");
+    grid.SetDimensions(1, 1, 1.0f, 1.0f);
+    Pass25LayerWireProbe layer(&context, "RetainedLayer", grid.GetID());
+    layer.SetType(4); layer.SetFormat(0); layer.SetRawFlags(0xF4);
+    layer.GetSquareArray()[0].dval = 0x12345678u;
+    CKSquare *original = layer.GetSquareArray();
+    Chunk chunk = NewChunk(CKCID_LAYER);
+    chunk->WriteIdentifier(0x40000000u);
+    chunk->WriteInt(123);
+    LoadChunk(layer, chunk.get());
+    Check(layer.GetOwner() == grid.GetID() && layer.GetType() == 4 && layer.GetFormat() == 0 &&
+          layer.RawFlags() == 0xF4 && layer.GetSquareArray() == original && original[0].dval == 0x12345678u,
+          "Absent Layer identifier must preserve all derived Layer state");
+    Check(registry->lookups == 0, "Absent Layer identifier must not consult registry");
+}
+
+void LayerWireLoadManagerRequirementDependsOnIdentifier() {
+    CKContext context(nullptr, 0, 0);
+    RCKLayer layer(&context, "NoLoadManager", 0);
+    Check(layer.Load(nullptr, nullptr) == CKERR_INVALIDPARAMETER, "Null Layer chunk error changed");
+    Chunk empty = NewChunk(CKCID_LAYER);
+    empty->CloseChunk();
+    Check(layer.Load(empty.get(), nullptr) == CK_OK, "Absent Layer identifier should not require manager");
+    Chunk payload = NewChunk(CKCID_LAYER);
+    payload->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    payload->WriteObject(nullptr); payload->WriteInt(1); payload->WriteInt(1); payload->WriteInt(1);
+    payload->CloseChunk();
+    Check(layer.Load(payload.get(), nullptr) == CKERR_NOTINITIALIZED,
+          "Present Layer identifier without manager must report not initialized");
+}
+
+void LayerWireNonzeroFormatReloadDropsPreviousCells() {
+    CKContext context(nullptr, 0, 0);
+    new Pass25LayerWireRegistry(&context);
+    RCKGrid first(&context, "FirstOwner"), second(&context, "SecondOwner");
+    first.SetDimensions(2, 1, 2.0f, 1.0f);
+    second.SetDimensions(1, 1, 1.0f, 1.0f);
+    Pass25LayerWireProbe layer(&context, "FormatReload", first.GetID());
+    layer.GetSquareArray()[0].dval = 77;
+    Chunk payload = NewChunk(CKCID_LAYER);
+    payload->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    payload->WriteObject(&second); payload->WriteInt(99); payload->WriteInt(7); payload->WriteDword(0x82);
+    LoadChunk(layer, payload.get());
+    Check(layer.GetOwner() == second.GetID() && layer.GetFormat() == 7 && layer.RawFlags() == 0x82 &&
+          layer.GetSquareArray() == nullptr, "Nonzero format reload must clear prior cells and replace owner/flags");
+}
+
+// Pass 25 layer functional regressions.
+class LayerDependencyOwnerProbe : public RCKGrid {
+public:
+    explicit LayerDependencyOwnerProbe(CKContext *context) : RCKGrid(context, "LayerOwnerProbe"), Calls(0) {}
+    CKERROR PrepareDependencies(CKDependenciesContext &) override { ++Calls; return CK_OK; }
+    int Calls;
+};
+
+void LayerNativeDependencyDescriptions() {
+    Check(std::strcmp(RCKLayer::GetClassName(), "Grid Layer") == 0, "Layer class display name differs from native Grid Layer");
+    for (int mode = 0; mode <= 5; ++mode) {
+        const bool copy = mode == CK_DEPENDENCIES_COPY;
+        Check(RCKLayer::GetDependenciesCount(mode) == (copy ? 1 : 0), "Layer copy-data dependency count differs from native");
+        const CKSTRING description = RCKLayer::GetDependencies(0, mode);
+        Check(copy ? description && std::strcmp(description, "Layer Data") == 0 : !description,
+              "Layer copy-data dependency description differs from native");
+        Check(!RCKLayer::GetDependencies(1, mode), "Layer exposed an unsupported dependency index");
+    }
+}
+
+void LayerCellsUseFourByteValuesAndNativeCoordinates() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerValueGrid");
+    grid.SetDimensions(3, 2, 3.0f, 2.0f); RCKLayer layer(&context, "LayerValue", grid.GetID());
+    Check(layer.GetClassID() == CKCID_LAYER && layer.GetType() == 1 && layer.GetFormat() == 0 && layer.IsVisible(),
+          "Layer constructor metadata changed");
+    CKSquare *squares = layer.GetSquareArray(); Check(squares != nullptr, "Layer constructor omitted cells");
+    std::memset(squares, 0xA7, 6 * sizeof(CKSquare));
+    const CKDWORD values[] = {0xF1234567u, 0x7F812345u, 0x80000000u};
+    layer.SetValue(2, 1, const_cast<CKDWORD *>(&values[0]));
+    Check(squares[5].dval == values[0] && squares[4].dval == 0xA7A7A7A7u, "Layer cell coordinate/host stride changed");
+    for (size_t byte = sizeof(CKDWORD); byte < sizeof(CKSquare); ++byte)
+        Check(reinterpret_cast<unsigned char *>(&squares[5])[byte] == 0xA7, "Layer value setter overwrote bytes beyond the SDK four-byte value");
+    CKDWORD output[2] = {0, 0x12345678u}; layer.GetValue(2, 1, &output[0]);
+    Check(output[0] == values[0] && output[1] == 0x12345678u, "Layer value getter overwrote its four-byte output");
+    Check(layer.SetValue2(0, 0, const_cast<CKDWORD *>(&values[1])) && layer.GetValue2(0, 0, &output[0]) && output[0] == values[1],
+          "Layer checked cell access changed value bits");
+    Check(!layer.SetValue2(-1, 0, const_cast<CKDWORD *>(&values[2])) && !layer.SetValue2(0, 2, const_cast<CKDWORD *>(&values[2])),
+          "Layer checked setter accepted coordinates outside the grid");
+    output[0] = 99; Check(!layer.GetValue2(3, 0, &output[0]) && output[0] == 0 && output[1] == 0x12345678u,
+          "Layer invalid checked getter did not return a four-byte zero");
+    layer.SetType(-7); layer.SetFormat(19); layer.SetVisible(FALSE);
+    Check(layer.GetType() == -7 && layer.GetFormat() == 19 && !layer.IsVisible(), "Layer metadata setters changed unrelated metadata");
+    layer.SetVisible(TRUE); Check(layer.IsVisible(), "Layer visibility setter did not restore visible state");
+    Check(layer.GetMemoryOccupation() == layer.CKObject::GetMemoryOccupation() + sizeof(RCKLayer) - sizeof(CKObject),
+          "Layer memory estimate did not use the host runtime object overhead");
+}
+
+void LayerSquareArrayTransfersCurrentPointerAndKeepsReplacementContract() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerArrayGrid");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f); RCKLayer layer(&context, "LayerArray", grid.GetID());
+    CKSquare *previous = layer.GetSquareArray(); CKSquare *replacement = new CKSquare[4]();
+    replacement[3].ival = 91; layer.SetSquareArray(replacement);
+    // Native SetSquareArray does not release the prior pointer. The caller
+    // retrieves and releases it; the current replacement belongs to the layer.
+    delete[] previous;
+    layer.FitSquareArray(); int value = 0; layer.GetValue(1, 1, &value);
+    Check(layer.GetSquareArray() == replacement && value == 91, "Layer reallocated or lost a caller-supplied current array");
+    layer.SetSquareArray(replacement); Check(layer.GetSquareArray() == replacement, "Layer same-pointer assignment changed its current array");
+}
+
+void LayerOwnerAssignmentAndInitializationKeepDistinctSemantics() {
+    CKContext context(nullptr, 0, 0); RCKGrid first(&context, "LayerOwnerA"), second(&context, "LayerOwnerB");
+    first.SetDimensions(2, 2, 2.0f, 2.0f); second.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer layer(&context, "LayerOwner", first.GetID()); CKSquare *cells = layer.GetSquareArray();
+    int value = 57; layer.SetValue(1, 1, &value); layer.SetOwner(second.GetID());
+    int output = 0; layer.GetValue(1, 1, &output);
+    Check(layer.GetOwner() == second.GetID() && layer.GetSquareArray() == cells && output == value,
+          "Layer SetOwner replaced cell ownership or contents");
+    layer.InitOwner(first.GetID());
+    Check(layer.GetOwner() == first.GetID() && layer.GetSquareArray(), "Layer InitOwner did not create its new owner's cells");
+    for (int i = 0; i < 4; ++i) Check(layer.GetSquareArray()[i].dval == 0, "New Layer cells did not retain the implementation's zero defaults");
+    layer.InitOwner(0); Check(layer.GetOwner() == 0 && !layer.GetSquareArray(), "Layer InitOwner(null) did not clear its owned cells");
+}
+
+void LayerPreparesItselfWithoutAddingItsOwnerDependency() {
+    CKContext context(nullptr, 0, 0); LayerDependencyOwnerProbe grid(&context);
+    RCKLayer layer(&context, "LayerDependency", grid.GetID()); CKDependenciesContext dependencies(&context);
+    dependencies.SetOperationMode(CK_DEPENDENCIES_DELETE);
+    Check(layer.PrepareDependencies(dependencies) == CK_OK && grid.Calls == 0 &&
+          dependencies.IsDependenciesHere(layer.GetID()) && !dependencies.IsDependenciesHere(grid.GetID()),
+          "Preparing a Layer added its owner as a deletion dependency");
+}
+
+void LayerPreDeletionClearsOnlyAnOwnerMarkedForDeletion() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerDeleteOwner");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f); RCKLayer layer(&context, "LayerDelete", grid.GetID());
+    CKSquare *cells = layer.GetSquareArray(); cells[0].ival = 44;
+    layer.CheckPreDeletion(); Check(layer.GetOwner() == grid.GetID(), "Layer pre-deletion cleared a live owner");
+    grid.ModifyObjectFlags(CK_OBJECT_TOBEDELETED, 0); layer.CheckPreDeletion();
+    Check(!layer.GetOwner() && layer.GetSquareArray() == cells && cells[0].ival == 44,
+          "Layer pre-deletion did not detach its deleted owner while retaining cells");
+    grid.ModifyObjectFlags(0, CK_OBJECT_TOBEDELETED);
+}
+
+void LayerDependencyRemappingChangesOnlyTheOwnerReference() {
+    CKContext context(nullptr, 0, 0); RCKGrid first(&context, "LayerRemapA"), second(&context, "LayerRemapB");
+    first.SetDimensions(2, 2, 2.0f, 2.0f); second.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer layer(&context, "LayerRemap", first.GetID()); CKSquare *cells = layer.GetSquareArray(); cells[3].ival = 38;
+    ObjectLifecycleDependencies dependencies(&context); dependencies.Map(first, second);
+    Check(layer.RemapDependencies(dependencies) == CK_OK && layer.GetOwner() == second.GetID() &&
+          layer.GetSquareArray() == cells && cells[3].ival == 38,
+          "Layer RemapDependencies changed cell ownership/data instead of only remapping its owner");
+}
+
+void LayerConstructorAllocationFailureLeavesUsableMetadata() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerCtorFailureGrid");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f); s_MorphArrayAllocationFailure = 0;
+    RCKLayer layer(&context, "LayerCtorFailure", grid.GetID());
+    const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+    Check(injected && layer.GetOwner() == grid.GetID() && !layer.GetSquareArray() && layer.GetType() == 1 && layer.IsVisible(),
+          "Layer constructor did not retain valid metadata after cell allocation failure");
+}
+
+void LayerInitOwnerAllocationFailureKeepsExistingOwnerAndCells() {
+    CKContext context(nullptr, 0, 0); RCKGrid first(&context, "LayerInitA"), second(&context, "LayerInitB");
+    first.SetDimensions(2, 2, 2.0f, 2.0f); second.SetDimensions(3, 2, 3.0f, 2.0f);
+    RCKLayer layer(&context, "LayerInitFailure", first.GetID()); CKSquare *cells = layer.GetSquareArray(); cells[3].ival = 72;
+    s_MorphArrayAllocationFailure = 0; layer.InitOwner(second.GetID());
+    const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+    Check(injected && layer.GetOwner() == first.GetID() && layer.GetSquareArray() == cells && cells[3].ival == 72,
+          "Layer InitOwner allocation failure changed the existing owner or cells");
+}
+
+template<bool CopyData>
+void LayerCopyPreservesNativeCellDependencyChoice() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerCopyGrid");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f); RCKLayer source(&context, "LayerCopySource", grid.GetID()), target(&context, "LayerCopyTarget", 0);
+    source.SetType(9); source.SetFormat(11); source.SetVisible(FALSE);
+    for (int i = 0; i < 4; ++i) source.GetSquareArray()[i].ival = 10 + i;
+    CKDependencies options; options.m_Flags = CopyData ? CK_DEPENDENCIES_FULL : CK_DEPENDENCIES_NONE;
+    CKDependenciesContext dependencies(&context); dependencies.StartDependencies(&options);
+    Check(target.Copy(source, dependencies) == CK_OK, "Layer Copy failed for a valid owner/cell array");
+    dependencies.StopDependencies();
+    Check(target.GetOwner() == grid.GetID() && target.GetType() == 9 && target.GetFormat() == 11 && !target.IsVisible() &&
+          target.GetSquareArray() && target.GetSquareArray() != source.GetSquareArray(), "Layer Copy lost metadata or shared source cell ownership");
+    for (int i = 0; i < 4; ++i) Check(target.GetSquareArray()[i].ival == (CopyData ? 10 + i : 0), "Layer Copy ignored its cell data dependency option");
+}
+
+void LayerCopyToSelfKeepsOwnedCells() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerSelfGrid");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f); RCKLayer layer(&context, "LayerSelf", grid.GetID());
+    CKSquare *cells = layer.GetSquareArray(); cells[3].ival = 61; CKDependenciesContext dependencies(&context);
+    Check(layer.Copy(layer, dependencies) == CK_OK && layer.GetSquareArray() == cells && cells[3].ival == 61,
+          "Layer self Copy discarded the owned cell array or its contents");
+}
+
+void LayerCopyAllocationFailureKeepsExistingLayerState() {
+    CKContext context(nullptr, 0, 0); RCKGrid first(&context, "LayerCopyA"), second(&context, "LayerCopyB");
+    first.SetDimensions(2, 2, 2.0f, 2.0f); second.SetDimensions(3, 2, 3.0f, 2.0f);
+    RCKLayer target(&context, "LayerCopyFailure", first.GetID()), source(&context, "LayerCopyNew", second.GetID());
+    target.SetType(5); target.SetVisible(FALSE); source.SetType(12);
+    CKSquare *cells = target.GetSquareArray(); cells[3].ival = 82;
+    CKDependenciesContext dependencies(&context); s_MorphArrayAllocationFailure = 0;
+    const CKERROR result = target.Copy(source, dependencies);
+    const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+    Check(injected && result == CKERR_OUTOFMEMORY && target.GetOwner() == first.GetID() && target.GetType() == 5 &&
+          !target.IsVisible() && target.GetSquareArray() == cells && cells[3].ival == 82,
+          "Layer Copy allocation failure changed metadata/cells or was not reported");
+}
+
+void LayerFactoryAllocationFailureReturnsNull() {
+    CKContext context(nullptr, 0, 0); s_ObjectAnimationAllocationFailure = true;
+    CKLayer *layer = RCKLayer::CreateInstance(&context);
+    const bool injected = !s_ObjectAnimationAllocationFailure; s_ObjectAnimationAllocationFailure = false;
+    delete layer; Check(injected && !layer, "Layer instance factory did not propagate object allocation failure");
+}
+
+// Pass 25 grid functional regressions.
+bool GridPoseNear(const VxVector &a, const VxVector &b) {
+    return std::fabs(a.x - b.x) < 0.0001f && std::fabs(a.y - b.y) < 0.0001f && std::fabs(a.z - b.z) < 0.0001f;
+}
+
+void GridDimensionsCoordinateAndStateContract() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "GeometryGrid");
+    Check(grid.GetClassID() == CKCID_GRID && std::strcmp(RCKGrid::GetClassName(), "Grid") == 0,
+          "Grid class metadata changed");
+    Check(grid.GetWidth() == 0 && grid.GetLength() == 0 && grid.GetGridPriority() == 0 &&
+          grid.GetOrientationMode() == CKGRID_FREE && std::fabs(grid.GetHeightValidity() - 10.0f) < 0.0001f,
+          "Grid constructor defaults changed");
+    grid.SetDimensions(6, 4, 12.0f, 20.0f);
+    grid.SetHeightValidity(8.0f);
+    VxVector scale;
+    grid.GetScale(&scale, TRUE);
+    Check(GridPoseNear(scale, VxVector(2.0f, 8.0f, 5.0f)) && grid.GetWidth() == 6 && grid.GetLength() == 4,
+          "Grid dimensions no longer represent total world size");
+    VxVector translation(3.0f, 4.0f, 5.0f);
+    grid.SetPosition(&translation);
+    VxVector center;
+    grid.Get3dPosFrom2dCoords(&center, 2, 1);
+    Check(GridPoseNear(center, VxVector(8.0f, 4.0f, 12.5f)), "Grid cell center transform changed");
+    center.y += 4.0f;
+    int x = -1, y = -1;
+    Check(std::fabs(grid.Get2dCoordsFrom3dPos(&center, &x, &y) - 0.5f) < 0.0001f && x == 2 && y == 1,
+          "Grid inverse coordinate or normalized height changed");
+    VxVector local(-0.75f, 0.25f, -1.75f), world;
+    grid.Transform(&world, &local);
+    Check(std::fabs(grid.Get2dCoordsFrom3dPos(&world, &x, &y) - 0.25f) < 0.0001f && x == 0 && y == -1,
+          "Grid coordinate conversion changed truncation towards zero");
+    grid.UpdateBox(TRUE);
+    Check(GridPoseNear(grid.m_LocalBoundingBox.Min, VxVector(0.0f)) &&
+          GridPoseNear(grid.m_LocalBoundingBox.Max, VxVector(6.0f, 1.0f, 4.0f)) &&
+          GridPoseNear(grid.m_WorldBoundingBox.Min, translation) &&
+          GridPoseNear(grid.m_WorldBoundingBox.Max, VxVector(15.0f, 12.0f, 25.0f)),
+          "Grid bounds do not follow dimensions and entity pose");
+    grid.SetGridPriority(13);
+    grid.SetOrientationMode(CKGRID_YZ);
+    Check(grid.GetGridPriority() == 13 && grid.GetOrientationMode() == CKGRID_YZ,
+          "Grid priority/orientation setters lost state");
+    grid.SetDimensions(0, 4, 0.0f, 16.0f);
+    grid.GetScale(&scale, TRUE);
+    Check(GridPoseNear(scale, VxVector(2.0f, 8.0f, 4.0f)),
+          "An empty grid axis corrupted the remaining entity scale");
+}
+
+void GridCopyDependencyMetadataContract() {
+    Check(RCKGrid::GetDependenciesCount(CK_DEPENDENCIES_COPY) == 1 &&
+          RCKGrid::GetDependenciesCount(CK_DEPENDENCIES_DELETE) == 0 &&
+          RCKGrid::GetDependenciesCount(CK_DEPENDENCIES_BUILD) == 0,
+          "Grid dependency metadata omitted its copy Layers option");
+    Check(RCKGrid::GetDependencies(0, CK_DEPENDENCIES_COPY) &&
+          std::strcmp(RCKGrid::GetDependencies(0, CK_DEPENDENCIES_COPY), "Layers") == 0 &&
+          RCKGrid::GetDependencies(1, CK_DEPENDENCIES_COPY) == nullptr &&
+          RCKGrid::GetDependencies(0, CK_DEPENDENCIES_DELETE) == nullptr,
+          "Grid dependency option name/mode changed");
+}
+
+void GridLayerRemovalDestroysEveryObject() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "RemovalGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create registered grid");
+    const CK_ID gridID = grid->GetID();
+    PopulateGrid(*grid, *registry);
+    CK_ID layers[3];
+    for (int i = 0; i < 3; ++i) layers[i] = grid->GetLayerByIndex(i)->GetID();
+    Check(grid->RemoveAllLayers() == CK_OK && context.GetObject(gridID) == grid && grid->GetLayerCount() == 0,
+          "Removing layers deleted the owner grid or retained links");
+    for (int i = 0; i < 3; ++i)
+        Check(context.GetObject(layers[i]) == nullptr, "RemoveAllLayers skipped an object after deletion notification");
+    const int type = registry->GetTypeFromName(const_cast<char *>("Intensity"));
+    CKLayer *layer = grid->AddLayerByName(const_cast<char *>("Intensity"));
+    Check(layer && grid->GetLayer(type) == layer && grid->GetLayerByName(const_cast<char *>("Intensity")) == layer &&
+          grid->GetLayerByIndex(0) == layer && grid->GetLayerByIndex(-1) == nullptr &&
+          grid->AddLayer(type) == nullptr && grid->AddLayer(type, 1) == nullptr,
+          "Grid layer lookup/duplicate/format contract changed");
+    const CK_ID layerID = layer->GetID();
+    Check(grid->RemoveLayer(type) == CK_OK && context.GetObject(gridID) == grid &&
+          context.GetObject(layerID) == nullptr && grid->GetLayerCount() == 0,
+          "RemoveLayer failed to detach and destroy the layer");
+    Check(grid->RemoveLayerByName(const_cast<char *>("Intensity")) == CK_OK,
+          "Recognized layer-name removal lost its original idempotent result");
+    Check(grid->RemoveLayerByName(const_cast<char *>("Unregistered")) != CK_OK,
+          "Unregistered layer-name removal unexpectedly succeeded");
+}
+
+void GridLegalResizeRebuildsDisplayGeometry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "ResizeGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create resize grid");
+    grid->SetDimensions(2, 2, 2.0f, 2.0f);
+    const int type = registry->RegisterType(const_cast<char *>("ResizeIntensity"));
+    VxColor white(1.0f, 1.0f, 1.0f);
+    registry->SetAssociatedColor(type, &white);
+    CKLayer *layer = grid->AddLayer(type);
+    Check(layer != nullptr, "Cannot create first resize layer");
+    layer->GetSquareArray()[0].ival = 10;
+    grid->ConstructMeshTexture(0.5f);
+    Check(grid->GetCurrentMesh() != nullptr, "Cannot construct initial display mesh");
+    const CK_ID oldMesh = grid->GetCurrentMesh()->GetID();
+    grid->RemoveAllLayers();
+    grid->SetDimensions(9, 1, 18.0f, 5.0f);
+    layer = grid->AddLayer(type);
+    Check(layer != nullptr, "Cannot recreate layer after supported resize workflow");
+    layer->GetSquareArray()[8].ival = 31;
+    grid->ConstructMeshTexture(0.5f);
+    CKMesh *mesh = grid->GetCurrentMesh();
+    VxVector vertex;
+    mesh->GetVertexPosition(2, &vertex);
+    Check(Equal(vertex, VxVector(9.0f, 1.0f, 1.0f)), "Grid resize reused stale display geometry");
+    float u = 0.0f, v = 0.0f;
+    mesh->GetVertexTextureCoordinates(2, &u, &v, -1);
+    CKTexture *texture = mesh->GetFaceMaterial(0)->GetTexture();
+    Check(u == 0.5625f && v == 0.125f && texture && texture->GetWidth() == 32 && texture->GetHeight() == 16,
+          "Grid resize reused stale display UV or texture dimensions");
+    const CKDWORD *pixels = reinterpret_cast<const CKDWORD *>(texture->LockSurfacePtr());
+    Check(pixels != nullptr, "Cannot inspect resized grid texture");
+    const bool cell = pixels[16] == 0xFF1F1F1Fu && pixels[17] == 0xFF1F1F1Fu &&
+                      pixels[48] == 0xFF1F1F1Fu && pixels[49] == 0xFF1F1F1Fu;
+    texture->ReleaseSurfacePtr();
+    Check(cell && context.GetObject(oldMesh) == nullptr, "Grid resize retained old display resources or cell pixels");
+    grid->Show(CKHIDE);
+    Check(!grid->IsVisible() && grid->GetCurrentMesh() == nullptr, "Grid hide retained display geometry");
+    grid->Show(CKSHOW);
+    Check(grid->IsVisible() && grid->GetCurrentMesh() != nullptr, "Grid show failed to restore display geometry");
+    grid->GetCurrentMesh()->GetVertexPosition(2, &vertex);
+    Check(Equal(vertex, VxVector(9.0f, 1.0f, 1.0f)), "Grid show restored outdated dimensions");
+}
+
+void GridCopyRemapsLayersAndOwnsDisplayResources() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *source = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "CopyGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(source != nullptr, "Cannot create copy source grid");
+    PopulateGrid(*source, *registry);
+    source->SetGridPriority(7); source->SetOrientationMode(CKGRID_XY);
+    source->ConstructMeshTexture(0.5f);
+    CKMesh *sourceMesh = source->GetCurrentMesh();
+    auto *copy = static_cast<RCKGrid *>(context.CopyObject(source));
+    Check(copy && copy != source && copy->GetClassID() == CKCID_GRID && copy->GetLayerCount() == 3 &&
+          copy->GetWidth() == 2 && copy->GetLength() == 2 && copy->GetGridPriority() == 7 &&
+          copy->GetOrientationMode() == CKGRID_XY, "Grid copy lost fields or default layer dependencies");
+    Check(source->GetCurrentMesh() == sourceMesh && copy->GetCurrentMesh() && copy->GetCurrentMesh() != sourceMesh,
+          "Grid copy shared private display geometry or changed source mesh");
+    for (int i = 0; i < 3; ++i) {
+        CKLayer *from = source->GetLayerByIndex(i), *to = copy->GetLayerByIndex(i);
+        Check(from && to && from != to && to->GetOwner() == copy->GetID() &&
+              from->GetOwner() == source->GetID() && to->GetType() == from->GetType() &&
+              to->IsVisible() == from->IsVisible(), "Copied layer owner/type/visibility was not remapped");
+        for (int cell = 0; cell < 4; ++cell)
+            Check(to->GetSquareArray()[cell].ival == from->GetSquareArray()[cell].ival, "Grid copy lost cell payload");
+        Check(copy->IsObjectUsed(to, CKCID_LAYER), "Grid does not report its copied layer dependency");
+    }
+    CheckGridDisplay(*copy);
+    CKDependencies noDependencies;
+    noDependencies.m_Flags = CK_DEPENDENCIES_NONE;
+    auto *without = static_cast<RCKGrid *>(context.CopyObject(source, &noDependencies));
+    Check(without && without->GetLayerCount() == 0 && without->GetWidth() == 2 && without->GetLength() == 2 &&
+          source->GetLayerCount() == 3 && source->GetCurrentMesh() == sourceMesh,
+          "Grid no-dependency copy retained layer links or damaged source");
+    CK_ID copiedLayerIDs[3];
+    for (int i = 0; i < 3; ++i) copiedLayerIDs[i] = copy->GetLayerByIndex(i)->GetID();
+    const CK_ID copiedMesh = copy->GetCurrentMesh()->GetID();
+    const CK_ID copiedMaterial = copy->GetCurrentMesh()->GetFaceMaterial(0)->GetID();
+    const CK_ID copiedTexture = copy->GetCurrentMesh()->GetFaceMaterial(0)->GetTexture()->GetID();
+    context.DestroyObject(copy);
+    for (int i = 0; i < 3; ++i)
+        Check(context.GetObject(copiedLayerIDs[i]) == nullptr, "Deleting grid left copied layer alive");
+    Check(context.GetObject(copiedMesh) == nullptr && context.GetObject(copiedMaterial) == nullptr &&
+          context.GetObject(copiedTexture) == nullptr && source->GetCurrentMesh() == sourceMesh &&
+          source->GetLayerCount() == 3, "Grid deletion leaked private display resources or damaged source");
+}
+
+class GridClassificationRegistry : public SerializationGridRegistry {
+public:
+    explicit GridClassificationRegistry(CKContext *context)
+        : SerializationGridRegistry(context), category(-1) {}
+    int GetGridClassificationCategory() override { return category; }
+    int category;
+};
+
+void GridClassificationUsesAttributeCategoryAndNativeResults() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new GridClassificationRegistry(&context);
+    CKAttributeManager *attributes = context.GetAttributeManager();
+    const int shared = attributes->RegisterNewAttributeType("Pass25GridShared", CKPGUID_BOOL, CKCID_3DENTITY);
+    const int foreign = attributes->RegisterNewAttributeType("Pass25GridForeign", CKPGUID_BOOL, CKCID_3DENTITY);
+    Check(shared >= 0 && foreign >= 0 && attributes->GetAttributeCompatibleClassId(shared) == CKCID_3DENTITY &&
+          attributes->GetAttributeCompatibleClassId(foreign) == CKCID_3DENTITY,
+          "Cannot register classification attributes for 3D entities");
+    attributes->SetAttributeCategory(shared, "Pass25GridClassification");
+    attributes->SetAttributeCategory(foreign, "Pass25OtherClassification");
+    registry->category = attributes->GetAttributeCategoryIndex(shared);
+    RCKGrid grid(&context, "ClassificationGrid");
+    RCK3dEntity entity(&context, "ClassifiedEntity");
+    Check(!grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)), "Empty classification matched");
+    Check(grid.AddClassification(foreign) == CK_OK && entity.SetAttribute(foreign),
+          "Cannot attach foreign classification attributes");
+    Check(grid.AddClassification(foreign) == CKERR_NOTFOUND,
+          "Duplicate indexed classification returned the wrong native result");
+    Check(!grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)),
+          "Grid matched a shared attribute outside its classification category");
+    Check(grid.AddClassificationByName("Pass25GridShared") == CK_OK && entity.SetAttribute(shared) &&
+          grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)),
+          "Grid classification by name did not match the entity's shared category");
+    Check(grid.AddClassificationByName("Pass25GridShared") == CKERR_NOTFOUND,
+          "Duplicate named classification returned the wrong native result");
+    Check(grid.RemoveClassification(shared) == CK_OK && !grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)),
+          "Indexed classification removal left a compatibility match");
+    Check(grid.RemoveClassification(shared) == CKERR_NOTFOUND,
+          "Absent indexed classification returned the wrong native result");
+    Check(grid.AddClassification(shared) == CK_OK && grid.RemoveClassificationByName("Pass25GridShared") == CK_OK &&
+          grid.RemoveClassificationByName("Pass25GridShared") == CKERR_NOTFOUND &&
+          grid.AddClassificationByName("Pass25GridUnknown") == CKERR_NOTFOUND &&
+          grid.RemoveClassificationByName("Pass25GridUnknown") == CKERR_NOTFOUND,
+          "Classification name lookup/removal returned the wrong native result");
+}
+
+// Pass 26 memory functional regressions.
+class SceneMemoryProbe : public CKSceneObject {
+public:
+    SceneMemoryProbe(CKContext *context, CKSTRING name) : CKSceneObject(context, name) {}
+    void SetSceneBit(int index) { m_Scenes.Set(index); }
+    void ClearSceneBits() { m_Scenes.Clear(); }
+    int SceneBufferBytes() const { return m_Scenes.Size() / 8; }
+};
+
+void SceneMemoryIncludesObjectBodyAndOwnedName() {
+    CKContext context(nullptr, 0, 0);
+    SceneMemoryProbe object(&context, nullptr);
+    Check(object.GetMemoryOccupation() == static_cast<int>(sizeof(CKSceneObject)) + object.SceneBufferBytes(),
+          "Scene memory omitted the object body");
+    object.SetName("Pass26SceneOwnedName");
+    Check(object.GetMemoryOccupation() == static_cast<int>(sizeof(CKSceneObject) + std::strlen(object.GetName()) + 1) + object.SceneBufferBytes(),
+          "Scene memory omitted the owned name or counted the bit-array header twice");
+    object.SetName("Pass26SceneSharedName", TRUE);
+    Check(object.GetMemoryOccupation() == static_cast<int>(sizeof(CKSceneObject)) + object.SceneBufferBytes(),
+          "Scene memory counted caller-owned shared name storage");
+}
+
+void SceneMemoryCountsAllocatedBitsAfterClear() {
+    CKContext context(nullptr, 0, 0);
+    SceneMemoryProbe object(&context, nullptr);
+    const int indices[] = {0, 31, 32, 127, 1024};
+    for (int index : indices) {
+        object.SetSceneBit(index);
+        Check(object.SceneBufferBytes() >= (index / 32 + 1) * 4 && object.GetMemoryOccupation() ==
+              static_cast<int>(sizeof(CKSceneObject)) + object.SceneBufferBytes(),
+              "Scene memory did not account for allocated scene-bit capacity");
+    }
+    const int allocated = object.SceneBufferBytes();
+    object.ClearSceneBits();
+    Check(object.GetSceneInCount() == 0 && object.SceneBufferBytes() == allocated &&
+          object.GetMemoryOccupation() == static_cast<int>(sizeof(CKSceneObject)) + allocated,
+          "Scene memory confused active scene count with retained allocation");
+}
+
+class GridMemoryProbe : public RCKGrid {
+public:
+    GridMemoryProbe(CKContext *context, CKSTRING name) : RCKGrid(context, name) {}
+    void SetSceneBit(int index) { m_Scenes.Set(index); }
+    int KnownOwnedBytes() const {
+        return m_Scenes.Size() / 8 + m_Groups.Size() / 8 + m_Attributes.GetMemoryOccupation(FALSE) +
+               m_Meshes.GetMemoryOccupation(FALSE) + m_Children.GetMemoryOccupation(FALSE) +
+               m_Layers.GetMemoryOccupation(FALSE);
+    }
+};
+
+void GridMemoryIncludesInheritedSceneStorageAndLayerCells() {
+    CKContext context(nullptr, 0, 0);
+    auto *registry = new SerializationGridRegistry(&context);
+    GridMemoryProbe grid(&context, "Pass26GridMemory");
+    PopulateGrid(grid, *registry);
+    const int body = static_cast<int>(sizeof(RCKGrid) + std::strlen(grid.GetName()) + 1);
+    Check(grid.GetMemoryOccupation() == body + grid.KnownOwnedBytes() + 4 * 2 * 2 * 3,
+          "Grid memory omitted inherited object fields or layer cells");
+    grid.SetSceneBit(127);
+    Check(grid.GetMemoryOccupation() == body + grid.KnownOwnedBytes() + 4 * 2 * 2 * 3,
+          "Grid memory omitted inherited scene-bit storage");
+    grid.RemoveAllLayers();
+    Check(grid.GetMemoryOccupation() == body + grid.KnownOwnedBytes(),
+          "Grid memory retained removed layer cell bytes");
+}
+
+// Pass 26 grid-contract functional regressions.
+// Pass 26: Grid public contracts. Root adds CKLevel.h and CKScene.h at file scope.
+void GridRegistrationDescriptorMatchesNativeContract() {
+    RCKGrid::Register();
+    CKClassDesc *descriptor = CKGetClassDesc(CKCID_GRID);
+    Check(descriptor && descriptor->Parameter == CKPGUID_3DENTITY &&
+          descriptor->ToBeNotify.IsSet(CKCID_LAYER) && descriptor->DefaultCopyDependencies == 1,
+          "Grid registration lost its native parameter, Layer notification or copy mask");
+    Check(descriptor->NameFct && std::strcmp(descriptor->NameFct(), "Grid") == 0 &&
+          descriptor->DependsCountFct && descriptor->DependsCountFct(CK_DEPENDENCIES_COPY) == 1 &&
+          descriptor->DependsFct && std::strcmp(descriptor->DependsFct(0, CK_DEPENDENCIES_COPY), "Layers") == 0,
+          "Registered Grid callbacks do not expose their native dependency metadata");
+}
+
+template<bool Notify>
+void GridExternalLayerDeletionPrunesRegisteredLinks() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    SerializationGridRegistry *registry = new SerializationGridRegistry(&context);
+    RCKGrid *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "ExternalDeleteGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Could not create Grid for external notification");
+    grid->SetDimensions(2, 1, 2.0f, 1.0f);
+    const int firstType = registry->RegisterType("ExternalDeleteA");
+    const int secondType = registry->RegisterType("ExternalDeleteB");
+    CKLayer *first = grid->AddLayer(firstType, 0);
+    CKLayer *second = grid->AddLayer(secondType, 0);
+    Check(first && second && grid->GetLayerCount() == 2, "Could not populate Grid for external deletion");
+    const CK_ID removed = first->GetID();
+    const CK_ID survivor = second->GetID();
+    Check(context.DestroyObject(first, Notify ? 0 : CK_DESTROY_NONOTIFY) == CK_OK && !context.GetObject(removed),
+          "External Layer deletion did not remove the requested object");
+    if (!Notify) {
+        Check(grid->GetLayerCount() == 2 && grid->GetLayerByIndex(0) == nullptr,
+              "NONOTIFY unexpectedly ran Grid's deletion callback");
+        grid->CheckPostDeletion();
+    }
+    Check(grid->GetLayerCount() == 1 && grid->GetLayerByIndex(0) == context.GetObject(survivor) &&
+          grid->GetLayer(firstType) == nullptr && grid->GetLayer(secondType) == second,
+          "Grid external notification/manual callback failed to prune only the deleted Layer");
+    grid->CheckPostDeletion();
+    Check(grid->GetLayerCount() == 1, "Grid CheckPostDeletion was not idempotent");
+}
+
+void GridActivityUsesOnlyTheCurrentSceneFlags() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "ActivityGrid");
+    Check(!grid.IsActive(), "Grid was active without a current level/scene");
+    CKLevel *level = static_cast<CKLevel *>(context.CreateObject(CKCID_LEVEL, "ActivityLevel", CK_OBJECTCREATION_NONAMECHECK));
+    CKScene *first = static_cast<CKScene *>(context.CreateObject(CKCID_SCENE, "ActivityFirst", CK_OBJECTCREATION_NONAMECHECK));
+    CKScene *second = static_cast<CKScene *>(context.CreateObject(CKCID_SCENE, "ActivitySecond", CK_OBJECTCREATION_NONAMECHECK));
+    Check(level && first && second, "Could not create activity scene/level objects");
+    first->UseEnvironmentSettings(FALSE); second->UseEnvironmentSettings(FALSE);
+    level->AddScene(first); level->AddScene(second); context.SetCurrentLevel(level);
+    first->AddObject(&grid); second->AddObject(&grid);
+    first->SetObjectFlags(&grid, CK_SCENEOBJECT_START_ACTIVATE);
+    second->SetObjectFlags(&grid, CK_SCENEOBJECT_START_DEACTIVATE);
+    Check(level->LaunchScene(first, CK_SCENEOBJECTACTIVITY_SCENEDEFAULT, CK_SCENEOBJECTRESET_DONOTHING) == CK_OK &&
+          grid.IsActive(), "Grid did not follow active flags in the launched first scene");
+    first->ModifyObjectFlags(&grid, 0, CK_SCENEOBJECT_ACTIVE);
+    Check(!grid.IsActive(), "Grid remained active after current-scene deactivation");
+    first->ModifyObjectFlags(&grid, CK_SCENEOBJECT_ACTIVE, 0);
+    Check(grid.IsActive(), "Grid did not follow current-scene activation");
+    Check(level->LaunchScene(second, CK_SCENEOBJECTACTIVITY_SCENEDEFAULT, CK_SCENEOBJECTRESET_DONOTHING) == CK_OK &&
+          !grid.IsActive(), "Grid activity leaked from a previous scene");
+    first->SetObjectFlags(&grid, CK_SCENEOBJECT_ACTIVE);
+    Check(!grid.IsActive(), "Non-current scene flags changed Grid activity");
+    second->ModifyObjectFlags(&grid, CK_SCENEOBJECT_ACTIVE, 0);
+    Check(grid.IsActive(), "Second scene activation did not activate Grid");
+    second->RemoveObject(&grid);
+    Check(!grid.IsActive(), "Grid absent from current scene remained active");
+    context.SetCurrentLevel(nullptr);
+    Check(!grid.IsActive(), "Grid remained active after detaching the current level");
+}
+
+void GridCoordinateQueriesFollowRotatedCellCentersAndHeight() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "RotatedGrid");
+    grid.SetDimensions(5, 4, 10.0f, 12.0f); grid.SetHeightValidity(4.0f);
+    VxMatrix pose; pose.SetIdentity();
+    pose[0][0] = 0.0f; pose[0][2] = -2.0f;
+    pose[1][1] = 4.0f;
+    pose[2][0] = 3.0f; pose[2][2] = 0.0f;
+    pose[3][0] = 7.0f; pose[3][1] = -3.0f; pose[3][2] = 11.0f;
+    grid.SetWorldMatrix(pose);
+    VxVector center;
+    grid.Get3dPosFrom2dCoords(&center, 1, 2);
+    Check(GridPoseNear(center, VxVector(14.5f, -3.0f, 8.0f)),
+          "Grid rotated cell center no longer uses x/z half-cell offsets");
+    const VxVector point(2.5f, -1.0f, 15.5f);
+    int x = 99, z = 99;
+    const float height = grid.Get2dCoordsFrom3dPos(&point, &x, &z);
+    Check(x == -2 && z == -1 && std::fabs(height - 0.5f) < 0.0001f,
+          "Grid rotated inverse query did not truncate local negative coordinates or normalize height");
+}
+
+void GridLocalOnlyBoxUpdatePreservesTheWorldCache() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "LocalBoundsGrid");
+    grid.SetDimensions(3, 2, 6.0f, 8.0f);
+    grid.m_WorldBoundingBox.Min.Set(-10.0f, -11.0f, -12.0f);
+    grid.m_WorldBoundingBox.Max.Set(10.0f, 11.0f, 12.0f);
+    grid.m_MoveableFlags &= ~4u;
+    grid.UpdateBox(FALSE);
+    Check(GridPoseNear(grid.m_LocalBoundingBox.Min, VxVector(0.0f)) &&
+          GridPoseNear(grid.m_LocalBoundingBox.Max, VxVector(3.0f, 1.0f, 2.0f)) &&
+          GridPoseNear(grid.m_WorldBoundingBox.Min, VxVector(-10.0f, -11.0f, -12.0f)) &&
+          GridPoseNear(grid.m_WorldBoundingBox.Max, VxVector(10.0f, 11.0f, 12.0f)) &&
+          (grid.m_MoveableFlags & 4u) != 0,
+          "Grid local-only UpdateBox changed world bounds or failed to mark local bounds current");
+}
+
+void GridObjectUsageDelegatesMeshAndAnimationQueries() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "UsageGrid");
+    RCKMesh mesh(&context, "UsedMesh"), unrelatedMesh(&context, "OtherMesh");
+    RCKObjectAnimation animation(&context, "UsedAnimation"), otherAnimation(&context, "OtherAnimation");
+    grid.SetCurrentMesh(&mesh, TRUE); grid.AddObjectAnimation(&animation);
+    Check(grid.IsObjectUsed(&mesh, CKCID_MESH) && !grid.IsObjectUsed(&unrelatedMesh, CKCID_MESH) &&
+          grid.IsObjectUsed(&animation, CKCID_ANIMATION) && !grid.IsObjectUsed(&otherAnimation, CKCID_ANIMATION),
+          "Grid did not delegate mesh/animation ownership queries to its entity base");
+    CKObject object(&context, "UnusedObject");
+    Check(!grid.IsObjectUsed(&object, CKCID_OBJECT), "Grid claimed an unrelated base object dependency");
+}
+
+template<bool CopyLayers>
+void GridPreparationSelectsLayersWithoutOwnerRecursion() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    SerializationGridRegistry *registry = new SerializationGridRegistry(&context);
+    RCKGrid grid(&context, "PrepareGrid"); grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    const int type = registry->RegisterType("PrepareLayer");
+    CKLayer *layer = grid.AddLayer(type, 0); Check(layer, "Could not create preparation Layer");
+    RCKMesh mesh(&context, "PrepareMesh"); grid.SetCurrentMesh(&mesh, TRUE);
+    CKDependencies options; options.Resize(64); options.Fill(0); options.m_Flags = CK_DEPENDENCIES_CUSTOM;
+    options[CKCID_GRID] = CopyLayers ? 1 : 0;
+    CKDependenciesContext dependencies(&context); dependencies.SetOperationMode(CK_DEPENDENCIES_COPY);
+    dependencies.StartDependencies(&options);
+    Check(grid.PrepareDependencies(dependencies) == CK_OK && dependencies.IsDependenciesHere(grid.GetID()) &&
+          static_cast<bool>(dependencies.IsDependenciesHere(layer->GetID())) == CopyLayers &&
+          grid.GetCurrentMesh() == nullptr && !dependencies.IsDependenciesHere(mesh.GetID()),
+          "Grid copy preparation did not honor Layers mask/current mesh exclusion");
+    dependencies.StopDependencies();
+    grid.SetCurrentMesh(&mesh, TRUE);
+}
+
+void GridPreparationPropagatesTheBaseSaveFailure() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "NoSaveGrid"); grid.ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED, 0);
+    CKDependenciesContext dependencies(&context); dependencies.SetOperationMode(CK_DEPENDENCIES_SAVE);
+    Check(grid.PrepareDependencies(dependencies) == CKERR_INCOMPATIBLEPARAMETERS &&
+          !dependencies.IsDependenciesHere(grid.GetID()) && dependencies.m_DynamicObjects.IsEmpty(),
+          "Grid PrepareDependencies swallowed the base's do-not-save error or left unfinished state");
+}
+
+// Pass 26 layer functional regressions.
+class LayerArrayAllocationFailureScope {
+public:
+    LayerArrayAllocationFailureScope() { s_MorphArrayAllocationFailure = 0; }
+    ~LayerArrayAllocationFailureScope() { s_MorphArrayAllocationFailure = -1; }
+};
+
+Chunk LayerPreparedCellFixture(CKObject *grid, int count) {
+    Chunk chunk = NewChunk(CKCID_LAYER);
+    chunk->WriteIdentifier(CK_STATESAVE_LAYERDATA); chunk->WriteObject(grid);
+    chunk->WriteInt(1); chunk->WriteInt(0); chunk->WriteInt(LAYER_STATE_VISIBLE);
+    CKDWORD values[] = {21, 34, 55, 89};
+    chunk->WriteBuffer_LEndian(count * sizeof(CKDWORD), values);
+    chunk->CloseChunk(); chunk->StartRead(); return chunk;
+}
+
+template<int WireCount>
+void LayerLoadCellAllocationFailureRetainsCellsAndCanRetry() {
+    CKContext context(nullptr, 0, 0); new LayerRegistry(&context);
+    RCKGrid grid(&context, "PreparedLayerGrid"); grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer layer(&context, "PreparedLayer", grid.GetID());
+    CKSquare *old = layer.GetSquareArray(); old[0].ival = 144; old[3].ival = 233;
+    Chunk chunk = LayerPreparedCellFixture(&grid, WireCount);
+    LayerArrayAllocationFailureScope allocationFailure;
+    const CKERROR result = layer.Load(chunk.get(), nullptr);
+    const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+    Check(injected && result == CKERR_OUTOFMEMORY,
+          "Layer cell preparation allocation failure was ignored or returned success");
+    Check(layer.GetSquareArray() == old && old[0].ival == 144 && old[3].ival == 233,
+          "Failed Layer cell preparation discarded its existing cell allocation");
+    chunk->StartRead(); Check(layer.Load(chunk.get(), nullptr) == CK_OK, "Layer cell loading could not retry after allocation failure");
+    const int expected[] = {21, 34, WireCount == 4 ? 55 : 0, WireCount == 4 ? 89 : 0};
+    for (int i = 0; i < 4; ++i) Check(layer.GetSquareArray()[i].ival == expected[i], "Layer cell retry lost prefix/zero-extension semantics");
+    int value = -1; layer.GetValue(1, 1, &value);
+    Check(value == expected[3], "Successful Layer Load did not allocate enough cells for its known owner");
+}
+
+template<bool FileSave>
+void LayerSaveCellPreparationAllocationFailureReturnsNull() {
+    CKContext context(nullptr, 0, 0); auto *registry = new LayerRegistry(&context);
+    RCKGrid grid(&context, "LayerSavePreparationGrid"); grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer layer(&context, "LayerSavePreparation", grid.GetID());
+    CKSquare *cells = layer.GetSquareArray(); cells[0].ival = 144; cells[3].ival = 233;
+    CKFile file(&context); LayerArrayAllocationFailureScope allocationFailure;
+    Chunk saved(layer.Save(FileSave ? &file : nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+    Check(injected && !saved, "Layer Save ignored cell wire-buffer allocation failure");
+    Check(layer.GetSquareArray() == cells && cells[0].ival == 144 && cells[3].ival == 233,
+          "Layer Save failure changed source cell ownership or values");
+    if (FileSave) Check(registry->remap[1] == 0 && registry->m_RemapCount == 1, "Failed Layer Save registered a successful type remap");
+    Chunk retry(layer.Save(FileSave ? &file : nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    Check(retry != nullptr, "Layer Save could not retry after cell wire-buffer allocation failure");
+    RCKLayer reloaded(&context, "LayerSaveRetry", 0); retry->StartRead();
+    Check(reloaded.Load(retry.get(), FileSave ? &file : nullptr) == CK_OK && reloaded.GetSquareArray() &&
+          reloaded.GetSquareArray()[0].ival == 144 && reloaded.GetSquareArray()[3].ival == 233,
+          "Layer Save retry did not retain source cells");
+}
+
+void LayerExplicitFitAllocationFailureKeepsOwnedPrefixAndRetries() {
+    CKContext context(nullptr, 0, 0); new LayerRegistry(&context);
+    RCKGrid grid(&context, "LayerFitPreparedGrid"); grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer layer(&context, "LayerFitPrepared", 0);
+    Chunk chunk = LayerPreparedCellFixture(nullptr, 2); LoadChunk(layer, chunk.get());
+    CKSquare *cells = layer.GetSquareArray(); layer.SetOwner(grid.GetID());
+    LayerArrayAllocationFailureScope allocationFailure; layer.FitSquareArray();
+    const bool injected = s_MorphArrayAllocationFailure == -1; s_MorphArrayAllocationFailure = -1;
+    Check(injected && layer.GetSquareArray() == cells && cells[0].ival == 21 && cells[1].ival == 34,
+          "Failed explicit Layer Fit discarded the owned prefix");
+    layer.FitSquareArray(); int last = -1; layer.GetValue(1, 1, &last);
+    Check(layer.GetSquareArray()[0].ival == 21 && layer.GetSquareArray()[1].ival == 34 && last == 0,
+          "Layer Fit retry lost its owned prefix or zero extension");
+}
+
+void LayerRegisterAppliesNativeDescriptorFields() {
+    RCKLayer::Register(); const CKClassDesc *descriptor = CKGetClassDesc(CKCID_LAYER);
+    Check(descriptor && descriptor->DefaultOptions == CK_GENERALOPTIONS_NODUPLICATENAMECHECK &&
+          descriptor->DefaultCopyDependencies == CK_DEPENDENCIES_COPY_GRIDLAYER_DATA && descriptor->ToBeNotify.IsSet(CKCID_GRID),
+          "Layer registration did not apply native grid notification/options/copy-data dependency");
+}
+
+void LayerContextDestructionKeepsOwnerAndHandlesTransferredCells() {
+    CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerDestructionGrid"); grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    CKLayer *layer = new RCKLayer(&context, "LayerDestruction", grid.GetID());
+    context.m_ObjectManager->FinishRegisterObject(layer);
+    CKSquare *previous = layer->GetSquareArray(); CKSquare *transferred = new CKSquare[4](); transferred[3].ival = 377;
+    layer->SetSquareArray(transferred); delete[] previous;
+    const CK_ID id = layer->GetID();
+    Check(context.DestroyObject(layer, CK_DESTROY_NONOTIFY) == CK_OK && !context.GetObject(id) && context.GetObject(grid.GetID()) == &grid,
+          "Destroying a Layer failed to unregister it or destroyed its referenced owner");
+    RCKLayer fresh(&context, "LayerDestructionFresh", grid.GetID()); int value = -1; fresh.GetValue(1, 1, &value);
+    Check(value == 0, "Layer destruction left the owner unusable for a fresh cell allocation");
+}
+
+// Pass 26 grid-reload functional regressions.
+void GridReloadRebuildsDisplayForLoadedDimensions() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    RCKGrid source(&context, "Pass26ReloadSource"), target(&context, "Pass26ReloadTarget");
+    source.SetDimensions(9, 1, 18.0f, 5.0f);
+    Chunk snapshot(source.Save(nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    Check(snapshot != nullptr, "Could not save Grid reload fixture");
+    target.SetDimensions(2, 2, 2.0f, 2.0f);
+    const int type = registry->RegisterType("Pass26ReloadCells");
+    VxColor white(1.0f, 1.0f, 1.0f);
+    registry->SetAssociatedColor(type, &white);
+    Check(target.AddLayer(type) != nullptr, "Could not create the previous Grid layer");
+    target.ConstructMeshTexture(0.5f);
+    CKMesh *oldMesh = target.GetCurrentMesh();
+    Check(oldMesh && oldMesh->GetFaceMaterial(0) && oldMesh->GetFaceMaterial(2) &&
+          oldMesh->GetFaceMaterial(0)->GetTexture(), "Could not prepare cached Grid display");
+    const CK_ID old[] = {oldMesh->GetID(), oldMesh->GetFaceMaterial(0)->GetID(),
+                        oldMesh->GetFaceMaterial(2)->GetID(), oldMesh->GetFaceMaterial(0)->GetTexture()->GetID()};
+    // Follow the SDK workflow: remove cells before changing dimensions and
+    // recreate them after the incoming Grid fields supply the new size.
+    target.RemoveAllLayers();
+    snapshot->StartRead();
+    const CKERROR loaded = target.Load(snapshot.get(), nullptr);
+    Check(loaded == CK_OK && target.GetWidth() == 9 && target.GetLength() == 1,
+          "Grid reload did not restore saved dimensions");
+    for (CK_ID id : old)
+        Check(context.GetObject(id) == nullptr, "Grid reload retained stale display resources");
+    CKLayer *layer = target.AddLayer(type);
+    Check(layer != nullptr, "Could not recreate cells after Grid reload");
+    CKDWORD value = 31;
+    layer->SetValue(8, 0, &value);
+    target.PostLoad();
+    CKMesh *mesh = target.GetCurrentMesh();
+    Check(mesh && mesh->GetFaceMaterial(0), "Grid PostLoad did not rebuild the loaded display");
+    VxVector vertex;
+    mesh->GetVertexPosition(2, &vertex);
+    float u = 0.0f, v = 0.0f;
+    mesh->GetVertexTextureCoordinates(2, &u, &v, -1);
+    CKTexture *texture = mesh->GetFaceMaterial(0)->GetTexture();
+    Check(Equal(vertex, VxVector(9.0f, 1.0f, 1.0f)) && u == 0.5625f && v == 0.125f &&
+          texture && texture->GetWidth() == 32 && texture->GetHeight() == 16,
+          "Grid PostLoad reused geometry, UV or texture sizes from the old dimensions");
+    const CKDWORD *pixels = reinterpret_cast<const CKDWORD *>(texture->LockSurfacePtr());
+    Check(pixels != nullptr, "Could not inspect reloaded Grid display pixels");
+    const bool finalCell = pixels[16] == 0xFF1F1F1Fu && pixels[17] == 0xFF1F1F1Fu &&
+                           pixels[48] == 0xFF1F1F1Fu && pixels[49] == 0xFF1F1F1Fu;
+    texture->ReleaseSurfacePtr();
+    Check(finalCell, "Grid PostLoad did not paint the last loaded cell");
+}
+
+// Pass 26 grid functional regressions.
+template<bool ByName>
+void GridAddLayerRejectsUncommittedOwnerAndCanRetry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "AddFailureGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create AddLayer failure grid");
+    grid->SetDimensions(2, 3, 4.0f, 9.0f);
+    const int type = registry->RegisterType("Pass26Cells");
+    const int before = context.GetObjectsCountByClassID(CKCID_LAYER);
+    s_MorphArrayAllocationFailure = 0;
+    CKLayer *failed = ByName ? grid->AddLayerByName("Pass26Cells") : grid->AddLayer(type);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && failed == nullptr && grid->GetLayerCount() == 0 &&
+          context.GetObjectsCountByClassID(CKCID_LAYER) == before,
+          "Grid returned or leaked a Layer whose cell allocation never committed its owner");
+    CKLayer *layer = ByName ? grid->AddLayerByName("Pass26Cells") : grid->AddLayer(type);
+    Check(layer && layer->GetOwner() == grid->GetID() && grid->GetLayerCount() == 1,
+          "Grid AddLayer could not retry after owner allocation failure");
+    CKDWORD value = 37, output = 0;
+    Check(layer->SetValue2(1, 2, &value) && layer->GetValue2(1, 2, &output) && output == value,
+          "Retried Layer did not have usable cells for all grid dimensions");
+    grid->RemoveAllLayers();
+    grid->SetDimensions(0, 3, 0.0f, 9.0f);
+    layer = ByName ? grid->AddLayerByName("Pass26Cells") : grid->AddLayer(type);
+    Check(layer && layer->GetOwner() == grid->GetID() && layer->GetSquareArray() == nullptr,
+          "Owner validation rejected a successful zero-cell Layer");
+}
+
+CKMesh *Pass26CallerMesh(CKContext &context, RCKGrid &grid) {
+    CKMesh *mesh = static_cast<CKMesh *>(context.CreateObject(CKCID_MESH, "CallerMesh", CK_OBJECTCREATION_NONAMECHECK));
+    Check(mesh != nullptr, "Cannot create caller mesh");
+    grid.SetCurrentMesh(mesh, TRUE);
+    return mesh;
+}
+
+void Pass26CheckRetryDisplay(RCKGrid &grid, CKMesh *caller) {
+    grid.ConstructMeshTexture(0.5f);
+    CKMesh *mesh = grid.GetCurrentMesh();
+    Check(mesh && mesh != caller && mesh->GetVertexCount() == 12 && mesh->GetFaceCount() == 10,
+          "Grid retry reused an incomplete display mesh");
+    CKMaterial *material = mesh->GetFaceMaterial(0);
+    CKTexture *texture = material ? material->GetTexture() : nullptr;
+    Check(texture && texture->GetWidth() == 16 && texture->GetHeight() == 16,
+          "Grid retry omitted its display texture");
+    const CKDWORD *pixels = reinterpret_cast<const CKDWORD *>(texture->LockSurfacePtr());
+    Check(pixels != nullptr, "Grid retry omitted the CPU surface");
+    const bool expected = pixels[0] == 0xFF0B0B0Bu && pixels[1] == 0xFF0B0B0Bu &&
+                          pixels[16] == 0xFF0B0B0Bu && pixels[17] == 0xFF0B0B0Bu;
+    texture->ReleaseSurfacePtr();
+    Check(expected, "Retried grid display did not render actual Layer data");
+}
+
+void Pass26PopulateOneLayer(RCKGrid &grid, SerializationGridRegistry &registry) {
+    const int type = registry.RegisterType("Pass26DisplayCells");
+    VxColor white(1.0f, 1.0f, 1.0f);
+    registry.SetAssociatedColor(type, &white);
+    CKLayer *layer = grid.AddLayer(type);
+    Check(layer != nullptr, "Cannot create display Layer");
+    CKDWORD value = 11;
+    layer->SetValue(0, 0, &value);
+}
+
+void GridDisplayWithoutManagerLeavesNoPartialResourcesAndCanRetry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "NoManagerDisplay", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create display grid without manager");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    CKMesh *caller = Pass26CallerMesh(context, *grid);
+    const int before = context.GetObjectCount();
+    grid->ConstructMeshTexture(0.5f);
+    Check(context.GetObjectCount() == before && grid->GetCurrentMesh() == caller && grid->GetMeshCount() == 1,
+          "Missing GridManager left partial display resources or changed the caller mesh");
+    auto *registry = new SerializationGridRegistry(&context);
+    Pass26PopulateOneLayer(*grid, *registry);
+    Pass26CheckRetryDisplay(*grid, caller);
+    Check(context.GetObject(caller->GetID()) == caller, "Display retry destroyed the caller-owned mesh");
+}
+
+class Pass26FactoryOverride {
+public:
+    Pass26FactoryOverride(CK_CLASSID cid, CKCLASSCREATIONFCT replacement)
+        : descriptor(CKGetClassDesc(cid)), previous(descriptor ? descriptor->CreationFct : nullptr) {
+        Check(descriptor && previous, "Cannot override the registered fixture factory");
+        descriptor->CreationFct = replacement;
+    }
+    ~Pass26FactoryOverride() { descriptor->CreationFct = previous; }
+private:
+    CKClassDesc *descriptor;
+    CKCLASSCREATIONFCT previous;
+};
+
+template<bool CreateFailure>
+class Pass26UnavailableTexture : public RCKTexture {
+public:
+    explicit Pass26UnavailableTexture(CKContext *context) : RCKTexture(context) {}
+    CKBOOL Create(int width, int height, int bpp, int slot) override {
+        if (CreateFailure) return FALSE;
+        const CKBOOL created = RCKTexture::Create(width, height, bpp, slot);
+        if (created) ReleaseAllSlots();
+        return created;
+    }
+};
+
+template<bool CreateFailure>
+CKObject *Pass26CreateUnavailableTexture(CKContext *context) {
+    return new Pass26UnavailableTexture<CreateFailure>(context);
+}
+
+int Pass26LiveObjectCount(CKContext &context) {
+    int count = 0;
+    const int lastID = context.GetObjectCount();
+    for (int id = 1; id <= lastID; ++id)
+        if (context.GetObject(id)) ++count;
+    return count;
+}
+
+template<bool CreateFailure>
+void GridDisplaySurfaceFailureCleansResourcesAndCanRetry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "SurfaceFailureDisplay", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create surface failure grid");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(*grid, *registry);
+    CKMesh *caller = Pass26CallerMesh(context, *grid);
+    const CK_ID callerID = caller->GetID();
+    const int before = Pass26LiveObjectCount(context);
+    const int beforeMesh = context.GetObjectsCountByClassID(CKCID_MESH);
+    const int beforeMaterial = context.GetObjectsCountByClassID(CKCID_MATERIAL);
+    const int beforeTexture = context.GetObjectsCountByClassID(CKCID_TEXTURE);
+    {
+        Pass26FactoryOverride replacement(CKCID_TEXTURE, Pass26CreateUnavailableTexture<CreateFailure>);
+        grid->ConstructMeshTexture(0.5f);
+    }
+    Check(Pass26LiveObjectCount(context) == before && grid->GetCurrentMesh() == caller &&
+          context.GetObject(callerID) == caller && grid->GetMeshCount() == 1 &&
+          context.GetObjectsCountByClassID(CKCID_MESH) == beforeMesh &&
+          context.GetObjectsCountByClassID(CKCID_MATERIAL) == beforeMaterial &&
+          context.GetObjectsCountByClassID(CKCID_TEXTURE) == beforeTexture,
+          "Failed texture creation or unavailable surface retained partial resources/current mesh");
+    Pass26CheckRetryDisplay(*grid, caller);
+    Check(context.GetObject(caller->GetID()) == caller, "Surface failure cleanup destroyed caller-owned geometry");
+}
+
+void GridDisplayLevelMembershipCacheAndDeletionContract() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    CKLevel *level = static_cast<CKLevel *>(context.CreateObject(CKCID_LEVEL, "DisplayLevel", CK_OBJECTCREATION_NONAMECHECK));
+    Check(level && level->GetLevelScene(), "Cannot create display fixture level/scene");
+    context.SetCurrentLevel(level);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "LevelDisplayGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create level display grid");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(*grid, *registry);
+    CKMesh *caller = Pass26CallerMesh(context, *grid);
+    const CK_ID callerID = caller->GetID();
+    Check(level->AddObject(caller) == CK_OK, "Cannot place unrelated caller mesh in level");
+    grid->ConstructMeshTexture(0.25f);
+    CKMesh *mesh = grid->GetCurrentMesh();
+    Check(mesh && mesh != caller, "Grid did not create its display mesh");
+    CKObject *resources[] = {mesh, mesh->GetFaceMaterial(0), mesh->GetFaceMaterial(2),
+                            mesh->GetFaceMaterial(0)->GetTexture()};
+    CK_ID ids[4];
+    for (int i = 0; i < 4; ++i) {
+        Check(resources[i] && static_cast<CKSceneObject *>(resources[i])->IsInScene(level->GetLevelScene()) &&
+              (resources[i]->GetObjectFlags() & 0x23) == 0x23,
+              "Generated display resource was not privately attached to the current level");
+        ids[i] = resources[i]->GetID();
+    }
+    const int count = context.GetObjectCount();
+    grid->SetCurrentMesh(caller);
+    grid->ConstructMeshTexture(0.9f);
+    Check(grid->GetCurrentMesh() == mesh && context.GetObjectCount() == count &&
+          (mesh->GetVertexColor(0) >> 24) == 63,
+          "Cached display call duplicated resources or changed native cached opacity");
+    grid->DestroyMeshTexture();
+    for (int i = 0; i < 4; ++i)
+        Check(context.GetObject(ids[i]) == nullptr, "DestroyMeshTexture left generated resource alive");
+    Check(grid->GetCurrentMesh() == nullptr && grid->GetMeshCount() == 1 &&
+          context.GetObject(callerID) == caller && caller->IsInScene(level->GetLevelScene()),
+          "DestroyMeshTexture deleted caller geometry or unrelated level membership");
+}
+
+void GridLoadPropagatesLayerFirstFitFailureAndCanRetry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    const int type = registry->RegisterType("Pass26PendingCells");
+    RCKGrid grid(&context, "PendingGrid");
+    CKLayer *layer = static_cast<CKLayer *>(context.CreateObject(CKCID_LAYER, "Pass26PendingCells", CK_OBJECTCREATION_NONAMECHECK));
+    Check(layer != nullptr, "Cannot create pending Layer");
+    Chunk layerData = NewChunk(CKCID_LAYER);
+    layerData->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    layerData->WriteObject(&grid); layerData->WriteInt(type); layerData->WriteInt(0); layerData->WriteInt(1);
+    CKDWORD prefix[] = {5, 6};
+    layerData->WriteBuffer_LEndian(sizeof(prefix), prefix);
+    LoadChunk(*layer, layerData.get());
+    CKSquare *old = layer->GetSquareArray();
+    Check(old && old[0].dval == 5 && old[1].dval == 6 && layer->GetOwner() == grid.GetID(),
+          "Layer-first fixture did not retain pending owner/payload");
+    Chunk gridData = NewChunk(CKCID_GRID);
+    gridData->WriteIdentifier(CK_STATESAVE_GRIDDATA);
+    gridData->WriteInt(2); gridData->WriteInt(2); gridData->WriteInt(0); gridData->WriteInt(0); gridData->WriteDword(CKGRID_FREE);
+    gridData->WriteInt(1);
+    XObjectArray layers; layers.PushBack(layer->GetID()); layers.Save(gridData.get(), &context);
+    gridData->CloseChunk(); gridData->StartRead();
+    CKFile file(&context);
+    s_MorphArrayAllocationFailure = 0;
+    const CKERROR failed = grid.Load(gridData.get(), &file);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && failed == CKERR_OUTOFMEMORY && layer->GetSquareArray() == old && old[0].dval == 5 && old[1].dval == 6,
+          "Grid.Load reported success after pending Layer capacity allocation failed");
+    gridData->StartRead();
+    Check(grid.Load(gridData.get(), &file) == CK_OK && grid.GetLayerCount() == 1,
+          "Grid.Load could not retry pending Layer sizing");
+    CKDWORD value = 99;
+    Check(layer->GetValue2(0, 0, &value) && value == 5 && layer->GetValue2(1, 0, &value) && value == 6 &&
+          layer->GetValue2(1, 1, &value) && value == 0,
+          "Grid.Load retry lost prefix or failed to create usable zero tail");
+}
+
+void GridEmbeddedSavePropagatesLayerAllocationFailureAndCanRetry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    RCKGrid grid(&context, "EmbeddedSaveGrid");
+    grid.SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(grid, *registry);
+    s_MorphArrayAllocationFailure = 0;
+    Chunk failed(grid.Save(nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && failed.get() == nullptr, "Grid.Save accepted a failed embedded Layer snapshot");
+    Chunk saved(grid.Save(nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    Check(saved.get() != nullptr, "Grid.Save could not retry embedded Layer snapshot");
+    CKDWORD changed = 77;
+    grid.GetLayerByIndex(0)->SetValue(0, 0, &changed);
+    LoadChunk(grid, saved.get());
+    grid.GetLayerByIndex(0)->GetValue(0, 0, &changed);
+    Check(changed == 11, "Retried Grid snapshot did not contain usable embedded Layer values");
+}
+
+void GridEmbeddedLoadPropagatesMissingManagerAndCanRetry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "EmbeddedLoadGrid");
+    grid.SetDimensions(1, 1, 1.0f, 1.0f);
+    CKLayer *layer = static_cast<CKLayer *>(context.CreateObject(CKCID_LAYER, "Pass26EmbeddedCells", CK_OBJECTCREATION_NONAMECHECK));
+    Check(layer != nullptr, "Cannot create embedded Load Layer");
+    layer->InitOwner(grid.GetID());
+    Chunk layerData = NewChunk(CKCID_LAYER);
+    layerData->WriteIdentifier(CK_STATESAVE_LAYERDATA);
+    layerData->WriteObject(&grid); layerData->WriteInt(1); layerData->WriteInt(0); layerData->WriteInt(1);
+    CKDWORD cell = 29; layerData->WriteBuffer_LEndian(sizeof(cell), &cell); layerData->CloseChunk();
+    Chunk data = NewChunk(CKCID_GRID);
+    data->WriteIdentifier(CK_STATESAVE_GRIDDATA);
+    data->WriteInt(1); data->WriteInt(1); data->WriteInt(0); data->WriteInt(0); data->WriteDword(CKGRID_FREE);
+    XObjectArray layers; layers.PushBack(layer->GetID()); layers.Save(data.get(), &context);
+    data->WriteSubChunk(layerData.get()); data->CloseChunk(); data->StartRead();
+    Check(grid.Load(data.get(), nullptr) == CKERR_NOTINITIALIZED,
+          "Grid.Load ignored a real embedded Layer missing-manager failure");
+    new SerializationGridRegistry(&context);
+    data->StartRead();
+    Check(grid.Load(data.get(), nullptr) == CK_OK && grid.GetLayerCount() == 1,
+          "Grid.Load could not retry after registering its manager");
+    CKDWORD actual = 0;
+    Check(layer->GetValue2(0, 0, &actual) && actual == cell && layer->GetOwner() == grid.GetID(),
+          "Retried embedded Grid.Load did not restore actual cell/owner");
+}
+
+
+// Pass 26 chunk functional regressions.
+void ChunkObjectIdArrayReadsReplaceNonemptyCacheWithEmpty() {
+    CKContext context(nullptr, 0, 0);
+    CKObject first(&context, "Pass26FirstArrayObject"), second(&context, "Pass26SecondArrayObject");
+    Chunk chunk = NewChunk(CKCID_OBJECT);
+    chunk->WriteIdentifier(0x10203040u);
+    chunk->StartObjectIDSequence(2);
+    chunk->WriteObjectIDSequence(first.GetID()); chunk->WriteObjectIDSequence(second.GetID());
+    chunk->StartObjectIDSequence(0);
+    chunk->CloseChunk(); chunk->StartRead();
+    Check(chunk->SeekIdentifier(0x10203040u), "Could not read object-ID array fixture");
+    const XObjectArray &nonempty = chunk->ReadXObjectArray();
+    Check(nonempty.Size() == 2 && nonempty[0] == first.GetID() && nonempty[1] == second.GetID(),
+          "Object-ID reader did not return the nonempty sequence");
+    Check(chunk->ReadXObjectArray().Size() == 0,
+          "Empty object-ID sequence returned the preceding array's cached IDs");
+    Check(chunk->ReadXObjectArray().Size() == 0,
+          "Object-ID reader returned stale IDs at the end of its chunk");
+    chunk->StartRead(); chunk->SeekIdentifier(0x10203040u);
+    Check(chunk->ReadXObjectArray(&context).Size() == 2, "Pointer-array reader did not resolve valid object IDs");
+    Check(chunk->ReadXObjectArray().Size() == 0,
+          "ID-array reader confused the distinct pointer-array cache with an empty sequence");
+}
+
+// Pass 27 display functional regressions.
+static CKCLASSCREATIONFCT s_Pass27DisplayFactory = nullptr;
+static int s_Pass27DisplayFactoryRemaining = -1;
+
+CKObject *Pass27DisplayFactoryFailure(CKContext *context) {
+    if (s_Pass27DisplayFactoryRemaining == 0) {
+        s_Pass27DisplayFactoryRemaining = -1;
+        return nullptr;
+    }
+    if (s_Pass27DisplayFactoryRemaining > 0) --s_Pass27DisplayFactoryRemaining;
+    return s_Pass27DisplayFactory(context);
+}
+
+class Pass27DisplayFactoryScope {
+public:
+    Pass27DisplayFactoryScope(CK_CLASSID cid, int index)
+        : descriptor(CKGetClassDesc(cid)), previous(descriptor ? descriptor->CreationFct : nullptr) {
+        Check(descriptor && previous, "Cannot override display class factory");
+        s_Pass27DisplayFactory = previous;
+        s_Pass27DisplayFactoryRemaining = index;
+        descriptor->CreationFct = Pass27DisplayFactoryFailure;
+    }
+    ~Pass27DisplayFactoryScope() {
+        descriptor->CreationFct = previous;
+        s_Pass27DisplayFactory = nullptr;
+        s_Pass27DisplayFactoryRemaining = -1;
+    }
+private:
+    CKClassDesc *descriptor;
+    CKCLASSCREATIONFCT previous;
+};
+
+template<int Stage>
+void GridDisplayFactoryNullPreservesCallerAndRetries() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "Pass27FactoryGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create display factory fixture Grid");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(*grid, *registry);
+    CKMesh *caller = Pass26CallerMesh(context, *grid);
+    const CK_ID callerID = caller->GetID();
+    const int before = Pass26LiveObjectCount(context);
+    const CK_CLASSID cid = Stage == 0 ? CKCID_MESH : (Stage == 3 ? CKCID_TEXTURE : CKCID_MATERIAL);
+    bool injected = false;
+    {
+        Pass27DisplayFactoryScope replacement(cid, Stage == 2 ? 1 : 0);
+        grid->ConstructMeshTexture(0.5f);
+        injected = s_Pass27DisplayFactoryRemaining == -1;
+    }
+    Check(injected, "Display fixture did not reach the selected null factory");
+    Check(Pass26LiveObjectCount(context) == before && context.GetObject(callerID) == caller &&
+          grid->GetCurrentMesh() == caller && grid->GetMeshCount() == 1,
+          "Null display factory leaked generated resources or changed caller geometry");
+    Pass26CheckRetryDisplay(*grid, caller);
+    Check(context.GetObject(callerID) == caller, "Display retry deleted caller geometry");
+}
+
+template<int Allocation>
+void GridDisplayScratchAllocationFailurePreservesCallerAndRetries() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "Pass27ScratchGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create display scratch fixture Grid");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(*grid, *registry);
+    CKMesh *caller = Pass26CallerMesh(context, *grid);
+    const CK_ID callerID = caller->GetID();
+    const int before = Pass26LiveObjectCount(context);
+    s_MorphArrayAllocationFailure = Allocation;
+    grid->ConstructMeshTexture(0.5f);
+    const bool injected = s_MorphArrayAllocationFailure == -1;
+    s_MorphArrayAllocationFailure = -1;
+    Check(injected && Pass26LiveObjectCount(context) == before &&
+          context.GetObject(callerID) == caller && grid->GetCurrentMesh() == caller && grid->GetMeshCount() == 1,
+          "Display scratch allocation failure leaked resources or changed caller geometry");
+    Pass26CheckRetryDisplay(*grid, caller);
+    Check(context.GetObject(callerID) == caller, "Display scratch retry deleted caller geometry");
+}
+
+class Pass27DisplayClearObserver : public CKBaseManager {
+public:
+    explicit Pass27DisplayClearObserver(CKContext *context)
+        : CKBaseManager(context, CKGUID(0x73270001, 0x17270001), "Pass27DisplayClearObserver"), context(context) {
+        context->RegisterNewManager(this);
+    }
+    CKDWORD GetValidFunctionsMask() override { return CKMANAGER_FUNC_PreClearAll; }
+    CKERROR PreClearAll() override {
+        if (!grid) return CK_OK;
+        called = true;
+        const int before = Pass26LiveObjectCount(*context);
+        CKMesh *mesh = grid->GetCurrentMesh();
+        bool present = context->IsInClearAll() != FALSE;
+        for (int i = 0; i < 5; ++i) present = present && context->GetObject(ids[i]) != nullptr;
+        grid->DestroyMeshTexture();
+        grid->DestroyMeshTexture();
+        intact = present && Pass26LiveObjectCount(*context) == before && grid->GetCurrentMesh() == mesh;
+        for (int i = 0; i < 5; ++i) intact = intact && context->GetObject(ids[i]) != nullptr;
+        grid = nullptr;
+        return CK_OK;
+    }
+    CKContext *context;
+    RCKGrid *grid = nullptr;
+    CK_ID ids[5] = {};
+    bool called = false;
+    bool intact = false;
+};
+
+void GridDisplayDestroyDefersToContextDuringClearAll() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *observer = new Pass27DisplayClearObserver(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "Pass27ClearGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create ClearAll display Grid");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(*grid, *registry);
+    grid->ConstructMeshTexture(0.5f);
+    CKMesh *mesh = grid->GetCurrentMesh();
+    Check(mesh && mesh->GetFaceMaterial(0) && mesh->GetFaceMaterial(2) && mesh->GetFaceMaterial(0)->GetTexture(),
+          "ClearAll fixture lacks generated display graph");
+    observer->grid = grid;
+    observer->ids[0] = grid->GetID();
+    observer->ids[1] = mesh->GetID();
+    observer->ids[2] = mesh->GetFaceMaterial(0)->GetID();
+    observer->ids[3] = mesh->GetFaceMaterial(2)->GetID();
+    observer->ids[4] = mesh->GetFaceMaterial(0)->GetTexture()->GetID();
+    Check(context.ClearAll() == CK_OK && observer->called && observer->intact,
+          "DestroyMeshTexture destroyed resources early during actual manager PreClearAll");
+    for (int i = 0; i < 5; ++i)
+        Check(context.GetObject(observer->ids[i]) == nullptr, "Context ClearAll failed to delete a display resource");
+    Check(Pass26LiveObjectCount(context) == 0 && !context.IsInClearAll(),
+          "Display ClearAll left live objects or failed to complete context cleanup");
+}
+
+void GridDisplaySignedCellRgbUsesNativeAddition() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "Pass27SignedGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create signed-cell display Grid");
+    grid->SetDimensions(4, 1, 8.0f, 3.0f);
+    const int type = registry->RegisterType("Pass27SignedCells");
+    VxColor white(1.0f, 1.0f, 1.0f);
+    registry->SetAssociatedColor(type, &white);
+    CKLayer *layer = grid->AddLayer(type);
+    Check(layer != nullptr, "Cannot create signed-cell Layer");
+    const int values[] = {-1, -2, 0, 11};
+    const CKDWORD expected[] = {0xFFFEFEFFu, 0xFFFDFDFEu, 0xFF000000u, 0xFF0B0B0Bu};
+    for (int x = 0; x < 4; ++x)
+        layer->SetValue(x, 0, const_cast<int *>(&values[x]));
+    grid->ConstructMeshTexture(0.5f);
+    CKMesh *mesh = grid->GetCurrentMesh();
+    CKMaterial *material = mesh ? mesh->GetFaceMaterial(0) : nullptr;
+    CKTexture *texture = material ? material->GetTexture() : nullptr;
+    Check(texture && texture->GetWidth() == 16 && texture->GetHeight() == 16,
+          "Signed-cell display did not create its real texture");
+    const CKDWORD *pixels = reinterpret_cast<const CKDWORD *>(texture->LockSurfacePtr());
+    Check(pixels != nullptr, "Signed-cell texture has no CPU pixels");
+    bool matched = true;
+    for (int x = 0; x < 4; ++x) {
+        const int index = x * 2;
+        matched = matched && pixels[index] == expected[x] && pixels[index + 1] == expected[x] &&
+                  pixels[index + 16] == expected[x] && pixels[index + 17] == expected[x];
+    }
+    texture->ReleaseSurfacePtr();
+    Check(matched, "Signed Layer color components must use native modular addition rather than bitwise OR");
+}
+
+template<bool MissingMain>
+void GridDisplayDestroyHandlesEditedMaterialSlots() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new SerializationGridRegistry(&context);
+    auto *grid = static_cast<RCKGrid *>(context.CreateObject(CKCID_GRID, "Pass27EditedDisplayGrid", CK_OBJECTCREATION_NONAMECHECK));
+    Check(grid != nullptr, "Cannot create edited-material display Grid");
+    grid->SetDimensions(1, 1, 2.0f, 3.0f);
+    Pass26PopulateOneLayer(*grid, *registry);
+    CKMesh *caller = Pass26CallerMesh(context, *grid);
+    const CK_ID callerID = caller->GetID();
+    grid->ConstructMeshTexture(0.5f);
+    CKMesh *mesh = grid->GetCurrentMesh();
+    CKMaterial *main = mesh ? mesh->GetFaceMaterial(0) : nullptr;
+    CKMaterial *border = mesh ? mesh->GetFaceMaterial(2) : nullptr;
+    CKTexture *texture = main ? main->GetTexture() : nullptr;
+    Check(mesh && main && border && texture, "Edited-material fixture lacks display resources");
+    const CK_ID meshID = mesh->GetID(), mainID = main->GetID(), borderID = border->GetID(), textureID = texture->GetID();
+    if (MissingMain) {
+        mesh->SetFaceMaterial(0, nullptr);
+        mesh->SetFaceMaterial(1, nullptr);
+    } else {
+        for (int face = 2; face < 10; ++face) mesh->SetFaceMaterial(face, main);
+    }
+    grid->DestroyMeshTexture();
+    Check(context.GetObject(meshID) == nullptr && grid->GetCurrentMesh() == nullptr &&
+          context.GetObject(callerID) == caller && grid->GetMeshCount() == 1,
+          "Edited-material display teardown changed caller mesh or kept generated mesh");
+    if (MissingMain) {
+        Check(context.GetObject(borderID) == nullptr && context.GetObject(mainID) == main &&
+              context.GetObject(textureID) == texture,
+              "Missing slot zero kept reachable border material or deleted detached resources");
+    } else {
+        Check(context.GetObject(mainID) == nullptr && context.GetObject(textureID) == nullptr &&
+              context.GetObject(borderID) == border,
+              "Aliased material slots deleted the same material twice or deleted detached border material");
+    }
+}
+
+// Pass 27 grid functional regressions.
+// Pass27: actual Grid API contracts; no shared test source edits.
+class Pass27GridRegistry : public SerializationGridRegistry {
+public:
+    explicit Pass27GridRegistry(CKContext *context) : SerializationGridRegistry(context), category(-1) {}
+    CKSTRING GetTypeName(int type) override {
+        if (type <= 0 || type >= GetLayerTypeCount()) return nullptr;
+        return SerializationGridRegistry::GetTypeName(type);
+    }
+    int GetGridClassificationCategory() override { return category; }
+    int category;
+};
+
+void GridFactoryAppliesConstructorStateAndGridAttribute() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    CKAttributeManager *attributes = context.GetAttributeManager();
+    int gridAttribute = attributes->GetAttributeTypeByName("Grid");
+    if (!attributes->IsAttributeIndexValid(gridAttribute))
+        gridAttribute = attributes->RegisterNewAttributeType("Grid", CKPGUID_BOOL, CKCID_3DENTITY);
+    Check(attributes->IsAttributeIndexValid(gridAttribute), "Cannot register the native Grid classification attribute");
+    CKGrid *created = RCKGrid::CreateInstance(&context);
+    Check(created != nullptr, "Grid factory did not construct a Grid");
+    RCKGrid *grid = reinterpret_cast<RCKGrid *>(created);
+    VxVector scale;
+    grid->GetScale(&scale, TRUE);
+    Check(grid->GetClassID() == CKCID_GRID && grid->GetWidth() == 0 && grid->GetLength() == 0 &&
+          grid->GetGridPriority() == 0 && grid->GetOrientationMode() == CKGRID_FREE &&
+          grid->GetLayerCount() == 0 && grid->GetCurrentMesh() == nullptr &&
+          GridPoseNear(scale, VxVector(1.0f, 10.0f, 1.0f)) && grid->HasAttribute(gridAttribute),
+          "Grid factory/constructor omitted defaults or registered Grid attribute");
+    const CK_ID id = grid->GetID();
+    Check(context.GetObject(id) == grid, "Direct Grid factory did not register its object");
+    context.DestroyObject(grid, CK_DESTROY_NONOTIFY);
+    Check(context.GetObject(id) == nullptr, "Grid factory object could not be destroyed normally");
+}
+
+template<bool ByName>
+void GridLayerOperationsWithoutManagerKeepState() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    RCKGrid grid(&context, "NoGridManager");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    RCK3dEntity entity(&context, "NoManagerEntity");
+    const int before = context.GetObjectsCountByClassID(CKCID_LAYER);
+    CKLayer *added = ByName ? grid.AddLayerByName("Unregistered") : grid.AddLayer(1);
+    Check(added == nullptr && grid.GetLayerByName("Unregistered") == nullptr &&
+          grid.RemoveLayer(1) == CKERR_NOTFOUND && !grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)) &&
+          grid.GetLayerCount() == 0 && context.GetObjectsCountByClassID(CKCID_LAYER) == before,
+          "Missing GridManager changed layers or native query/removal results");
+}
+
+template<bool ByName>
+void GridLayerRejectionsAndNamedLookupFollowRegistry() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new Pass27GridRegistry(&context);
+    RCKGrid grid(&context, "NamedLayers");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    const int type = registry->RegisterType("Pass27KnownCells");
+    const int before = context.GetObjectsCountByClassID(CKCID_LAYER);
+    Check(grid.AddLayer(0) == nullptr && grid.AddLayer(9999) == nullptr &&
+          grid.AddLayerByName("Pass27UnknownCells") == nullptr &&
+          grid.GetLayerByName("Pass27UnknownCells") == nullptr && grid.RemoveLayer(type) == CKERR_NOTFOUND,
+          "Unregistered or absent Layer was accepted");
+    Check((ByName ? grid.AddLayerByName("Pass27KnownCells", 1) : grid.AddLayer(type, 1)) == nullptr &&
+          grid.GetLayerCount() == 0 && context.GetObjectsCountByClassID(CKCID_LAYER) == before,
+          "Unsupported Layer format changed owned state");
+    CKLayer *layer = ByName ? grid.AddLayerByName("Pass27KnownCells") : grid.AddLayer(type);
+    Check(layer && layer->GetOwner() == grid.GetID() && layer->GetType() == type && layer->GetFormat() == 0 &&
+          std::strcmp(layer->GetName(), "Pass27KnownCells") == 0 &&
+          grid.GetLayer(type) == layer && grid.GetLayerByName("Pass27KnownCells") == layer,
+          "Registered Layer lost name/type/format/owner or named lookup");
+    Check(grid.AddLayer(type) == nullptr && grid.AddLayerByName("Pass27KnownCells") == nullptr &&
+          grid.GetLayerCount() == 1, "Duplicate named/indexed Layer changed owned state");
+    const CK_ID id = layer->GetID();
+    Check(grid.RemoveLayer(type) == CK_OK && context.GetObject(id) == nullptr &&
+          grid.GetLayerByName("Pass27KnownCells") == nullptr && grid.RemoveLayer(type) == CKERR_NOTFOUND,
+          "Layer removal did not destroy the matched Layer or retain its absent result");
+}
+
+void GridNamedClassificationUsesRegisteredCategoryAndNativeErrors() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new Pass27GridRegistry(&context);
+    CKAttributeManager *attributes = context.GetAttributeManager();
+    const int a = attributes->RegisterNewAttributeType("Pass27SharedA", CKPGUID_BOOL, CKCID_3DENTITY);
+    const int b = attributes->RegisterNewAttributeType("Pass27SharedB", CKPGUID_BOOL, CKCID_3DENTITY);
+    const int foreign = attributes->RegisterNewAttributeType("Pass27Foreign", CKPGUID_BOOL, CKCID_3DENTITY);
+    attributes->SetAttributeCategory(a, "Pass27GridCategory");
+    attributes->SetAttributeCategory(b, "Pass27GridCategory");
+    attributes->SetAttributeCategory(foreign, "Pass27OtherCategory");
+    registry->category = attributes->GetAttributeCategoryIndex(a);
+    RCKGrid grid(&context, "NamedClassifications");
+    RCK3dEntity entity(&context, "MultiAttributeEntity");
+    Check(!grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)) && !grid.HasCompatibleClass(nullptr),
+          "Empty/null entity matched Grid classifications");
+    Check(grid.AddClassificationByName("Pass27SharedA") == CK_OK &&
+          grid.AddClassificationByName("Pass27SharedA") == CKERR_NOTFOUND &&
+          grid.AddClassificationByName("Pass27Foreign") == CK_OK && entity.SetAttribute(foreign) &&
+          entity.SetAttribute(b) && !grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)),
+          "Shared unrelated-category or different-category-member attributes matched");
+    Check(entity.SetAttribute(a) && grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)),
+          "Reverse attribute scan omitted a real shared classification");
+    Check(grid.RemoveClassificationByName("Pass27SharedA") == CK_OK &&
+          grid.RemoveClassificationByName("Pass27SharedA") == CKERR_NOTFOUND &&
+          !grid.HasCompatibleClass(reinterpret_cast<CK3dEntity *>(&entity)) &&
+          grid.AddClassificationByName("Pass27Unknown") == CKERR_NOTFOUND &&
+          grid.RemoveClassificationByName("Pass27Unknown") == CKERR_NOTFOUND,
+          "Named classification removal or unknown-name result differs from original");
+}
+
+template<bool Current>
+void GridPreSaveCollectsLayersAndOnlyCurrentMesh() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new Pass27GridRegistry(&context);
+    RCKGrid grid(&context, "PreSaveGrid");
+    grid.SetDimensions(1, 1, 1.0f, 1.0f);
+    CKLayer *layer = grid.AddLayer(registry->RegisterType("Pass27PreSaveCells"));
+    Check(layer != nullptr, "Cannot create PreSave Layer");
+    CKMesh *first = static_cast<CKMesh *>(context.CreateObject(CKCID_MESH, "CurrentCandidate"));
+    CKMesh *other = static_cast<CKMesh *>(context.CreateObject(CKCID_MESH, "DiscardedCandidate"));
+    Check(first && other, "Cannot create PreSave mesh candidates");
+    grid.AddMesh(first); grid.AddMesh(other); grid.SetCurrentMesh(Current ? first : nullptr, TRUE);
+    TemporarySerializationFile temporary;
+    CKFile file(&context);
+    const CKDWORD flags = CK_STATESAVE_GRIDONLY;
+    Check(file.StartSave(temporary.Path) == CK_OK, "Cannot initialize the native CKFile save job");
+    // The test registry advertises no automatic manager callbacks.
+    Check(registry->PreSave() == CK_OK, "Cannot initialize the test registry's file type map");
+    file.SaveObject(&grid, flags); // Dispatch the real PreSave callback inside its required save job.
+    Check(grid.GetMeshCount() == (Current ? 1 : 0) && grid.GetCurrentMesh() == (Current ? first : nullptr),
+          "PreSave did not collapse the mesh list to its current mesh");
+    bool hasLayer = false, hasFirst = false, hasOther = false;
+    for (CKFileObject &entry : file.m_FileObjects) {
+        if (entry.Object == layer->GetID()) { hasLayer = true; Check(entry.SaveFlags == flags, "Layer PreSave flags changed"); }
+        if (entry.Object == first->GetID()) hasFirst = true;
+        if (entry.Object == other->GetID()) hasOther = true;
+    }
+    Check(hasLayer && hasFirst == Current && !hasOther &&
+          context.GetObject(other->GetID()) == other, "PreSave dependency collection omitted Layer/current mesh or destroyed caller meshes");
+    Check(file.EndSave() == CK_OK, "Grid PreSave dependency queue could not complete its real file save");
+}
+
+template<bool Visible>
+void GridPostLoadBuildsOnlyVisibleDisplay() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new Pass27GridRegistry(&context);
+    RCKGrid grid(&context, "PostLoadGrid");
+    grid.SetDimensions(1, 1, 1.0f, 1.0f);
+    if (!Visible) grid.Show(CKHIDE);
+    CKLayer *layer = grid.AddLayer(registry->RegisterType("Pass27PostLoadCells"));
+    Check(layer != nullptr, "Cannot create PostLoad Layer");
+    const int before = Pass26LiveObjectCount(context);
+    grid.PostLoad();
+    Check(grid.IsVisible() == Visible, "PostLoad changed saved visibility");
+    if (Visible) {
+        CKMesh *mesh = grid.GetCurrentMesh();
+        Check(mesh && mesh->GetVertexCount() == 12 && (mesh->GetVertexColor(0) >> 24) == 127,
+              "Visible PostLoad omitted native 0.5-opacity display");
+    } else {
+        Check(grid.GetCurrentMesh() == nullptr && grid.GetMeshCount() == 0 && Pass26LiveObjectCount(context) == before,
+              "Hidden PostLoad allocated display resources");
+    }
+}
+
+void GridSaveMasksAndEmptyLayerWireMatchOriginalLayout() {
+    CKContext context(nullptr, 0, 0);
+    RCKGrid grid(&context, "SelectiveGrid");
+    grid.SetDimensions(3, 2, 6.0f, 8.0f); grid.SetGridPriority(-7); grid.SetOrientationMode(CKGRID_XZ);
+    const CKDWORD masks[] = {0, CK_STATESAVE_3DENTITYONLY, 0x00400000u, 0x00800000u,
+                            0x01000000u, 0x02000000u, 0x04000000u, 0x08000000u};
+    for (CKDWORD flags : masks) {
+        Chunk saved(grid.Save(nullptr, flags), &DeleteCKStateChunk);
+        Check(saved.get() != nullptr, "Selective Grid Save returned no chunk");
+        saved->StartRead();
+        const bool included = (flags & CK_STATESAVE_GRIDONLY) != 0;
+        Check((saved->SeekIdentifier(CK_STATESAVE_GRIDDATA) != FALSE) == included,
+              "Grid mask changed base-only versus complete Grid block selection");
+        if (!included) continue;
+        Check(saved->SeekIdentifierAndReturnSize(CK_STATESAVE_GRIDDATA) == 24,
+              "Standalone empty Grid block has the wrong native size");
+        Check(saved->ReadInt() == 3 && saved->ReadInt() == 2 && saved->ReadInt() == 0 &&
+              saved->ReadInt() == -7 && saved->ReadDword() == CKGRID_XZ && saved->ReadXObjectArray().Size() == 0,
+              "Standalone Grid fields/reserved word/empty Layer sequence changed");
+    }
+    CKFile file(&context);
+    Chunk saved(grid.Save(&file, 0), &DeleteCKStateChunk); saved->StartRead();
+    Check(saved->SeekIdentifierAndReturnSize(CK_STATESAVE_GRIDDATA) == 28 &&
+          saved->ReadInt() == 3 && saved->ReadInt() == 2 && saved->ReadInt() == 0 &&
+          saved->ReadInt() == -7 && saved->ReadDword() == CKGRID_XZ && saved->ReadInt() == 1 &&
+          saved->ReadXObjectArray().Size() == 0, "File Grid block omitted its native marker or ignored unconditional file inclusion");
+}
+
+template<bool FileMode>
+void GridLoadIndependentEmptyLayerWireAndAbsentBlock() {
+    CKContext context(nullptr, 0, 0);
+    RCKGrid grid(&context, "IndependentLoad");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f); grid.SetGridPriority(6); grid.SetOrientationMode(CKGRID_YZ);
+    Chunk missing = NewChunk(CKCID_GRID);
+    missing->WriteIdentifier(0x76543210u); missing->WriteInt(17); missing->CloseChunk(); missing->StartRead();
+    CKFile file(&context);
+    CKFile *mode = FileMode ? &file : nullptr;
+    Check(grid.Load(nullptr, mode) == CKERR_INVALIDPARAMETER && grid.Load(missing.get(), mode) == CK_OK &&
+          grid.GetWidth() == 2 && grid.GetLength() == 1 && grid.GetGridPriority() == 6 &&
+          grid.GetOrientationMode() == CKGRID_YZ, "Null/absent Grid block changed saved Grid fields");
+    Chunk wire = NewChunk(CKCID_GRID);
+    wire->WriteIdentifier(CK_STATESAVE_GRIDDATA);
+    wire->WriteInt(4); wire->WriteInt(3); wire->WriteInt(0x11223344);
+    wire->WriteInt(-9); wire->WriteDword(CKGRID_XY);
+    if (FileMode) wire->WriteInt(1);
+    wire->StartObjectIDSequence(0); wire->CloseChunk(); wire->StartRead();
+    Check(grid.Load(wire.get(), mode) == CK_OK && grid.GetWidth() == 4 && grid.GetLength() == 3 &&
+          grid.GetGridPriority() == -9 && grid.GetOrientationMode() == CKGRID_XY && grid.GetLayerCount() == 0,
+          "Independent file/memory Grid wire did not restore native fields or empty Layers");
+}
+
+class Pass27GridMemoryProbe : public RCKGrid {
+public:
+    explicit Pass27GridMemoryProbe(CKContext *context) : RCKGrid(context, "MemoryDelegation") {}
+    int LayerArrayBytes() const { return m_Layers.GetMemoryOccupation(FALSE); }
+};
+
+void GridMemoryAddsOwnedLayerStorageToEntityEstimate() {
+    CKContext context(nullptr, 0, 0);
+    new RCKRenderManager(&context);
+    auto *registry = new Pass27GridRegistry(&context);
+    Pass27GridMemoryProbe grid(&context);
+    grid.SetDimensions(3, 2, 3.0f, 2.0f);
+    CKMesh *mesh = static_cast<CKMesh *>(context.CreateObject(CKCID_MESH, "MemoryMesh"));
+    Check(mesh != nullptr, "Cannot create Grid memory mesh"); grid.AddMesh(mesh);
+    const int fields = static_cast<int>(sizeof(XObjectArray) + 4 * sizeof(CKDWORD) + sizeof(CKMesh *));
+    Check(grid.GetMemoryOccupation() == grid.RCK3dEntity::GetMemoryOccupation() + fields + grid.LayerArrayBytes(),
+          "Empty Grid memory did not delegate existing entity/mesh allocations");
+    CKLayer *a = grid.AddLayer(registry->RegisterType("MemoryA"));
+    CKLayer *b = grid.AddLayer(registry->RegisterType("MemoryB"));
+    Check(a && b && grid.GetMemoryOccupation() == grid.RCK3dEntity::GetMemoryOccupation() + fields +
+          grid.LayerArrayBytes() + 2 * 3 * 2 * 4, "Grid memory did not count four bytes for each owned Layer cell");
+    grid.RemoveAllLayers();
+    Check(grid.GetMemoryOccupation() == grid.RCK3dEntity::GetMemoryOccupation() + fields + grid.LayerArrayBytes() &&
+          context.GetObject(mesh->GetID()) == mesh, "Layer removal confused retained array capacity with live cell storage");
+}
+
+// Pass 27 layer functional regressions.
+// Pass27 observer requires pass27-layer-allocation-hooks.inc at global scope.
+class LayerArrayReleaseObservationScope {
+public:
+    explicit LayerArrayReleaseObservationScope(void *pointer, size_t bytes = 0) {
+        s_LayerArrayObservedPointer = pointer;
+        s_LayerArrayObservedBytes = bytes;
+        s_LayerArrayObservedAllocations = 0;
+        s_LayerArrayObservedReleases = 0;
+        s_LayerArrayReleaseObservation = true;
+    }
+    ~LayerArrayReleaseObservationScope() {
+        s_LayerArrayReleaseObservation = false;
+        s_LayerArrayObservedPointer = nullptr;
+        s_LayerArrayObservedBytes = 0;
+    }
+};
+
+template<bool Transferred>
+void LayerDestructorReleasesCurrentArrayExactlyOnce() {
+    CKContext context(nullptr, 0, 0);
+    RCKGrid grid(&context, "ObservedLayerOwner");
+    grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer *layer = new RCKLayer(&context, "ObservedLayer", grid.GetID());
+    CKSquare *cells = layer->GetSquareArray();
+    Check(cells != nullptr, "Observed Layer did not allocate its initial cells");
+    if (Transferred) {
+        CKSquare *replacement = new CKSquare[4]();
+        replacement[3].dval = 0xA1B2C3D4u;
+        {
+            LayerArrayReleaseObservationScope previous(cells);
+            layer->SetSquareArray(replacement);
+            Check(s_LayerArrayObservedReleases == 0 && layer->GetSquareArray() == replacement,
+                  "SetSquareArray freed the previous allocation instead of transferring only the current pointer");
+            delete[] cells;
+            Check(s_LayerArrayObservedReleases == 1,
+                  "The replacing caller could not release the previous Layer allocation exactly once");
+        }
+        cells = replacement;
+    }
+    const CK_ID layerID = layer->GetID();
+    LayerArrayReleaseObservationScope current(cells);
+    delete layer;
+    Check(s_LayerArrayObservedReleases == 1 && !context.GetObject(layerID) && context.GetObject(grid.GetID()) == &grid,
+          "Layer destruction did not release its current cell pointer once while retaining the owner");
+    RCKLayer fresh(&context, "ObservedLayerFresh", grid.GetID());
+    CKDWORD last = 1; fresh.GetValue(1, 1, &last);
+    Check(last == 0, "Layer owner was not usable after independently observed cell release");
+}
+
+template<bool FileSave>
+void LayerSaveReleasesPackedScratchAndMatchesIndependentWire() {
+    CKContext context(nullptr, 0, 0);
+    auto *registry = new LayerRegistry(&context);
+    registry->color.Set(0.25f, 0.5f, 0.75f, 1.0f);
+    registry->parameter = CKGUID(0x10203040, 0x50607080);
+    RCKGrid grid(&context, "ObservedScratchGrid"); grid.SetDimensions(32, 32, 32.0f, 32.0f);
+    RCKLayer layer(&context, "ObservedScratchLayer", grid.GetID());
+    CKDWORD expected[1024];
+    for (int i = 0; i < 1024; ++i) {
+        expected[i] = 0x80000000u | static_cast<CKDWORD>(i * 257 + 3);
+        layer.GetSquareArray()[i].dval = expected[i];
+    }
+    CKFile file(&context);
+    file.m_FileObjects.Resize(1);
+    file.m_FileObjects[0].Object = file.m_FileObjects[0].CreatedObject = grid.GetID();
+    file.m_FileObjects[0].ObjPtr = &grid;
+    file.m_ObjectsHashTable.Insert(grid.GetID(), 0);
+    LayerArrayReleaseObservationScope scratch(nullptr, sizeof(expected));
+    Chunk saved(layer.Save(FileSave ? &file : nullptr, CK_STATESAVE_ALL), &DeleteCKStateChunk);
+    Check(saved && s_LayerArrayObservedAllocations == 1 && s_LayerArrayObservedReleases == 1,
+          "Successful Layer Save did not independently allocate/release its packed cell scratch exactly once");
+    saved->StartRead();
+    Check(saved->SeekIdentifierAndReturnSize(CK_STATESAVE_LAYERDATA) == (FileSave ? 28 : 16) + 4 + sizeof(expected),
+          "Layer word payload/header size differed from independent native wire layout");
+    Check(saved->ReadObjectID() == grid.GetID(), "Layer wire owner changed");
+    if (!FileSave) Check(saved->ReadInt() == 1, "Layer memory type word changed");
+    Check(saved->ReadInt() == 0, "Layer wire format changed");
+    if (FileSave) {
+        Check(saved->ReadInt() == 3 && saved->ReadDword() == registry->color.GetRGBA() && saved->ReadGuid() == registry->parameter,
+              "Layer file version/color/GUID header changed");
+    }
+    Check(saved->ReadDword() == 1, "Layer wire visible flag changed");
+    void *raw = nullptr;
+    const int bytes = saved->ReadBuffer(&raw);
+    const bool matched = bytes == sizeof(expected) && raw && std::memcmp(raw, expected, sizeof(expected)) == 0;
+    CKDeletePointer(raw);
+    Check(matched, "Layer packed cells changed four-byte stride or independent word values");
+    for (int i = 0; i < 1024; ++i) Check(layer.GetSquareArray()[i].dval == expected[i], "Layer Save changed source cells");
+    if (FileSave) Check(registry->remap[1] == 1 && registry->m_RemapCount == 2, "Successful Layer file Save did not commit its one type remap");
+}
+
+void LayerFitNoActionPreservesPointersWithoutAllocation() {
+    CKContext context(nullptr, 0, 0);
+    RCKGrid zero(&context, "ZeroFitGrid");
+    RCKGrid sized(&context, "SizedFitGrid"); sized.SetDimensions(2, 1, 2.0f, 1.0f);
+    RCKLayer layer(&context, "NoActionFitLayer", sized.GetID());
+    CKSquare *owned = layer.GetSquareArray(); owned[0].dval = 17; owned[1].dval = 29;
+    LayerArrayAllocationFailureScope allocation;
+    layer.FitSquareArray(); // Already fitted.
+    layer.SetOwner(0); layer.FitSquareArray(); // No owner.
+    layer.SetOwner(zero.GetID()); layer.FitSquareArray(); // Owner dimensions pending.
+    layer.SetOwner(sized.GetID()); layer.SetFormat(7); layer.FitSquareArray(); // Format does not store cells.
+    Check(s_MorphArrayAllocationFailure == 0 && layer.GetSquareArray() == owned && owned[0].dval == 17 && owned[1].dval == 29,
+          "A no-action owned Fit branch allocated or changed its cells");
+    layer.SetFormat(0);
+    CKSquare *transferred = new CKSquare[2](); transferred[0].dval = 41;
+    layer.SetSquareArray(transferred); delete[] owned; layer.FitSquareArray();
+    Check(s_MorphArrayAllocationFailure == 0 && layer.GetSquareArray() == transferred && transferred[0].dval == 41,
+          "Fit resized an unknown-capacity transferred pointer");
+}
+
+void LayerFitRejectsUnrepresentableOwnerCountWithoutAllocation() {
+    CKContext context(nullptr, 0, 0); new LayerRegistry(&context);
+    RCKGrid grid(&context, "InvalidCountFitGrid");
+    RCKLayer layer(&context, "InvalidCountFitLayer", 0);
+    Chunk cells = LayerPreparedCellFixture(nullptr, 2); LoadChunk(layer, cells.get());
+    CKSquare *previous = layer.GetSquareArray();
+    grid.SetDimensions(INT_MAX, 2, 2.0f, 2.0f); layer.SetOwner(grid.GetID());
+    LayerArrayAllocationFailureScope allocation;
+    layer.FitSquareArray();
+    Check(s_MorphArrayAllocationFailure == 0 && layer.GetSquareArray() == previous && previous[0].dval == 21 && previous[1].dval == 34,
+          "Public Fit changed cells or attempted an unrepresentable allocation");
+    Chunk data = NewChunk(CKCID_GRID);
+    data->WriteIdentifier(CK_STATESAVE_GRIDDATA);
+    data->WriteInt(INT_MAX); data->WriteInt(2); data->WriteInt(0); data->WriteInt(0); data->WriteDword(CKGRID_FREE); data->WriteInt(1);
+    XObjectArray links; links.PushBack(layer.GetID()); links.Save(data.get(), &context);
+    data->CloseChunk(); data->StartRead(); CKFile file(&context);
+    Check(grid.Load(data.get(), &file) == CKERR_INVALIDPARAMETER && s_MorphArrayAllocationFailure == 0 && layer.GetSquareArray() == previous,
+          "Checked Layer Fit did not propagate unrepresentable count through Grid Load");
+    grid.SetDimensions(2, 1, 2.0f, 1.0f);
+    layer.FitSquareArray(); CKDWORD last = 0; layer.GetValue(1, 0, &last);
+    Check(s_MorphArrayAllocationFailure == 0 && last == 34, "Fitted cells were unusable after representable owner dimensions were restored");
+}
+
+template<bool FileLoad>
+void LayerLoadsIndependentWordsAndReleasesPreviousCells() {
+    CKContext context(nullptr, 0, 0); auto *registry = new LayerRegistry(&context);
+    RCKGrid grid(&context, "IndependentLoadGrid"); grid.SetDimensions(2, 2, 2.0f, 2.0f);
+    RCKLayer layer(&context, "IndependentLoadLayer", grid.GetID());
+    CKSquare *previous = layer.GetSquareArray(); previous[0].dval = 999;
+    const CKDWORD words[] = {0x12345678u, 0xFEDCBA98u, 0x80000000u, 0x7FFFFFFFu};
+    const CKGUID parameter(0xA1B2C3D4, 0x55667788);
+    Chunk data = NewChunk(CKCID_LAYER);
+    data->WriteIdentifier(CK_STATESAVE_LAYERDATA); data->WriteObject(&grid);
+    if (!FileLoad) data->WriteInt(73); // Native Load derives type from name instead.
+    data->WriteInt(0);
+    if (FileLoad) { data->WriteInt(3); data->WriteDword(0xFF336699u); data->WriteGuid(parameter); }
+    data->WriteDword(0xA4); data->WriteBuffer_LEndian(sizeof(words), const_cast<CKDWORD *>(words));
+    data->CloseChunk(); data->StartRead(); CKFile file(&context);
+    LayerArrayReleaseObservationScope release(previous);
+    Check(layer.Load(data.get(), FileLoad ? &file : nullptr) == CK_OK && s_LayerArrayObservedReleases == 1,
+          "Independent Layer Load did not replace/release previous owned cells exactly once");
+    Check(layer.GetType() == 1 && layer.GetFormat() == 0 && !layer.IsVisible() && layer.GetOwner() == grid.GetID(),
+          "Independent Layer Load changed native type/name/format/flag/owner semantics");
+    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+        CKDWORD value = 0; layer.GetValue(x, y, &value);
+        Check(value == words[y * 2 + x], "Independent Layer wire values changed row-major four-byte semantics");
+    }
+    if (FileLoad) Check(registry->parameter == parameter && registry->color.GetRGBA() == 0xFF336699u,
+                        "Independent Layer file metadata changed");
+}
+
+// Pass 28 CKFile functional regressions.
+
+static CKGUID Pass28FileParameterGuid(int variant) {
+    return CKGUID(0x50323846u, 0x100u + variant);
+}
+
+static void Pass28RegisterFileParameterType(CKContext &context, int variant) {
+    CKParameterTypeDesc description;
+    description.Guid = Pass28FileParameterGuid(variant);
+    description.TypeName = variant ? "Pass28 Other Integer" : "Pass28 Reference Integer";
+    description.DefaultSize = sizeof(int);
+    Check(context.GetParameterManager()->RegisterParameterType(&description) == CK_OK,
+          "Pass28 parameter type registration failed");
+}
+
+class Pass28ReferenceMappingManager : public CKBaseManager {
+public:
+    explicit Pass28ReferenceMappingManager(CKContext *context)
+        : CKBaseManager(context, CKGUID(0x50323846u, 0x200u), "Pass28 reference mapping"),
+          SourceId(0), ActualId(0), Loaded(0), InSession(FALSE) {
+        Check(context->RegisterNewManager(this) == CK_OK, "Pass28 mapping manager registration failed");
+    }
+    CKStateChunk *SaveData(CKFile *file) override {
+        CKStateChunk *chunk = CreateCKStateChunk(CKCID_OBJECT, file);
+        chunk->StartWrite();
+        chunk->WriteIdentifier(0x50323846u);
+        // Deliberately a raw source ID: RealId must translate it during LoadData.
+        chunk->WriteDword(SourceId);
+        chunk->CloseChunk();
+        return chunk;
+    }
+    CKERROR LoadData(CKStateChunk *chunk, CKFile *) override {
+        Check(chunk != nullptr, "Pass28 mapping manager chunk missing");
+        chunk->StartRead();
+        Check(chunk->SeekIdentifier(0x50323846u), "Pass28 mapping manager payload missing");
+        SourceId = chunk->ReadDword();
+        CKObjectManager *objects = static_cast<CKObjectManager *>(m_Context->GetManagerByGuid(OBJECT_MANAGER_GUID));
+        Check(objects != nullptr, "Pass28 load callback object manager missing");
+        InSession = objects->InLoadSession();
+        ActualId = objects->RealId(SourceId);
+        ++Loaded;
+        return CK_OK;
+    }
+    CK_ID SourceId, ActualId;
+    int Loaded;
+    CKBOOL InSession;
+};
+
+template<bool Compressed, int MatchMode>
+void FileReferenceHeaderRestoresSourceIdAndExistingParameter() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    Pass28RegisterFileParameterType(source, 0);
+    Pass28RegisterFileParameterType(destination, 0);
+    Pass28RegisterFileParameterType(destination, 1);
+    for (int i = 0; i < 7; ++i) destination.CreateObject(CKCID_OBJECT, nullptr);
+    CKParameterLocal *parameter = source.CreateCKParameterLocal("Pass28 Shared Parameter", Pass28FileParameterGuid(0));
+    CKParameterLocal *existing = destination.CreateCKParameterLocal(
+        MatchMode == 1 ? "Pass28 Different Name" : "Pass28 Shared Parameter", Pass28FileParameterGuid(MatchMode == 2 ? 1 : 0));
+    Check(parameter && existing, "Pass28 reference parameter creation failed");
+    const int sourceValue = 317, existingValue = 941;
+    Check(parameter->SetValue(&sourceValue, sizeof(sourceValue)) == CK_OK &&
+          existing->SetValue(&existingValue, sizeof(existingValue)) == CK_OK, "Pass28 reference value setup failed");
+    Check(parameter->GetID() != existing->GetID(), "Pass28 reference fixture requires distinct object IDs");
+    const CK_ID sourceId = parameter->GetID(), destinationId = existing->GetID();
+    Pass28ReferenceMappingManager *savedManager = new Pass28ReferenceMappingManager(&source);
+    Pass28ReferenceMappingManager *loadedManager = new Pass28ReferenceMappingManager(&destination);
+    savedManager->SourceId = sourceId;
+    TemporarySerializationFile temporary;
+    source.SetFileWriteMode(Compressed ? CKFILE_WHOLECOMPRESSED : CKFILE_UNCOMPRESSED);
+    DependencySaveFile saved(&source);
+    CKFile loaded(&destination);
+    Check(saved.StartSave(temporary.Path) == CK_OK, "Pass28 reference StartSave failed");
+    saved.SaveObjectAsReference(parameter);
+    saved.SaveObjectAsReference(parameter);
+    saved.SaveObjectAsReference(nullptr);
+    Check(saved.m_FileObjects.Size() == 1 && saved.m_ReferencedObjects.Size() == 1 &&
+          saved.SaveFindObjectIndex(sourceId) == 0 && saved.m_FileObjects[0].SaveFlags == 0,
+          "Pass28 duplicate reference changed its queue or ID mapping");
+    Check(saved.EndSave() == CK_OK, "Pass28 reference EndSave failed");
+    Check(!(parameter->GetObjectFlags() & CK_OBJECT_ONLYFORFILEREFERENCE), "Pass28 reference marker escaped EndSave");
+    Check(loaded.OpenFile(temporary.Path) == CK_OK && loaded.m_FileObjects.Size() == 1,
+          "Pass28 reference file header unavailable");
+    Check(loaded.m_FileObjects[0].Object == (sourceId | 0x80000000u),
+          "Pass28 reference header must encode the source ID with the highest bit");
+    Check(loaded.LoadFileData(nullptr) == CK_OK, "Pass28 reference file load failed");
+    CKFileObject &entry = loaded.m_FileObjects[0];
+    Check(entry.ObjPtr == (MatchMode == 0 ? existing : nullptr) &&
+          entry.CreatedObject == (MatchMode == 0 ? destinationId : 0),
+          "Pass28 reference did not use exact parameter name and type matching");
+    int actual = 0;
+    Check(existing->GetValue(&actual) == CK_OK && actual == existingValue,
+          "Pass28 reference load overwrote the existing parameter value");
+    Check(loadedManager->Loaded == 1 && loadedManager->InSession && loadedManager->SourceId == sourceId,
+          "Pass28 reference mapping callback did not run inside the real load session");
+    Check(loadedManager->ActualId == (MatchMode == 0 ? destinationId : 0),
+          "Pass28 reference lost the source-ID mapping used by manager load callbacks");
+    Check(entry.Object == sourceId, "Pass28 reference source ID was decoded by arithmetic negation");
+}
+
+template<bool Compressed>
+void FileSaveQueuePreservesPromotionFlagsDependenciesAndJobReset() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    new RCKRenderManager(&source);
+    new RCKRenderManager(&destination);
+    RCKTexture texture(&source, "Pass28 Promoted Texture");
+    RCKMaterial material(&source, "Pass28 Promoted Material");
+    material.SetTexture(0, &texture);
+    material.SetPower(23.75f);
+    for (int i = 0; i < 7; ++i) destination.CreateObject(CKCID_OBJECT, nullptr);
+    TemporarySerializationFile temporary;
+    source.SetFileWriteMode(Compressed ? CKFILE_WHOLECOMPRESSED : CKFILE_UNCOMPRESSED);
+    DependencySaveFile saved(&source);
+    CKFile loaded(&destination);
+    for (int job = 0; job < 2; ++job) {
+        Check(saved.StartSave(temporary.Path) == CK_OK, "Pass28 promotion StartSave failed");
+        Check(saved.m_FileObjects.IsEmpty() && saved.m_ReferencedObjects.IsEmpty(), "Pass28 save job retained prior entries");
+        saved.SaveObjectAsReference(&texture);
+        saved.SaveObject(&material, CK_STATESAVE_ALL);
+        saved.SaveObject(&material, 0);
+        saved.SaveObjectAsReference(&material);
+        saved.SaveObjectAsReference(&texture);
+        Check(saved.m_FileObjects.Size() == 2 && saved.m_ReferencedObjects.IsEmpty(),
+              "Pass28 promotion left a reference or duplicate dependency");
+        Check(!saved.m_AlreadyReferencedMask.IsSet(texture.GetID()) && saved.m_AlreadySavedMask.IsSet(texture.GetID()),
+              "Pass28 promotion did not transfer reference state into saved state");
+        Check(saved.SaveFindObjectIndex(texture.GetID()) == 0 && saved.SaveFindObjectIndex(material.GetID()) == 1 &&
+              saved.SaveFindObjectIndex(0x7fffffffu) == -1, "Pass28 save index does not map source IDs to queue positions");
+        for (int i = 0; i < 2; ++i) {
+            CKFileObject &entry = saved.m_FileObjects[i];
+            Check(entry.SaveFlags == CK_STATESAVE_ALL && saved.m_IndexByClassId[entry.ObjectCid].Size() == 1 &&
+                  saved.m_IndexByClassId[entry.ObjectCid][0] == i, "Pass28 promotion flags or per-class index changed");
+        }
+        Check(saved.EndSave() == CK_OK && loaded.Load(temporary.Path, nullptr) == CK_OK, "Pass28 promoted file cycle failed");
+        RCKTexture *newTexture = nullptr;
+        RCKMaterial *newMaterial = nullptr;
+        for (int i = 0; i < loaded.m_FileObjects.Size(); ++i) {
+            CKFileObject &entry = loaded.m_FileObjects[i];
+            Check(!(entry.Object & 0x80000000u) && entry.ObjPtr, "Pass28 promoted dependency remained reference-only on wire");
+            if (entry.ObjectCid == CKCID_TEXTURE) newTexture = static_cast<RCKTexture *>(entry.ObjPtr);
+            if (entry.ObjectCid == CKCID_MATERIAL) newMaterial = static_cast<RCKMaterial *>(entry.ObjPtr);
+        }
+        Check(newTexture && newMaterial && newMaterial->GetTexture() == newTexture &&
+              newMaterial->GetPower() == material.GetPower(), "Pass28 promoted file lost dependency remapping or material fields");
+        material.SetPower(51.5f);
+    }
+}
+
+void FileSaveQueueExcludesDynamicAndNotSavedObjects() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    CKObject *dynamic = source.CreateObject(CKCID_OBJECT, "Pass28 Dynamic", CK_OBJECTCREATION_DYNAMIC);
+    CKObject *excluded = source.CreateObject(CKCID_OBJECT, "Pass28 Excluded");
+    CKObject *accepted = source.CreateObject(CKCID_OBJECT, "Pass28 Accepted");
+    Check(dynamic && excluded && accepted && dynamic->IsDynamic(), "Pass28 exclusion fixture setup failed");
+    excluded->ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED, 0);
+    TemporarySerializationFile temporary;
+    DependencySaveFile saved(&source);
+    CKFile loaded(&destination);
+    Check(saved.StartSave(temporary.Path) == CK_OK, "Pass28 exclusion StartSave failed");
+    saved.SaveObjectAsReference(dynamic); saved.SaveObjectAsReference(excluded); saved.SaveObjectAsReference(nullptr);
+    Check(saved.m_FileObjects.IsEmpty() && saved.m_ReferencedObjects.IsEmpty() &&
+          !saved.m_AlreadyReferencedMask.IsSet(dynamic->GetID()) && !saved.m_AlreadyReferencedMask.IsSet(excluded->GetID()),
+          "Pass28 excluded reference mutated queue state");
+    saved.SaveObject(dynamic); saved.SaveObject(excluded); saved.SaveObject(nullptr);
+    Check(saved.m_FileObjects.IsEmpty() && saved.m_AlreadySavedMask.IsSet(dynamic->GetID()) &&
+          saved.m_AlreadySavedMask.IsSet(excluded->GetID()), "Pass28 excluded save differs from native saved-mask ordering");
+    saved.SaveObject(accepted); saved.SaveObject(accepted, 0);
+    Check(saved.m_FileObjects.Size() == 1 && saved.SaveFindObjectIndex(accepted->GetID()) == 0 &&
+          saved.m_SaveIDMax == accepted->GetID(), "Pass28 accepted save queue or max ID incorrect");
+    Check(saved.EndSave() == CK_OK && loaded.Load(temporary.Path, nullptr) == CK_OK && loaded.m_FileObjects.Size() == 1,
+          "Pass28 exclusion file cycle failed");
+    Check(loaded.m_FileObjects[0].ObjPtr && std::strcmp(loaded.m_FileObjects[0].ObjPtr->GetName(), "Pass28 Accepted") == 0,
+          "Pass28 full file created an excluded object or lost the accepted object");
+}
+
+class Pass28PreSaveObject : public CKObject {
+public:
+    Pass28PreSaveObject(CKContext *context, CKObject *dependency)
+        : CKObject(context, "Pass28 Before Callback"), Dependency(dependency), PreSaved(0), Saved(0),
+          PreFlags(0), SavedFlags(0), OwnIndex(0) {}
+    void PreSave(CKFile *file, CKDWORD flags) override {
+        ++PreSaved;
+        PreFlags = flags;
+        OwnIndex = static_cast<DependencySaveFile *>(file)->SaveFindObjectIndex(GetID());
+        file->SaveObject(this, 0); // Native saved-mask ordering stops recursion.
+        file->SaveObject(Dependency, flags);
+        SetName("Pass28 After Callback");
+    }
+    CKStateChunk *Save(CKFile *file, CKDWORD flags) override {
+        ++Saved;
+        SavedFlags = flags;
+        CKStateChunk *chunk = CKObject::Save(file, flags);
+        chunk->WriteIdentifier(0x50323847u);
+        chunk->WriteDword(flags);
+        chunk->CloseChunk();
+        return chunk;
+    }
+    CKObject *Dependency;
+    int PreSaved, Saved;
+    CKDWORD PreFlags, SavedFlags;
+    int OwnIndex;
+};
+
+void FileSaveNonLevelPreSaveRunsBeforeEntryAndKeepsFirstFlags() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    CKObject dependency(&source, "Pass28 Callback Dependency");
+    Pass28PreSaveObject object(&source, &dependency);
+    object.Show(CKHIDE);
+    const CKDWORD firstFlags = 0x12340000u;
+    TemporarySerializationFile temporary;
+    DependencySaveFile saved(&source);
+    CKFile loaded(&destination);
+    Check(saved.StartSave(temporary.Path) == CK_OK, "Pass28 callback StartSave failed");
+    saved.SaveObject(&object, firstFlags);
+    saved.SaveObject(&object, CK_STATESAVE_ALL);
+    Check(object.PreSaved == 1 && object.OwnIndex == -1 && object.PreFlags == firstFlags,
+          "Pass28 non-Level PreSave order or duplicate callback flags changed");
+    Check(saved.m_FileObjects.Size() == 2 && saved.SaveFindObjectIndex(dependency.GetID()) == 0 &&
+          saved.SaveFindObjectIndex(object.GetID()) == 1 && saved.m_FileObjects[1].SaveFlags == firstFlags &&
+          std::strcmp(saved.m_FileObjects[1].Name, "Pass28 After Callback") == 0,
+          "Pass28 non-Level callback dependency/name was not captured after PreSave");
+    Check(saved.EndSave() == CK_OK && object.Saved == 1 && object.SavedFlags == firstFlags,
+          "Pass28 EndSave did not deliver the first accepted save flags exactly once");
+    Check(loaded.OpenFile(temporary.Path) == CK_OK && loaded.LoadFileData(nullptr) == CK_OK,
+          "Pass28 callback full-file load failed");
+    CKObject *newObject = destination.GetObjectByName("Pass28 After Callback");
+    Check(newObject && newObject->IsVisible() == CKHIDE && destination.GetObjectByName("Pass28 Callback Dependency"),
+          "Pass28 callback file did not preserve its post-callback name, visibility and dependency");
+}
+
+void FileSaveLevelEntryExistsBeforePreSaveAndSceneReferencePromotes() {
+    CKContext source(nullptr, 0, 0), destination(nullptr, 0, 0);
+    new RCKRenderManager(&source);
+    new RCKRenderManager(&destination);
+    CKLevel *level = static_cast<CKLevel *>(source.CreateObject(CKCID_LEVEL, "Pass28 Level"));
+    CKScene *scene = static_cast<CKScene *>(source.CreateObject(CKCID_SCENE, "Pass28 Additional Scene"));
+    RCKMaterial *entity = static_cast<RCKMaterial *>(source.CreateObject(CKCID_MATERIAL, "Pass28 Scene Material"));
+    Check(level && scene && entity && level->AddScene(scene) == CK_OK, "Pass28 Level scene fixture setup failed");
+    entity->Show(CKHIDE);
+    entity->SetPower(13.5f);
+    scene->AddObjectToScene(entity, FALSE);
+    Check(scene->IsObjectHere(entity), "Pass28 Level dependency not attached to its Scene");
+    TemporarySerializationFile temporary;
+    DependencySaveFile saved(&source);
+    CKFile loaded(&destination);
+    Check(saved.StartSave(temporary.Path) == CK_OK && !saved.m_SceneSaved, "Pass28 Level StartSave state incorrect");
+    saved.SaveObjectAsReference(scene);
+    Check(saved.m_SceneSaved && saved.m_ReferencedObjects.Size() == 1 &&
+          saved.m_FileObjects[0].SaveFlags == 0, "Pass28 Scene reference did not set scene-save state");
+    saved.SaveObject(level);
+    saved.SaveObject(level);
+    // The Scene already occupies slot zero. Its new entity dependency must be
+    // appended after the Level entry, showing the Level-specific callback order.
+    Check(saved.SaveFindObjectIndex(level->GetID()) == 1 && saved.SaveFindObjectIndex(entity->GetID()) == 2 &&
+          saved.m_FileObjects.Size() == 3 && saved.m_SceneSaved &&
+          saved.m_ReferencedObjects.IsEmpty() && !saved.m_AlreadyReferencedMask.IsSet(scene->GetID()),
+          "Pass28 Level entry order or recursive Scene reference promotion changed");
+    Check(saved.EndSave() == CK_OK && loaded.Load(temporary.Path, nullptr) == CK_OK,
+          "Pass28 Level/Scene full-file cycle failed");
+    CKLevel *newLevel = nullptr;
+    CKScene *newScene = nullptr;
+    for (int i = 0; i < loaded.m_FileObjects.Size(); ++i) {
+        CKFileObject &entry = loaded.m_FileObjects[i];
+        if (entry.ObjectCid == CKCID_LEVEL) newLevel = static_cast<CKLevel *>(entry.ObjPtr);
+        if (entry.ObjectCid == CKCID_SCENE && entry.Name && std::strcmp(entry.Name, "Pass28 Additional Scene") == 0)
+            newScene = static_cast<CKScene *>(entry.ObjPtr);
+    }
+    CKObject *newEntity = destination.GetObjectByName("Pass28 Scene Material");
+    Check(newLevel && newScene && newLevel->GetSceneCount() == 1 && newLevel->GetScene(0) == newScene && newLevel->GetLevelScene() &&
+          newEntity && newEntity->IsVisible() == CKHIDE && newScene->IsObjectHere(newEntity) &&
+          static_cast<RCKMaterial *>(newEntity)->GetPower() == 13.5f,
+          "Pass28 Level saved dependencies did not remap its scenes and default scene");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -6443,6 +8713,8 @@ int main(int argc, char **argv) {
         {"Runtime Grid missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, false, true>},
         {"Runtime Grid compressed missing marker fresh types", RuntimeGridFileRestoresTypeParameters<false, true, true>},
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
+        {"Runtime Grid SDK recreation uncompressed file", RuntimeGridRecreationPreservesDimensionsAndFileCells<false>},
+        {"Runtime Grid SDK recreation compressed file", RuntimeGridRecreationPreservesDimensionsAndFileCells<true>},
     };
     const Test tests[] = {
 
@@ -6934,7 +9206,115 @@ int main(int argc, char **argv) {
         {"Linear rotation original runtime boundaries", LoadedLinearMatchesOriginalRuntime<CKANIMATION_LINROT_CONTROL>},
         {"Linear scale original runtime boundaries", LoadedLinearMatchesOriginalRuntime<CKANIMATION_LINSCL_CONTROL>},
         {"Linear scale-axis original runtime boundaries", LoadedLinearMatchesOriginalRuntime<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"Layer memory Save requires manager", LayerWireSaveRequiresManagerBeforeSelectivePayload<false>},
+        {"Layer file Save requires manager", LayerWireSaveRequiresManagerBeforeSelectivePayload<true>},
+        {"Layer memory selective square wire", LayerWireMemorySaveUsesNativeSelectiveHeader<0>},
+        {"Layer memory selective nonzero format wire", LayerWireMemorySaveUsesNativeSelectiveHeader<7>},
+        {"Layer file version3 square wire", LayerWireFileSaveOmitsTypeAndWritesVersion3Metadata<0>},
+        {"Layer file version3 nonzero format wire", LayerWireFileSaveOmitsTypeAndWritesVersion3Metadata<7>},
+        {"Layer Load metadata version0", LayerWireLoadVersionedMetadataUsesNativeFieldOrder<0>},
+        {"Layer Load metadata version1", LayerWireLoadVersionedMetadataUsesNativeFieldOrder<1>},
+        {"Layer Load metadata version2", LayerWireLoadVersionedMetadataUsesNativeFieldOrder<2>},
+        {"Layer Load metadata version3", LayerWireLoadVersionedMetadataUsesNativeFieldOrder<3>},
+        {"Layer Load metadata forward version4", LayerWireLoadVersionedMetadataUsesNativeFieldOrder<4>},
+        {"Layer memory existing named type", LayerWireMemoryLoadIgnoresRawTypeAndRegistersName<true>},
+        {"Layer memory unregistered named type", LayerWireMemoryLoadIgnoresRawTypeAndRegistersName<false>},
+        {"Layer absent identifier preserves state", LayerWireNoIdentifierPreservesDerivedState},
+        {"Layer Load manager requirement", LayerWireLoadManagerRequirementDependsOnIdentifier},
+        {"Layer nonzero format clears old cells", LayerWireNonzeroFormatReloadDropsPreviousCells},
+        {"Layer native dependency descriptions", &LayerNativeDependencyDescriptions},
+        {"Layer cells preserve four-byte value semantics", &LayerCellsUseFourByteValuesAndNativeCoordinates},
+        {"Layer SetSquareArray transfers current pointer", &LayerSquareArrayTransfersCurrentPointerAndKeepsReplacementContract},
+        {"Layer SetOwner and InitOwner have distinct semantics", &LayerOwnerAssignmentAndInitializationKeepDistinctSemantics},
+        {"Layer dependency preparation excludes owner", &LayerPreparesItselfWithoutAddingItsOwnerDependency},
+        {"Layer pre-deletion detaches deleted owner", &LayerPreDeletionClearsOnlyAnOwnerMarkedForDeletion},
+        {"Layer dependency remapping preserves cell array", &LayerDependencyRemappingChangesOnlyTheOwnerReference},
+        {"Layer constructor array allocation failure", &LayerConstructorAllocationFailureLeavesUsableMetadata},
+        {"Layer InitOwner allocation failure preserves cells", &LayerInitOwnerAllocationFailureKeepsExistingOwnerAndCells},
+        {"Layer Copy includes cell data dependency", &LayerCopyPreservesNativeCellDependencyChoice<true>},
+        {"Layer Copy excludes cell data dependency", &LayerCopyPreservesNativeCellDependencyChoice<false>},
+        {"Layer Copy to self keeps owned cells", &LayerCopyToSelfKeepsOwnedCells},
+        {"Layer Copy allocation failure preserves cells", &LayerCopyAllocationFailureKeepsExistingLayerState},
+        {"Layer factory allocation failure returns null", &LayerFactoryAllocationFailureReturnsNull},
+        {"Grid dimensions coordinate and state contract", GridDimensionsCoordinateAndStateContract},
+        {"Grid copy dependency metadata contract", GridCopyDependencyMetadataContract},
+        {"Grid layer removal destroys every object", GridLayerRemovalDestroysEveryObject},
+        {"Grid legal resize rebuilds display geometry", GridLegalResizeRebuildsDisplayGeometry},
+        {"Grid copy remaps layers and owns display resources", GridCopyRemapsLayersAndOwnsDisplayResources},
+        {"Grid classification uses attribute category and native results", GridClassificationUsesAttributeCategoryAndNativeResults},
+        {"Scene memory includes object body and owned name", SceneMemoryIncludesObjectBodyAndOwnedName},
+        {"Scene memory counts allocated bits after clear", SceneMemoryCountsAllocatedBitsAfterClear},
+        {"Grid memory includes inherited scene storage and layer cells", GridMemoryIncludesInheritedSceneStorageAndLayerCells},
+        {"Grid registration descriptor native contract", GridRegistrationDescriptorMatchesNativeContract},
+        {"Grid external Layer deletion registered notification", GridExternalLayerDeletionPrunesRegisteredLinks<true>},
+        {"Grid manual callback after NONOTIFY Layer deletion", GridExternalLayerDeletionPrunesRegisteredLinks<false>},
+        {"Grid activity follows current scene transitions", GridActivityUsesOnlyTheCurrentSceneFlags},
+        {"Grid rotated coordinate and height queries", GridCoordinateQueriesFollowRotatedCellCentersAndHeight},
+        {"Grid local-only bounding box update", GridLocalOnlyBoxUpdatePreservesTheWorldCache},
+        {"Grid dependency usage delegates mesh animation", GridObjectUsageDelegatesMeshAndAnimationQueries},
+        {"Grid copy preparation excludes Layers", GridPreparationSelectsLayersWithoutOwnerRecursion<false>},
+        {"Grid copy preparation includes Layers", GridPreparationSelectsLayersWithoutOwnerRecursion<true>},
+        {"Grid preparation propagates do-not-save failure", GridPreparationPropagatesTheBaseSaveFailure},
+        {"Layer full cell Load allocation failure keeps cells", &LayerLoadCellAllocationFailureRetainsCellsAndCanRetry<4>},
+        {"Layer short cell Load allocation failure keeps cells", &LayerLoadCellAllocationFailureRetainsCellsAndCanRetry<2>},
+        {"Layer memory Save cell allocation failure", &LayerSaveCellPreparationAllocationFailureReturnsNull<false>},
+        {"Layer file Save cell allocation failure", &LayerSaveCellPreparationAllocationFailureReturnsNull<true>},
+        {"Layer explicit Fit failure keeps prefix and retries", &LayerExplicitFitAllocationFailureKeepsOwnedPrefixAndRetries},
+        {"Layer registration native descriptor fields", &LayerRegisterAppliesNativeDescriptorFields},
+        {"Layer context destruction retains owner", &LayerContextDestructionKeepsOwnerAndHandlesTransferredCells},
+        {"Grid reload rebuilds display for loaded dimensions", GridReloadRebuildsDisplayForLoadedDimensions},
+        {"Grid AddLayer owner allocation failure and retry", GridAddLayerRejectsUncommittedOwnerAndCanRetry<false>},
+        {"Grid AddLayerByName owner allocation failure and retry", GridAddLayerRejectsUncommittedOwnerAndCanRetry<true>},
+        {"Grid display missing manager cleanup and retry", GridDisplayWithoutManagerLeavesNoPartialResourcesAndCanRetry},
+        {"Grid display texture Create failure cleanup and retry", GridDisplaySurfaceFailureCleansResourcesAndCanRetry<true>},
+        {"Grid display unavailable surface cleanup and retry", GridDisplaySurfaceFailureCleansResourcesAndCanRetry<false>},
+        {"Grid display level membership cache and deletion", GridDisplayLevelMembershipCacheAndDeletionContract},
+        {"Grid Load Layer-first Fit failure and retry", GridLoadPropagatesLayerFirstFitFailureAndCanRetry},
+        {"Grid embedded Save allocation failure and retry", GridEmbeddedSavePropagatesLayerAllocationFailureAndCanRetry},
+        {"Grid embedded Load manager failure and retry", GridEmbeddedLoadPropagatesMissingManagerAndCanRetry},
+        {"Chunk object-ID array clears cached IDs on empty input", ChunkObjectIdArrayReadsReplaceNonemptyCacheWithEmpty},
+        {"Grid display null mesh factory cleanup and retry", GridDisplayFactoryNullPreservesCallerAndRetries<0>},
+        {"Grid display null main material factory cleanup and retry", GridDisplayFactoryNullPreservesCallerAndRetries<1>},
+        {"Grid display null border material factory cleanup and retry", GridDisplayFactoryNullPreservesCallerAndRetries<2>},
+        {"Grid display null texture factory cleanup and retry", GridDisplayFactoryNullPreservesCallerAndRetries<3>},
+        {"Grid display Layer pointer scratch allocation failure and retry", GridDisplayScratchAllocationFailurePreservesCallerAndRetries<0>},
+        {"Grid display Layer color scratch allocation failure and retry", GridDisplayScratchAllocationFailurePreservesCallerAndRetries<1>},
+        {"Grid display destroy during actual context ClearAll", GridDisplayDestroyDefersToContextDuringClearAll},
+        {"Grid signed Layer cell RGB native addition", GridDisplaySignedCellRgbUsesNativeAddition},
+        {"Grid display missing main material teardown", GridDisplayDestroyHandlesEditedMaterialSlots<true>},
+        {"Grid display aliased material teardown", GridDisplayDestroyHandlesEditedMaterialSlots<false>},
+        {"Grid factory defaults and registered attribute", GridFactoryAppliesConstructorStateAndGridAttribute},
+        {"Grid indexed Layer absent manager", GridLayerOperationsWithoutManagerKeepState<false>},
+        {"Grid named Layer absent manager", GridLayerOperationsWithoutManagerKeepState<true>},
+        {"Grid indexed Layer registry rejection and lookup", GridLayerRejectionsAndNamedLookupFollowRegistry<false>},
+        {"Grid named Layer registry rejection and lookup", GridLayerRejectionsAndNamedLookupFollowRegistry<true>},
+        {"Grid named classifications and native errors", GridNamedClassificationUsesRegisteredCategoryAndNativeErrors},
+        {"Grid PreSave current mesh and layers", GridPreSaveCollectsLayersAndOnlyCurrentMesh<true>},
+        {"Grid PreSave no current mesh and layers", GridPreSaveCollectsLayersAndOnlyCurrentMesh<false>},
+        {"Grid visible PostLoad display", GridPostLoadBuildsOnlyVisibleDisplay<true>},
+        {"Grid hidden PostLoad display", GridPostLoadBuildsOnlyVisibleDisplay<false>},
+        {"Grid Save masks and independent field layout", GridSaveMasksAndEmptyLayerWireMatchOriginalLayout},
+        {"Grid memory Load independent and absent fields", GridLoadIndependentEmptyLayerWireAndAbsentBlock<false>},
+        {"Grid file Load independent and absent fields", GridLoadIndependentEmptyLayerWireAndAbsentBlock<true>},
+        {"Grid memory entity delegation and owned cells", GridMemoryAddsOwnedLayerStorageToEntityEstimate},
+        {"Layer internal array destruction releases once", &LayerDestructorReleasesCurrentArrayExactlyOnce<false>},
+        {"Layer transferred array destruction releases once", &LayerDestructorReleasesCurrentArrayExactlyOnce<true>},
+        {"Layer memory Save packed scratch release and independent wire", &LayerSaveReleasesPackedScratchAndMatchesIndependentWire<false>},
+        {"Layer file Save packed scratch release and independent wire", &LayerSaveReleasesPackedScratchAndMatchesIndependentWire<true>},
+        {"Layer Fit no-action states keep cells without allocation", &LayerFitNoActionPreservesPointersWithoutAllocation},
+        {"Layer Fit unrepresentable owner count returns a checked error", &LayerFitRejectsUnrepresentableOwnerCountWithoutAllocation},
+        {"Layer memory Load independent words and previous-cell release", &LayerLoadsIndependentWordsAndReleasesPreviousCells<false>},
+        {"Layer file Load independent words and previous-cell release", &LayerLoadsIndependentWordsAndReleasesPreviousCells<true>},
+        {"File reference source ID and existing parameter", FileReferenceHeaderRestoresSourceIdAndExistingParameter<false, 0>},
+        {"Compressed file reference source ID and existing parameter", FileReferenceHeaderRestoresSourceIdAndExistingParameter<true, 0>},
+        {"File reference different parameter name", FileReferenceHeaderRestoresSourceIdAndExistingParameter<false, 1>},
+        {"File reference different parameter type", FileReferenceHeaderRestoresSourceIdAndExistingParameter<false, 2>},
+        {"File save queue promotion flags dependencies and reset", FileSaveQueuePreservesPromotionFlagsDependenciesAndJobReset<false>},
+        {"Compressed file save queue promotion flags dependencies and reset", FileSaveQueuePreservesPromotionFlagsDependenciesAndJobReset<true>},
+        {"File save queue excludes dynamic and not saved objects", FileSaveQueueExcludesDynamicAndNotSavedObjects},
 
+        {"File non-Level PreSave entry ordering and first flags", FileSaveNonLevelPreSaveRunsBeforeEntryAndKeepsFirstFlags},
+        {"File Level PreSave entry ordering and Scene reference promotion", FileSaveLevelEntryExistsBeforePreSaveAndSceneReferencePromotes},
     };
     int failures = 0;
     const Test *selectedTests = runtimeGrids ? gridTests : tests;
