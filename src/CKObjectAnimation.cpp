@@ -15,6 +15,7 @@
 #include <cfloat>
 #include <climits>
 #include <cstring>
+#include <new>
 
 namespace {
 
@@ -68,6 +69,147 @@ CKBOOL MergedSourceTime(float time, float length, RCKObjectAnimation *source, fl
         return FALSE;
     result = static_cast<float>(mapped);
     return TRUE;
+}
+
+// Legacy Load 0x10058C51 consumes native raw key arrays without AddKey sorting.
+// Partial raw records retain the key constructors' defaults.
+struct LegacyAnimationAxisKey {
+    float TimeStep;
+    float Unused;
+    VxQuaternion Rotation;
+    LegacyAnimationAxisKey() : Rotation(0.0f, 0.0f, 0.0f, 1.0f) {}
+};
+static_assert(sizeof(LegacyAnimationAxisKey) == 24, "Legacy scale-axis record must contain six floats");
+
+struct LegacyAnimationNormalEntry {
+    CKDWORD X;
+    CKDWORD Y;
+    LegacyAnimationNormalEntry() : X(0), Y(0) {}
+};
+static_assert(sizeof(LegacyAnimationNormalEntry) == 8, "Legacy normal conversion entry must contain two DWORDs");
+
+static CKBOOL SeekLegacyAnimationBlock(CKStateChunk *chunk, CKDWORD identifier, int &endWord) {
+    const int bytes = chunk->SeekIdentifierAndReturnSize(identifier);
+    if (bytes == -1)
+        return FALSE;
+    endWord = chunk->GetCurrentPos() + bytes / 4;
+    return TRUE;
+}
+
+static CKBOOL LegacyAnimationPayloadFits(CKStateChunk *chunk, int endWord, CKDWORD bytes) {
+    if (bytes > static_cast<CKDWORD>(INT_MAX))
+        return FALSE;
+    const int position = chunk->GetCurrentPos();
+    const CKDWORD words = bytes / 4 + ((bytes & 3) != 0);
+    return position >= 0 && endWord <= chunk->GetDataSize() / 4 && position <= endWord &&
+        words <= static_cast<CKDWORD>(endWord - position);
+}
+
+template<class Key>
+static CKERROR ReadLegacyAnimationArray(CKStateChunk *chunk, int endWord, CKDWORD bytes, int count, Key *&keys, CKBOOL words16 = FALSE) {
+    keys = nullptr;
+    // Native zero-count records do not read or skip the byte field's payload.
+    if (count == 0)
+        return CK_OK;
+    if (count < 0 || static_cast<size_t>(count) > static_cast<size_t>(-1) / sizeof(Key) ||
+        static_cast<size_t>(bytes) > static_cast<size_t>(count) * sizeof(Key) ||
+        !LegacyAnimationPayloadFits(chunk, endWord, bytes))
+        return CKERR_INVALIDFILE;
+    Key *prepared = new(std::nothrow) Key[count];
+    if (!prepared)
+        return CKERR_OUTOFMEMORY;
+    if (words16)
+        chunk->ReadAndFillBuffer_LEndian16(static_cast<int>(bytes), prepared);
+    else
+        chunk->ReadAndFillBuffer_LEndian(static_cast<int>(bytes), prepared);
+    keys = prepared;
+    return CK_OK;
+}
+
+static void DeleteLegacyAnimationMorphKeys(CKMorphKey *keys, int count) {
+    for (int i = 0; i < count; ++i) {
+        delete[] keys[i].PosArray;
+        delete[] keys[i].NormArray;
+    }
+    delete[] keys;
+}
+
+static CKERROR ReadLegacyAnimationMorphKeys(CKStateChunk *chunk, int endWord, int count, int vertexCount, CKMorphKey *&keys) {
+    keys = nullptr;
+    if (count <= 0)
+        return CK_OK;
+    if (vertexCount < 0 || static_cast<size_t>(count) > static_cast<size_t>(-1) / sizeof(CKMorphKey))
+        return CKERR_INVALIDFILE;
+    CKMorphKey *prepared = new(std::nothrow) CKMorphKey[count];
+    if (!prepared)
+        return CKERR_OUTOFMEMORY;
+    for (int i = 0; i < count; ++i) {
+        prepared[i].PosArray = nullptr;
+        prepared[i].NormArray = nullptr;
+    }
+    for (int i = 0; i < count; ++i) {
+        if (!LegacyAnimationPayloadFits(chunk, endWord, 8)) {
+            DeleteLegacyAnimationMorphKeys(prepared, count);
+            return CKERR_INVALIDFILE;
+        }
+        prepared[i].TimeStep = chunk->ReadFloat();
+        const CKDWORD bytes = chunk->ReadDword();
+        if (bytes == 0)
+            continue;
+        if (bytes / sizeof(VxVector) > static_cast<CKDWORD>(INT_MAX) || bytes % sizeof(VxVector) ||
+            bytes / sizeof(VxVector) < static_cast<CKDWORD>(vertexCount)) {
+            DeleteLegacyAnimationMorphKeys(prepared, count);
+            return CKERR_INVALIDFILE;
+        }
+        const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes,
+            static_cast<int>(bytes / sizeof(VxVector)), prepared[i].PosArray);
+        if (error != CK_OK) {
+            DeleteLegacyAnimationMorphKeys(prepared, count);
+            return error;
+        }
+    }
+    keys = prepared;
+    return CK_OK;
+}
+
+static CKERROR ReadLegacyAnimationNormals(CKStateChunk *chunk, int endWord, RCKMorphController *controller, CKBOOL converted) {
+    for (int i = 0; i < controller->GetKeyCount(); ++i) {
+        CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(i));
+        if (!LegacyAnimationPayloadFits(chunk, endWord, 4))
+            return CKERR_INVALIDFILE;
+        const CKDWORD bytes = chunk->ReadDword();
+        VxCompressedVector *replacement = nullptr;
+        if (bytes != 0) {
+            if ((bytes & 3) || bytes / 4 > static_cast<CKDWORD>(INT_MAX) || controller->GetMorphVertexCount() < 0 ||
+                bytes / 4 < static_cast<CKDWORD>(controller->GetMorphVertexCount()))
+                return CKERR_INVALIDFILE;
+            const int count = static_cast<int>(bytes / 4);
+            if (!converted) {
+                const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, replacement, TRUE);
+                if (error != CK_OK)
+                    return error;
+            } else {
+                LegacyAnimationNormalEntry *entries;
+                CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, entries);
+                if (error != CK_OK)
+                    return error;
+                replacement = new(std::nothrow) VxCompressedVector[count];
+                if (!replacement) {
+                    delete[] entries;
+                    return CKERR_OUTOFMEMORY;
+                }
+                for (int v = 0; v < count; ++v) {
+                    replacement[v].xa = static_cast<short>(entries[v].X & 0xFFFFu);
+                    replacement[v].ya = static_cast<short>(entries[v].Y & 0xFFFFu);
+                }
+                delete[] entries;
+            }
+        }
+        // Allocate/read completely before releasing this key's previous normals.
+        delete[] key->NormArray;
+        key->NormArray = replacement;
+    }
+    return CK_OK;
 }
 
 } // namespace
@@ -330,6 +472,13 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
         // New format (data version >= 1)
         if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMSHARED)) {
             // Shared animation reference format
+            const int blockBytes = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_OBJANIMSHARED);
+            const int startWord = chunk->GetCurrentPos();
+            const int totalWords = chunk->GetDataSize() / 4;
+            if (blockBytes < 40 || (blockBytes & 3) || startWord < 0 || startWord > totalWords ||
+                blockBytes / 4 > totalWords - startWord)
+                return CKERR_INVALIDFILE;
+            const int endWord = startWord + blockBytes / 4;
             CKObjectAnimation *sharedAnim = (CKObjectAnimation *) chunk->ReadObject(m_Context);
             rootPos.x = chunk->ReadFloat();
             rootPos.y = chunk->ReadFloat();
@@ -342,15 +491,23 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
 
             m_Flags = chunk->ReadDword();
             m_Entity = (RCK3dEntity *) chunk->ReadObject(m_Context);
+            if (chunk->GetCurrentPos() > endWord)
+                return CKERR_INVALIDFILE;
 
             if (m_Flags & 0x80) {
+                if (chunk->GetCurrentPos() > endWord - 3)
+                    return CKERR_INVALIDFILE;
                 m_MergeFactor = chunk->ReadFloat();
                 m_Anim1 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
                 m_Anim2 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
+                if (chunk->GetCurrentPos() > endWord)
+                    return CKERR_INVALIDFILE;
             }
 
-            // Strictly matches original: always call ShareDataFrom (nullptr creates new keyframe data)
-            ShareDataFrom(sharedAnim);
+            // Native ignores the FALSE result for self-sharing. A missing
+            // owner creates new data; failure to allocate that data is a load failure.
+            if (!ShareDataFrom(sharedAnim) && sharedAnim != this)
+                return CKERR_OUTOFMEMORY;
         } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS)) {
             // Full keyframe data format
             const int blockBytes = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_OBJANIMCONTROLLERS);
@@ -398,368 +555,371 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
                 if (dataSize > static_cast<CKDWORD>(endWord - chunk->GetCurrentPos()))
                     return CKERR_INVALIDFILE;
                 CKAnimController *ctrl = CreateController(ctrlType);
+                if (!ctrl) {
+                    switch (ctrlType) {
+                    case CKANIMATION_CONTROLLER_POS:
+                    case CKANIMATION_LINPOS_CONTROL:
+                    case CKANIMATION_TCBPOS_CONTROL:
+                    case CKANIMATION_BEZIERPOS_CONTROL:
+                    case CKANIMATION_CONTROLLER_ROT:
+                    case CKANIMATION_LINROT_CONTROL:
+                    case CKANIMATION_TCBROT_CONTROL:
+                    case CKANIMATION_CONTROLLER_SCL:
+                    case CKANIMATION_LINSCL_CONTROL:
+                    case CKANIMATION_TCBSCL_CONTROL:
+                    case CKANIMATION_BEZIERSCL_CONTROL:
+                    case CKANIMATION_LINSCLAXIS_CONTROL:
+                    case CKANIMATION_TCBSCLAXIS_CONTROL:
+                    case CKANIMATION_CONTROLLER_MORPH:
+                    case CKANIMATION_MORPH_CONTROL:
+                        return CKERR_OUTOFMEMORY;
+                    default:
+                        break; // Unknown records retain the native skip contract.
+                    }
+                }
                 if (ctrl) {
                     void *buffer = chunk->LockReadBuffer();
-                    if (ctrl->GetType() == CKANIMATION_MORPH_CONTROL) {
-                        if (!static_cast<RCKMorphController *>(ctrl)->ReadKeysFromBuffer(buffer, static_cast<int>(dataSize) * 4)) {
-                            DeleteController(ctrlType);
-                            return CKERR_INVALIDFILE;
-                        }
-                    } else {
-                        ctrl->ReadKeysFrom(buffer);
+                    const int bufferBytes = static_cast<int>(dataSize) * 4;
+                    int readSize = 0;
+                    // Factory aliases use the controller's canonical type.
+                    switch (ctrl->GetType()) {
+                    case CKANIMATION_LINPOS_CONTROL:
+                        readSize = static_cast<RCKLinearPositionController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_LINROT_CONTROL:
+                        readSize = static_cast<RCKLinearRotationController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_LINSCL_CONTROL:
+                        readSize = static_cast<RCKLinearScaleController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_LINSCLAXIS_CONTROL:
+                        readSize = static_cast<RCKLinearScaleAxisController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_TCBPOS_CONTROL:
+                        readSize = static_cast<RCKTCBPositionController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_TCBROT_CONTROL:
+                        readSize = static_cast<RCKTCBRotationController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_TCBSCL_CONTROL:
+                        readSize = static_cast<RCKTCBScaleController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_TCBSCLAXIS_CONTROL:
+                        readSize = static_cast<RCKTCBScaleAxisController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_BEZIERPOS_CONTROL:
+                        readSize = static_cast<RCKBezierPositionController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_BEZIERSCL_CONTROL:
+                        readSize = static_cast<RCKBezierScaleController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    case CKANIMATION_MORPH_CONTROL:
+                        readSize = static_cast<RCKMorphController *>(ctrl)->ReadKeysFromBuffer(buffer, bufferBytes);
+                        break;
+                    default:
+                        break;
+                    }
+                    if (!readSize) {
+                        DeleteController(ctrlType);
+                        return CKERR_INVALIDFILE;
                     }
                 }
                 chunk->Skip(static_cast<int>(dataSize));
             }
-        } else if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMNEWDATA)) {
-            // Legacy/new snapshot format (identifier 0x1000) as implemented by CK2_3D.dll
-            ResetKeyframeData();
-            m_KeyframeData->m_ObjectAnimation = this;
+        } else {
+            // Native fallback permits normal-only snapshots without NEWDATA.
+            int endWord;
+            if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMNEWDATA, endWord)) {
+                ResetKeyframeData();
+                if (!m_KeyframeData)
+                    return CKERR_OUTOFMEMORY;
+                m_KeyframeData->m_ObjectAnimation = this;
 
-            rootPos.x = chunk->ReadFloat();
-            rootPos.y = chunk->ReadFloat();
-            rootPos.z = chunk->ReadFloat();
-            // Skip 4 reserved floats
-            chunk->ReadFloat();
-            chunk->ReadFloat();
-            chunk->ReadFloat();
-            chunk->ReadFloat();
+                if (!LegacyAnimationPayloadFits(chunk, endWord, 48))
+                    return CKERR_INVALIDFILE;
+                rootPos.x = chunk->ReadFloat();
+                rootPos.y = chunk->ReadFloat();
+                rootPos.z = chunk->ReadFloat();
+                chunk->ReadFloat();
+                chunk->ReadFloat();
+                chunk->ReadFloat();
+                chunk->ReadFloat();
+                const int morphVertexCount = chunk->ReadInt();
+                const int morphKeyCount = chunk->ReadInt();
+                m_Flags = chunk->ReadDword();
+                m_Entity = static_cast<RCK3dEntity *>(chunk->ReadObject(m_Context));
+                SetKeyframeLength(chunk->ReadFloat());
+                if (IsMerged()) {
+                    if (!LegacyAnimationPayloadFits(chunk, endWord, 12))
+                        return CKERR_INVALIDFILE;
+                    m_MergeFactor = chunk->ReadFloat();
+                    m_Anim1 = static_cast<RCKObjectAnimation *>(chunk->ReadObject(m_Context));
+                    m_Anim2 = static_cast<RCKObjectAnimation *>(chunk->ReadObject(m_Context));
+                }
 
-            const int morphVertexCount = chunk->ReadInt();
-            const int morphKeyCount = chunk->ReadInt();
-
-            m_Flags = chunk->ReadDword();
-            m_Entity = (RCK3dEntity *) chunk->ReadObject(m_Context);
-            const float length = chunk->ReadFloat();
-            SetKeyframeLength(length);
-
-            if (IsMerged()) {
-                m_MergeFactor = chunk->ReadFloat();
-                m_Anim1 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
-                m_Anim2 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
-            }
-
-            // Morph keys (positions)
-            struct MorphAccess : RCKMorphController {
-                using RCKMorphController::m_Keys;
-                using RCKMorphController::m_VertexCount;
-            };
-            struct LinPosAccess : RCKLinearPositionController {
-                using RCKLinearPositionController::m_Keys;
-            };
-            struct LinSclAccess : RCKLinearScaleController {
-                using RCKLinearScaleController::m_Keys;
-            };
-            struct LinRotAccess : RCKLinearRotationController {
-                using RCKLinearRotationController::m_Keys;
-            };
-            struct LinAxisAccess : RCKLinearScaleAxisController {
-                using RCKLinearScaleAxisController::m_Keys;
-            };
-
-            if (morphKeyCount > 0) {
-                // Strictly matches original: allocate keys array directly and read raw buffers (no AddKey sorting).
-                auto *morphCtrl = static_cast<MorphAccess *>(static_cast<RCKMorphController *>(CreateController(CKANIMATION_MORPH_CONTROL)));
-                if (morphCtrl) {
-                    morphCtrl->m_NbKeys = morphKeyCount;
-                    morphCtrl->m_VertexCount = morphVertexCount;
-                    morphCtrl->SetLength(length);
-
-                    morphCtrl->m_Keys = new CKMorphKey[morphKeyCount];
-                    for (int i = 0; i < morphKeyCount; ++i) {
-                        morphCtrl->m_Keys[i].TimeStep = chunk->ReadFloat();
-                        morphCtrl->m_Keys[i].PosArray = nullptr;
-                        morphCtrl->m_Keys[i].NormArray = nullptr;
-
-                        const CKDWORD sizeBytes = chunk->ReadDword();
-                        if (sizeBytes) {
-                            const int vecCount = (int)(sizeBytes / sizeof(VxVector));
-                            if (vecCount > 0) {
-                                morphCtrl->m_Keys[i].PosArray = new VxVector[vecCount];
-                                chunk->ReadAndFillBuffer_LEndian((int)sizeBytes, morphCtrl->m_Keys[i].PosArray);
-                            }
-                        }
+                if (morphKeyCount > 0) {
+                    auto *controller = static_cast<RCKMorphController *>(CreateController(CKANIMATION_MORPH_CONTROL));
+                    if (!controller)
+                        return CKERR_OUTOFMEMORY;
+                    CKMorphKey *keys;
+                    const CKERROR error = ReadLegacyAnimationMorphKeys(chunk, endWord, morphKeyCount, morphVertexCount, keys);
+                    if (error != CK_OK) {
+                        DeleteController(CKANIMATION_MORPH_CONTROL);
+                        return error;
                     }
-                }
-            }
-
-            // Linear position controller
-            {
-                auto *posCtrl = static_cast<LinPosAccess *>(static_cast<RCKLinearPositionController *>(CreateController(CKANIMATION_LINPOS_CONTROL)));
-                const CKDWORD bufSize = chunk->ReadDword();
-                const CKDWORD keyCount = chunk->ReadDword();
-
-                if (posCtrl)
-                    posCtrl->m_NbKeys = (int)keyCount;
-
-                if (posCtrl && keyCount) {
-                    posCtrl->m_Keys = new CKPositionKey[keyCount];
-                    chunk->ReadAndFillBuffer_LEndian((int)bufSize, posCtrl->m_Keys);
+                    controller->m_Keys = keys;
+                    controller->m_NbKeys = morphKeyCount;
+                    controller->m_VertexCount = morphVertexCount;
                 }
 
-                if (posCtrl && !keyCount)
-                    DeleteController(CKANIMATION_LINPOS_CONTROL);
-            }
-
-            // Linear scale controller
-            {
-                auto *sclCtrl = static_cast<LinSclAccess *>(static_cast<RCKLinearScaleController *>(CreateController(CKANIMATION_LINSCL_CONTROL)));
-                const CKDWORD bufSize = chunk->ReadDword();
-                const CKDWORD keyCount = chunk->ReadDword();
-
-                if (sclCtrl)
-                    sclCtrl->m_NbKeys = (int)keyCount;
-
-                if (sclCtrl && keyCount) {
-                    sclCtrl->m_Keys = new CKScaleKey[keyCount];
-                    chunk->ReadAndFillBuffer_LEndian((int)bufSize, sclCtrl->m_Keys);
-                }
-
-                if (sclCtrl && !keyCount)
-                    DeleteController(CKANIMATION_LINSCL_CONTROL);
-            }
-
-            // Linear rotation controller
-            {
-                auto *rotCtrl = static_cast<LinRotAccess *>(static_cast<RCKLinearRotationController *>(CreateController(CKANIMATION_LINROT_CONTROL)));
-                const CKDWORD rotBufSize = chunk->ReadDword();
-                const CKDWORD rotKeyCount = chunk->ReadDword();
-
-                if (rotCtrl)
-                    rotCtrl->m_NbKeys = (int)rotKeyCount;
-
-                if (rotCtrl && rotKeyCount) {
-                    rotCtrl->m_Keys = new CKRotationKey[rotKeyCount];
-                    chunk->ReadAndFillBuffer_LEndian((int)rotBufSize, rotCtrl->m_Keys);
-                }
-
-                if (rotCtrl && !rotKeyCount)
-                    DeleteController(CKANIMATION_LINROT_CONTROL);
-
-                // Off-axis scale axis controller is stored as float blocks (6 floats per key)
-                const CKDWORD axisBufSize = chunk->ReadDword();
-                const CKDWORD axisKeyCount = chunk->ReadDword();
-                if (axisKeyCount) {
-                    float *tmp = new float[(size_t)axisKeyCount * 6];
-                    chunk->ReadAndFillBuffer_LEndian((int)axisBufSize, tmp);
-
-                    auto *axisCtrl = static_cast<LinAxisAccess *>(static_cast<RCKLinearScaleAxisController *>(CreateController(CKANIMATION_LINSCLAXIS_CONTROL)));
-                    if (axisCtrl) {
-                        axisCtrl->m_NbKeys = (int)axisKeyCount;
-                        axisCtrl->m_Keys = new CKScaleAxisKey[axisKeyCount];
-                        for (CKDWORD i = 0; i < axisKeyCount; ++i) {
-                            axisCtrl->m_Keys[i].TimeStep = tmp[i * 6 + 0];
-                            axisCtrl->m_Keys[i].Rot = *(VxQuaternion *)&tmp[i * 6 + 2];
-                        }
+                // Snapshot ordering is position, scale, rotation, scale axis.
+                {
+                    if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                        return CKERR_INVALIDFILE;
+                    auto *controller = static_cast<RCKLinearPositionController *>(CreateController(CKANIMATION_LINPOS_CONTROL));
+                    if (!controller)
+                        return CKERR_OUTOFMEMORY;
+                    const CKDWORD bytes = chunk->ReadDword();
+                    const int count = chunk->ReadInt();
+                    CKPositionKey *keys;
+                    const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, keys);
+                    if (error != CK_OK) {
+                        DeleteController(CKANIMATION_LINPOS_CONTROL);
+                        return error;
                     }
-                    delete[] tmp;
+                    controller->m_Keys = keys;
+                    controller->m_NbKeys = count;
+                    if (count == 0)
+                        DeleteController(CKANIMATION_LINPOS_CONTROL);
                 }
-            }
-
-            // Optional morph normals formats
-            if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMORPHCOMP) && m_KeyframeData && m_KeyframeData->m_MorphController) {
-                CKMorphController *morphCtrl = m_KeyframeData->m_MorphController;
-                for (int i = 0; i < morphCtrl->GetKeyCount(); ++i) {
-                    CKMorphKey *key = static_cast<CKMorphKey *>(morphCtrl->GetKey(i));
-                    if (!key)
-                        continue;
-                    delete[] key->NormArray;
-                    key->NormArray = nullptr;
-
-                    const CKDWORD sizeBytes = chunk->ReadDword();
-                    if (!sizeBytes)
-                        continue;
-                    const int count = (int)(sizeBytes / sizeof(VxCompressedVector));
-                    if (count <= 0)
-                        continue;
-                    key->NormArray = new VxCompressedVector[count];
-                    chunk->ReadAndFillBuffer_LEndian16((int)sizeBytes, key->NormArray);
-                }
-            }
-
-            if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMORPHNORMALS) && m_KeyframeData && m_KeyframeData->m_MorphController) {
-                CKMorphController *morphCtrl = m_KeyframeData->m_MorphController;
-                for (int i = 0; i < morphCtrl->GetKeyCount(); ++i) {
-                    CKMorphKey *key = static_cast<CKMorphKey *>(morphCtrl->GetKey(i));
-                    if (!key)
-                        continue;
-                    delete[] key->NormArray;
-                    key->NormArray = nullptr;
-
-                    // Strictly matches original CK2_3D.dll (sub_1005C4B0 usage):
-                    // sizeBytes -> count = sizeBytes >> 2; read sizeBytes into a temp buffer, then
-                    // for each entry copy WORD[0] and WORD[2] into VxCompressedVector (xa, ya).
-                    const CKDWORD sizeBytes = chunk->ReadDword();
-                    if (!sizeBytes)
-                        continue;
-                    const int count = (int)(sizeBytes >> 2);
-                    if (count <= 0)
-                        continue;
-
-                    // Native sub_10013360 zeroes both DWORDs in every entry.
-                    // The payload fills only part of this conversion array.
-                    CKBYTE *tmp = new CKBYTE[(size_t)count * 8]();
-                    chunk->ReadAndFillBuffer_LEndian((int)sizeBytes, tmp);
-
-                    key->NormArray = new VxCompressedVector[count];
-                    CKWORD *words = reinterpret_cast<CKWORD *>(tmp);
-                    for (int v = 0; v < count; ++v) {
-                        key->NormArray[v].xa = (short)words[v * 4 + 0];
-                        key->NormArray[v].ya = (short)words[v * 4 + 2];
+                {
+                    if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                        return CKERR_INVALIDFILE;
+                    auto *controller = static_cast<RCKLinearScaleController *>(CreateController(CKANIMATION_LINSCL_CONTROL));
+                    if (!controller)
+                        return CKERR_OUTOFMEMORY;
+                    const CKDWORD bytes = chunk->ReadDword();
+                    const int count = chunk->ReadInt();
+                    CKScaleKey *keys;
+                    const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, keys);
+                    if (error != CK_OK) {
+                        DeleteController(CKANIMATION_LINSCL_CONTROL);
+                        return error;
                     }
-                    delete[] tmp;
+                    controller->m_Keys = keys;
+                    controller->m_NbKeys = count;
+                    if (count == 0)
+                        DeleteController(CKANIMATION_LINSCL_CONTROL);
                 }
+                {
+                    if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                        return CKERR_INVALIDFILE;
+                    auto *controller = static_cast<RCKLinearRotationController *>(CreateController(CKANIMATION_LINROT_CONTROL));
+                    if (!controller)
+                        return CKERR_OUTOFMEMORY;
+                    const CKDWORD bytes = chunk->ReadDword();
+                    const int count = chunk->ReadInt();
+                    CKRotationKey *keys;
+                    const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, keys);
+                    if (error != CK_OK) {
+                        DeleteController(CKANIMATION_LINROT_CONTROL);
+                        return error;
+                    }
+                    controller->m_Keys = keys;
+                    controller->m_NbKeys = count;
+                    if (count == 0)
+                        DeleteController(CKANIMATION_LINROT_CONTROL);
+                }
+                if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                    return CKERR_INVALIDFILE;
+                const CKDWORD axisBytes = chunk->ReadDword();
+                const int axisCount = chunk->ReadInt();
+                if (axisCount != 0) {
+                    LegacyAnimationAxisKey *entries;
+                    CKERROR error = ReadLegacyAnimationArray(chunk, endWord, axisBytes, axisCount, entries);
+                    if (error != CK_OK)
+                        return error;
+                    auto *controller = static_cast<RCKLinearScaleAxisController *>(CreateController(CKANIMATION_LINSCLAXIS_CONTROL));
+                    if (!controller) {
+                        delete[] entries;
+                        return CKERR_OUTOFMEMORY;
+                    }
+                    CKScaleAxisKey *keys = new(std::nothrow) CKScaleAxisKey[axisCount];
+                    if (!keys) {
+                        delete[] entries;
+                        DeleteController(CKANIMATION_LINSCLAXIS_CONTROL);
+                        return CKERR_OUTOFMEMORY;
+                    }
+                    for (int i = 0; i < axisCount; ++i) {
+                        keys[i].TimeStep = entries[i].TimeStep;
+                        keys[i].Rot = entries[i].Rotation;
+                    }
+                    delete[] entries;
+                    controller->m_Keys = keys;
+                    controller->m_NbKeys = axisCount;
+                }
+            }
+
+            // These blocks belong only to the fallback, not shared/CONTROLLERS.
+            if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMMORPHCOMP, endWord) && m_KeyframeData && m_KeyframeData->m_MorphController) {
+                const CKERROR error = ReadLegacyAnimationNormals(chunk, endWord, static_cast<RCKMorphController *>(m_KeyframeData->m_MorphController), FALSE);
+                if (error != CK_OK)
+                    return error;
+            }
+            if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMMORPHNORMALS, endWord) && m_KeyframeData && m_KeyframeData->m_MorphController) {
+                const CKERROR error = ReadLegacyAnimationNormals(chunk, endWord, static_cast<RCKMorphController *>(m_KeyframeData->m_MorphController), TRUE);
+                if (error != CK_OK)
+                    return error;
             }
         }
     } else {
-        // Very old format (data version < 1)
         ResetKeyframeData();
-
-        chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMORPHKEYS); // Skip old identifier if present
-
-        // Morph keys (legacy)
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMORPHKEYS2)) {
-            const int morphKeyCount = chunk->ReadInt();
-            if (morphKeyCount > 0) {
-                struct MorphAccess : RCKMorphController {
-                    using RCKMorphController::m_Keys;
-                    using RCKMorphController::m_VertexCount;
-                };
-
-                auto *morphCtrl = static_cast<MorphAccess *>(static_cast<RCKMorphController *>(CreateController(CKANIMATION_MORPH_CONTROL)));
-                const int morphVertexCount = chunk->ReadInt();
-                if (morphCtrl) {
-                    morphCtrl->m_NbKeys = morphKeyCount;
-                    morphCtrl->m_VertexCount = morphVertexCount;
-                    morphCtrl->m_Keys = new CKMorphKey[morphKeyCount];
-                    for (int i = 0; i < morphKeyCount; ++i) {
-                        morphCtrl->m_Keys[i].TimeStep = chunk->ReadFloat();
-                        morphCtrl->m_Keys[i].PosArray = nullptr;
-                        morphCtrl->m_Keys[i].NormArray = nullptr;
-
-                        const CKDWORD sizeBytes = chunk->ReadDword();
-                        const int vecCount = sizeBytes ? (int)(sizeBytes / sizeof(VxVector)) : 0;
-                        if (vecCount > 0) {
-                            morphCtrl->m_Keys[i].PosArray = new VxVector[vecCount];
-                            chunk->ReadAndFillBuffer_LEndian((int)sizeBytes, morphCtrl->m_Keys[i].PosArray);
-                        }
-                    }
+        if (!m_KeyframeData)
+            return CKERR_OUTOFMEMORY;
+        int endWord;
+        chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMORPHKEYS);
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMMORPHKEYS2, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 4))
+                return CKERR_INVALIDFILE;
+            const int count = chunk->ReadInt();
+            if (count > 0) {
+                auto *controller = static_cast<RCKMorphController *>(CreateController(CKANIMATION_MORPH_CONTROL));
+                if (!controller)
+                    return CKERR_OUTOFMEMORY;
+                if (!LegacyAnimationPayloadFits(chunk, endWord, 4)) {
+                    DeleteController(CKANIMATION_MORPH_CONTROL);
+                    return CKERR_INVALIDFILE;
                 }
+                const int vertexCount = chunk->ReadInt();
+                CKMorphKey *keys;
+                const CKERROR error = ReadLegacyAnimationMorphKeys(chunk, endWord, count, vertexCount, keys);
+                if (error != CK_OK) {
+                    DeleteController(CKANIMATION_MORPH_CONTROL);
+                    return error;
+                }
+                controller->m_Keys = keys;
+                controller->m_NbKeys = count;
+                controller->m_VertexCount = vertexCount;
             }
         }
-
-        // Position keys (legacy)
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMPOSKEYS)) {
-            struct LinPosAccess : RCKLinearPositionController {
-                using RCKLinearPositionController::m_Keys;
-            };
-
-            auto *posCtrl = static_cast<LinPosAccess *>(static_cast<RCKLinearPositionController *>(CreateController(CKANIMATION_LINPOS_CONTROL)));
-            const CKDWORD bufSize = chunk->ReadDword();
-            const CKDWORD keyCount = chunk->ReadDword();
-
-            if (posCtrl)
-                posCtrl->m_NbKeys = (int)keyCount;
-
-            if (posCtrl && keyCount) {
-                posCtrl->m_Keys = new CKPositionKey[keyCount];
-                chunk->ReadAndFillBuffer_LEndian((int)bufSize, posCtrl->m_Keys);
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMPOSKEYS, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                return CKERR_INVALIDFILE;
+            auto *controller = static_cast<RCKLinearPositionController *>(CreateController(CKANIMATION_LINPOS_CONTROL));
+            if (!controller)
+                return CKERR_OUTOFMEMORY;
+            const CKDWORD bytes = chunk->ReadDword();
+            const int count = chunk->ReadInt();
+            CKPositionKey *keys;
+            const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, keys);
+            if (error != CK_OK) {
+                DeleteController(CKANIMATION_LINPOS_CONTROL);
+                return error;
             }
-
-            if (posCtrl && !keyCount)
+            controller->m_Keys = keys;
+            controller->m_NbKeys = count;
+            if (count == 0)
                 DeleteController(CKANIMATION_LINPOS_CONTROL);
         }
-
-        // Rotation keys (legacy) + scale axis data
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMROTKEYS)) {
-            struct LinRotAccess : RCKLinearRotationController {
-                using RCKLinearRotationController::m_Keys;
-            };
-            struct LinAxisAccess : RCKLinearScaleAxisController {
-                using RCKLinearScaleAxisController::m_Keys;
-            };
-
-            auto *rotCtrl = static_cast<LinRotAccess *>(static_cast<RCKLinearRotationController *>(CreateController(CKANIMATION_LINROT_CONTROL)));
-            const CKDWORD rotBufSize = chunk->ReadDword();
-            const CKDWORD rotKeyCount = chunk->ReadDword();
-
-            if (rotCtrl)
-                rotCtrl->m_NbKeys = (int)rotKeyCount;
-
-            if (rotCtrl && rotKeyCount) {
-                rotCtrl->m_Keys = new CKRotationKey[rotKeyCount];
-                chunk->ReadAndFillBuffer_LEndian((int)rotBufSize, rotCtrl->m_Keys);
-            }
-
-            if (rotCtrl && !rotKeyCount)
-                DeleteController(CKANIMATION_LINROT_CONTROL);
-
-            const CKDWORD axisBufSize = chunk->ReadDword();
-            const CKDWORD axisKeyCount = chunk->ReadDword();
-            if (axisKeyCount) {
-                float *tmp = new float[(size_t)axisKeyCount * 6];
-                chunk->ReadAndFillBuffer_LEndian((int)axisBufSize, tmp);
-
-                auto *axisCtrl = static_cast<LinAxisAccess *>(static_cast<RCKLinearScaleAxisController *>(CreateController(CKANIMATION_LINSCLAXIS_CONTROL)));
-                if (axisCtrl) {
-                    axisCtrl->m_NbKeys = (int)axisKeyCount;
-                    axisCtrl->m_Keys = new CKScaleAxisKey[axisKeyCount];
-                    for (CKDWORD i = 0; i < axisKeyCount; ++i) {
-                        axisCtrl->m_Keys[i].TimeStep = tmp[i * 6 + 0];
-                        axisCtrl->m_Keys[i].Rot = *(VxQuaternion *)&tmp[i * 6 + 2];
-                    }
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMROTKEYS, endWord)) {
+            {
+                if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                    return CKERR_INVALIDFILE;
+                auto *controller = static_cast<RCKLinearRotationController *>(CreateController(CKANIMATION_LINROT_CONTROL));
+                if (!controller)
+                    return CKERR_OUTOFMEMORY;
+                const CKDWORD bytes = chunk->ReadDword();
+                const int count = chunk->ReadInt();
+                CKRotationKey *keys;
+                const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, keys);
+                if (error != CK_OK) {
+                    DeleteController(CKANIMATION_LINROT_CONTROL);
+                    return error;
                 }
-                delete[] tmp;
+                controller->m_Keys = keys;
+                controller->m_NbKeys = count;
+                if (count == 0)
+                    DeleteController(CKANIMATION_LINROT_CONTROL);
+            }
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                return CKERR_INVALIDFILE;
+            const CKDWORD axisBytes = chunk->ReadDword();
+            const int axisCount = chunk->ReadInt();
+            if (axisCount != 0) {
+                LegacyAnimationAxisKey *entries;
+                CKERROR error = ReadLegacyAnimationArray(chunk, endWord, axisBytes, axisCount, entries);
+                if (error != CK_OK)
+                    return error;
+                auto *controller = static_cast<RCKLinearScaleAxisController *>(CreateController(CKANIMATION_LINSCLAXIS_CONTROL));
+                if (!controller) {
+                    delete[] entries;
+                    return CKERR_OUTOFMEMORY;
+                }
+                CKScaleAxisKey *keys = new(std::nothrow) CKScaleAxisKey[axisCount];
+                if (!keys) {
+                    delete[] entries;
+                    DeleteController(CKANIMATION_LINSCLAXIS_CONTROL);
+                    return CKERR_OUTOFMEMORY;
+                }
+                for (int i = 0; i < axisCount; ++i) {
+                    keys[i].TimeStep = entries[i].TimeStep;
+                    keys[i].Rot = entries[i].Rotation;
+                }
+                delete[] entries;
+                controller->m_Keys = keys;
+                controller->m_NbKeys = axisCount;
             }
         }
-
-        // Scale keys (legacy)
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMSCLKEYS)) {
-            struct LinSclAccess : RCKLinearScaleController {
-                using RCKLinearScaleController::m_Keys;
-            };
-
-            auto *sclCtrl = static_cast<LinSclAccess *>(static_cast<RCKLinearScaleController *>(CreateController(CKANIMATION_LINSCL_CONTROL)));
-            const CKDWORD bufSize = chunk->ReadDword();
-            const CKDWORD keyCount = chunk->ReadDword();
-
-            if (sclCtrl)
-                sclCtrl->m_NbKeys = (int)keyCount;
-
-            if (sclCtrl && keyCount) {
-                sclCtrl->m_Keys = new CKScaleKey[keyCount];
-                chunk->ReadAndFillBuffer_LEndian((int)bufSize, sclCtrl->m_Keys);
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMSCLKEYS, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 8))
+                return CKERR_INVALIDFILE;
+            auto *controller = static_cast<RCKLinearScaleController *>(CreateController(CKANIMATION_LINSCL_CONTROL));
+            if (!controller)
+                return CKERR_OUTOFMEMORY;
+            const CKDWORD bytes = chunk->ReadDword();
+            const int count = chunk->ReadInt();
+            CKScaleKey *keys;
+            const CKERROR error = ReadLegacyAnimationArray(chunk, endWord, bytes, count, keys);
+            if (error != CK_OK) {
+                DeleteController(CKANIMATION_LINSCL_CONTROL);
+                return error;
             }
-
-            if (sclCtrl && !keyCount)
+            controller->m_Keys = keys;
+            controller->m_NbKeys = count;
+            if (count == 0)
                 DeleteController(CKANIMATION_LINSCL_CONTROL);
         }
 
-        // Read various old format identifiers
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMFLAGS))
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMFLAGS, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 4))
+                return CKERR_INVALIDFILE;
             m_Flags = chunk->ReadDword();
-
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMENTITY))
-            m_Entity = (RCK3dEntity *) chunk->ReadObject(m_Context);
-
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMLENGTH)) {
-            // Strictly matches original old-format behavior: only sets keyframe data length.
-            if (m_KeyframeData)
-                m_KeyframeData->m_Length = chunk->ReadFloat();
         }
-
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMMERGE)) {
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMENTITY, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 4))
+                return CKERR_INVALIDFILE;
+            m_Entity = static_cast<RCK3dEntity *>(chunk->ReadObject(m_Context));
+        }
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMLENGTH, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 4))
+                return CKERR_INVALIDFILE;
+            // Version 0 changes data length only, after controller construction.
+            m_KeyframeData->m_Length = chunk->ReadFloat();
+        }
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMMERGE, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 16))
+                return CKERR_INVALIDFILE;
             m_MergeFactor = chunk->ReadFloat();
             if (chunk->ReadInt())
                 m_Flags |= CK_OBJECTANIMATION_MERGED;
             else
                 m_Flags &= ~CK_OBJECTANIMATION_MERGED;
-
-            m_Anim1 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
-            m_Anim2 = (RCKObjectAnimation *) chunk->ReadObject(m_Context);
+            m_Anim1 = static_cast<RCKObjectAnimation *>(chunk->ReadObject(m_Context));
+            m_Anim2 = static_cast<RCKObjectAnimation *>(chunk->ReadObject(m_Context));
         }
-
-        if (chunk->SeekIdentifier(CK_STATESAVE_OBJANIMNEWDATA)) {
+        if (SeekLegacyAnimationBlock(chunk, CK_STATESAVE_OBJANIMNEWDATA, endWord)) {
+            if (!LegacyAnimationPayloadFits(chunk, endWord, 12))
+                return CKERR_INVALIDFILE;
             rootPos.x = chunk->ReadFloat();
             rootPos.y = chunk->ReadFloat();
             rootPos.z = chunk->ReadFloat();
