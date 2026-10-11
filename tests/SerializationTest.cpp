@@ -17,8 +17,12 @@
 #include "CKContext.h"
 #include "CKGlobals.h"
 #include "CKFile.h"
+#include "CKParameterManager.h"
 #include "CKGridManager.h"
+#include "CKAttributeManager.h"
 #include "CKObjectManager.h"
+#include "CKLevel.h"
+#include "CKScene.h"
 #include "CKParameterLocal.h"
 #include "CKStateChunk.h"
 #include "RCK3dEntity.h"
@@ -44,9 +48,22 @@
 #include "LinearReferenceSamples.h"
 #include "VxSharedLibrary.h"
 
-// Test-executable-only replacement for the nothrow array allocation entry.
-// Delegate normally; a scoped counter in the test thread can fail one request.
+// Test-executable-only replacements for nothrow allocation entries.
+// Delegate normally; the test thread can fail a selected request.
 static thread_local int s_MorphArrayAllocationFailure = -1;
+static thread_local bool s_ObjectAnimationAllocationFailure = false;
+
+void *operator new(size_t bytes, const std::nothrow_t &) noexcept {
+    if (s_ObjectAnimationAllocationFailure) {
+        s_ObjectAnimationAllocationFailure = false;
+        return nullptr;
+    }
+    try {
+        return ::operator new(bytes);
+    } catch (...) {
+        return nullptr;
+    }
+}
 
 void *operator new[](size_t bytes, const std::nothrow_t &) noexcept {
     if (s_MorphArrayAllocationFailure == 0) {
@@ -61,6 +78,37 @@ void *operator new[](size_t bytes, const std::nothrow_t &) noexcept {
         return nullptr;
     }
 }
+
+// Pass 27 global Layer array release observer.
+// Integrate at GLOBAL scope in the test executable, before its anonymous namespace.
+// CK2_3DStatic arrays resolve these entries. Shared CK2.dll arrays do not;
+// this observer intentionally makes no throwing-CK2 allocation assertion.
+static thread_local bool s_LayerArrayReleaseObservation = false;
+static thread_local void *s_LayerArrayObservedPointer = nullptr;
+static thread_local size_t s_LayerArrayObservedBytes = 0;
+static thread_local int s_LayerArrayObservedAllocations = 0;
+static thread_local int s_LayerArrayObservedReleases = 0;
+
+void *operator new[](size_t bytes) {
+    void *pointer = ::operator new(bytes);
+    if (s_LayerArrayReleaseObservation && s_LayerArrayObservedBytes == bytes) {
+        s_LayerArrayObservedPointer = pointer;
+        ++s_LayerArrayObservedAllocations;
+    }
+    return pointer;
+}
+
+void operator delete[](void *pointer) noexcept {
+    if (s_LayerArrayReleaseObservation && pointer && pointer == s_LayerArrayObservedPointer)
+        ++s_LayerArrayObservedReleases;
+    ::operator delete(pointer);
+}
+
+void operator delete[](void *pointer, size_t) noexcept {
+    ::operator delete[](pointer);
+}
+
+// End Pass 27 global Layer array release observer.
 
 extern void SetProcessorSpecific_FunctionsPtr();
 
@@ -1495,6 +1543,201 @@ void AddTimedAnimationKeys(RCKObjectAnimation &animation, float base, float span
         key->NormArray[0].ya = 300;
     }
     animation.SetLength(span);
+}
+
+class ObjectCloneProbe : public RCKObjectAnimation {
+public:
+    ObjectCloneProbe(CKContext *context, const char *name) : RCKObjectAnimation(context, name) {
+        context->m_ObjectManager->FinishRegisterObject(this);
+    }
+    CKKeyframeData *Data() const { return m_KeyframeData; }
+    int References() const { return m_KeyframeData ? m_KeyframeData->m_RefCount : 0; }
+    void DropData() { ReleaseKeyframeData(); }
+    void SetCloneState(RCK3dEntity *entity, RCKObjectAnimation *first, RCKObjectAnimation *second, CKDWORD flags) {
+        m_Entity = entity;
+        m_Anim1 = first; m_Anim2 = second;
+        m_Flags = flags; m_MergeFactor = 0.25f; m_CurrentStep = 0.625f;
+    }
+    RCKObjectAnimation *First() const { return m_Anim1; }
+    RCKObjectAnimation *Second() const { return m_Anim2; }
+    void SetParent(RCKKeyedAnimation *parent) { m_ParentKeyedAnimation = parent; }
+    RCKKeyedAnimation *Parent() const { return m_ParentKeyedAnimation; }
+};
+
+struct ObjectCloneDataSnapshot {
+    CKKeyframeData *Data;
+    CKObjectAnimation *Owner;
+    CKAnimController *Controllers[5];
+    WireWords Payloads[5];
+    float Length;
+};
+
+ObjectCloneDataSnapshot SnapshotObjectCloneData(ObjectCloneProbe &animation) {
+    ObjectCloneDataSnapshot snapshot;
+    snapshot.Data = animation.Data(); snapshot.Owner = animation.Shared(); snapshot.Length = animation.GetLength();
+    CKAnimController *controllers[] = {animation.GetPositionController(), animation.GetRotationController(),
+        animation.GetScaleController(), animation.GetScaleAxisController(), animation.GetMorphController()};
+    for (int i = 0; i < 5; ++i) {
+        snapshot.Controllers[i] = controllers[i];
+        if (!controllers[i]) continue;
+        const int bytes = controllers[i]->DumpKeysTo(nullptr);
+        Check(bytes > 0 && !(bytes & 3), "Object Clone fixture has invalid wire state");
+        snapshot.Payloads[i].resize(bytes / 4);
+        Check(controllers[i]->DumpKeysTo(snapshot.Payloads[i].data()) == bytes, "Cannot snapshot Object Clone controller");
+    }
+    return snapshot;
+}
+
+void CheckObjectCloneData(ObjectCloneProbe &animation, const ObjectCloneDataSnapshot &before, CKObjectAnimation *owner) {
+    Check(animation.Data() == before.Data && animation.Shared() == owner && animation.GetLength() == before.Length,
+          "Object Clone changed shared data/owner/length");
+    CKAnimController *controllers[] = {animation.GetPositionController(), animation.GetRotationController(),
+        animation.GetScaleController(), animation.GetScaleAxisController(), animation.GetMorphController()};
+    for (int i = 0; i < 5; ++i) {
+        Check(controllers[i] == before.Controllers[i], "Object Clone replaced a shared controller");
+        if (!controllers[i]) continue;
+        WireWords after(before.Payloads[i].size(), 0u);
+        Check(controllers[i]->DumpKeysTo(nullptr) == static_cast<int>(after.size() * 4) &&
+              controllers[i]->DumpKeysTo(after.data()) == static_cast<int>(after.size() * 4) && after == before.Payloads[i],
+              "Object Clone changed source controller bytes");
+    }
+}
+
+void CheckObjectCloneFields(ObjectCloneProbe &target, RCK3dEntity *entity, RCKObjectAnimation *first,
+                            RCKObjectAnimation *second, CKDWORD flags, RCKKeyedAnimation *parent) {
+    Check(target.Get3dEntity() == reinterpret_cast<CK3dEntity *>(entity) && target.First() == first && target.Second() == second &&
+          target.GetFlags() == flags && target.GetMergeFactor() == 0.25f && target.GetCurrentStep() == 0.625f && target.Parent() == parent,
+          "Object Clone lost playback fields or changed the target's parent");
+}
+
+void CheckObjectCloneReload(ObjectCloneProbe &animation, CKContext &context, float expectedPosition) {
+    VxVector actual;
+    Check(animation.EvaluatePosition(3.0f, actual) && std::fabs(actual.x - expectedPosition) < 5.0e-5f,
+          "Object Clone lost independently expected position");
+    Chunk saved(animation.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    Check(saved != nullptr, "Object Clone Save failed");
+    RCKObjectAnimation reloaded(&context, "ObjectCloneReloaded");
+    LoadChunk(reloaded, saved.get());
+    Check(reloaded.GetFlags() == animation.GetFlags() && reloaded.GetLength() == animation.GetLength() &&
+          reloaded.Get3dEntity() == animation.Get3dEntity() && reloaded.GetMergeFactor() == (animation.IsMerged() ? 0.25f : 0.5f),
+          "Object Clone Save/Load changed flags, entity, length or merged factor");
+    Check(reloaded.EvaluatePosition(3.0f, actual) && std::fabs(actual.x - expectedPosition) < 5.0e-5f,
+          "Object Clone Save/Load lost position semantics");
+}
+
+template<bool Merged>
+void ObjectAnimationSelfClonePreservesState() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe animation(&context, "SelfObjectClone"), alias(&context, "SelfCloneAlias");
+    RCKObjectAnimation first(&context, "FirstCloneSource"), second(&context, "SecondCloneSource");
+    RCK3dEntity entity(&context, "CloneEntity"); RCKKeyedAnimation parent(&context, "CloneParent");
+    AddTimedAnimationKeys(animation, 4.0f); AddTimedAnimationKeys(first, 2.0f); AddTimedAnimationKeys(second, 10.0f);
+    animation.SetCloneState(&entity, &first, &second, CK_OBJECTANIMATION_IGNOREMORPH | (Merged ? CK_OBJECTANIMATION_MERGED : 0));
+    animation.SetParent(&parent); alias.ShareDataFrom(&animation);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(animation);
+    animation.Clone(&animation);
+    CheckObjectCloneData(animation, before, &animation); CheckObjectCloneData(alias, before, &animation);
+    Check(animation.References() == 2, "Self Object Clone changed the reference count");
+    CheckObjectCloneFields(animation, &entity, &first, &second, CK_OBJECTANIMATION_IGNOREMORPH | (Merged ? CK_OBJECTANIMATION_MERGED : 0), &parent);
+    CheckObjectCloneReload(animation, context, 7.0f);
+}
+
+template<int Relationship>
+void ObjectAnimationClonePreservesSameDataAliases() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe owner(&context, "CloneOwner"), first(&context, "CloneAliasFirst"), second(&context, "CloneAliasSecond");
+    AddTimedAnimationKeys(owner, 4.0f); first.ShareDataFrom(&owner); second.ShareDataFrom(&owner);
+    ObjectCloneProbe &source = Relationship == 0 ? owner : first;
+    ObjectCloneProbe &target = Relationship == 1 ? owner : second;
+    RCKObjectAnimation mergedFirst(&context, "MergedCloneFirst"), mergedSecond(&context, "MergedCloneSecond");
+    AddTimedAnimationKeys(mergedFirst, 2.0f); AddTimedAnimationKeys(mergedSecond, 10.0f);
+    RCK3dEntity entity(&context, "AliasCloneEntity"); RCKKeyedAnimation parent(&context, "AliasCloneParent");
+    source.SetCloneState(&entity, &mergedFirst, &mergedSecond, CK_OBJECTANIMATION_MERGED);
+    target.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREPOS); target.SetParent(&parent);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(owner);
+    target.Clone(&source);
+    CheckObjectCloneData(owner, before, &owner); CheckObjectCloneData(first, before, &owner); CheckObjectCloneData(second, before, &owner);
+    Check(target.References() == 3, "Same-data Object Clone changed reference count");
+    CheckObjectCloneFields(target, &entity, &mergedFirst, &mergedSecond, CK_OBJECTANIMATION_MERGED, &parent);
+    CheckObjectCloneFields(source, &entity, &mergedFirst, &mergedSecond, CK_OBJECTANIMATION_MERGED, nullptr);
+    CheckObjectCloneReload(target, context, 7.0f);
+}
+
+template<bool TargetOwnsOldData>
+void ObjectAnimationClonePreservesReleasedDataAndSourceLifetime() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe oldOwner(&context, "CloneOldOwner"), oldAlias(&context, "CloneOldAlias"), target(&context, "CloneTarget");
+    ObjectCloneProbe &destination = TargetOwnsOldData ? target : oldAlias;
+    ObjectCloneProbe &retained = TargetOwnsOldData ? oldAlias : oldOwner;
+    ObjectCloneProbe &initialOwner = TargetOwnsOldData ? target : oldOwner;
+    AddTimedAnimationKeys(initialOwner, 40.0f);
+    oldAlias.ShareDataFrom(&initialOwner);
+    const ObjectCloneDataSnapshot oldData = SnapshotObjectCloneData(initialOwner);
+    {
+        ObjectCloneProbe source(&context, "CloneScopedSource"); AddTimedAnimationKeys(source, 4.0f);
+        source.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREMORPH);
+        const ObjectCloneDataSnapshot sourceData = SnapshotObjectCloneData(source);
+        destination.Clone(&source);
+        CheckObjectCloneData(retained, oldData, &retained);
+        CheckObjectCloneData(destination, sourceData, &source); CheckObjectCloneData(source, sourceData, &source);
+        Check(retained.References() == 1 && source.References() == 2, "Different-data Object Clone changed reference counts");
+        CheckObjectCloneReload(destination, context, 7.0f);
+        CheckObjectCloneReload(retained, context, 43.0f);
+    }
+    Check(destination.Shared() == &destination && destination.References() == 1, "Source destruction did not transfer cloned data ownership");
+    CheckObjectCloneReload(destination, context, 7.0f);
+    CheckObjectCloneReload(retained, context, 43.0f);
+}
+
+void ObjectAnimationNullCloneClearsOnlyTarget() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe target(&context, "NullCloneTarget"), alias(&context, "NullCloneAlias");
+    AddTimedAnimationKeys(target, 4.0f); alias.ShareDataFrom(&target);
+    target.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREPOS);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(alias);
+    target.Clone(nullptr);
+    CheckObjectCloneData(alias, before, &alias); CheckObjectCloneReload(alias, context, 7.0f);
+    Check(target.Data() != before.Data && target.Shared() == &target && target.References() == 1 && alias.References() == 1 &&
+          target.GetLength() == 0.0f && !target.GetPositionController() && !target.GetMorphController() && target.GetFlags() == 0 &&
+          !target.Get3dEntity() && !target.First() && !target.Second() && target.GetCurrentStep() == 0.0f && target.GetMergeFactor() == 0.5f,
+          "Null Object Clone did not clear only the target into owned empty data");
+    Chunk saved(target.Save(nullptr, CK_STATESAVE_OBJANIMALL), &DeleteCKStateChunk);
+    RCKObjectAnimation reloaded(&context, "NullCloneReloaded"); LoadChunk(reloaded, saved.get());
+    Check(reloaded.GetLength() == 0.0f && !reloaded.GetPositionController() && reloaded.Shared() == &reloaded,
+          "Null Object Clone empty data did not survive Save/Load");
+}
+
+void ObjectAnimationCloneHandlesSourceWithoutData() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe source(&context, "MissingCloneData"), target(&context, "MissingDataTarget"), alias(&context, "MissingDataAlias");
+    source.DropData(); source.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREMORPH);
+    AddTimedAnimationKeys(target, 4.0f); alias.ShareDataFrom(&target);
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(alias);
+    target.Clone(&source);
+    CheckObjectCloneData(alias, before, &alias);
+    Check(!source.Data() && target.Data() && target.Shared() == &target && target.GetLength() == 0.0f &&
+          !target.GetPositionController() && target.References() == 1, "Missing-data Object Clone did not create independent empty data");
+    CheckObjectCloneFields(target, nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREMORPH, nullptr);
+}
+
+template<bool MissingDataSource>
+void ObjectAnimationEmptyClonePreservesStateOnAllocationFailure() {
+    CKContext context(nullptr, 0, 0);
+    ObjectCloneProbe target(&context, "FailedCloneTarget"), alias(&context, "FailedCloneAlias"), source(&context, "FailedCloneSource");
+    RCKKeyedAnimation parent(&context, "FailedCloneParent");
+    AddTimedAnimationKeys(target, 4.0f); alias.ShareDataFrom(&target);
+    target.SetCloneState(nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREMORPH); target.SetParent(&parent);
+    source.DropData();
+    const ObjectCloneDataSnapshot before = SnapshotObjectCloneData(target);
+    s_ObjectAnimationAllocationFailure = true;
+    target.Clone(MissingDataSource ? &source : nullptr);
+    const bool injected = !s_ObjectAnimationAllocationFailure;
+    s_ObjectAnimationAllocationFailure = false;
+    Check(injected, "Empty Object Clone did not exercise its allocation failure");
+    CheckObjectCloneData(target, before, &target); CheckObjectCloneData(alias, before, &target);
+    Check(target.References() == 2, "Failed empty Object Clone changed reference counts");
+    CheckObjectCloneFields(target, nullptr, nullptr, nullptr, CK_OBJECTANIMATION_IGNOREMORPH, &parent);
+    CheckObjectCloneReload(target, context, 7.0f);
 }
 
 template<int Case>
@@ -3851,6 +4094,12 @@ int main(int argc, char **argv) {
         InitializeGridPlugin = info->m_InitInstanceFct;
     }
     const Test gridTests[] = {
+
+
+
+
+
+
         {"Runtime Grid fresh types", RuntimeGridFileRestoresTypeParameters<false, false>},
         {"Runtime Grid existing types", RuntimeGridFileRestoresTypeParameters<true, false>},
         {"Runtime Grid compressed fresh types", RuntimeGridFileRestoresTypeParameters<false, true>},
@@ -3861,6 +4110,32 @@ int main(int argc, char **argv) {
         {"Runtime Grid compressed missing marker existing types", RuntimeGridFileRestoresTypeParameters<true, true, true>},
     };
     const Test tests[] = {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        {"Object self-Clone retains state and controllers", ObjectAnimationSelfClonePreservesState<false>},
+        {"Merged Object self-Clone retains playback and controllers", ObjectAnimationSelfClonePreservesState<true>},
+        {"Object Clone from owner preserves all shared keys", ObjectAnimationClonePreservesSameDataAliases<0>},
+        {"Object owner Clone from alias preserves all shared keys", ObjectAnimationClonePreservesSameDataAliases<1>},
+        {"Object Clone between aliases preserves all shared keys", ObjectAnimationClonePreservesSameDataAliases<2>},
+        {"Object owner Clone transfers retained data ownership", ObjectAnimationClonePreservesReleasedDataAndSourceLifetime<true>},
+        {"Object alias Clone preserves old owner data", ObjectAnimationClonePreservesReleasedDataAndSourceLifetime<false>},
+        {"Null Object Clone clears only its target", ObjectAnimationNullCloneClearsOnlyTarget},
+        {"Object Clone tolerates a source with no keyframe data", ObjectAnimationCloneHandlesSourceWithoutData},
+        {"Null Object Clone allocation failure preserves all state", ObjectAnimationEmptyClonePreservesStateOnAllocationFailure<false>},
+        {"Missing-data Object Clone allocation failure preserves all state", ObjectAnimationEmptyClonePreservesStateOnAllocationFailure<true>},
         {"Morph self-Clone retains normal-bearing keys", MorphSelfClonePreservesOwnedState<true, false>},
         {"Morph self-Clone retains position-only keys", MorphSelfClonePreservesOwnedState<false, false>},
         {"Morph self-Clone retains zero-sized normal presence", MorphSelfClonePreservesOwnedState<true, true>},
@@ -4124,6 +4399,7 @@ int main(int argc, char **argv) {
         {"Linear rotation original runtime boundaries", LoadedLinearMatchesOriginalRuntime<CKANIMATION_LINROT_CONTROL>},
         {"Linear scale original runtime boundaries", LoadedLinearMatchesOriginalRuntime<CKANIMATION_LINSCL_CONTROL>},
         {"Linear scale-axis original runtime boundaries", LoadedLinearMatchesOriginalRuntime<CKANIMATION_LINSCLAXIS_CONTROL>},
+
     };
     int failures = 0;
     const Test *selectedTests = runtimeGrids ? gridTests : tests;
