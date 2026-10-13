@@ -361,9 +361,8 @@ CKERROR RCKSprite::Draw(CKRenderContext *dev) {
     positionPtr[3] = 1.0f;
 
     CKSpriteSetDrawAnnotation(rctx, this, VX_TRIANGLEFAN, 4, (CKDWORD)data->VertexCount);
-    rctx->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data);
-
-    return CK_OK;
+    return rctx->DrawPrimitive(VX_TRIANGLEFAN, NULL, 4, data)
+        ? CK_OK : CKERR_INVALIDOPERATION;
 }
 
 CKBOOL RCKSprite::SystemToVideoMemory(CKRenderContext *dev, CKBOOL Clamping) {
@@ -425,7 +424,10 @@ CKBOOL RCKSprite::Restore(CKBOOL Clamp) {
 
         VxImageDescEx uploadDesc = desc;
         CKBYTE *converted = nullptr;
-        if (!SamePixelFormat(desc, m_VideoFormatDesc)) {
+        // Compressed storage still accepts system pixels at the upload boundary;
+        // VxDoBlit cannot produce DXT blocks.
+        if (!(m_VideoFormatDesc.Flags >= _DXT1 && m_VideoFormatDesc.Flags <= _DXT5) &&
+            !SamePixelFormat(desc, m_VideoFormatDesc)) {
             converted = ConvertSpriteImage(desc, m_VideoFormatDesc, uploadDesc);
             if (!converted)
                 return FALSE;
@@ -492,7 +494,8 @@ CKBOOL RCKSprite::ApplyContextCopy(RCKRenderContext *context,
 
     VxImageDescEx uploadDesc = source;
     CKBYTE *converted = nullptr;
-    if (!SamePixelFormat(source, m_VideoFormatDesc)) {
+    if (!(m_VideoFormatDesc.Flags >= _DXT1 && m_VideoFormatDesc.Flags <= _DXT5) &&
+        !SamePixelFormat(source, m_VideoFormatDesc)) {
         converted = ConvertSpriteImage(source, m_VideoFormatDesc, uploadDesc);
         if (!converted)
             return FALSE;
@@ -542,15 +545,13 @@ VX_PIXELFORMAT RCKSprite::GetDesiredVideoFormat() {
 }
 
 void RCKSprite::CopySpriteData(RCKSprite *src) {
-    if (!src) return;
+    if (!src || src == this) return;
 
-    if (src->GetMovieFileName()) {
-        m_BitmapData.LoadMovieFile(src->GetMovieFileName());
-    }
-
-    if (src->m_BitmapData.m_SaveProperties) {
-        m_BitmapData.m_SaveProperties = CKCopyBitmapProperties(src->m_BitmapData.m_SaveProperties);
-    }
+    // Replace owned bitmap storage before copying. In particular, a movie
+    // destination must stop owning its reader before accepting ordinary slots.
+    m_BitmapData.SetMovieInfo(nullptr);
+    m_BitmapData.ReleaseAllSlots();
+    m_BitmapData.SetSaveFormat(src->m_BitmapData.m_SaveProperties);
 
     m_BitmapData.m_Width = src->m_BitmapData.m_Width;
     m_BitmapData.m_Height = src->m_BitmapData.m_Height;
@@ -561,13 +562,19 @@ void RCKSprite::CopySpriteData(RCKSprite *src) {
     m_BitmapData.m_PickThreshold = src->m_BitmapData.m_PickThreshold;
     m_VideoFormat = src->m_VideoFormat;
 
-    const int slotCount = src->GetSlotCount();
-    SetSlotCount(slotCount);
+    if (src->GetMovieFileName()) {
+        m_BitmapData.LoadMovieFile(src->GetMovieFileName());
+        m_BitmapData.SetCurrentSlot(src->GetCurrentSlot());
+    } else {
+        m_BitmapData.SetSlotCount(src->m_BitmapData.m_Slots.Size());
+    }
 
-    const size_t byteCount = (size_t) (4 * m_BitmapData.m_Height * m_BitmapData.m_Width);
+    // Movie frame counts are not bitmap slot counts: their current decoded
+    // frame lives in one system slot and is selected by the reader above.
+    const int slotCount = src->m_BitmapData.m_Slots.Size();
+    const size_t byteCount = (size_t)m_BitmapData.m_Width * (size_t)m_BitmapData.m_Height * sizeof(CKDWORD);
     for (int i = 0; i < slotCount; ++i) {
         CKBYTE *srcPtr = src->LockSurfacePtr(i);
-        SetSlotFileName(i, src->GetSlotFileName(i));
         if (srcPtr) {
             // Original allocates per-slot storage then memcpy 32bpp (4*W*H).
             m_BitmapData.CreateImage(m_BitmapData.m_Width, m_BitmapData.m_Height, 32, i);
@@ -576,10 +583,20 @@ void RCKSprite::CopySpriteData(RCKSprite *src) {
                 memcpy(dstPtr, srcPtr, byteCount);
             }
         }
+        // CreateImage resets the name; install it after allocating the pixels.
+        SetSlotFileName(i, src->GetSlotFileName(i));
     }
+
+    m_BitmapData.m_BitmapFlags = src->m_BitmapData.m_BitmapFlags | CKBITMAPDATA_FORCERESTORE;
+    RCKRenderManager *renderManager = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+    if (renderManager)
+        renderManager->SpriteObjectChanged(this);
 }
 
 CKERROR RCKSprite::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (this == &o)
+        return CK_OK;
+
     CKERROR err = RCK2dEntity::Copy(o, context);
     if (err != CK_OK) return err;
 
@@ -757,7 +774,11 @@ void RCKSprite::SetPickThreshold(int Threshold) { m_BitmapData.SetPickThreshold(
 int RCKSprite::GetPickThreshold() { return m_BitmapData.GetPickThreshold(); }
 void RCKSprite::SetSaveOptions(CK_BITMAP_SAVEOPTIONS Options) { m_BitmapData.SetSaveOptions(Options); }
 CK_BITMAP_SAVEOPTIONS RCKSprite::GetSaveOptions() { return m_BitmapData.GetSaveOptions(); }
-void RCKSprite::SetSaveFormat(CKBitmapProperties *Format) { m_BitmapData.SetSaveFormat(Format); }
+void RCKSprite::SetSaveFormat(CKBitmapProperties *Format) {
+    if (Format == m_BitmapData.m_SaveProperties)
+        return;
+    m_BitmapData.SetSaveFormat(Format);
+}
 CKBitmapProperties *RCKSprite::GetSaveFormat() { return m_BitmapData.GetSaveFormat(); }
 
 // Pixel format information
