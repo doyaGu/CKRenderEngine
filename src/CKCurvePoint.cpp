@@ -29,7 +29,33 @@ RCKCurvePoint::RCKCurvePoint(CKContext *Context, CKSTRING name)
 /**
  * @brief RCKCurvePoint destructor
  */
-RCKCurvePoint::~RCKCurvePoint() {}
+RCKCurvePoint::~RCKCurvePoint() {
+    // A point may remain listed by multiple curves after it is reassigned.
+    const CK_ID lastID = static_cast<CK_ID>(m_Context->GetObjectCount());
+    bool parentAlive = false;
+    for (CK_ID id = 1; id <= lastID; ++id) {
+        CKObject *object = m_Context->GetObject(id);
+        if (object && object == reinterpret_cast<CKObject *>(m_Parent))
+            parentAlive = true;
+        if (object && CKIsChildClassOf(object, CKCID_3DENTITY)) {
+            RCK3dEntity *entity = static_cast<RCK3dEntity *>(object);
+            if (entity->GetParent() == reinterpret_cast<CK3dEntity *>(this))
+                entity->SetParent(nullptr, TRUE);
+        }
+        if (!object || !CKIsChildClassOf(object, CKCID_CURVE))
+            continue;
+        CKCurve *curve = reinterpret_cast<CKCurve *>(object);
+        for (int index = 0; index < curve->GetControlPointCount();) {
+            if (curve->GetControlPoint(index) == reinterpret_cast<CKCurvePoint *>(this)) {
+                curve->RemoveControlPoint(reinterpret_cast<CKCurvePoint *>(this));
+            } else
+                ++index;
+        }
+    }
+    // Batch deletion may already have destroyed a non-curve parent.
+    if (parentAlive)
+        SetParent(nullptr, TRUE);
+}
 
 /**
  * @brief Get the class ID for RCKCurvePoint
@@ -94,11 +120,13 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
 
     // Call base class Load first
     RCK3dEntity::Load(chunk, file);
+    bool pointDataLoaded = false;
 
     // Handle different data versions
     if (chunk->GetDataVersion() < 5) {
         // Legacy format handling for data version < 5
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTDEFAULTDATA)) {
+            pointDataLoaded = true;
             // Load basic curve point properties
             m_Curve = reinterpret_cast<CKCurve *>(chunk->ReadObject(m_Context));
             m_UseTCB = chunk->ReadInt();
@@ -114,6 +142,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
 
         // Load TCB parameters (legacy format)
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTTCB)) {
+            pointDataLoaded = true;
             m_Tension = chunk->ReadFloat();
             m_Continuity = chunk->ReadFloat();
             m_Bias = chunk->ReadFloat();
@@ -121,6 +150,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
 
         // Load reserved vector (legacy format)
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTCURVEPOS)) {
+            pointDataLoaded = true;
             m_ReservedVector.x = chunk->ReadFloat();
             m_ReservedVector.y = chunk->ReadFloat();
             m_ReservedVector.z = chunk->ReadFloat();
@@ -128,6 +158,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
 
         // Load tangent vectors (legacy format)
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTTANGENTS)) {
+            pointDataLoaded = true;
             m_TangentIn.x = chunk->ReadFloat();
             m_TangentIn.y = chunk->ReadFloat();
             m_TangentIn.z = chunk->ReadFloat();
@@ -138,6 +169,7 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
     } else {
         // Modern format for data version >= 5
         if (chunk->SeekIdentifier(CK_STATESAVE_CURVEPOINTDEFAULTDATA)) {
+            pointDataLoaded = true;
             // Load all curve point properties in modern format
             m_Curve = reinterpret_cast<CKCurve *>(chunk->ReadObject(m_Context));
             m_UseTCB = chunk->ReadInt();
@@ -150,6 +182,8 @@ CKERROR RCKCurvePoint::Load(CKStateChunk *chunk, CKFile *file) {
         }
     }
 
+    if (pointDataLoaded)
+        NotifyUpdate();
     return CK_OK;
 }
 
@@ -179,6 +213,9 @@ CKERROR RCKCurvePoint::RemapDependencies(CKDependenciesContext &context) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKCurvePoint::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     // Base class copy
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK) {
@@ -326,11 +363,13 @@ void RCKCurvePoint::SetLinear(CKBOOL linear) {
 }
 
 void RCKCurvePoint::UseTCB(CKBOOL use) {
-    m_UseTCB = use;
+    // The native wire value is zero for TCB and nonzero for explicit tangents.
+    m_UseTCB = !use;
+    NotifyUpdate();
 }
 
 CKBOOL RCKCurvePoint::IsTCB() {
-    return m_UseTCB;
+    return m_UseTCB == 0;
 }
 
 float RCKCurvePoint::GetLength() {

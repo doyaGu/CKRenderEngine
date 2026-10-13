@@ -440,6 +440,13 @@ if (TARGET gtest_main)
     ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
     target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
     foreach (animation_test
+            CurvePointLifecycleTest
+            CurvePointPropertiesTest
+            CurvePointTransformTest
+            CurvePointTangentsTest
+            CurvePointSerializationTest
+            CurvePointDependenciesTest
+            CurvePointParentLifetimeTest
             CurveLifecycleTest
             CurveControlPointsTest
             CurveGeometryTest
