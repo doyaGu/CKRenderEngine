@@ -38,7 +38,7 @@ RCKLight::RCKLight(CKContext *Context, CKSTRING name)
     // Initialize colors
     m_LightData.Diffuse = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
     m_LightData.Specular = VxColor(0.0f, 0.0f, 0.0f, 0.0f);
-    m_LightData.Ambient = VxColor(0.0f, 0.0f, 0.0f, 0.0f);
+    m_LightData.Ambient = VxColor(0.0f, 0.0f, 0.0f, 1.0f);
 
     // Initialize attenuation
     m_LightData.Range = 5000.0f;
@@ -584,7 +584,7 @@ Remarks:
 - Checks if light is active (bit 8 / 0x100 in m_Flags)
 - Extracts world-space position from world matrix row 3
 - Extracts world-space direction from world matrix row 2
-- Handles specular flag (0x200) - scales diffuse by light power for specular
+- Handles specular flag (0x200) - scales diffuse RGBA by light power for specular
 - Applies light power scaling to diffuse color if != 1.0
 - The rasterizer transforms position/direction to view space internally
 
@@ -597,8 +597,8 @@ CKBOOL RCKLight::Setup(CKRasterizerContext *rst, int lightIndex) {
 
     // For non-directional lights, check attenuation sum
     if (m_LightData.Type != VX_LIGHTDIREC) {
-        float attenuationSum = m_LightData.Attenuation0 + m_LightData.Attenuation1 + m_LightData.Attenuation2;
-        if (attenuationSum < 0.00001f)
+        double attenuationSum = static_cast<double>(m_LightData.Attenuation0) + m_LightData.Attenuation1 + m_LightData.Attenuation2;
+        if (attenuationSum < 0.00001)
             return FALSE;
     }
 
@@ -618,13 +618,13 @@ CKBOOL RCKLight::Setup(CKRasterizerContext *rst, int lightIndex) {
     m_LightData.Direction.z = worldMat[2][2];
 
     // Handle specular flag (0x200) - set specular to scaled diffuse or black
-    // IDA: sub_1001BA40 scales r,g,b by power; sub_1001B9B0 creates (val,val,val,1.0)
+    // IDA: sub_1001BA40 scales RGBA by power; sub_1001B9B0 creates (val,val,val,1.0)
     if (m_Flags & 0x200) {
-        // Scale diffuse color RGB by light power for specular, alpha = 1.0
+        // Scale every diffuse component by light power for specular.
         m_LightData.Specular.r = m_LightData.Diffuse.r * m_LightPower;
         m_LightData.Specular.g = m_LightData.Diffuse.g * m_LightPower;
         m_LightData.Specular.b = m_LightData.Diffuse.b * m_LightPower;
-        m_LightData.Specular.a = 1.0f;
+        m_LightData.Specular.a = m_LightData.Diffuse.a * m_LightPower;
     } else {
         // Set specular to black with alpha = 1.0
         m_LightData.Specular.r = 0.0f;
@@ -687,22 +687,27 @@ Summary: Copies light data from another light object.
 Purpose: Deep copy of all light properties including CKLightData.
 Remarks:
 - Calls base class Copy first
-- Copies entire light data block using memcpy (0x70 = 112 bytes)
-- This includes CKLightData (104 bytes), m_Flags (4 bytes), m_LightPower (4 bytes)
+- Copies light data, flags and power explicitly for each platform layout
+- Self-copy retains skin and cached entity state
+- Releases an owned destination skin before the base replaces it
 
 Implementation based on decompilation at 0x1001b873.
 *************************************************/
 CKERROR RCKLight::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
+    RCKLight *srcLight = static_cast<RCKLight *>(&o);
+    if (srcLight->m_Skin)
+        DestroySkin();
+
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK)
         return err;
 
-    RCKLight *srcLight = static_cast<RCKLight *>(&o);
-
-    // Copy entire light data block (0x70 = 112 bytes)
-    // This copies m_LightData (104), m_Flags (4), and m_LightPower (4)
-    // Must match original qmemcpy(&this->m_LightData, &a2->m_LightData, 0x70u)
-    memcpy(&m_LightData, &srcLight->m_LightData, sizeof(CKLightData));
+    m_LightData = srcLight->m_LightData;
+    m_Flags = srcLight->m_Flags;
+    m_LightPower = srcLight->m_LightPower;
 
     return CK_OK;
 }
