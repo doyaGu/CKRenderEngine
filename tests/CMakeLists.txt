@@ -440,6 +440,15 @@ if (TARGET gtest_main)
     ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
     target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
     foreach (animation_test
+            Entity3dFrustumTest
+            Entity3dHierFrustumTest
+            Entity3dRenderTest
+            Entity3dLifecycleTest
+            Entity3dHierarchyTest
+            Entity3dSerializationTest
+            Entity3dDependenciesTest
+            Entity3dTransformTest
+            Entity3dGeometryTest
             RenderObjectLifecycleTest
             RenderObjectContextTest
             RenderObjectCallbacksTest

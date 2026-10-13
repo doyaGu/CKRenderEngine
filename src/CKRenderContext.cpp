@@ -868,11 +868,13 @@ CKWORD *RCKRenderContext::GetDrawPrimitiveIndices(int IndicesCount) {
 void RCKRenderContext::Transform(VxVector *Dest, VxVector *Src, CK3dEntity *Ref) {
     if (!Src || !Dest) return;
 
-    VxMatrix world = Ref ? Ref->GetWorldMatrix() : m_WorldMatrix;
+    if (Ref)
+        SetWorldTransformationMatrix(Ref->GetWorldMatrix());
+    const VxMatrix &world = m_WorldMatrix;
     VxMatrix wvp;
     VxMatrix vp;
-    Vx3DMultiplyMatrix4(vp, m_ViewMatrix, m_ProjectionMatrix);
-    Vx3DMultiplyMatrix4(wvp, world, vp);
+    Vx3DMultiplyMatrix4(vp, m_ProjectionMatrix, m_ViewMatrix);
+    Vx3DMultiplyMatrix4(wvp, vp, world);
 
     VxVector4 clip;
     clip.x = Src->x * wvp[0][0] + Src->y * wvp[1][0] + Src->z * wvp[2][0] + wvp[3][0];
@@ -1736,11 +1738,13 @@ void RCKRenderContext::TransformVertices(int VertexCount, VxTransformData *data,
     if (VertexCount <= 0 || !data || !data->InVertices)
         return;
 
-    VxMatrix world = Ref ? Ref->GetWorldMatrix() : m_WorldMatrix;
+    if (Ref)
+        SetWorldTransformationMatrix(Ref->GetWorldMatrix());
+    const VxMatrix &world = m_WorldMatrix;
     VxMatrix vp;
     VxMatrix wvp;
-    Vx3DMultiplyMatrix4(vp, m_ViewMatrix, m_ProjectionMatrix);
-    Vx3DMultiplyMatrix4(wvp, world, vp);
+    Vx3DMultiplyMatrix4(vp, m_ProjectionMatrix, m_ViewMatrix);
+    Vx3DMultiplyMatrix4(wvp, vp, world);
 
     const unsigned int inStride = data->InStride ? data->InStride : sizeof(VxVector);
     const unsigned int outStride = data->OutStride ? data->OutStride : sizeof(VxVector4);
@@ -1820,14 +1824,10 @@ CKDWORD RCKRenderContext::ComputeBoxVisibility(const VxBbox &box, const VxMatrix
     if (!box.IsValid())
         return 1;
 
-    const float frustumClass = m_Frustum.Classify(box, world);
-    if (frustumClass > 0.0f)
-        return 0;
-
     VxMatrix vp;
     VxMatrix wvp;
-    Vx3DMultiplyMatrix4(vp, m_ViewMatrix, m_ProjectionMatrix);
-    Vx3DMultiplyMatrix4(wvp, world, vp);
+    Vx3DMultiplyMatrix4(vp, m_ProjectionMatrix, m_ViewMatrix);
+    Vx3DMultiplyMatrix4(wvp, vp, world);
 
     const float right = (float)m_ViewportData.ViewX + (float)m_ViewportData.ViewWidth;
     const float bottom = (float)m_ViewportData.ViewY + (float)m_ViewportData.ViewHeight;
@@ -1837,16 +1837,13 @@ CKDWORD RCKRenderContext::ComputeBoxVisibility(const VxBbox &box, const VxMatrix
     VXCLIP_FLAGS allAnd = (VXCLIP_FLAGS)VXCLIP_ALL;
     VxRect projected(100000000.0f, 100000000.0f, -100000000.0f, -100000000.0f);
     const XBOOL visible = VxTransformBox2D(wvp, box, &screen, &projected, allOr, allAnd);
-    if (!visible) {
-        if (extents)
-            *extents = screen;
-        return 1;
-    }
+    if (!visible)
+        return 0;
 
     if (extents)
         *extents = projected;
 
-    return (allOr & VXCLIP_ALL || frustumClass == 0.0f) ? 1 : 2;
+    return (allOr & VXCLIP_ALL) ? 1 : 2;
 }
 
 void RCKRenderContext::SetWorldTransformationMatrix(const VxMatrix &M) {

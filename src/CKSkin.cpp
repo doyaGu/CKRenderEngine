@@ -398,6 +398,7 @@ void RCKSkin::RemapVertices(const XArray<int> &permutation) {
 
 void RCKSkin::SetNormalCount(int Count) {
     m_Normals.Resize(Count);
+    ClearBonePointLists();
 }
 
 int RCKSkin::GetNormalCount() {
@@ -406,6 +407,7 @@ int RCKSkin::GetNormalCount() {
 
 void RCKSkin::SetNormal(int Index, const VxVector &Norm) {
     m_Normals[Index] = Norm;
+    ClearBonePointLists();
 }
 
 VxVector &RCKSkin::GetNormal(int Index) {
