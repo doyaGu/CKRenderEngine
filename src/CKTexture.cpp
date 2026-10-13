@@ -915,6 +915,9 @@ CKStateChunk *RCKTexture::Save(CKFile *file, CKDWORD flags) {
 CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
     if (!chunk)
         return CKERR_INVALIDPARAMETER;
+    const VX_PIXELFORMAT oldVideoFormat = m_DesiredVideoFormat;
+    const int oldWidth = GetWidth();
+    const int oldHeight = GetHeight();
 
     CKBeObject::Load(chunk, file);
 
@@ -925,7 +928,17 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
         CK_STATESAVE_TEXFILENAMES,
         CK_STATESAVE_TEXBITMAPS
     };
+    if (m_MovieInfo &&
+        (chunk->SeekIdentifier(CK_STATESAVE_TEXREADER) ||
+         chunk->SeekIdentifier(CK_STATESAVE_TEXCOMPRESSED) ||
+         chunk->SeekIdentifier(CK_STATESAVE_TEXBITMAPS) ||
+         chunk->SeekIdentifier(CK_STATESAVE_TEXFILENAMES)))
+        SetMovieInfo(nullptr);
     ReadFromChunk(chunk, m_Context, file, identifiers);
+    if (m_MipMaps && (oldWidth != GetWidth() || oldHeight != GetHeight() || GetSlotCount() != 1)) {
+        if (!SetUserMipMapMode(FALSE))
+            return CKERR_INVALIDOPERATION;
+    }
 
     if (chunk->GetDataVersion() < CHUNK_VERSION2) {
         if (chunk->SeekIdentifier(CK_STATESAVE_TEXTRANSPARENT)) {
@@ -1015,10 +1028,12 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
                         if (data) {
                             desc.Image = data;
                             VxImageDescEx *mipmap = m_MipMaps->At(i);
+                            delete[] mipmap->Image;
                             mipmap->Set(desc);
                             mipmap->Image = new CKBYTE[desc.BytesPerLine * desc.Height];
                             VxDoBlitUpsideDown(desc, *mipmap);
                             CKDeletePointer(data);
+                            m_BitmapFlags |= CKBITMAPDATA_FORCERESTORE;
                         }
                     }
                 }
@@ -1040,13 +1055,19 @@ CKERROR RCKTexture::Load(CKStateChunk *chunk, CKFile *file) {
             }
         }
 
-        if (!IsSupportedObjectVideoFormat(m_DesiredVideoFormat)) {
-            RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
-            m_DesiredVideoFormat = ResolveObjectVideoFormat(
-                m_DesiredVideoFormat,
-                rm ? static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value) : UNKNOWN_PF);
-        }
     }
+
+    if (!IsSupportedObjectVideoFormat(m_DesiredVideoFormat)) {
+        RCKRenderManager *rm = static_cast<RCKRenderManager *>(m_Context->GetRenderManager());
+        m_DesiredVideoFormat = ResolveObjectVideoFormat(
+            m_DesiredVideoFormat,
+            rm ? static_cast<VX_PIXELFORMAT>(rm->m_TextureVideoFormat.Value) : UNKNOWN_PF);
+    }
+    const VX_PIXELFORMAT loadedVideoFormat = m_DesiredVideoFormat;
+    m_DesiredVideoFormat = oldVideoFormat;
+    SetDesiredVideoFormat(loadedVideoFormat);
+    if (m_DesiredVideoFormat != loadedVideoFormat)
+        return CKERR_INVALIDOPERATION;
 
     return CK_OK;
 }

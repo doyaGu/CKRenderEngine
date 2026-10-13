@@ -442,6 +442,7 @@ if (TARGET gtest_main)
     foreach (animation_test
             TextureLifecycleTest
             TextureImageLifecycleTest
+            TextureSerializationTest
             TextureUploadTest
             TextureStateTest
             MaterialApplyTest
