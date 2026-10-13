@@ -211,9 +211,8 @@ float RCKAnimation::GetStep() {
 
 // 0x10047EF0 - Set m_Step as normalized position
 void RCKAnimation::SetFrame(float frame) {
-    // Original has no zero check - divides directly
-    // This matches the IDA decompilation exactly
-    m_Step = frame / m_Length;
+    // A zero-duration animation has only its initial position.
+    m_Step = m_Length != 0.0f ? frame / m_Length : 0.0f;
 }
 
 // SetStep and SetCurrentStep both set m_Step directly
@@ -262,7 +261,7 @@ CK_ANIMATION_TRANSITION_MODE RCKAnimation::GetTransitionMode() {
     return (CK_ANIMATION_TRANSITION_MODE) ((m_Flags & CKANIMATION_TRANSITION_ALL) >> CK_TRANSITION_MODE_SHIFT);
 }
 
-// 0x1004781E - SecondaryAnimationMode stored in bits 18-23
+// 0x1004781E - Shift 16, sparse secondary flags in bits 18,19,21-23
 void RCKAnimation::SetSecondaryAnimationMode(CK_SECONDARYANIMATION_FLAGS mode) {
     m_Flags &= ~CKANIMATION_SECONDARY_ALL;
     m_Flags |= ((CKDWORD) mode << CK_SECONDARY_FLAGS_SHIFT);

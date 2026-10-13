@@ -521,6 +521,12 @@ if (TARGET gtest_main)
             RenderObjectCallbacksTest
             Object3dRegistrationTest
             Object3dLifecycleTest
+            AnimationSerializationTest
+            AnimationDependenciesTest
+            AnimationClockTest
+            AnimationFlagsTest
+            AnimationLifecycleTest
+            AnimationFieldsTest
 )
         ckre_add_engine_test(${animation_test} ${animation_test}.cpp)
         target_link_libraries(${animation_test} PRIVATE gtest_main)

@@ -9,7 +9,7 @@
 // Bit 2  (0x00000004): CKANIMATION_CANBEBREAK
 // Bit 4  (0x00000010): CKANIMATION_ALIGNORIENTATION
 // Bits 8-16  (0x0001FF00): TransitionMode
-// Bits 18-23 (0x00EC0000): SecondaryAnimationMode
+// Shift 16, bits 18,19,21-23 (0x00EC0000): SecondaryAnimationMode
 
 class RCKAnimation : public CKAnimation {
     friend class RCKCharacter;  // Allow RCKCharacter to access protected members
@@ -61,15 +61,20 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
-    // Object layout: sizeof(RCKAnimation) = 0x34 (52 bytes)
-    // Offset 0x00: CKAnimation base (28 bytes)
-    RCKCharacter *m_Character;    // Offset 0x1C
-    float m_Length;               // Offset 0x20 - Default: 100.0f
-    float m_Step;                 // Offset 0x24 - Default: 0.0f (represents normalized frame position)
-    RCK3dEntity *m_RootEntity;    // Offset 0x28
-    CKDWORD m_Flags;              // Offset 0x2C - Default: CKANIMATION_LINKTOFRAMERATE | CKANIMATION_CANBEBREAK
-    float m_FrameRate;            // Offset 0x30 - Default: 30.0f
+    // Original Virtools 2.1 Win32 reference offsets; SDL layout is platform-dependent.
+    // Native size 0x34, with a 0x1C-byte CKAnimation base.
+    RCKCharacter *m_Character;    // Native +0x1C
+    float m_Length;               // Native +0x20 - Default: 100.0f
+    float m_Step;                 // Native +0x24 - Normalized cursor, default 0.0f
+    RCK3dEntity *m_RootEntity;    // Native +0x28
+    CKDWORD m_Flags;              // Native +0x2C - Default: link | can interrupt
+    float m_FrameRate;            // Native +0x30 - Default: 30.0f
     // Note: TransitionMode and SecondaryAnimationMode are packed into m_Flags
+
+private:
+    // Registered object identity and owned names must be copied through the context.
+    RCKAnimation(const RCKAnimation &) = delete;
+    RCKAnimation &operator=(const RCKAnimation &) = delete;
 };
 
 #endif // RCKANIMATION_H
