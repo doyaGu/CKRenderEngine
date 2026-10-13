@@ -1079,6 +1079,8 @@ int RCKTexture::GetMemoryOccupation() {
 }
 
 CKERROR RCKTexture::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
     CKERROR err = CKBeObject::Copy(o, context);
     if (err != CK_OK)
         return err;
@@ -1088,8 +1090,10 @@ CKERROR RCKTexture::Copy(CKObject &o, CKDependenciesContext &context) {
     context.GetClassDependencies(CKCID_TEXTURE);
 
     // Copy movie if present
-    FreeVideoMemory();
-    SetUserMipMapMode(FALSE);
+    if (!FreeVideoMemory() && m_InVideoMemory)
+        return CKERR_INVALIDOPERATION;
+    if (!SetUserMipMapMode(FALSE))
+        return CKERR_INVALIDOPERATION;
     SetMovieInfo(nullptr);
     ReleaseAllSlots();
     ReleaseBitmapProperties(m_SaveProperties);
@@ -1128,8 +1132,6 @@ CKERROR RCKTexture::Copy(CKObject &o, CKDependenciesContext &context) {
             : 0u;
         for (int i = 0; i < GetSlotCount(); ++i) {
             CKBYTE *srcImage = src->LockSurfacePtr(i);
-            SetSlotFileName(i, src->GetSlotFileName(i));
-
             if (srcImage) {
                 if (imageSize > 0) {
                     CreateImage(m_Width, m_Height, 32, i);
@@ -1141,6 +1143,7 @@ CKERROR RCKTexture::Copy(CKObject &o, CKDependenciesContext &context) {
                 }
                 src->ReleaseSurfacePtr(i);
             }
+            SetSlotFileName(i, src->GetSlotFileName(i));
         }
     }
 

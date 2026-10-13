@@ -443,6 +443,7 @@ if (TARGET gtest_main)
             TextureLifecycleTest
             TextureImageLifecycleTest
             TextureSerializationTest
+            TextureCopyTest
             TextureUploadTest
             TextureStateTest
             MaterialApplyTest
