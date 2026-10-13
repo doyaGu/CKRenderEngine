@@ -153,7 +153,7 @@ VxVector ReadPackedPosition(const FFPRecordingBackend &backend, CKDWORD vertexIn
     return position;
 }
 
-void StandardTextureUploadPreservesSourceFormat() {
+void StandardTextureUploadUsesDesiredVideoFormat() {
     TextureTestWorld world;
     RCKTexture texture(world.context, "SourceFormat");
 
@@ -165,14 +165,14 @@ void StandardTextureUploadPreservesSourceFormat() {
               "SystemToVideoMemory should succeed");
     TestCheck(world.rasterizer->CreatedTextureCount == 1,
               "texture should be created once");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureDesc.Format) == _32_ARGB8888,
-              "regular textures should be created with the source image format");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureUpdateDesc) == _32_ARGB8888,
-              "Restore upload should preserve the source image format");
-    TestCheck(world.rasterizer->LastTextureUpdateDesc.BytesPerLine == 4 * 4,
-              "source-format texture upload pitch should remain one row");
-    TestCheck(texture.GetVideoPixelFormat() == _32_ARGB8888,
-              "reported video format should match the created source format");
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureDesc.Format) == _16_RGB565,
+              "regular textures should be created with the desired video format");
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureUpdateDesc) == _16_RGB565,
+              "Restore upload should convert to the video format");
+    TestCheck(world.rasterizer->LastTextureUpdateDesc.BytesPerLine == 4 * 2,
+              "converted texture upload pitch should match RGB565 rows");
+    TestCheck(texture.GetVideoPixelFormat() == _16_RGB565,
+              "reported video format should match the created desired format");
 }
 
 void SetAsCurrentFailureDoesNotBindOrClearRestoreFlag() {
@@ -552,10 +552,10 @@ void UserMipmapsUploadUsingCreatedTextureFormat() {
               "base level and two user mip levels should be uploaded");
     TestCheck(world.rasterizer->LastUpdateMip == 2,
               "last upload should be the final user mip level");
-    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureUpdateDesc) == _32_ARGB8888,
+    TestCheck(VxImageDesc2PixelFormat(world.rasterizer->LastTextureUpdateDesc) == _16_RGB565,
               "user mipmap levels should use the created texture format");
-    TestCheck(world.rasterizer->LastTextureUpdateDesc.BytesPerLine == 1 * 4,
-              "user mipmap upload pitch should remain one row");
+    TestCheck(world.rasterizer->LastTextureUpdateDesc.BytesPerLine == 1 * 2,
+              "user mipmap upload pitch should match a converted RGB565 row");
     TestCheck(world.rasterizer->LastTextureUpdateDesc.Width == 1 &&
                   world.rasterizer->LastTextureUpdateDesc.Height == 1,
               "final user mip dimensions should be preserved during conversion");
@@ -1021,8 +1021,8 @@ int main() {
     CKBuildClassHierarchyTable();
 
     TestFramework tests;
-    tests.Run("Standard texture upload preserves source format",
-              &StandardTextureUploadPreservesSourceFormat);
+    tests.Run("Standard texture upload uses desired video format",
+              &StandardTextureUploadUsesDesiredVideoFormat);
     tests.Run("SetAsCurrent failure does not bind or clear restore flag",
               &SetAsCurrentFailureDoesNotBindOrClearRestoreFlag);
     tests.Run("Restore failure keeps dirty flag",
