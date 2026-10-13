@@ -54,6 +54,8 @@ public:
     // CKObject Virtual Methods
     //=========================================================================
     CK_CLASSID GetClassID() override;
+    void AddToScene(CKScene *scene, CKBOOL dependencies) override;
+    void RemoveFromScene(CKScene *scene, CKBOOL dependencies) override;
     void CheckPreDeletion() override;
     int GetMemoryOccupation() override;
     CKBOOL IsObjectUsed(CKObject *obj, CK_CLASSID cid) override;

@@ -11,6 +11,8 @@
 #include "RCKRenderManager.h"
 #include "RCKMaterial.h"
 #include "RCKMesh.h"
+#include "RCKRenderObject.h"
+#include "RCK3dEntity.h"
 #include "RCKTexture.h"
 #include "FFPRecordingContext.h"
 #include "FFPRecordingHarness.h"
@@ -128,8 +130,13 @@ void MaterialBindingClearsTailAndPreservesLowerStages() {
     MaterialTestWorld world;
     RCKMaterial material(world.context, "StageResetMaterial");
     RCKTexture texture(world.context, "StageResetTexture");
+    RCKTexture distractor(world.context, "DifferentSlotTwoTexture");
     TestCheck(texture.Create(2, 2, 32, 0), "texture Create failed");
+    TestCheck(distractor.Create(2, 2, 32, 0), "distractor texture Create failed");
     FillTextureSlot(texture, 0, 0xFF112233u);
+    FillTextureSlot(distractor, 0, 0xFF778899u);
+    material.SetTexture0(&texture);
+    material.SetTexture(2, &distractor);
     CKRasterizerContext &context = *world.translated.Context;
     for (int current : {0, 2}) {
         CKDWORD previousTextures[CKRST_MAX_TEXTURE_STAGES] = {};
@@ -147,7 +154,6 @@ void MaterialBindingClearsTailAndPreservesLowerStages() {
             for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
                 context.GetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), &previousStates[stage][state]);
         }
-        material.SetTexture(current, &texture);
         TestCheck(material.SetAsCurrent(world.renderContext, TRUE, current), "apply material to selected stage");
         for (int stage = 0; stage < current; ++stage) {
             CKDWORD value = 0;
@@ -827,7 +833,7 @@ void CubeTexGenPreservesThreeCoordinates() {
               "planar TexGen remains two-dimensional");
 }
 
-void CubeReflectionRemovesCameraRotation() {
+void CubeReflectionUsesReferentialWorldRotation() {
     MaterialTestWorld world;
     RCKMaterial material(world.context, "CubeReflection");
     VxMatrix view;
@@ -836,6 +842,11 @@ void CubeReflectionRemovesCameraRotation() {
     view[2][1] = 0.6f; view[2][2] = 0.8f;
     view[3][0] = -100.0f; view[3][2] = 10.0f;
     world.renderContext->SetViewTransformationMatrix(view);
+    RCK3dEntity *root = reinterpret_cast<RCK3dEntity *>(world.renderContext->GetViewpoint());
+    TestCheck(root != nullptr, "cube reflection requires an actual registered viewpoint entity");
+    VxMatrix rootWorld = VxMatrix::Identity();
+    rootWorld[0].Set(0, 1, 0, 0); rootWorld[1].Set(-1, 0, 0, 0);
+    rootWorld[3].Set(7, 8, 9, 1); root->SetWorldMatrix(rootWorld);
     TestCheck(material.TexGenEffect(world.renderContext, VXEFFECT_TGCUBEMAP_REFLECT, nullptr, 0) != 0,
               "cube reflection setup succeeds");
     VxMatrix texture;
@@ -843,10 +854,25 @@ void CubeReflectionRemovesCameraRotation() {
               "cube reflection installs a texture matrix");
     for (int row = 0; row < 3; ++row)
         for (int col = 0; col < 3; ++col)
-            TestCheck(fabsf(texture[row][col] - view[col][row]) < 0.00001f,
-                      "cube reflection removes the camera rotation as on CKDX8Rasterizer");
+            TestCheck(fabsf(texture[row][col] - rootWorld[row][col]) < 0.00001f,
+                      "cube reflection uses the viewpoint referential rotation, independently of the view matrix");
     TestCheck(texture[3][0] == 0 && texture[3][1] == 0 && texture[3][2] == 0,
-              "reflection directions must not include camera translation");
+              "reflection directions must not include referential translation");
+
+    RCK3dEntity reference(world.context, "Explicit cube referential");
+    VxMatrix referenceWorld = VxMatrix::Identity();
+    referenceWorld[1].Set(0, 0, 1, 0); referenceWorld[2].Set(0, -1, 0, 0);
+    referenceWorld[3].Set(11, 12, 13, 1); reference.SetWorldMatrix(referenceWorld);
+    TestCheck(material.TexGenEffect(world.renderContext, VXEFFECT_TGCUBEMAP_REFLECT, &reference, 1) != 0,
+              "explicit cube referential setup succeeds");
+    TestCheck(world.renderContext->m_RasterizerContext->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + 1), texture),
+              "explicit cube reflection installs its texture matrix");
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col)
+            TestCheck(fabsf(texture[row][col] - referenceWorld[row][col]) < 0.00001f,
+                      "explicit cube referential replaces the viewpoint rotation");
+    TestCheck(texture[3][0] == 0 && texture[3][1] == 0 && texture[3][2] == 0,
+              "explicit cube directions omit referential translation");
 }
 
 void ZWriteChangesInvalidateTransparencyClassification() {
@@ -869,6 +895,8 @@ void ZWriteChangesInvalidateTransparencyClassification() {
 int main() {
     SetProcessorSpecific_FunctionsPtr();
     TestCheck(CKStartUp() == CK_OK, "CKStartUp failed");
+    CKCLASSREGISTERCID(RCKRenderObject, CKCID_BEOBJECT);
+    CKCLASSREGISTERCID(RCK3dEntity, CKCID_RENDEROBJECT);
     CKCLASSREGISTERCID(RCKMaterial, CKCID_BEOBJECT);
     CKCLASSREGISTERCID(RCKTexture, CKCID_BEOBJECT);
     CKCLASSREGISTERCID(RCKMesh, CKCID_BEOBJECT);
@@ -913,7 +941,7 @@ int main() {
               &CustomEffectTextureMatrixSurvivesMaterialSetup);
     tests.Run("Cubemap TexGen preserves three coordinates",
               &CubeTexGenPreservesThreeCoordinates);
-    tests.Run("Cube reflection removes camera rotation", &CubeReflectionRemovesCameraRotation);
+    tests.Run("Cube reflection uses referential world rotation", &CubeReflectionUsesReferentialWorldRotation);
     tests.Run("ZWrite changes invalidate transparency classification",
               &ZWriteChangesInvalidateTransparencyClassification);
 
