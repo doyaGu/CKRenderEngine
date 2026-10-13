@@ -1611,10 +1611,32 @@ void RCKCharacter::AlignCharacterWithRootPosition() {
     CKKeyedAnimation *keyedAnim = (CKKeyedAnimation *) active;
 
     if (m_RootBodyPart) {
-        // Get position from root body part and set character position
-        VxVector pos;
-        ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
-        SetPosition(&pos, nullptr, TRUE);
+        CKObjectAnimation *rootAnimation = keyedAnim->DoesCharacterTakeOrientation()
+            ? keyedAnim->GetAnimation((CK3dEntity *)m_RootBodyPart) : nullptr;
+        if (rootAnimation) {
+            // Native 0x10011D81 extracts yaw relative to the first rotation.
+            VxQuaternion first(0, 0, 0, 1), heading(0, 0, 0, 1);
+            rootAnimation->EvaluateRotation(0.0f, first);
+            rootAnimation->EvaluateRotation(keyedAnim->GetFrame(), heading);
+            first.w = -first.w;
+            heading.Multiply(first);
+            heading.x = 0.0f;
+            heading.z = 0.0f;
+            heading.Normalize();
+            VxMatrix turn, world;
+            heading.ToMatrix(turn);
+            Vx3DMultiplyMatrix(world, turn, m_WorldMatrix);
+            VxVector position;
+            ((CK3dEntity *)m_RootBodyPart)->GetPosition(&position, nullptr);
+            world[3][0] = position.x;
+            world[3][1] = position.y;
+            world[3][2] = position.z;
+            SetWorldMatrix(world, TRUE);
+        } else {
+            VxVector pos;
+            ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+            SetPosition(&pos, nullptr, TRUE);
+        }
     }
 
     // Center animation
@@ -1627,7 +1649,25 @@ CK3dEntity *RCKCharacter::GetFloorReferenceObject() {
 }
 
 void RCKCharacter::SetFloorReferenceObject(CK3dEntity *FloorRef) {
+    if (m_FloorRef == (RCK3dEntity *)FloorRef)
+        return;
     m_FloorRef = (RCK3dEntity *) FloorRef;
+
+    // Root and floor channels lead the low-LOD prefix. Rebuild that order when
+    // the floor changes, including transitions retained for later reuse.
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        if (CKIsChildClassOf(*it, CKCID_KEYEDANIMATION))
+            ((RCKKeyedAnimation *)*it)->m_Flags &= ~CKANIMATION_SUBANIMSSORTED;
+    }
+    RCKAnimation *playing[] = {m_ActiveAnimation, m_AnimDest, m_Warper};
+    for (int i = 0; i < 3; ++i) {
+        if (playing[i] && CKIsChildClassOf((CKObject *)playing[i], CKCID_KEYEDANIMATION))
+            playing[i]->m_Flags &= ~CKANIMATION_SUBANIMSSORTED;
+    }
+    for (int i = 0; i < m_SecondaryAnimationsAllocated; ++i) {
+        if (m_SecondaryAnimations[i].Animation)
+            m_SecondaryAnimations[i].Animation->m_Flags &= ~CKANIMATION_SUBANIMSSORTED;
+    }
 }
 
 void RCKCharacter::SetAnimationLevelOfDetail(float LOD) {
@@ -1668,7 +1708,7 @@ void RCKCharacter::FindFloorReference() {
         if (!child) continue;
         CKSTRING name = child->GetName();
         if (name && strstr(name, kFloorRef)) {
-            m_FloorRef = (RCK3dEntity *) child;
+            SetFloorReferenceObject((CK3dEntity *)child);
             return;
         }
     }
@@ -1678,7 +1718,7 @@ void RCKCharacter::FindFloorReference() {
         if (!child) continue;
         CKSTRING name = child->GetName();
         if (name && strstr(name, kFootsteps)) {
-            m_FloorRef = (RCK3dEntity *) child;
+            SetFloorReferenceObject((CK3dEntity *)child);
             return;
         }
     }
@@ -1688,7 +1728,7 @@ void RCKCharacter::FindFloorReference() {
         if (!child) continue;
         CKSTRING name = child->GetName();
         if (name && strstr(name, kFoot)) {
-            m_FloorRef = (RCK3dEntity *) child;
+            SetFloorReferenceObject((CK3dEntity *)child);
             return;
         }
     }
@@ -1698,7 +1738,7 @@ void RCKCharacter::FindFloorReference() {
         if (!child) continue;
         CKSTRING name = child->GetName();
         if (name && strstr(name, kPas)) {
-            m_FloorRef = (RCK3dEntity *) child;
+            SetFloorReferenceObject((CK3dEntity *)child);
             return;
         }
     }

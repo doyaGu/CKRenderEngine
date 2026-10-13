@@ -544,6 +544,8 @@ if (TARGET gtest_main)
             CharacterDependenciesTest
             BodyPartJointTest
             CharacterRegistrationTest
+            CharacterGeometryTest
+            CharacterFloorVelocityTest
 )
         ckre_add_engine_test(${animation_test} ${animation_test}.cpp)
         target_link_libraries(${animation_test} PRIVATE gtest_main)
