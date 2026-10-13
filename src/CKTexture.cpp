@@ -133,10 +133,12 @@ CKBOOL RCKTexture::Create(int Width, int Height, int BPP, int Slot) {
     if (!result)
         return FALSE;
 
-    SetUserMipMapMode(FALSE);
-
-    if ((oldWidth != GetWidth() || oldHeight != GetHeight()) && m_InVideoMemory && !FreeVideoMemory())
-        return FALSE;
+    if (oldWidth != GetWidth() || oldHeight != GetHeight()) {
+        if (!SetUserMipMapMode(FALSE))
+            return FALSE;
+        if (m_InVideoMemory && !FreeVideoMemory())
+            return FALSE;
+    }
 
     return TRUE;
 }
@@ -145,7 +147,8 @@ CKBOOL RCKTexture::LoadImage(CKSTRING Name, int Slot) {
     if (!Name)
         return FALSE;
 
-    SetUserMipMapMode(0);
+    if (!SetUserMipMapMode(FALSE))
+        return FALSE;
 
     int oldWidth = GetWidth();
     int oldHeight = GetHeight();
@@ -164,7 +167,8 @@ CKBOOL RCKTexture::LoadImage(CKSTRING Name, int Slot) {
 }
 
 CKBOOL RCKTexture::LoadMovie(CKSTRING Name) {
-    SetUserMipMapMode(0);
+    if (!SetUserMipMapMode(FALSE))
+        return FALSE;
 
     if (!Name)
         return FALSE;
