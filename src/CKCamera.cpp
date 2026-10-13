@@ -248,8 +248,8 @@ void RCKCamera::ResetRoll() {
     VxVector dir, up, right;
     GetOrientation(&dir, &up, &right, nullptr);
 
-    const VxVector zero(0.0f, 0.0f, 0.0f);
-    right = CrossProduct(zero, dir);
+    const VxVector worldUp(0.0f, 1.0f, 0.0f);
+    right = CrossProduct(worldUp, dir);
 
     // Check if looking nearly straight up/down
     if (right.Magnitude() < 0.1f) {
@@ -348,6 +348,9 @@ Remarks:
 Implementation based on decompilation at 0x1000f72e.
 *************************************************/
 CKERROR RCKCamera::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK)
         return err;
