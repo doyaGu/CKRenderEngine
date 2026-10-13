@@ -876,7 +876,7 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
         m_AnimDest = nullptr;
         if (m_ActiveAnimation) {
             // If active animation can be interrupted, clear it
-            if ((((RCKAnimation *)m_ActiveAnimation)->m_Flags & CKANIMATION_CANBEBREAK) != 0) {
+            if ((m_ActiveAnimation->GetFlags() & CKANIMATION_CANBEBREAK) != 0) {
                 m_ActiveAnimation = nullptr;
             }
         }
@@ -900,7 +900,7 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
         // No active animation - set destination and initialize
         m_AnimDest = (RCKAnimation *)destAnim;
         anim->SetStep(0.0f);
-        if (anim->GetClassID() == CKCID_KEYEDANIMATION) {
+        if (CKIsChildClassOf(anim, CKCID_KEYEDANIMATION)) {
             ((CKKeyedAnimation *)destAnim)->CenterAnimation(0.0f);
         }
         anim->SetStep(0.0f);
@@ -921,7 +921,7 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
     RCKKeyedAnimation *activeAnim = m_ActiveAnimation;
     CKDWORD activeFlags = 0;
     if (activeAnim) {
-        activeFlags = ((RCKAnimation *)activeAnim)->m_Flags;
+        activeFlags = activeAnim->GetFlags();
     }
 
     // Check if we can break or animation step is 0
@@ -936,7 +936,7 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
             // Different animation - align and switch
             AlignCharacterWithRootPosition();
             m_ActiveAnimation = destAnim;
-            if (anim->GetClassID() == CKCID_KEYEDANIMATION) {
+            if (CKIsChildClassOf(anim, CKCID_KEYEDANIMATION)) {
                 ((CKKeyedAnimation *)destAnim)->CenterAnimation(0.0f);
             }
             anim->SetStep(0.0f);
@@ -952,7 +952,11 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
     // CK_TRANSITION_WARPMASK (0x132) - Warp transitions
     else if ((transitionmode & CK_TRANSITION_WARPMASK) != 0) {
         if (m_AnimDest != (RCKAnimation *)destAnim && destAnim) {
-            if (anim->GetClassID() == CKCID_KEYEDANIMATION) {
+            if (CKIsChildClassOf(anim, CKCID_KEYEDANIMATION)) {
+                // The builder does not generate a transition for identical
+                // inputs. Reject before consuming pose or reusing old curves.
+                if (m_ActiveAnimation == destAnim)
+                    return CKERR_INVALIDPARAMETER;
                 float frameDest = 0.0f;
 
                 // Check if we're currently warping and dest can't be interrupted
@@ -961,9 +965,13 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
                 }
 
                 if (m_ActiveAnimation) {
-                    if (((CKObject *)m_ActiveAnimation)->GetClassID() == CKCID_KEYEDANIMATION) {
+                    if (CKIsChildClassOf((CKObject *)m_ActiveAnimation, CKCID_KEYEDANIMATION)) {
                         if (((CKAnimation *)m_ActiveAnimation)->CanBeInterrupt()) {
                             // Animation can be interrupted - create warp now
+                            if (!m_Warper || ((RCKAnimation *)m_ActiveAnimation)->m_Character != this)
+                                return CKERR_INVALIDPARAMETER;
+                            int targetCount = destAnim->GetAnimationCount();
+                            float frameSrc = m_ActiveAnimation->GetFrame();
                             AlignCharacterWithRootPosition();
                             frameDest = m_Warper->CreateTransition(
                                 (CKAnimation *)m_ActiveAnimation,
@@ -971,7 +979,11 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
                                 transitionmode,
                                 warplength,
                                 0.0f);
-                            m_FrameSrc = ((CKAnimation *)m_ActiveAnimation)->GetFrame();
+                            // FrameTo is signed, including valid negative SAMEPOS
+                            // frames. Failed channel growth leaves fewer outputs.
+                            if (m_Warper->GetAnimationCount() < targetCount)
+                                return CKERR_INVALIDPARAMETER;
+                            m_FrameSrc = frameSrc;
                             ((CKKeyedAnimation *)m_Warper)->CenterAnimation(0.0f);
                             ((CKAnimation *)m_Warper)->SetStep(0.0f);
                             m_AnimSrc = (RCKAnimation *)m_ActiveAnimation;
@@ -986,14 +998,24 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
                             CKBOOL atEnd = (curLen == curFrame);
 
                             if (((CKAnimation *)m_ActiveAnimation)->IsLinkedToFrameRate()) {
-                                float checkFrame = ((CKAnimation *)m_ActiveAnimation)->GetFrame();
-                                float checkLen = ((CKAnimation *)m_ActiveAnimation)->GetLength();
-                                atEnd = (checkLen - 0.3f <= checkFrame);
+                                // Length is the starting pose when playing
+                                // backwards. An unbreakable clip must reach zero.
+                                if (((CKAnimation *)m_ActiveAnimation)->GetLinkedFrameRate() < 0.0f) {
+                                    atEnd = (curFrame == 0.0f);
+                                } else {
+                                    float checkFrame = ((CKAnimation *)m_ActiveAnimation)->GetFrame();
+                                    float checkLen = ((CKAnimation *)m_ActiveAnimation)->GetLength();
+                                    atEnd = (checkLen - 0.3f <= checkFrame);
+                                }
                             }
 
                             if (atEnd) {
+                                if (!m_Warper || ((RCKAnimation *)m_ActiveAnimation)->m_Character != this)
+                                    return CKERR_INVALIDPARAMETER;
+                                int targetCount = destAnim->GetAnimationCount();
+                                float frameSrc = m_ActiveAnimation->GetFrame();
                                 AlignCharacterWithRootPosition();
-                                if (((CKObject *)m_ActiveAnimation)->GetClassID() == CKCID_KEYEDANIMATION) {
+                                if (CKIsChildClassOf((CKObject *)m_ActiveAnimation, CKCID_KEYEDANIMATION)) {
                                     frameDest = m_Warper->CreateTransition(
                                         (CKAnimation *)m_ActiveAnimation,
                                         anim,
@@ -1001,12 +1023,34 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
                                         warplength,
                                         0.0f);
                                 }
+                                if (m_Warper->GetAnimationCount() < targetCount)
+                                    return CKERR_INVALIDPARAMETER;
+                                m_FrameSrc = frameSrc;
+                                m_AnimSrc = (RCKAnimation *)m_ActiveAnimation;
+                                m_TransitionMode = transitionmode;
                                 ((CKKeyedAnimation *)m_Warper)->CenterAnimation(0.0f);
                                 ((CKAnimation *)m_Warper)->SetStep(0.0f);
                                 m_ActiveAnimation = m_Warper;
                                 m_AnimDest = (RCKAnimation *)destAnim;
                                 m_FrameDest = frameDest;
                             }
+                        }
+                    } else {
+                        // A plain animation has no channels for the keyed
+                        // builder. Switch at the same interruption boundary.
+                        const float frame = activeAnim->GetFrame();
+                        const float length = activeAnim->GetLength();
+                        CKBOOL atEnd = length == frame;
+                        if (activeAnim->IsLinkedToFrameRate()) {
+                            atEnd = activeAnim->GetLinkedFrameRate() < 0.0f
+                                ? frame == 0.0f : length - 0.3f <= frame;
+                        }
+                        if (activeAnim->CanBeInterrupt() || atEnd) {
+                            m_ActiveAnimation = destAnim;
+                            anim->CenterAnimation(0.0f);
+                            anim->SetStep(0.0f);
+                            m_AnimDest = nullptr;
+                            m_FrameDest = 0.0f;
                         }
                     }
                 } else {
@@ -1016,10 +1060,28 @@ CKERROR RCKCharacter::SetNextActiveAnimation(CKAnimation *anim, CKDWORD transiti
                     m_FrameDest = 0.0f;
                 }
             } else {
-                // Not keyed animation
-                m_ActiveAnimation = destAnim;
-                m_AnimDest = nullptr;
-                m_FrameDest = 0.0f;
+                // A plain target must respect the same source and pending
+                // transition priority even though it has no keyed channels.
+                if (m_ActiveAnimation == m_Warper && m_AnimDest && !((CKAnimation *)m_AnimDest)->CanBeInterrupt())
+                    return CK_OK;
+
+                CKBOOL canSwitch = ((CKAnimation *)activeAnim)->CanBeInterrupt();
+                if (!canSwitch) {
+                    const float frame = ((CKAnimation *)activeAnim)->GetFrame();
+                    const float length = ((CKAnimation *)activeAnim)->GetLength();
+                    if (((CKAnimation *)activeAnim)->IsLinkedToFrameRate()) {
+                        canSwitch = ((CKAnimation *)activeAnim)->GetLinkedFrameRate() < 0.0f
+                            ? frame == 0.0f : length - 0.3f <= frame;
+                    } else {
+                        canSwitch = length == frame;
+                    }
+                }
+                if (canSwitch) {
+                    // Preserve the ready plain target's cursor and pose.
+                    m_ActiveAnimation = destAnim;
+                    m_AnimDest = nullptr;
+                    m_FrameDest = 0.0f;
+                }
             }
         }
     } else {
@@ -1058,53 +1120,115 @@ void RCKCharacter::ProcessAnimation(float deltat) {
 
     if (activeAnim) {
         float curFrame = activeAnim->GetFrame();
-        if (activeAnim->GetLength() != curFrame || activeAnim->CanBeInterrupt()) {
+        const CKBOOL reversePlayback = activeAnim->IsLinkedToFrameRate() && activeAnim->GetLinkedFrameRate() < 0.0f;
+        if (activeAnim->GetLength() != curFrame || activeAnim->CanBeInterrupt() || reversePlayback) {
             const float activeLen = activeAnim->GetLength();
             float nextFrame = activeAnim->GetNextFrame(deltat);
+            const float frameAdvance = nextFrame - curFrame;
 
-            if (nextFrame < activeLen) {
+            if (nextFrame < activeLen || reversePlayback) {
                 if (nextFrame < 0.0f) {
+                    const float sourceStep = activeKeyed ? activeKeyed->m_Step : 0.0f;
+                    if (activeKeyed) {
+                        if (m_RootBodyPart) {
+                            RCKObjectAnimation *rootObjAnim = activeKeyed->m_RootAnimation;
+                            if (rootObjAnim) {
+                                // Complete the root pose in the source world
+                                // basis before transferring its terminal yaw.
+                                VxVector pos;
+                                ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+                                VxVector currentPosition(0.0f, 0.0f, 0.0f), endpointPosition(0.0f, 0.0f, 0.0f);
+                                rootObjAnim->EvaluatePosition(curFrame, currentPosition);
+                                rootObjAnim->EvaluatePosition(0.0f, endpointPosition);
+                                const VxVector delta = endpointPosition - currentPosition;
+                                rootObjAnim->SetStep(0.0f, reinterpret_cast<CKKeyedAnimation *>(activeKeyed));
+                                m_RootBodyPart->LocalMatrixChanged(FALSE, FALSE);
+                                // Keep the actual accumulated root position,
+                                // including a SetFrame followed by Center.
+                                m_RootBodyPart->SetPosition(&pos, nullptr, FALSE);
+                                m_RootBodyPart->Translate(&delta, (CK3dEntity *) this, FALSE);
+
+                                ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+                                SetPosition(&pos, nullptr, TRUE);
+                            }
+                        }
+                        activeKeyed->m_Step = 0.0f;
+                    }
                     AlignCharacterWithRootPosition();
+                    if (activeKeyed)
+                        activeKeyed->m_Step = sourceStep;
+
                     m_ActiveAnimation = (RCKKeyedAnimation *) m_AnimDest;
                     m_AnimDest = nullptr;
 
                     if (destAnim) {
-                        const float destLen = destAnim->GetLength();
-                        if (destLen != 0.0f) {
-                            while (nextFrame < 0.0f) {
-                                nextFrame += destLen;
-                            }
+                        if (activeAnim->IsLinkedToFrameRate() && destAnim->IsLinkedToFrameRate()) {
+                            const float sourceRate = activeAnim->GetLinkedFrameRate();
+                            if (sourceRate != 0.0f)
+                                nextFrame *= destAnim->GetLinkedFrameRate() / sourceRate;
+                        } else if (activeAnim->IsLinkedToFrameRate() != destAnim->IsLinkedToFrameRate() && nextFrame != 0.0f) {
+                            // Mixed modes share the unused portion of this
+                            // process, rather than a source-frame duration.
+                            nextFrame /= frameAdvance;
+                            if (destAnim->IsLinkedToFrameRate())
+                                nextFrame *= deltat * destAnim->GetLinkedFrameRate() * 0.001f;
                         }
 
-                        const float destFrame = nextFrame + m_FrameDest;
+                        float entryFrame = m_FrameDest;
+                        // A zero-offset restart of this clip enters at its
+                        // end when continuing backwards. Other entries remain
+                        // literal, including signed transition frame data.
+                        if (destAnim == activeAnim && m_FrameDest == 0.0f && nextFrame < 0.0f)
+                            entryFrame = destAnim->GetLength();
+
                         if (destKeyed) {
-                            destKeyed->CenterAnimation(destFrame);
+                            destKeyed->CenterAnimation(entryFrame);
                         }
-                        destAnim->SetFrame(destFrame);
+                        destAnim->SetFrame(entryFrame + nextFrame);
+
+                        if (destKeyed && m_RootBodyPart) {
+                            VxVector pos;
+                            ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+                            SetPosition(&pos, nullptr, TRUE);
+                        }
+
+                        if (destKeyed) {
+                            destKeyed->CenterAnimation(destAnim->GetFrame());
+                        }
                     }
 
                     doActivePostUpdate = false;
                 }
             } else {
                 if (activeAnim->CanBeInterrupt() || m_AnimDest) {
-                    AlignCharacterWithRootPosition();
+                    const float sourceStep = activeKeyed ? activeKeyed->m_Step : 0.0f;
+                    const float endpointStep = activeLen > 0.0f ? 1.0f : 0.0f;
+                    if (activeKeyed) {
+                        if (m_RootBodyPart) {
+                            RCKObjectAnimation *rootObjAnim = activeKeyed->m_RootAnimation;
+                            if (rootObjAnim) {
+                                VxVector pos;
+                                ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+                                VxVector currentPosition(0.0f, 0.0f, 0.0f), endpointPosition(0.0f, 0.0f, 0.0f);
+                                rootObjAnim->EvaluatePosition(curFrame, currentPosition);
+                                rootObjAnim->EvaluatePosition(activeLen, endpointPosition);
+                                const VxVector delta = endpointPosition - currentPosition;
+                                rootObjAnim->SetStep(endpointStep, reinterpret_cast<CKKeyedAnimation *>(activeKeyed));
+                                m_RootBodyPart->LocalMatrixChanged(FALSE, FALSE);
+                                m_RootBodyPart->SetPosition(&pos, nullptr, FALSE);
+                                m_RootBodyPart->Translate(&delta, (CK3dEntity *) this, FALSE);
 
-                    if (activeKeyed && m_RootBodyPart) {
-                        CKObjectAnimation *rootObjAnim = activeKeyed->GetAnimation((CK3dEntity *) m_RootBodyPart);
-                        if (rootObjAnim) {
-                            VxVector posEnd;
-                            VxVector posCentered;
-                            const float centeredFrame = activeAnim->GetFrame();
-                            rootObjAnim->EvaluatePosition(activeLen, posEnd);
-                            rootObjAnim->EvaluatePosition(centeredFrame, posCentered);
-                            VxVector delta = posEnd - posCentered;
-                            m_RootBodyPart->Translate(&delta, (CK3dEntity *) this, FALSE);
-
-                            VxVector pos;
-                            ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
-                            SetPosition(&pos, nullptr, TRUE);
+                                ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+                                SetPosition(&pos, nullptr, TRUE);
+                            }
                         }
+                        // The virtual callback sees the completed pose, while
+                        // the inactive source retains its logical cursor.
+                        activeKeyed->m_Step = endpointStep;
                     }
+                    AlignCharacterWithRootPosition();
+                    if (activeKeyed)
+                        activeKeyed->m_Step = sourceStep;
 
                     m_ActiveAnimation = (RCKKeyedAnimation *) m_AnimDest;
                     m_AnimDest = nullptr;
@@ -1114,16 +1238,26 @@ void RCKCharacter::ProcessAnimation(float deltat) {
                             destKeyed->CenterAnimation(m_FrameDest);
                         }
 
-                        if (activeLen != 0.0f) {
-                            while (nextFrame >= activeLen) {
-                                nextFrame -= activeLen;
+                        if (activeLen > 0.0f) {
+                            // One queued clip is consumed once, including a
+                            // restart of the same animation. Carry its full
+                            // remaining time instead of looping the source.
+                            nextFrame -= activeLen;
+                            if (activeAnim->IsLinkedToFrameRate() && destAnim->IsLinkedToFrameRate()) {
+                                const float sourceRate = activeAnim->GetLinkedFrameRate();
+                                if (sourceRate != 0.0f)
+                                    nextFrame *= destAnim->GetLinkedFrameRate() / sourceRate;
+                            } else if (activeAnim->IsLinkedToFrameRate() != destAnim->IsLinkedToFrameRate() && nextFrame != 0.0f) {
+                                nextFrame /= frameAdvance;
+                                if (destAnim->IsLinkedToFrameRate())
+                                    nextFrame *= deltat * destAnim->GetLinkedFrameRate() * 0.001f;
                             }
                         }
 
                         const float destFrame = nextFrame + m_FrameDest;
                         destAnim->SetFrame(destFrame);
 
-                        if (m_RootBodyPart) {
+                        if (destKeyed && m_RootBodyPart) {
                             VxVector pos;
                             ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
                             SetPosition(&pos, nullptr, TRUE);
@@ -1142,6 +1276,9 @@ void RCKCharacter::ProcessAnimation(float deltat) {
 
             nextFrameForActive = nextFrame;
         } else {
+            // A noninterruptible clip displayed its end on the preceding
+            // tick. Consume that terminal orientation before promoting next.
+            AlignCharacterWithRootPosition();
             m_ActiveAnimation = (RCKKeyedAnimation *) m_AnimDest;
             m_AnimDest = nullptr;
 
@@ -1150,10 +1287,10 @@ void RCKCharacter::ProcessAnimation(float deltat) {
                     destKeyed->CenterAnimation(m_FrameDest);
                 }
 
-                float destLen = ((CKAnimation *) m_ActiveAnimation)->GetLength();
-                if (destLen != 0.0f) {
-                    while (curFrame >= destLen) {
-                        curFrame -= destLen;
+                const float sourceLen = activeAnim->GetLength();
+                if (sourceLen != 0.0f) {
+                    while (curFrame >= sourceLen) {
+                        curFrame -= sourceLen;
                     }
                 }
                 destAnim->SetFrame(curFrame + m_FrameDest);
@@ -1175,14 +1312,16 @@ void RCKCharacter::ProcessAnimation(float deltat) {
             activeKeyed = m_ActiveAnimation;
         }
 
-        if (activeAnim && activeKeyed) {
+        if (activeAnim) {
             activeAnim->SetFrame(nextFrameForActive);
-            if (m_RootBodyPart) {
-                VxVector pos;
-                ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
-                SetPosition(&pos, nullptr, TRUE);
+            if (activeKeyed) {
+                if (m_RootBodyPart) {
+                    VxVector pos;
+                    ((CK3dEntity *) m_RootBodyPart)->GetPosition(&pos, nullptr);
+                    SetPosition(&pos, nullptr, TRUE);
+                }
+                activeKeyed->CenterAnimation(nextFrameForActive);
             }
-            activeKeyed->CenterAnimation(nextFrameForActive);
         }
     }
 
@@ -1196,9 +1335,10 @@ void RCKCharacter::ProcessAnimation(float deltat) {
                 continue;
             }
 
+            const float current = ((CKAnimation *)anim)->GetFrame();
             const float next = ((CKAnimation *)anim)->GetNextFrame(deltat);
             const float remaining = next - ((CKAnimation *)anim)->GetLength();
-            if (remaining < 0.0f) {
+            if (remaining <= 0.0f) {
                 ((CKAnimation *)anim)->SetFrame(next);
             } else {
                 secAnim.Mode = CKSECONDARYANIMATIONRUNTIME_PLAYING;
@@ -1207,7 +1347,17 @@ void RCKCharacter::ProcessAnimation(float deltat) {
 
                 const float startFrame = secAnim.GetStartingFrame();
                 if (source) {
-                    source->SetFrame(remaining + startFrame);
+                    float sourceRemaining = remaining;
+                    if (anim->IsLinkedToFrameRate() && source->IsLinkedToFrameRate()) {
+                        sourceRemaining *= source->GetLinkedFrameRate() / anim->GetLinkedFrameRate();
+                    } else if (anim->IsLinkedToFrameRate() != source->IsLinkedToFrameRate()) {
+                        // Mixed clocks share only the unused fraction of this Process call.
+                        sourceRemaining /= next - current;
+                        if (source->IsLinkedToFrameRate()) {
+                            sourceRemaining *= deltat * source->GetLinkedFrameRate() * 0.001f;
+                        }
+                    }
+                    source->SetFrame(sourceRemaining + startFrame);
                 }
             }
             continue;
@@ -1221,8 +1371,44 @@ void RCKCharacter::ProcessAnimation(float deltat) {
 
             const float next = ((CKAnimation *)anim)->GetNextFrame(deltat);
             const float remaining = next - ((CKAnimation *)anim)->GetLength();
-            if (remaining < 0.0f) {
-                ((CKAnimation *)anim)->SetFrame(next);
+            CKBOOL livePoseApplied = FALSE;
+            if (secAnim.Padding) {
+                // Mixed clocks and a held main's entry-only handoff depend
+                // on Process call boundaries rather than elapsed time alone.
+                // Blend the retained secondary pose towards the main pose
+                // actually reached by the preceding primary phase instead.
+                CKAnimation *target = GetActiveAnimation();
+                const CKBOOL mainStopped = target == nullptr;
+                if (!target)
+                    target = (CKAnimation *)m_Context->GetObject(secAnim.Padding);
+                if (target && CKIsChildClassOf(target, CKCID_KEYEDANIMATION) &&
+                    target->GetCharacter() == reinterpret_cast<CKCharacter *>(this)) {
+                    secAnim.Padding = target->GetID();
+                    float targetFrame = target->GetFrame();
+                    if (mainStopped) {
+                        // Completion retains the old logical cursor. Sample
+                        // its displayed endpoint without advancing it again.
+                        targetFrame = target->IsLinkedToFrameRate() && target->GetLinkedFrameRate() < 0.0f
+                            ? 0.0f : target->GetLength();
+                    }
+                    const float duration = ((CKAnimation *)anim)->GetLength();
+                    const CKBOOL linked = ((CKAnimation *)anim)->IsLinkedToFrameRate();
+                    const float rate = ((CKAnimation *)anim)->GetLinkedFrameRate();
+                    // Frame-zero keys retain the captured return pose, even
+                    // if the original secondary later advances.
+                    anim->SetCurrentStep(0.0f);
+                    anim->CreateTransition((CKAnimation *)anim, target, 0, duration, targetFrame);
+                    anim->LinkToFrameRate(linked, rate);
+                    PreDeleteBodyPartsForAnimation((CKAnimation *)anim);
+                    // Even a held endpoint or the strict release tick must
+                    // reflect this call's main pose before releasing its gate.
+                    ((CKAnimation *)anim)->SetFrame(next > duration ? duration : next);
+                    livePoseApplied = TRUE;
+                }
+            }
+            if (remaining <= 0.0f) {
+                if (!livePoseApplied)
+                    ((CKAnimation *)anim)->SetFrame(next);
             } else {
                 const int removeIndex = i;
                 --i;
@@ -1241,41 +1427,76 @@ void RCKCharacter::ProcessAnimation(float deltat) {
         }
 
         const float next = anim->GetNextFrame(deltat);
-        const float remaining = next - anim->GetLength();
-        if (remaining < 0.0f) {
+        const float length = anim->GetLength();
+        const float remaining = next - length;
+        const bool reverseEnd = next < 0.0f;
+        if (!reverseEnd && remaining <= 0.0f) {
             anim->SetFrame(next);
             continue;
         }
 
+        const float terminalFrame = reverseEnd ? 0.0f : length;
+        float loopFrame = reverseEnd ? next : remaining;
+        double completedLoops = 1.0;
+        if (length > 0.0f &&
+            (secAnim.Flags & (CKSECONDARYANIMATION_LOOP | CKSECONDARYANIMATION_LOOPNTIMES))) {
+            loopFrame = fmodf(next, length);
+            if (reverseEnd) {
+                completedLoops = ceil(-static_cast<double>(next) / length);
+                if (loopFrame < 0.0f)
+                    loopFrame += length;
+                // Exact negative periods retain frame zero until the next
+                // update crosses it, just as forward playback retains length.
+            } else {
+                completedLoops = floor(static_cast<double>(next) / length);
+                // At an exact multiple retain the preceding period's last frame;
+                // its final loop is consumed only when the next update exceeds it.
+                if (loopFrame == 0.0f) {
+                    loopFrame = length;
+                    completedLoops -= 1.0;
+                }
+            }
+        }
+
         int removeIt = 0;
         if ((secAnim.Flags & CKSECONDARYANIMATION_LOOP) != 0) {
-            anim->SetFrame(remaining);
+            anim->SetFrame(loopFrame);
         } else if ((secAnim.Flags & CKSECONDARYANIMATION_LOOPNTIMES) != 0) {
-            if ((int)--secAnim.LoopCountRemaining > 0) {
-                anim->SetFrame(remaining);
-            } else if ((secAnim.Flags & CKSECONDARYANIMATION_LASTFRAME) != 0) {
-                anim->SetFrame(anim->GetLength());
-                secAnim.Flags &= ~CKSECONDARYANIMATION_LOOPNTIMES;
+            if (completedLoops < secAnim.LoopCountRemaining) {
+                secAnim.LoopCountRemaining -= static_cast<CKDWORD>(completedLoops);
+                anim->SetFrame(loopFrame);
             } else {
-                removeIt = 1;
+                secAnim.LoopCountRemaining = 0;
+                if ((secAnim.Flags & CKSECONDARYANIMATION_LASTFRAME) != 0) {
+                    anim->SetFrame(terminalFrame);
+                    secAnim.Flags &= ~CKSECONDARYANIMATION_LOOPNTIMES;
+                } else {
+                    removeIt = 1;
+                }
             }
         } else if ((secAnim.Flags & CKSECONDARYANIMATION_LASTFRAME) != 0) {
-            anim->SetFrame(anim->GetLength());
+            anim->SetFrame(terminalFrame);
         } else {
             removeIt = 1;
         }
 
         if (removeIt) {
+            // A reverse animation finishes at its first pose. Sample that
+            // endpoint before the return builder reads the source's step.
+            if (reverseEnd)
+                anim->SetFrame(0.0f);
             if ((secAnim.Flags & CKSECONDARYANIMATION_DOWARP) != 0 && CKIsChildClassOf((CKObject *)anim, CKCID_KEYEDANIMATION)) {
                 RCKKeyedAnimation *active = m_ActiveAnimation;
-                if (active && CKIsChildClassOf((CKObject *)active, CKCID_KEYEDANIMATION)) {
+                if (active && CKIsChildClassOf((CKObject *)active, CKCID_KEYEDANIMATION) &&
+                    active->m_Character == this &&
+                    anim->GetCharacter() == reinterpret_cast<CKCharacter *>(this) &&
+                    anim != static_cast<CKAnimation *>(active)) {
                     RCKKeyedAnimation *transition = secAnim.Animation;
                     if (!transition) {
-                        CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
                         transition = (RCKKeyedAnimation *)m_Context->CreateObject(
                             CKCID_KEYEDANIMATION,
                             nullptr,
-                            isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
+                            IsDynamic() ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
                             nullptr);
                         secAnim.Animation = transition;
                         if (transition) {
@@ -1284,13 +1505,85 @@ void RCKCharacter::ProcessAnimation(float deltat) {
                     }
 
                     if (transition) {
-                        float targetFrame = ((CKAnimation *)active)->GetFrame() + secAnim.WarpLength;
+                        const float activeFrame = ((CKAnimation *)active)->GetFrame();
+                        float targetFrame = activeFrame + secAnim.WarpLength;
                         const float activeLen = ((CKAnimation *)active)->GetLength();
-                        while (targetFrame >= activeLen) {
-                            targetFrame -= activeLen;
+                        const CKBOOL returnLinked = ((CKAnimation *)active)->IsLinkedToFrameRate();
+                        const float returnRate = ((CKAnimation *)active)->GetLinkedFrameRate();
+                        const float returnLength = secAnim.WarpLength < 1.0f ? 1.0f : secAnim.WarpLength;
+                        RCKKeyedAnimation *returnTarget = active;
+                        secAnim.Padding = 0;
+                        if (activeLen > 0.0f) {
+                            if (returnLinked && returnRate == 0.0f) {
+                                targetFrame = activeFrame;
+                            } else if (returnLinked && returnRate < 0.0f) {
+                                // The return warp uses abs(primary FPS). Predict the
+                                // primary backwards over the builder's actual duration.
+                                targetFrame = activeFrame - returnLength;
+                                if (targetFrame < 0.0f) {
+                                    if (m_AnimDest == (RCKAnimation *)active)
+                                        targetFrame += activeLen;
+                                    if (targetFrame < 0.0f)
+                                        targetFrame = 0.0f;
+                                }
+                            } else {
+                                while (targetFrame > activeLen) {
+                                    targetFrame -= activeLen;
+                                }
+                            }
+                        } else {
+                            targetFrame = 0.0f;
                         }
 
-                        transition->CreateTransition(anim, (CKAnimation *)active, 0, secAnim.WarpLength, targetFrame);
+                        if (activeLen > 0.0f && returnLinked && returnRate != 0.0f &&
+                            m_AnimDest && m_AnimDest != (RCKAnimation *)active &&
+                            CKIsChildClassOf((CKObject *)m_AnimDest, CKCID_KEYEDANIMATION) &&
+                            ((CKAnimation *)m_AnimDest)->GetCharacter() == reinterpret_cast<CKCharacter *>(this) &&
+                            ((CKAnimation *)m_AnimDest)->IsLinkedToFrameRate()) {
+                            const float futureFrame = activeFrame + (returnRate < 0.0f ? -returnLength : returnLength);
+                            const CKBOOL crossesEnd = returnRate < 0.0f ? futureFrame < 0.0f :
+                                futureFrame >= activeLen && (activeFrame != activeLen || ((CKAnimation *)active)->CanBeInterrupt());
+                            if (crossesEnd) {
+                                // Sample the queued clip after the primary has
+                                // consumed its boundary and remaining time.
+                                returnTarget = (RCKKeyedAnimation *)m_AnimDest;
+                                const float remaining = returnRate < 0.0f ? futureFrame : futureFrame - activeLen;
+                                targetFrame = m_FrameDest + remaining * (((CKAnimation *)returnTarget)->GetLinkedFrameRate() / returnRate);
+                                const float targetLen = ((CKAnimation *)returnTarget)->GetLength();
+                                // Match SetFrame, including literal zero entries
+                                // for reverse clips, rather than adding a period.
+                                if (targetFrame < 0.0f)
+                                    targetFrame = 0.0f;
+                                else if (targetFrame > targetLen)
+                                    targetFrame = targetLen;
+                            }
+                        }
+
+                        const CKBOOL heldEnd = activeFrame == activeLen &&
+                            !((CKAnimation *)active)->CanBeInterrupt() && !(returnLinked && returnRate < 0.0f);
+                        if (heldEnd || (m_AnimDest && m_AnimDest != (RCKAnimation *)active &&
+                            CKIsChildClassOf((CKObject *)m_AnimDest, CKCID_KEYEDANIMATION) &&
+                            ((CKAnimation *)m_AnimDest)->GetCharacter() == reinterpret_cast<CKCharacter *>(this) &&
+                            returnLinked != ((CKAnimation *)m_AnimDest)->IsLinkedToFrameRate())) {
+                            secAnim.Padding = ((CKAnimation *)active)->GetID();
+                            targetFrame = activeFrame;
+                        }
+
+                        if (anim == (CKAnimation *)returnTarget) {
+                            // Capture the secondary's current pose before it
+                            // becomes the queued primary. The builder rejects
+                            // equal inputs, so sample its future through the warp.
+                            transition->CreateTransition(anim, (CKAnimation *)active, 0, secAnim.WarpLength, activeFrame);
+                            transition->SetCurrentStep(0.0f);
+                            transition->CreateTransition((CKAnimation *)transition, (CKAnimation *)returnTarget, 0, secAnim.WarpLength, targetFrame);
+                        } else {
+                            transition->CreateTransition(anim, (CKAnimation *)returnTarget, 0, secAnim.WarpLength, targetFrame);
+                        }
+                        if (returnTarget != active) {
+                            // Keep the requested duration in the triggering
+                            // primary's clock even when the target has another FPS.
+                            transition->LinkToFrameRate(returnLinked, returnRate < 0.0f ? -returnRate : returnRate);
+                        }
                         secAnim.Flags |= CKSECONDARYANIMATION_DOWARP;
                         ((CKAnimation *)transition)->SetFrame(0.0f);
                         PreDeleteBodyPartsForAnimation((CKAnimation *)transition);
@@ -1398,18 +1691,19 @@ CKERROR RCKCharacter::PlaySecondaryAnimation(CKAnimation *anim, float StartingFr
         m_SecondaryAnimationsAllocated += 2;
     }
 
+    CKBOOL warped = FALSE;
     // Handle DOWARP flag - create transition from active animation
     if ((PlayFlags & CKSECONDARYANIMATION_DOWARP) != 0) {
         if (CKIsChildClassOf((CKObject *)anim, CKCID_KEYEDANIMATION)) {
             RCKKeyedAnimation *activeKeyed = m_ActiveAnimation;
-            if (activeKeyed && CKIsChildClassOf((CKObject *)activeKeyed, CKCID_KEYEDANIMATION)) {
+            if (activeKeyed && CKIsChildClassOf((CKObject *)activeKeyed, CKCID_KEYEDANIMATION) &&
+                activeKeyed->m_Character == this && (CKAnimation *)activeKeyed != anim) {
                 RCKKeyedAnimation *transition = m_SecondaryAnimations[m_SecondaryAnimationsCount].Animation;
                 if (!transition) {
-                    CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
                     transition = (RCKKeyedAnimation *)m_Context->CreateObject(
                         CKCID_KEYEDANIMATION,
                         nullptr,
-                        isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
+                        IsDynamic() ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
                         nullptr);
 
                     CKDWORD flags = ((RCKAnimation *)transition)->m_Flags;
@@ -1425,10 +1719,12 @@ CKERROR RCKCharacter::PlaySecondaryAnimation(CKAnimation *anim, float StartingFr
                 ((CKAnimation *)transition)->SetFrame(0.0f);
                 PreDeleteBodyPartsForAnimation((CKAnimation *)transition);
                 m_SecondaryAnimations[m_SecondaryAnimationsCount].Mode = CKSECONDARYANIMATIONRUNTIME_STARTINGWARP;
+                warped = TRUE;
             }
         }
-    } else {
-        // No warp - just set the frame and start playing
+    }
+    if (!warped) {
+        // An unavailable transition falls back to ordinary secondary playback.
         anim->SetFrame(StartingFrame);
         if (CKIsChildClassOf((CKObject *)anim, CKCID_KEYEDANIMATION)) {
             PreDeleteBodyPartsForAnimation(anim);
@@ -1440,6 +1736,7 @@ CKERROR RCKCharacter::PlaySecondaryAnimation(CKAnimation *anim, float StartingFr
     m_SecondaryAnimations[m_SecondaryAnimationsCount].SetStartingFrame(StartingFrame);
     m_SecondaryAnimations[m_SecondaryAnimationsCount].AnimID = animID;
     m_SecondaryAnimations[m_SecondaryAnimationsCount].Flags = PlayFlags;
+    m_SecondaryAnimations[m_SecondaryAnimationsCount].Padding = 0;
     m_SecondaryAnimations[m_SecondaryAnimationsCount].LoopCountRemaining = LoopCount;
 
     m_SecondaryAnimationsCount++;
@@ -1459,24 +1756,10 @@ CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, CKBOOL warp, flo
     CK_ID animID = anim->GetID();
 
     // Find the secondary animation
-    int idx = -1;
-    for (int i = 0; i < m_SecondaryAnimationsCount && m_SecondaryAnimations[i].AnimID != animID; ++i) {
-        idx = i;
-    }
-
-    // Check if we found it (need to verify the condition matched)
-    if (idx >= m_SecondaryAnimationsCount || m_SecondaryAnimations[idx].AnimID != animID) {
-        // Re-scan properly
-        idx = -1;
-        for (int i = 0; i < m_SecondaryAnimationsCount; ++i) {
-            if (m_SecondaryAnimations[i].AnimID == animID) {
-                idx = i;
-                break;
-            }
-        }
-    }
-
-    if (idx < 0 || idx >= m_SecondaryAnimationsCount) {
+    int idx = 0;
+    while (idx < m_SecondaryAnimationsCount && m_SecondaryAnimations[idx].AnimID != animID)
+        ++idx;
+    if (idx >= m_SecondaryAnimationsCount) {
         return CK_OK; // Not playing
     }
 
@@ -1487,14 +1770,25 @@ CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, CKBOOL warp, flo
         }
 
         RCKKeyedAnimation *activeKeyed = m_ActiveAnimation;
-        if (activeKeyed && CKIsChildClassOf((CKObject *)activeKeyed, CKCID_KEYEDANIMATION)) {
+        if (activeKeyed && CKIsChildClassOf((CKObject *)activeKeyed, CKCID_KEYEDANIMATION) &&
+            activeKeyed->m_Character == this) {
+            CKAnimation *fromAnim = nullptr;
+            if (m_SecondaryAnimations[idx].Mode == CKSECONDARYANIMATIONRUNTIME_PLAYING) {
+                fromAnim = (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[idx].AnimID);
+            } else {
+                fromAnim = (CKAnimation *)m_SecondaryAnimations[idx].Animation;
+            }
+            if (!fromAnim || fromAnim == (CKAnimation *)activeKeyed ||
+                !CKIsChildClassOf((CKObject *)fromAnim, CKCID_KEYEDANIMATION)) {
+                RemoveSecondaryAnimationAt(idx);
+                return CK_OK;
+            }
             RCKKeyedAnimation *transition = m_SecondaryAnimations[idx].Animation;
             if (!transition) {
-                CKBOOL isDynamic = m_Context->IsInDynamicCreationMode();
                 transition = (RCKKeyedAnimation *)m_Context->CreateObject(
                     CKCID_KEYEDANIMATION,
                     nullptr,
-                    isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
+                    IsDynamic() ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK,
                     nullptr);
                 m_SecondaryAnimations[idx].Animation = transition;
                 if (transition) {
@@ -1502,21 +1796,84 @@ CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, CKBOOL warp, flo
                 }
             }
 
-            CKAnimation *fromAnim = nullptr;
-            if (m_SecondaryAnimations[idx].Mode == CKSECONDARYANIMATIONRUNTIME_PLAYING) {
-                fromAnim = (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[idx].AnimID);
+            const float activeFrame = ((CKAnimation *)activeKeyed)->GetFrame();
+            float targetFrame = activeFrame + warplength;
+            const float activeLen = ((CKAnimation *)activeKeyed)->GetLength();
+            const CKBOOL returnLinked = ((CKAnimation *)activeKeyed)->IsLinkedToFrameRate();
+            const float returnRate = ((CKAnimation *)activeKeyed)->GetLinkedFrameRate();
+            const float returnLength = warplength < 1.0f ? 1.0f : warplength;
+            RCKKeyedAnimation *returnTarget = activeKeyed;
+            m_SecondaryAnimations[idx].Padding = 0;
+            if (activeLen > 0.0f) {
+                if (returnLinked && returnRate == 0.0f) {
+                    targetFrame = activeFrame;
+                } else if (returnLinked && returnRate < 0.0f) {
+                    // Match the return warp's abs(primary FPS) clock and the
+                    // main player's single queued-self restart, if any.
+                    targetFrame = activeFrame - returnLength;
+                    if (targetFrame < 0.0f) {
+                        if (m_AnimDest == (RCKAnimation *)activeKeyed)
+                            targetFrame += activeLen;
+                        if (targetFrame < 0.0f)
+                            targetFrame = 0.0f;
+                    }
+                } else {
+                    while (targetFrame > activeLen)
+                        targetFrame -= activeLen;
+                }
             } else {
-                fromAnim = (CKAnimation *)m_SecondaryAnimations[idx].Animation;
+                targetFrame = 0.0f;
             }
 
-            float targetFrame = ((CKAnimation *)activeKeyed)->GetFrame() + warplength;
-            const float activeLen = ((CKAnimation *)activeKeyed)->GetLength();
-            while (targetFrame >= activeLen) {
-                targetFrame -= activeLen;
+            if (activeLen > 0.0f && returnLinked && returnRate != 0.0f &&
+                m_AnimDest && m_AnimDest != (RCKAnimation *)activeKeyed &&
+                CKIsChildClassOf((CKObject *)m_AnimDest, CKCID_KEYEDANIMATION) &&
+                ((CKAnimation *)m_AnimDest)->GetCharacter() == reinterpret_cast<CKCharacter *>(this) &&
+                ((CKAnimation *)m_AnimDest)->IsLinkedToFrameRate()) {
+                const float futureFrame = activeFrame + (returnRate < 0.0f ? -returnLength : returnLength);
+                const CKBOOL crossesEnd = returnRate < 0.0f ? futureFrame < 0.0f :
+                    futureFrame >= activeLen && (activeFrame != activeLen || ((CKAnimation *)activeKeyed)->CanBeInterrupt());
+                if (crossesEnd) {
+                    // The main player consumes its queued clip later. Sample
+                    // that clip without advancing it or consuming the queue.
+                    returnTarget = (RCKKeyedAnimation *)m_AnimDest;
+                    const float remaining = returnRate < 0.0f ? futureFrame : futureFrame - activeLen;
+                    targetFrame = m_FrameDest + remaining * (((CKAnimation *)returnTarget)->GetLinkedFrameRate() / returnRate);
+                    const float targetLen = ((CKAnimation *)returnTarget)->GetLength();
+                    if (targetFrame < 0.0f)
+                        targetFrame = 0.0f;
+                    else if (targetFrame > targetLen)
+                        targetFrame = targetLen;
+                }
+            }
+
+            const CKBOOL heldEnd = activeFrame == activeLen &&
+                !((CKAnimation *)activeKeyed)->CanBeInterrupt() && !(returnLinked && returnRate < 0.0f);
+            if (heldEnd || (m_AnimDest && m_AnimDest != (RCKAnimation *)activeKeyed &&
+                CKIsChildClassOf((CKObject *)m_AnimDest, CKCID_KEYEDANIMATION) &&
+                ((CKAnimation *)m_AnimDest)->GetCharacter() == reinterpret_cast<CKCharacter *>(this) &&
+                returnLinked != ((CKAnimation *)m_AnimDest)->IsLinkedToFrameRate())) {
+                // A held main only enters the queued clip on its next call,
+                // or stops without a queue. Track its actual pose as for mixed clocks.
+                m_SecondaryAnimations[idx].Padding = ((CKAnimation *)activeKeyed)->GetID();
+                targetFrame = activeFrame;
             }
 
             if (transition && fromAnim && CKIsChildClassOf((CKObject *)fromAnim, CKCID_KEYEDANIMATION)) {
-                transition->CreateTransition(fromAnim, (CKAnimation *)activeKeyed, 0, warplength, targetFrame);
+                // During STARTINGWARP, fromAnim is transition itself. Capture
+                // its current blend before resetting the new return cursor.
+                if (fromAnim == (CKAnimation *)returnTarget) {
+                    // The queued primary may be the original secondary. The
+                    // builder rejects equal inputs, so capture its current
+                    // pose in the private warp before sampling its future.
+                    transition->CreateTransition(fromAnim, (CKAnimation *)activeKeyed, 0, warplength, activeFrame);
+                    transition->SetCurrentStep(0.0f);
+                    transition->CreateTransition((CKAnimation *)transition, (CKAnimation *)returnTarget, 0, warplength, targetFrame);
+                } else {
+                    transition->CreateTransition(fromAnim, (CKAnimation *)returnTarget, 0, warplength, targetFrame);
+                }
+                if (returnTarget != activeKeyed)
+                    transition->LinkToFrameRate(returnLinked, returnRate < 0.0f ? -returnRate : returnRate);
                 m_SecondaryAnimations[idx].Flags |= CKSECONDARYANIMATION_DOWARP;
                 m_SecondaryAnimations[idx].WarpLength = warplength;
                 ((CKAnimation *)transition)->SetFrame(0.0f);
@@ -1539,10 +1896,8 @@ CKERROR RCKCharacter::StopSecondaryAnimation(CKAnimation *anim, float warplength
         return CKERR_INVALIDPARAMETER;
     }
 
-    // Get secondary animation mode from animation and check DOWARP flag
-    // The mode is returned as-is from GetSecondaryAnimationMode, then AND with 0x800000
-    // 0x800000 = CKSECONDARYANIMATION_DOWARP (0x80) << 16 after it's stored in m_Flags
-    // But GetSecondaryAnimationMode returns the shifted-back value, so we check 0x80
+    // The native getter shifts flags back by 16; its caller's 0x800000 mask
+    // is erroneous. Use the public DOWARP flag so this overload can warp.
     int mode = anim->GetSecondaryAnimationMode();
     CKBOOL warp = (mode & CKSECONDARYANIMATION_DOWARP) != 0;
 
@@ -1576,11 +1931,10 @@ void RCKCharacter::FlushSecondaryAnimations() {
         CKObject *obj = m_Context->GetObject(m_SecondaryAnimations[i].AnimID);
         RCKAnimation *anim = (obj && CKIsChildClassOf(obj, CKCID_ANIMATION)) ? (RCKAnimation *) obj : nullptr;
         if (anim) {
-            // For each animation, iterate through entities and notify body parts
-            // This corresponds to sub_10048148 which iterates entities and calls method at vtable[118]
-            // on body parts with parameter 0
-            NotifyBodyPartsInAnimation(anim, 0);
+            NotifyBodyPartsInAnimation(anim, nullptr);
         }
+        if (m_SecondaryAnimations[i].Animation)
+            NotifyBodyPartsInAnimation((CKAnimation *)m_SecondaryAnimations[i].Animation, nullptr);
     }
 
     m_SecondaryAnimationsCount = 0;
@@ -1752,8 +2106,10 @@ void RCKCharacter::RemoveSecondaryAnimationAt(int index) {
 
     CKAnimation *anim = (CKAnimation *)m_Context->GetObject(m_SecondaryAnimations[index].AnimID);
     if (anim) {
-        PreDeleteBodyPartsForAnimation(anim);
+        NotifyBodyPartsInAnimation(anim, nullptr);
     }
+    if (m_SecondaryAnimations[index].Animation)
+        NotifyBodyPartsInAnimation((CKAnimation *)m_SecondaryAnimations[index].Animation, nullptr);
 
     const int newCount = m_SecondaryAnimationsCount - 1;
     m_SecondaryAnimationsCount = (CKWORD)newCount;
@@ -1766,6 +2122,7 @@ void RCKCharacter::RemoveSecondaryAnimationAt(int index) {
         m_SecondaryAnimations[index].WarpLength = 0;
         m_SecondaryAnimations[index].Padding = 0;
         m_SecondaryAnimations[index].LoopCountRemaining = 0;
+        m_SecondaryAnimations[index].Mode = static_cast<CK_SECONDARYANIMATION_RUNTIME_MODE>(0);
         return;
     }
 
@@ -1784,27 +2141,12 @@ void RCKCharacter::RemoveSecondaryAnimationAt(int index) {
     m_SecondaryAnimations[newCount].WarpLength = 0;
     m_SecondaryAnimations[newCount].Padding = 0;
     m_SecondaryAnimations[newCount].LoopCountRemaining = 0;
+    m_SecondaryAnimations[newCount].Mode = static_cast<CK_SECONDARYANIMATION_RUNTIME_MODE>(0);
     m_SecondaryAnimations[newCount].Animation = preserved;
 }
 
 void RCKCharacter::PreDeleteBodyPartsForAnimation(CKAnimation *anim) {
-    // Based on decompilation helper at 0x10048148
-    // Iterates ObjectAnimations in a keyed animation and calls PreDelete on body parts.
-    if (!anim || !CKIsChildClassOf((CKObject *) anim, CKCID_KEYEDANIMATION)) {
-        return;
-    }
-
-    auto *keyed = static_cast<CKKeyedAnimation *>(anim);
-    const int count = keyed->GetAnimationCount();
-    for (int idx = 0; idx < count; ++idx) {
-        CKObjectAnimation *objAnim = keyed->GetAnimation(idx);
-        if (!objAnim) {
-            continue;
-        }
-
-        CK3dEntity *ent = objAnim->Get3dEntity();
-        if (ent && CKIsChildClassOf((CKObject *) ent, CKCID_BODYPART)) {
-            ent->PreDelete();
-        }
-    }
+    // Native 0x10048148 sets BodyPart::SetExclusiveAnimation, not PreDelete.
+    // Playback callers pass the keyed animation itself as the exclusive gate.
+    NotifyBodyPartsInAnimation(anim, anim);
 }
