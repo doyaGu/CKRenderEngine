@@ -439,157 +439,48 @@ add_test(NAME RenderProfileDisabled COMMAND $<TARGET_FILE:test_render_profile_di
 if (TARGET gtest_main)
     ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
     target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
-    foreach (animation_test
-            TextureLifecycleTest
-            TextureImageLifecycleTest
-            TextureSerializationTest
-            TextureCopyTest
-            TextureUploadTest
-            TextureStateTest
-            MaterialApplyTest
-            MaterialPipelineTest
-            MaterialLifecycleTest
-            MaterialDependenciesTest
-            MaterialBatchTest
-            MaterialSerializationTest
-            MaterialPropertiesTest
-            MaterialStateTest
-            MaterialEffectsStateTest
-            MaterialTexGenTest
-            MaterialDP3Test
-            Sprite3DDependenciesTest
-            Sprite3DGeometryTest
-            Sprite3DLifecycleTest
-            Sprite3DOrientationTest
-            Sprite3DPickThresholdTest
-            Sprite3DRayTest
-            Sprite3DRenderTest
-            Sprite3DSerializationTest
-            PlaceLifecycleTest
-            PlaceSceneTest
-            PlacePortalsTest
-            PlaceReferencesTest
-            PlaceSerializationTest
-            PlaceDependenciesTest
-            PlaceGeometryTest
-            PlaceLifetimeTest
-            PlaceFitToleranceTest
-            CurvePointLifecycleTest
-            CurvePointPropertiesTest
-            CurvePointTransformTest
-            CurvePointTangentsTest
-            CurvePointSerializationTest
-            CurvePointDependenciesTest
+    foreach (animation_test TextureLifecycleTest TextureImageLifecycleTest TextureSerializationTest TextureCopyTest
+            TextureUploadTest TextureContextCopyTest TextureStateTest
+            MaterialApplyTest MaterialPipelineTest MaterialLifecycleTest MaterialDependenciesTest
+            MaterialBatchTest MaterialSerializationTest MaterialPropertiesTest MaterialStateTest MaterialEffectsStateTest
+            MaterialTexGenTest MaterialDP3Test
+            Sprite3DDependenciesTest Sprite3DGeometryTest Sprite3DLifecycleTest
+            Sprite3DOrientationTest Sprite3DPickThresholdTest Sprite3DRayTest Sprite3DRenderTest Sprite3DSerializationTest
+            PlaceLifecycleTest PlaceSceneTest PlacePortalsTest PlaceReferencesTest
+            PlaceSerializationTest PlaceDependenciesTest PlaceGeometryTest PlaceLifetimeTest PlaceFitToleranceTest
+            CurvePointLifecycleTest CurvePointPropertiesTest CurvePointTransformTest
+            CurvePointTangentsTest CurvePointSerializationTest CurvePointDependenciesTest
             CurvePointParentLifetimeTest
-            CurveLifecycleTest
-            CurveControlPointsTest
-            CurveGeometryTest
-            CurveTangentsTest
-            CurveSerializationTest
-            CurveDependenciesTest
-            CurveMeshTest
-            TargetLightLifecycleTest
-            TargetLightSerializationTest
-            TargetLightDependenciesTest
-            LightLifecycleTest
-            LightSerializationTest
-            LightDependenciesTest
-            LightStateTest
-            TargetCameraLifecycleTest
-            TargetCameraSerializationTest
-            TargetCameraDependenciesTest
-            TargetCameraStateTest
-            CameraLifecycleTest
-            CameraCopyTest
-            CameraStateTest
-            CameraSerializationTest
-            CameraGeometryTest
-            CameraProjectionTest
-            SpriteTextLifecycleTest
-            SpriteTextCopyTest
-            SpriteTextStateTest
-            SpriteTextSerializationTest
-            SpriteTextRenderTest
-            SpriteLifecycleTest
-            SpriteSerializationTest
-            SpriteCopyTest
-            SpriteBitmapTest
-            SpriteVideoMemoryTest
-            SpriteContextCopyTest
-            SpriteDrawTest
-            Entity2dLifecycleTest
-            Entity2dHierarchyTest
-            Entity2dLayoutTest
-            Entity2dFlagsTest
-            Entity2dSerializationTest
-            Entity2dDependenciesTest
-            Entity2dRenderTest
-            Entity3dFrustumTest
-            Entity3dHierFrustumTest
-            Entity3dRenderTest
-            Entity3dLifecycleTest
-            Entity3dHierarchyTest
-            Entity3dSerializationTest
-            Entity3dDependenciesTest
-            Entity3dTransformTest
-            Entity3dGeometryTest
-            RenderObjectLifecycleTest
-            RenderObjectContextTest
-            RenderObjectCallbacksTest
-            Object3dRegistrationTest
-            Object3dLifecycleTest
-            AnimationSerializationTest
-            KeyedAnimationLoadTest
-            KeyedAnimationSaveTest
-            AnimationDependenciesTest
-            KeyedAnimationDependenciesTest
-            KeyedAnimationListTest
-            KeyedAnimationCompositionTest
-            KeyedAnimationPlaybackTest
-            AnimationClockTest
-            AnimationFlagsTest
-            AnimationLifecycleTest
-            AnimationFieldsTest
-            KeyedAnimationFieldsTest
-            AnimationInterfaceTest
-            CharacterLoadTest
-            CharacterSaveTest
-            BodyPartSerializationTest
-            BodyPartRegistrationTest
-            BodyPartLoadTest
-            CharacterOwnershipTest
-            CharacterDependenciesTest
-            BodyPartJointTest
-            CharacterPrimaryPlaybackTest
-            CharacterSecondaryPlaybackTest
-            CharacterProcessAnimationTest
-            CharacterPrimaryMotionTest
-            CharacterSecondaryReverseTest
-            CharacterPrimaryReverseTest
-            CharacterTerminalRotationTest
-            CharacterPrimaryMixedTimeTest
-            CharacterPrimaryTypesTest
-            CharacterReverseWarpReadinessTest
-            CharacterPlainWarpReadinessTest
-            CharacterSecondaryReturnDirectionTest
-            CharacterWarpRemainderTest
-            CharacterSecondaryNaturalQueueTest
-            CharacterSecondaryNaturalDistinctTest
-            CharacterSecondaryNaturalMixedTest
-            CharacterSecondaryNaturalTerminalTest
-            CharacterSecondaryExplicitDistinctTest
-            CharacterSecondaryNaturalIdentityTest
-            CharacterSecondaryHeldEntryTest
-            CharacterSecondaryHeldClockTest
-            CharacterSecondaryHeldStartTest
-            CharacterSecondaryStartHandoverTest
-            CharacterSecondaryPausedReturnTest
+            CurveLifecycleTest CurveControlPointsTest CurveGeometryTest CurveTangentsTest
+            CurveSerializationTest CurveDependenciesTest CurveMeshTest
+            TargetLightLifecycleTest TargetLightSerializationTest TargetLightDependenciesTest
+            LightLifecycleTest LightSerializationTest LightDependenciesTest LightStateTest
+            TargetCameraLifecycleTest TargetCameraSerializationTest TargetCameraDependenciesTest TargetCameraStateTest
+            CameraLifecycleTest CameraCopyTest CameraStateTest CameraSerializationTest CameraGeometryTest CameraProjectionTest
+            SpriteTextLifecycleTest SpriteTextCopyTest SpriteTextStateTest SpriteTextSerializationTest SpriteTextRenderTest
+            SpriteLifecycleTest SpriteSerializationTest SpriteCopyTest SpriteBitmapTest SpriteVideoMemoryTest SpriteContextCopyTest SpriteDrawTest
+            Entity2dLifecycleTest Entity2dHierarchyTest Entity2dLayoutTest Entity2dFlagsTest Entity2dSerializationTest Entity2dDependenciesTest Entity2dRenderTest
+        Entity3dFrustumTest Entity3dHierFrustumTest Entity3dRenderTest
+            Entity3dLifecycleTest Entity3dHierarchyTest
+            Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest
+            RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
+            Object3dRegistrationTest Object3dLifecycleTest
+            AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
+            AnimationDependenciesTest KeyedAnimationDependenciesTest KeyedAnimationListTest KeyedAnimationCompositionTest
+            KeyedAnimationPlaybackTest AnimationClockTest AnimationFlagsTest AnimationLifecycleTest
+            AnimationFieldsTest KeyedAnimationFieldsTest AnimationInterfaceTest
+            CharacterLoadTest CharacterSaveTest BodyPartSerializationTest BodyPartRegistrationTest BodyPartLoadTest
+            CharacterOwnershipTest CharacterDependenciesTest BodyPartJointTest
+            CharacterPrimaryPlaybackTest CharacterSecondaryPlaybackTest CharacterProcessAnimationTest
+            CharacterPrimaryMotionTest CharacterSecondaryReverseTest CharacterPrimaryReverseTest
+            CharacterTerminalRotationTest CharacterPrimaryMixedTimeTest CharacterPrimaryTypesTest CharacterReverseWarpReadinessTest
+            CharacterPlainWarpReadinessTest CharacterSecondaryReturnDirectionTest CharacterWarpRemainderTest
+            CharacterSecondaryNaturalQueueTest CharacterSecondaryNaturalDistinctTest CharacterSecondaryNaturalMixedTest
+            CharacterSecondaryNaturalTerminalTest CharacterSecondaryExplicitDistinctTest CharacterSecondaryNaturalIdentityTest
+            CharacterSecondaryHeldEntryTest CharacterSecondaryHeldClockTest CharacterSecondaryHeldStartTest
+            CharacterSecondaryStartHandoverTest CharacterSecondaryPausedReturnTest
             CharacterSecondaryForwardTerminalTest
-            CharacterRegistrationTest
-            CharacterGeometryTest
-            CharacterFloorVelocityTest
-            CharacterPlaybackCompletionTest
-)
+            CharacterRegistrationTest CharacterGeometryTest CharacterFloorVelocityTest CharacterPlaybackCompletionTest)
         ckre_add_engine_test(${animation_test} ${animation_test}.cpp)
         target_link_libraries(${animation_test} PRIVATE gtest_main)
         target_compile_features(${animation_test} PRIVATE cxx_std_17)

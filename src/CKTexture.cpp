@@ -588,6 +588,8 @@ CKBOOL RCKTexture::ApplyContextCopy(RCKRenderContext *context,
                                     int cubeMapFace) {
     if (!context || !context->m_RasterizerContext)
         return FALSE;
+    if (!source.Image || source.Width <= 0 || source.Height <= 0)
+        return FALSE;
     context->m_RenderManager->SelectTextureObject(this, context->m_RasterizerContext);
     if (!m_InVideoMemory)
         return FALSE;
@@ -598,10 +600,39 @@ CKBOOL RCKTexture::ApplyContextCopy(RCKRenderContext *context,
 
     VxImageDescEx uploadDesc = source;
     CKBYTE *converted = nullptr;
-    if (!SamePixelFormat(source, m_VideoFormat)) {
+    if (!(m_VideoFormat.Flags >= _DXT1 && m_VideoFormat.Flags <= _DXT5) && !SamePixelFormat(source, m_VideoFormat)) {
         converted = ConvertTextureImage(source, m_VideoFormat, uploadDesc);
         if (!converted)
             return FALSE;
+    }
+
+    const int width = destination ? (int)destination->right - (int)destination->left : GetWidth();
+    const int height = destination ? (int)destination->bottom - (int)destination->top : GetHeight();
+    if (width <= 0 || height <= 0) {
+        delete[] converted;
+        return FALSE;
+    }
+    CKBYTE *resized = nullptr;
+    if (uploadDesc.Width != width || uploadDesc.Height != height) {
+        const int bytesPerPixel = uploadDesc.BitsPerPixel / 8;
+        if (bytesPerPixel <= 0) {
+            delete[] converted;
+            return FALSE;
+        }
+        resized = new CKBYTE[(size_t)width * height * bytesPerPixel];
+        for (int y = 0; y < height; ++y) {
+            const int sourceY = (int)(((2LL * y + 1) * uploadDesc.Height) / (2LL * height));
+            for (int x = 0; x < width; ++x) {
+                const int sourceX = (int)(((2LL * x + 1) * uploadDesc.Width) / (2LL * width));
+                memcpy(resized + ((size_t)y * width + x) * bytesPerPixel,
+                       uploadDesc.Image + sourceY * uploadDesc.BytesPerLine + sourceX * bytesPerPixel,
+                       bytesPerPixel);
+            }
+        }
+        uploadDesc.Width = width;
+        uploadDesc.Height = height;
+        uploadDesc.BytesPerLine = width * bytesPerPixel;
+        uploadDesc.Image = resized;
     }
 
     CKRECT region;
@@ -609,12 +640,14 @@ CKBOOL RCKTexture::ApplyContextCopy(RCKRenderContext *context,
     if (!BuildCopyUploadRegion(destination, GetWidth(), GetHeight(),
                                uploadDesc, region, regionPtr)) {
         delete[] converted;
+        delete[] resized;
         return FALSE;
     }
 
     const CKBOOL loaded = m_RasterizerContext->LoadTexture(
         m_ObjectIndex, uploadDesc, 0, (CKRST_CUBEFACE)cubeMapFace, regionPtr);
     delete[] converted;
+    delete[] resized;
     return loaded;
 }
 
