@@ -522,7 +522,10 @@ if (TARGET gtest_main)
             Object3dRegistrationTest
             Object3dLifecycleTest
             AnimationSerializationTest
+            KeyedAnimationLoadTest
+            KeyedAnimationSaveTest
             AnimationDependenciesTest
+            KeyedAnimationDependenciesTest
             KeyedAnimationListTest
             KeyedAnimationPlaybackTest
             AnimationClockTest

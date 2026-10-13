@@ -97,6 +97,12 @@ CKStateChunk *RCKKeyedAnimation::Save(CKFile *file, CKDWORD flags) {
         for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
             CKObject *obj = *it;
             CKStateChunk *subChunk = obj ? obj->Save(nullptr, flags) : nullptr;
+            // A missing entry is a valid empty snapshot. A present animation
+            // whose Save failed must not become a successful empty snapshot.
+            if (obj && !subChunk) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
+            }
             chunk->WriteObject(obj);
             chunk->WriteSubChunk(subChunk);
             DeleteCKStateChunk(subChunk);
@@ -118,13 +124,28 @@ CKERROR RCKKeyedAnimation::Load(CKStateChunk *chunk, CKFile *file) {
         return CKERR_INVALIDPARAMETER;
 
     // Load base class
-    RCKAnimation::Load(chunk, file);
+    RCK3dEntity *previousRoot = m_RootEntity;
+    CKERROR loadError = RCKAnimation::Load(chunk, file);
+    if (loadError != CK_OK)
+        return loadError;
+
+    // File loads do not call UpdateRootEntity. Keep selective state loads from
+    // discarding a valid centering cache, but invalidate a replaced root.
+    if (m_RootEntity != previousRoot)
+        m_RootAnimation = nullptr;
 
     // Load animations list
     if (chunk->SeekIdentifier(CK_STATESAVE_KEYEDANIMANIMLIST)) {
+        m_RootAnimation = nullptr;
+        XSObjectPointerArray previousAnimations = m_Animations;
         m_Animations.Clear();
         m_Animations.Load(m_Context, chunk);
         m_Animations.Check();
+        for (CKObject **it = previousAnimations.Begin(); it != previousAnimations.End(); ++it) {
+            RCKObjectAnimation *anim = static_cast<RCKObjectAnimation *>(*it);
+            if (anim && !m_Animations.IsHere(anim) && anim->m_ParentKeyedAnimation == this)
+                SetParentKeyedAnimation(anim, nullptr);
+        }
     }
 
     // Load merged state and factor
@@ -141,7 +162,9 @@ CKERROR RCKKeyedAnimation::Load(CKStateChunk *chunk, CKFile *file) {
                 CKObject *obj = chunk->ReadObject(m_Context);
                 CKStateChunk *subChunk = chunk->ReadSubChunk();
                 if (obj) {
-                    obj->Load(subChunk, nullptr);
+                    const CKERROR error = obj->Load(subChunk, nullptr);
+                    if (loadError == CK_OK && error != CK_OK)
+                        loadError = error;
                 }
                 DeleteCKStateChunk(subChunk);
             }
@@ -166,7 +189,7 @@ CKERROR RCKKeyedAnimation::Load(CKStateChunk *chunk, CKFile *file) {
         }
     }
 
-    return CK_OK;
+    return loadError;
 }
 
 int RCKKeyedAnimation::GetMemoryOccupation() {
@@ -185,11 +208,26 @@ CKERROR RCKKeyedAnimation::PrepareDependencies(CKDependenciesContext &context) {
 }
 
 CKERROR RCKKeyedAnimation::RemapDependencies(CKDependenciesContext &context) {
+    RCK3dEntity *previousRoot = m_RootEntity;
     CKERROR err = RCKAnimation::RemapDependencies(context);
     if (err != CK_OK)
         return err;
 
-    m_Animations.Remap(context);
+    if (m_RootEntity != previousRoot)
+        m_RootAnimation = nullptr;
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *previous = static_cast<RCKObjectAnimation *>(*it);
+        if (!previous)
+            continue;
+        RCKObjectAnimation *remapped = static_cast<RCKObjectAnimation *>(context.Remap(previous));
+        *it = remapped;
+        if (remapped != previous) {
+            m_RootAnimation = nullptr;
+            if (!m_Animations.IsHere(previous) && previous->m_ParentKeyedAnimation == this)
+                SetParentKeyedAnimation(previous, nullptr);
+            SetParentKeyedAnimation(remapped, this);
+        }
+    }
     return CK_OK;
 }
 
@@ -201,7 +239,13 @@ CKERROR RCKKeyedAnimation::Copy(CKObject &o, CKDependenciesContext &context) {
     RCKKeyedAnimation *src = (RCKKeyedAnimation *) &o;
 
     m_RootAnimation = nullptr;
+    XSObjectPointerArray previousAnimations = m_Animations;
     m_Animations = src->m_Animations;  // Array copy
+    for (CKObject **it = previousAnimations.Begin(); it != previousAnimations.End(); ++it) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(*it);
+        if (animation && !m_Animations.IsHere(animation) && animation->m_ParentKeyedAnimation == this)
+            SetParentKeyedAnimation(animation, nullptr);
+    }
     m_Merged = src->m_Merged;
     m_MergeFactor = src->m_MergeFactor;
     m_Vector = src->m_Vector;
