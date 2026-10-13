@@ -117,7 +117,8 @@ void RCKRenderObject::RemoveAllCallbacks() {
     // IDA @ 0x10076bf7
     if (m_Callbacks) {
         RCKRenderManager *rm = (RCKRenderManager *) m_Context->GetRenderManager();
-        rm->RemoveTemporaryCallback(m_Callbacks);
+        if (rm)
+            rm->RemoveTemporaryCallback(m_Callbacks);
     }
     if (m_Callbacks) {
         delete m_Callbacks;

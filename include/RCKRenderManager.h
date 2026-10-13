@@ -85,7 +85,11 @@ public:
     void AddMovedEntity(RCK3dEntity *entity) { m_MovedEntities.PushBack((CKObject*)entity); }
 
     // Render context mask management
-    CKDWORD GetRenderContextMaskFree() { return m_RenderContextMaskFree; }
+    CKDWORD GetRenderContextMaskFree() {
+        const CKDWORD mask = m_RenderContextMaskFree & (~m_RenderContextMaskFree + CKDWORD(1));
+        m_RenderContextMaskFree &= ~mask;
+        return mask;
+    }
     void ReleaseRenderContextMaskFree(CKDWORD mask) { m_RenderContextMaskFree |= mask; }
 
     // Driver management

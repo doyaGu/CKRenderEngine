@@ -439,4 +439,15 @@ add_test(NAME RenderProfileDisabled COMMAND $<TARGET_FILE:test_render_profile_di
 if (TARGET gtest_main)
     ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
     target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
+    foreach (animation_test
+            RenderObjectLifecycleTest
+            RenderObjectContextTest
+            RenderObjectCallbacksTest
+            Object3dRegistrationTest
+            Object3dLifecycleTest
+)
+        ckre_add_engine_test(${animation_test} ${animation_test}.cpp)
+        target_link_libraries(${animation_test} PRIVATE gtest_main)
+        target_compile_features(${animation_test} PRIVATE cxx_std_17)
+    endforeach ()
 endif ()
