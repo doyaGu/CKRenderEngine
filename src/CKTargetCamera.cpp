@@ -73,8 +73,11 @@ void RCKTargetCamera::SetTarget(CK3dEntity *target) {
     CK3dEntity *oldTarget = static_cast<CK3dEntity *>(m_Context->GetObject(m_Target));
 
     // Don't do anything if same target
-    if (oldTarget == target)
+    if (oldTarget == target) {
+        if (!target)
+            m_Target = 0;
         return;
+    }
 
     // Clear flags on old target
     if (oldTarget) {
@@ -167,7 +170,7 @@ Remarks:
 - Returns TRUE if the given object is the target
 - Otherwise delegates to base class
 
-Implementation based on decompilation at 0x10043db9.
+Implementation based on decompilation at 0x10043d9d.
 *************************************************/
 CKBOOL RCKTargetCamera::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
     if (o && o->GetID() == m_Target)
@@ -218,7 +221,9 @@ Summary: Remaps object IDs after copy/paste operations.
 Purpose: Updates target ID to point to copied object.
 Remarks:
 - Calls base class RemapDependencies first
-- Remaps m_Target using context's Remap function
+- Remaps the stored target ID, including unresolved references
+- A zero or absent mapping retains the original target
+- Updates target flags when replacing a resolved attachment
 
 Implementation based on decompilation at 0x100440ca.
 *************************************************/
@@ -227,11 +232,13 @@ CKERROR RCKTargetCamera::RemapDependencies(CKDependenciesContext &context) {
     if (err != CK_OK)
         return err;
 
-    // Remap target ID
-    CKObject *targetObj = m_Context->GetObject(m_Target);
-    CKObject *remapped = context.Remap(targetObj);
-    if (remapped) {
-        m_Target = remapped->GetID();
+    CK_ID remappedID = m_Target;
+    context.RemapID(remappedID);
+    if (remappedID && remappedID != m_Target) {
+        CK3dEntity *target = static_cast<CK3dEntity *>(m_Context->GetObject(remappedID));
+        SetTarget(target);
+        if (!target)
+            m_Target = remappedID;
     }
 
     return CK_OK;
@@ -242,17 +249,23 @@ Summary: Copies target camera data from another object.
 Purpose: Deep copy including target reference.
 Remarks:
 - Calls base class Copy first
-- Copies m_Target ID
+- Replaces the target attachment and preserves unresolved IDs
 
 Implementation based on decompilation at 0x10044107.
 *************************************************/
 CKERROR RCKTargetCamera::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     CKERROR err = RCKCamera::Copy(o, context);
     if (err != CK_OK)
         return err;
 
     RCKTargetCamera *srcCamera = static_cast<RCKTargetCamera *>(&o);
-    m_Target = srcCamera->m_Target;
+    CK3dEntity *target = srcCamera->GetTarget();
+    SetTarget(target);
+    if (!target)
+        m_Target = srcCamera->m_Target;
 
     return CK_OK;
 }
@@ -418,7 +431,7 @@ Remarks:
 - Index 0 returns "Target" for valid modes
 - Other indices return NULL
 
-Implementation based on decompilation at 0x10043f70.
+Implementation based on decompilation at 0x10043f64.
 *************************************************/
 CKSTRING RCKTargetCamera::GetDependencies(int i, int mode) {
     if (i == 0)
