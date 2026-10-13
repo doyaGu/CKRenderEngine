@@ -93,50 +93,72 @@ CKERROR RCKBodyPart::Load(CKStateChunk *chunk, CKFile *file) {
     RCK3dEntity::Load(chunk, file);
 
     const int version = chunk->GetDataVersion();
+    RCKCharacter *character = m_Character;
+    CKIkJoint rotationJoint = m_RotationJoint;
 
     if (version >= 5) {
-        if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTCHARACTER)) {
-            m_Character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
+        const int bytes = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_BODYPARTCHARACTER);
+        if (bytes >= 0) {
+            const int required = sizeof(CK_ID) + ((GetFlags() & CK_3DENTITY_IKJOINTVALID) ? sizeof(CKIkJoint) : 0);
+            if (bytes < required)
+                return CKERR_INVALIDFILE;
+            character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
             if ((GetFlags() & CK_3DENTITY_IKJOINTVALID) != 0) {
-                chunk->ReadAndFillBuffer_LEndian(sizeof(CKIkJoint), &m_RotationJoint);
+                chunk->ReadAndFillBuffer_LEndian(sizeof(CKIkJoint), &rotationJoint);
             }
         }
     } else {
         // Legacy data starts with nine integer booleans, followed by three vectors.
-        // 0x1000EB98 uses SHL r32, CL: x86 masks (i - 1) to five bits.
-        // An oversized block is skipped instead of overflowing the legacy layout.
+        // Native shifts by i - 1, matching its off-by-one joint consumer.
+        // Convert the legacy columns to the SDK's named X/Y/Z axis flags.
+        // The size prefix describes this identifier's payload, not later blocks.
         struct LegacyRotationJoint {
             CKDWORD flags[3][3];
             VxVector minimum, maximum, damping;
         } legacy = {};
         static_assert(sizeof(LegacyRotationJoint) == 72, "Legacy rotation joint layout");
-        const CKBOOL hasJoint = chunk->SeekIdentifier(CK_STATESAVE_BODYPARTROTJOINT);
-        const int size = hasJoint ? chunk->ReadInt() : -1;
-        const bool fits = size >= 0 && size <= static_cast<int>(sizeof(legacy));
-        if (hasJoint)
-            chunk->ReadAndFillBuffer_LEndian(size, fits ? &legacy : nullptr);
-        if (fits) {
-            m_RotationJoint.m_Damping = legacy.damping;
-            m_RotationJoint.m_Max = legacy.maximum;
-            m_RotationJoint.m_Min = legacy.minimum;
-            m_RotationJoint.m_Flags = 0;
+        const int bytes = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_BODYPARTROTJOINT);
+        if (bytes >= 0) {
+            if (bytes < sizeof(int))
+                return CKERR_INVALIDFILE;
+            const int size = chunk->ReadInt();
+            if (size < 0 || size > bytes - sizeof(int))
+                return CKERR_INVALIDFILE;
+            if (size > static_cast<int>(sizeof(legacy))) {
+                // Unknown complete legacy extensions are skipped without
+                // replacing the existing joint or consuming another block.
+                chunk->ReadAndFillBuffer_LEndian(size, nullptr);
+            } else {
+                chunk->ReadAndFillBuffer_LEndian(size, &legacy);
+                rotationJoint.m_Damping = legacy.damping;
+                rotationJoint.m_Max = legacy.maximum;
+                rotationJoint.m_Min = legacy.minimum;
+                rotationJoint.m_Flags = 0;
 
-            for (int i = 0; i < 3; ++i) {
-                const unsigned int shift = static_cast<unsigned int>(i - 1) & 31;
-                if (legacy.flags[0][i])
-                    m_RotationJoint.m_Flags |= CKDWORD(1) << shift;
-                if (legacy.flags[1][i])
-                    m_RotationJoint.m_Flags |= CKDWORD(16) << shift;
-                if (legacy.flags[2][i])
-                    m_RotationJoint.m_Flags |= CKDWORD(256) << shift;
+                const CKDWORD activeFlags[] = {CK_IKJOINT_ACTIVE_X, CK_IKJOINT_ACTIVE_Y, CK_IKJOINT_ACTIVE_Z};
+                const CKDWORD limitFlags[] = {CK_IKJOINT_LIMIT_X, CK_IKJOINT_LIMIT_Y, CK_IKJOINT_LIMIT_Z};
+                const CKDWORD easeFlags[] = {CK_IKJOINT_EASE_X, CK_IKJOINT_EASE_Y, CK_IKJOINT_EASE_Z};
+                for (int i = 0; i < 3; ++i) {
+                    if (legacy.flags[0][i])
+                        rotationJoint.m_Flags |= activeFlags[i];
+                    if (legacy.flags[1][i])
+                        rotationJoint.m_Flags |= limitFlags[i];
+                    if (legacy.flags[2][i])
+                        rotationJoint.m_Flags |= easeFlags[i];
+                }
             }
         }
 
-        if (chunk->SeekIdentifier(CK_STATESAVE_BODYPARTCHARACTER)) {
-            m_Character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
+        const int characterBytes = chunk->SeekIdentifierAndReturnSize(CK_STATESAVE_BODYPARTCHARACTER);
+        if (characterBytes >= 0) {
+            if (characterBytes < sizeof(CK_ID))
+                return CKERR_INVALIDFILE;
+            character = static_cast<RCKCharacter *>(chunk->ReadObject(m_Context));
         }
     }
 
+    m_Character = character;
+    m_RotationJoint = rotationJoint;
     return CK_OK;
 }
 
@@ -188,7 +210,7 @@ CKERROR RCKBodyPart::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // Static class registration methods
 CKSTRING RCKBodyPart::GetClassName() {
-    return "BodyPart";
+    return "Body Part";
 }
 
 int RCKBodyPart::GetDependenciesCount(int mode) {
@@ -200,7 +222,7 @@ CKSTRING RCKBodyPart::GetDependencies(int i, int mode) {
 }
 
 void RCKBodyPart::Register() {
-    // IDA: 0x1000ec81 - CKGUID(0x4BA2618E, 0x7AAD0D02)
+    // IDA: 0x1000ec81 - CKGUID(0x4BA1010E, 0x7ABD6D02)
     CKCLASSNOTIFYFROMCID(RCKBodyPart, CKCID_CHARACTER);
     CKPARAMETERFROMCLASS(RCKBodyPart, CKPGUID_BODYPART);
 }
@@ -241,14 +263,11 @@ CKERROR RCKBodyPart::FitToJoint() {
     // Extract Euler angles from local matrix
     Vx3DMatrixToEulerAngles(GetLocalMatrix(), &euler.x, &euler.y, &euler.z);
 
-    // Apply joint limits for each axis
-    // NOTE: The original DLL uses (16 << (i - 1)) which creates an off-by-one mapping:
-    //   i=0: 16 >> 1 = 8 (undefined but MSVC gives 8) - checks non-standard bit
-    //   i=1: 16 << 0 = 16 = CK_IKJOINT_LIMIT_X - checks X limit for Y axis!
-    //   i=2: 16 << 1 = 32 = CK_IKJOINT_LIMIT_Y - checks Y limit for Z axis!
-    // We match this behavior exactly for binary compatibility.
+    // Use the SDK's named axis bits. Native 0x1000E8F5 shifts by i-1;
+    // x86 masks -1 to 31, so X is never limited and Y/Z use X/Y bits.
+    const CKDWORD limitFlags[] = {CK_IKJOINT_LIMIT_X, CK_IKJOINT_LIMIT_Y, CK_IKJOINT_LIMIT_Z};
     for (int i = 0; i < 3; ++i) {
-        if (((16 << (i - 1)) & m_RotationJoint.m_Flags) != 0) {
+        if ((limitFlags[i] & m_RotationJoint.m_Flags) != 0) {
             float *angle = &euler.x + i;
             float *minVal = &m_RotationJoint.m_Min.x + i;
             float *maxVal = &m_RotationJoint.m_Max.x + i;

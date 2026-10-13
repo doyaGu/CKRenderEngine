@@ -314,7 +314,7 @@ public:
     const CKIkJoint &Joint() const { return m_RotationJoint; }
 };
 
-void LegacyBodyPartUsesIntegerFlagsAndX86ShiftCounts() {
+void LegacyBodyPartUsesIntegerFlagsAndNamedSdkAxes() {
     CKContext context(nullptr, 0, 0);
     BodyPartForTest body(&context);
     struct LegacyJoint {
@@ -333,7 +333,7 @@ void LegacyBodyPartUsesIntegerFlagsAndX86ShiftCounts() {
     chunk->WriteIdentifier(CK_STATESAVE_BODYPARTROTJOINT);
     chunk->WriteBuffer_LEndian(sizeof(joint), &joint);
     LoadChunk(body, chunk.get());
-    Check(body.Joint().m_Flags == 0x80000210u, "Legacy integer flags or x86 shift masking changed");
+    Check(body.Joint().m_Flags == (CK_IKJOINT_ACTIVE_X | CK_IKJOINT_LIMIT_Y | CK_IKJOINT_EASE_Z), "Legacy integer booleans did not restore named SDK axes");
     Check(Equal(body.Joint().m_Min, joint.minimum) && Equal(body.Joint().m_Max, joint.maximum) &&
               Equal(body.Joint().m_Damping, joint.damping), "Legacy joint vectors changed");
 }
@@ -7274,7 +7274,8 @@ void GridObjectUsageDelegatesMeshAndAnimationQueries() {
     RCKObjectAnimation animation(&context, "UsedAnimation"), otherAnimation(&context, "OtherAnimation");
     grid.SetCurrentMesh(&mesh, TRUE); grid.AddObjectAnimation(&animation);
     Check(grid.IsObjectUsed(&mesh, CKCID_MESH) && !grid.IsObjectUsed(&unrelatedMesh, CKCID_MESH) &&
-          grid.IsObjectUsed(&animation, CKCID_ANIMATION) && !grid.IsObjectUsed(&otherAnimation, CKCID_ANIMATION),
+          grid.IsObjectUsed(&animation, CKCID_OBJECTANIMATION) && !grid.IsObjectUsed(&otherAnimation, CKCID_OBJECTANIMATION) &&
+          !grid.IsObjectUsed(&animation, CKCID_ANIMATION),
           "Grid did not delegate mesh/animation ownership queries to its entity base");
     CKObject object(&context, "UnusedObject");
     Check(!grid.IsObjectUsed(&object, CKCID_OBJECT), "Grid claimed an unrelated base object dependency");
@@ -9055,7 +9056,7 @@ int main(int argc, char **argv) {
         {"Modern entity precedence", ModernEntityDataTakesPrecedenceOverLegacyData},
         {"Legacy texture mipmaps", LegacyTextureReadsVideoFormatIdentifier},
         {"Legacy texture save options", LegacyTextureReadsSaveFormatIdentifier},
-        {"Legacy body part joint", LegacyBodyPartUsesIntegerFlagsAndX86ShiftCounts},
+        {"Legacy body part joint", LegacyBodyPartUsesIntegerFlagsAndNamedSdkAxes},
         {"Sprite text base serialization", SpriteTextSaveOmitsSpriteBitmapState},
         {"Sprite text default font without handle", SpriteTextSavePreservesFontWhenHandleIsUnavailable<false>},
         {"Sprite text requested font without handle", SpriteTextSavePreservesFontWhenHandleIsUnavailable<true>},
