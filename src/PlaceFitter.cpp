@@ -9,8 +9,8 @@
 static void CollectHierarchyWorldVertices(CK3dEntity *root, XArray<VxVector> &outWorldPoints) {
     if (!root) return;
 
-    CK3dEntity *current = nullptr;
-    while ((current = root->HierarchyParser(current)) != nullptr) {
+    CK3dEntity *current = root;
+    for (; current; current = root->HierarchyParser(current == root ? nullptr : current)) {
         CKMesh *mesh = current->GetCurrentMesh();
         if (!mesh) continue;
 
@@ -57,8 +57,8 @@ static float Max3(float a, float b, float c) {
 PlaceFitter::PlaceFitter()
     : m_TargetCells(64),
       m_MaxCells(128),
-      m_GridThreshold(0.5f),
-      m_MinCommonPoints(3) {}
+      m_GridThreshold(0.1f),
+      m_MinCommonPoints(1) {}
 
 CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity *p1, CK3dEntity *p2, VxMatrix &bboxMatrix) {
     if (!p1 || !p2) return FALSE;
@@ -80,7 +80,6 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity *p1, CK3dEntity *p2, VxMatrix 
     extent.z = ubox.Max.z - ubox.Min.z;
 
     const float maxDim = Max3(extent.x, extent.y, extent.z);
-    if (maxDim <= 0.0f) return FALSE;
 
     // Keep the same basic structure as the original: normalize points into a grid
     // and use NearestPointGrid for proximity matching.
@@ -101,7 +100,10 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity *p1, CK3dEntity *p2, VxMatrix 
 
     NearestPointGrid grid;
     grid.SetGridDimensions(sizeX, sizeY, sizeZ);
-    grid.SetThreshold(m_GridThreshold);
+    // Keep the native world-space tolerance while using a bounded SDL grid.
+    const float nativeExtent = maxDim + 0.02f;
+    const float nativeCellSize = ((nativeExtent < 2.0f) ? nativeExtent : 2.0f) / 20.0f;
+    grid.SetThreshold(m_GridThreshold * nativeCellSize / cellSize);
 
     // Add p1 points in grid space.
     for (int i = 0; i < points1.Size(); ++i) {
@@ -138,7 +140,7 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity *p1, CK3dEntity *p2, VxMatrix 
         const int idx = grid.FindNearPoint(gp);
         if (idx >= 0 && idx < points1.Size() && !used[idx]) {
             used[idx] = TRUE;
-            commonWorld.PushBack(points1[idx]);
+            commonWorld.PushBack(w);
         }
     }
 
@@ -148,5 +150,5 @@ CKBOOL PlaceFitter::ComputeBestFitBBox(CK3dEntity *p1, CK3dEntity *p2, VxMatrix 
                                 sizeof(VxVector),
                                 commonWorld.Size(),
                                 bboxMatrix,
-                                0.0f);
+                                m_GridThreshold);
 }

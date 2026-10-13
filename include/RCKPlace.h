@@ -35,6 +35,8 @@ public:
     CKBOOL IsObjectUsed(CKObject *o, CK_CLASSID cid) override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
     // CKBeObject overrides
     void AddToScene(CKScene *scene, CKBOOL dependencies) override;

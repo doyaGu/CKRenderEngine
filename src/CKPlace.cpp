@@ -48,7 +48,32 @@ RCKPlace::RCKPlace(CKContext *Context, CKSTRING name) : RCK3dEntity(Context, nam
  * IDA: 0x1003e2e8
  */
 RCKPlace::~RCKPlace() {
-    // XSArray destructor clears m_Portals automatically
+    const CK_ID lastID = static_cast<CK_ID>(m_Context->GetObjectCount());
+    bool parentAlive = false;
+    for (CK_ID id = 1; id <= lastID; ++id) {
+        CKObject *object = m_Context->GetObject(id);
+        if (object && object == reinterpret_cast<CKObject *>(m_Parent))
+            parentAlive = true;
+        if (object && CKIsChildClassOf(object, CKCID_3DENTITY)) {
+            RCK3dEntity *entity = static_cast<RCK3dEntity *>(object);
+            if (entity->GetParent() == reinterpret_cast<CK3dEntity *>(this))
+                entity->SetParent(nullptr, TRUE);
+        }
+        if (!object || object == this || !CKIsChildClassOf(object, CKCID_PLACE))
+            continue;
+        RCKPlace *place = static_cast<RCKPlace *>(object);
+        for (int index = 0; index < place->m_Portals.Size();) {
+            const CKPortalEntry &entry = place->m_Portals[index];
+            if (entry.place == reinterpret_cast<CKPlace *>(this) ||
+                entry.portal == reinterpret_cast<CK3dEntity *>(this))
+                place->m_Portals.Remove(place->m_Portals.Begin() + index);
+            else
+                ++index;
+        }
+    }
+    // A parent can already be absent during Context batch destruction.
+    if (parentAlive)
+        SetParent(nullptr, TRUE);
 }
 
 /**
@@ -299,7 +324,8 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
                 // and parent is not already in the children array
                 if (child->GetReferencePlace() != reinterpret_cast<CKPlace *>(this)) {
                     CKObject *parent = child->GetParent();
-                    if (!children.FindObject(parent)) {
+                    // An unresolved/null child slot is not the root's parent.
+                    if (!parent || !children.FindObject(parent)) {
                         AddChild(child, TRUE);
                     }
                 }
@@ -343,8 +369,12 @@ CKERROR RCKPlace::Load(CKStateChunk *chunk, CKFile *file) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKPlace::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
     // Base class copy
-    RCK3dEntity::Copy(o, context);
+    CKERROR error = RCK3dEntity::Copy(o, context);
+    if (error != CK_OK)
+        return error;
 
     CKDWORD deps = context.GetClassDependencies(CKCID_PLACE);
 
@@ -355,6 +385,33 @@ CKERROR RCKPlace::Copy(CKObject &o, CKDependenciesContext &context) {
         m_Portals = src->m_Portals;
     }
 
+    return CK_OK;
+}
+
+CKERROR RCKPlace::PrepareDependencies(CKDependenciesContext &context) {
+    CKERROR error = RCK3dEntity::PrepareDependencies(context);
+    if (error != CK_OK)
+        return error;
+    if (context.GetClassDependencies(CKCID_PLACE) & 1) {
+        for (int index = 0; index < m_Portals.Size(); ++index) {
+            if (m_Portals[index].portal)
+                m_Portals[index].portal->PrepareDependencies(context);
+        }
+    }
+    return context.FinishPrepareDependencies(this, m_ClassID);
+}
+
+CKERROR RCKPlace::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR error = RCK3dEntity::RemapDependencies(context);
+    if (error != CK_OK)
+        return error;
+    context.RemapID(m_Level);
+    context.RemapID(m_Camera);
+    for (int index = 0; index < m_Portals.Size(); ++index) {
+        m_Portals[index].place = reinterpret_cast<CKPlace *>(
+            context.Remap(reinterpret_cast<const CKObject *>(m_Portals[index].place)));
+        m_Portals[index].portal = static_cast<CK3dEntity *>(context.Remap(m_Portals[index].portal));
+    }
     return CK_OK;
 }
 
@@ -501,6 +558,8 @@ int RCKPlace::GetPortalCount() {
  * IDA: 0x1003eb4a
  */
 CKPlace *RCKPlace::GetPortal(int i, CK3dEntity **portal) {
+    if (i < 0 || i >= m_Portals.Size())
+        return nullptr;
     CKPortalEntry *entry = m_Portals.At(i);
     if (!entry) {
         return nullptr;
