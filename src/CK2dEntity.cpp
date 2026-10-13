@@ -15,7 +15,9 @@ extern CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v);
 static int CompareByZOrder(const void *a, const void *b) {
     CK2dEntity *ent1 = *(CK2dEntity **) a;
     CK2dEntity *ent2 = *(CK2dEntity **) b;
-    return ent1->GetZOrder() - ent2->GetZOrder();
+    const int z1 = ent1->GetZOrder();
+    const int z2 = ent2->GetZOrder();
+    return (z1 > z2) - (z1 < z2);
 }
 
 static void CK2dSetDrawAnnotation(RCKRenderContext *dev,
@@ -140,14 +142,19 @@ void RCK2dEntity::SetSize(const Vx2DVector &vect, CKBOOL hom, CKBOOL KeepChildre
 }
 
 void RCK2dEntity::SetRect(const VxRect &rect, CKBOOL KeepChildren) {
+    const VxRect oldRect = m_Rect;
+    const VxRect newRect = rect;
+
     // Handle homogeneous coordinate system
     if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
         VxRect relRect;
         GetHomogeneousRelativeRect(relRect);
-        *m_HomogeneousRect = rect;
+        *m_HomogeneousRect = newRect;
         m_HomogeneousRect->TransformToHomogeneous(relRect);
     }
 
+    // Descendants normalize against the new parent rectangle.
+    m_Rect = newRect;
     if (!KeepChildren) {
         for (auto it = m_Children.Begin(); it != m_Children.End(); ++it) {
             RCK2dEntity *child = (RCK2dEntity *) *it;
@@ -164,43 +171,43 @@ void RCK2dEntity::SetRect(const VxRect &rect, CKBOOL KeepChildren) {
                 float childHeight = child->m_Rect.GetHeight();
 
                 if (child->m_Flags & CK_2DENTITY_STICKLEFT) {
-                    childRect.left = child->m_Rect.left - m_Rect.left + rect.left;
+                    childRect.left = child->m_Rect.left - oldRect.left + newRect.left;
                     if (child->m_Flags & CK_2DENTITY_STICKRIGHT) {
-                        childRect.right = rect.right - (m_Rect.right - child->m_Rect.right);
+                        childRect.right = newRect.right - (oldRect.right - child->m_Rect.right);
                     } else {
                         childRect.right = childRect.left + childWidth;
                     }
                 } else if (child->m_Flags & CK_2DENTITY_STICKRIGHT) {
-                    childRect.right = rect.right - (m_Rect.right - child->m_Rect.right);
+                    childRect.right = newRect.right - (oldRect.right - child->m_Rect.right);
                     childRect.left = childRect.right - childWidth;
                 } else {
                     float centerX = (child->m_Rect.left + child->m_Rect.right) * 0.5f;
-                    const float parentWidth = m_Rect.GetWidth();
+                    const float parentWidth = oldRect.GetWidth();
                     const float ratio = parentWidth != 0.0f
-                        ? (centerX - m_Rect.left) / parentWidth
+                        ? (centerX - oldRect.left) / parentWidth
                         : 0.5f;
-                    float newCenter = rect.GetWidth() * ratio + rect.left;
+                    float newCenter = newRect.GetWidth() * ratio + newRect.left;
                     childRect.left = newCenter - childWidth * 0.5f;
                     childRect.right = childRect.left + childWidth;
                 }
 
                 if (child->m_Flags & CK_2DENTITY_STICKTOP) {
-                    childRect.top = child->m_Rect.top - m_Rect.top + rect.top;
+                    childRect.top = child->m_Rect.top - oldRect.top + newRect.top;
                     if (child->m_Flags & CK_2DENTITY_STICKBOTTOM) {
-                        childRect.bottom = rect.bottom - (m_Rect.bottom - child->m_Rect.bottom);
+                        childRect.bottom = newRect.bottom - (oldRect.bottom - child->m_Rect.bottom);
                     } else {
                         childRect.bottom = childRect.top + childHeight;
                     }
                 } else if (child->m_Flags & CK_2DENTITY_STICKBOTTOM) {
-                    childRect.bottom = rect.bottom - (m_Rect.bottom - child->m_Rect.bottom);
+                    childRect.bottom = newRect.bottom - (oldRect.bottom - child->m_Rect.bottom);
                     childRect.top = childRect.bottom - childHeight;
                 } else {
                     float centerY = (child->m_Rect.top + child->m_Rect.bottom) * 0.5f;
-                    const float parentHeight = m_Rect.GetHeight();
+                    const float parentHeight = oldRect.GetHeight();
                     const float ratio = parentHeight != 0.0f
-                        ? (centerY - m_Rect.top) / parentHeight
+                        ? (centerY - oldRect.top) / parentHeight
                         : 0.5f;
-                    float newCenter = rect.GetHeight() * ratio + rect.top;
+                    float newCenter = newRect.GetHeight() * ratio + newRect.top;
                     childRect.top = newCenter - childHeight * 0.5f;
                     childRect.bottom = childRect.top + childHeight;
                 }
@@ -209,7 +216,6 @@ void RCK2dEntity::SetRect(const VxRect &rect, CKBOOL KeepChildren) {
             child->SetRect(childRect, FALSE);
         }
     }
-    m_Rect = rect;
 }
 
 void RCK2dEntity::GetRect(VxRect &rect) {
@@ -350,8 +356,8 @@ CKBOOL RCK2dEntity::IsClipToParent() {
 
 // IDA: 0x1005cabb - Internal Pick method used by RCKRenderContext::_Pick2D
 CK2dEntity *RCK2dEntity::Pick(const Vx2DVector &pt, CKBOOL ignoreUnpickable) {
-    // IDA line 14-15: Check if hidden by parent hierarchy (ObjectFlags & CK_OBJECT_HIERACHICALHIDE)
-    if (IsHiddenByParent())
+    // Hierarchical hiding prunes this entire subtree; ordinary hiding only skips self.
+    if (m_ObjectFlags & CK_OBJECT_HIERACHICALHIDE)
         return nullptr;
 
     // IDA line 16-24: Recursively check children in reverse order (back to front)
@@ -601,17 +607,24 @@ CKMaterial *RCK2dEntity::GetMaterial() {
 void RCK2dEntity::SetHomogeneousCoordinates(CKBOOL Coord) {
     if (Coord) {
         if (!(m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD)) {
-            m_Flags |= CK_2DENTITY_USEHOMOGENEOUSCOORD;
+            VxRect relativeRect;
+            GetHomogeneousRelativeRect(relativeRect);
+            m_Flags |= CK_2DENTITY_USEHOMOGENEOUSCOORD | CK_2DENTITY_UPDATEHOMOGENEOUSCOORD;
             if (!m_HomogeneousRect)
-                m_HomogeneousRect = new VxRect();
+                m_HomogeneousRect = new VxRect(m_Rect);
+            else
+                *m_HomogeneousRect = m_Rect;
+            m_HomogeneousRect->TransformToHomogeneous(relativeRect);
         }
     } else {
-        if (m_Flags & CK_2DENTITY_USEHOMOGENEOUSCOORD) {
-            m_Flags &= ~CK_2DENTITY_USEHOMOGENEOUSCOORD;
-            if (m_HomogeneousRect) {
-                delete m_HomogeneousRect;
-                m_HomogeneousRect = nullptr;
-            }
+        m_Flags &= ~CK_2DENTITY_USEHOMOGENEOUSCOORD;
+        if (m_HomogeneousRect) {
+            VxRect relativeRect;
+            GetHomogeneousRelativeRect(relativeRect);
+            m_Rect = *m_HomogeneousRect;
+            m_Rect.TransformFromHomogeneous(relativeRect);
+            delete m_HomogeneousRect;
+            m_HomogeneousRect = nullptr;
         }
     }
 }
@@ -761,7 +774,7 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
     // Right edge clip
     if (rect.right > clipRect.right) {
         float delta = rect.right - clipRect.right;
-        srcRect.right = srcLeft + (rectWidth - delta) * srcWidth * invWidth;
+        srcRect.right = srcRect.left + (rectWidth - delta) * srcWidth * invWidth;
         rect.right = clipRect.right;
     } else {
         srcRect.right = srcRect.right; // Keep original
@@ -770,7 +783,7 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
     // Bottom edge clip
     if (rect.bottom > clipRect.bottom) {
         float delta = rect.bottom - clipRect.bottom;
-        srcRect.bottom = srcTop + (rectHeight - delta) * srcHeight * invHeight;
+        srcRect.bottom = srcRect.top + (rectHeight - delta) * srcHeight * invHeight;
         rect.bottom = clipRect.bottom;
     } else {
         srcRect.bottom = srcRect.bottom; // Keep original
@@ -1067,13 +1080,13 @@ CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
 }
 
 void RCK2dEntity::GetExtents(VxRect &srcrect, VxRect &rect) {
-    srcrect = m_SourceRect;
-    rect = m_Rect;
+    srcrect = m_SrcRect;
+    rect = m_VtxPos;
 }
 
 void RCK2dEntity::SetExtents(const VxRect &srcrect, const VxRect &rect) {
-    m_SourceRect = srcrect;
-    m_Rect = rect;
+    m_SrcRect = srcrect;
+    m_VtxPos = rect;
 }
 
 void RCK2dEntity::RestoreInitialSize() {}
@@ -1081,7 +1094,7 @@ void RCK2dEntity::RestoreInitialSize() {}
 CKBOOL RCK2dEntity::IsHiddenByParent() {
     CK2dEntity *p = m_Parent;
     while (p) {
-        if (!p->IsVisible()) return TRUE;
+        if (p->GetObjectFlags() & CK_OBJECT_HIERACHICALHIDE) return TRUE;
         p = p->GetParent();
     }
     return FALSE;
@@ -1097,7 +1110,7 @@ CKBOOL RCK2dEntity::IsRootObject() {
 }
 
 CKBOOL RCK2dEntity::IsToBeRendered() {
-    return IsVisible();
+    return TRUE;
 }
 
 void RCK2dEntity::SetZOrder(int Z) {
@@ -1461,6 +1474,9 @@ CKERROR RCK2dEntity::RemapDependencies(CKDependenciesContext &context) {
 
 CKERROR RCK2dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
     // IDA: 0x1005fbc6
+    if (this == &o)
+        return CK_OK;
+
     CKERROR err = CKBeObject::Copy(o, context);
     if (err != CK_OK)
         return err;
@@ -1480,6 +1496,9 @@ CKERROR RCK2dEntity::Copy(CKObject &o, CKDependenciesContext &context) {
             delete m_HomogeneousRect;
         }
         m_HomogeneousRect = new VxRect(*src->m_HomogeneousRect);
+    } else if (m_HomogeneousRect) {
+        delete m_HomogeneousRect;
+        m_HomogeneousRect = nullptr;
     }
 
     return CK_OK;
