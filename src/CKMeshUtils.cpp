@@ -39,8 +39,8 @@ CKBOOL PreciseTexturePick(CKMaterial *mat, float u, float v) {
     if (!tex)
         return TRUE;
 
-    // Get alpha reference value from material
-    int alphaRef = mat->GetAlphaRef();
+    // Picking threshold is independent of the material's render alpha test.
+    int alphaRef = tex->GetPickThreshold();
     if (alphaRef == 0)
         return TRUE;
 

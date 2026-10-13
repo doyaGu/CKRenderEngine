@@ -243,7 +243,7 @@ Remarks:
 Implementation based on decompilation at 0x10043238:
 *************************************************/
 CKBOOL RCKSprite3D::IsObjectUsed(CKObject *obj, CK_CLASSID cid) {
-    if (obj == (CKObject *) m_Material) {
+    if (obj && obj == (CKObject *) m_Material) {
         return TRUE;
     }
     return RCK3dEntity::IsObjectUsed(obj, cid);
@@ -301,6 +301,8 @@ CKERROR RCKSprite3D::RemapDependencies(CKDependenciesContext &context) {
 }
 
 CKERROR RCKSprite3D::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK)
         return err;
@@ -340,6 +342,7 @@ void RCKSprite3D::SetSize(Vx2DVector &size) {
     m_LocalBoundingBox.Max.y = (m_Offset.y + 1.0f) * halfHeight;
 
     // Invalidate scene graph bounding box
+    m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
     if (m_SceneGraphNode)
         m_SceneGraphNode->InvalidateBox(TRUE);
 }
@@ -367,6 +370,7 @@ void RCKSprite3D::SetOffset(Vx2DVector &offset) {
     m_LocalBoundingBox.Max.y = (m_Offset.y + 1.0f) * halfHeight;
 
     // Invalidate scene graph bounding box
+    m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
     if (m_SceneGraphNode)
         m_SceneGraphNode->InvalidateBox(TRUE);
 }
@@ -449,39 +453,6 @@ void RCKSprite3D::UpdateBox(CKBOOL World) {
 }
 
 CKBOOL RCKSprite3D::SetBoundingBox(const VxBbox *BBox, CKBOOL Local) {
-    if (!BBox)
-        return RCK3dEntity::SetBoundingBox(nullptr, Local);
-
-    VxBbox localBox;
-    if (Local) {
-        localBox = *BBox;
-    } else {
-        const VxMatrix &invWorld = GetInverseWorldMatrix();
-        localBox.TransformFrom(*BBox, invWorld);
-    }
-
-    const float dx = localBox.Max.x - localBox.Min.x;
-    const float dy = localBox.Max.y - localBox.Min.y;
-    const float dz = localBox.Max.z - localBox.Min.z;
-    const float height = (dy > 0.0001f) ? dy : dz;
-    const float centerX = (localBox.Min.x + localBox.Max.x) * 0.5f;
-    const float centerY = (dy > 0.0001f)
-        ? (localBox.Min.y + localBox.Max.y) * 0.5f
-        : (localBox.Min.z + localBox.Max.z) * 0.5f;
-
-    m_LocalBoundingBox.Min.x = centerX - dx * 0.5f;
-    m_LocalBoundingBox.Max.x = centerX + dx * 0.5f;
-    m_LocalBoundingBox.Min.y = centerY - height * 0.5f;
-    m_LocalBoundingBox.Max.y = centerY + height * 0.5f;
-    m_LocalBoundingBox.Min.z = 0.0f;
-    m_LocalBoundingBox.Max.z = 0.0f;
-    m_WorldBoundingBox.TransformFrom(m_LocalBoundingBox, m_WorldMatrix);
-
-    if (m_SceneGraphNode)
-        m_SceneGraphNode->InvalidateBox(TRUE);
-
-    m_MoveableFlags |= (VX_MOVEABLE_USERBOX | VX_MOVEABLE_BOXVALID);
-    m_MoveableFlags &= ~VX_MOVEABLE_UPTODATE;
     return TRUE;
 }
 
@@ -833,6 +804,8 @@ int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2,
 
     // t = -localPos1.z / rayDir.z gives us the parameter where ray hits Z=0
     float t = -localPos1.z / rayDir.z;
+    if (t < 0.0f || ((iOptions & CKRAYINTERSECTION_SEGMENT) && t > 1.0f))
+        return 0;
 
     // Calculate intersection point
     VxVector intersectPoint;
@@ -848,6 +821,14 @@ int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2,
         return 0; // Outside sprite bounds
     }
 
+    const float texU = (intersectPoint.x - m_LocalBoundingBox.Min.x) * m_Rect.GetWidth() /
+        (m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x) + m_Rect.left;
+    const float texV = m_Rect.bottom - (intersectPoint.y - m_LocalBoundingBox.Min.y) * m_Rect.GetHeight() /
+        (m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y);
+    if (m_Material && !(iOptions & CKRAYINTERSECTION_IGNOREALPHA) &&
+        !PreciseTexturePick(m_Material, texU, texV))
+        return 0;
+
     // Fill in intersection description if provided
     if (Desc) {
         Desc->Distance = t;
@@ -862,18 +843,8 @@ int RCKSprite3D::RayIntersection(const VxVector *Pos1, const VxVector *Pos2,
         Desc->FaceIndex = 0;
         Desc->IntersectionPoint = intersectPoint;
 
-        const float uvWidth = m_Rect.GetWidth();
-        const float uvHeight = m_Rect.GetHeight();
-        const float spriteWidth = m_LocalBoundingBox.Max.x - m_LocalBoundingBox.Min.x;
-        const float spriteHeight = m_LocalBoundingBox.Max.y - m_LocalBoundingBox.Min.y;
-
-        Desc->TexU = (intersectPoint.x - m_LocalBoundingBox.Min.x) * uvWidth / spriteWidth + m_Rect.left;
-        Desc->TexV = m_Rect.bottom - (intersectPoint.y - m_LocalBoundingBox.Min.y) * uvHeight / spriteHeight;
-
-        // Precise alpha-tested pick (material alpha ref + texture)
-        if (m_Material && !PreciseTexturePick(m_Material, Desc->TexU, Desc->TexV)) {
-            return 0;
-        }
+        Desc->TexU = texU;
+        Desc->TexV = texV;
 
         Desc->IntersectionNormal.x = 0.0f;
         Desc->IntersectionNormal.y = 0.0f;

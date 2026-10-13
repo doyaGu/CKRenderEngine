@@ -440,6 +440,14 @@ if (TARGET gtest_main)
     ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
     target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
     foreach (animation_test
+            Sprite3DDependenciesTest
+            Sprite3DGeometryTest
+            Sprite3DLifecycleTest
+            Sprite3DOrientationTest
+            Sprite3DPickThresholdTest
+            Sprite3DRayTest
+            Sprite3DRenderTest
+            Sprite3DSerializationTest
             PlaceLifecycleTest
             PlaceSceneTest
             PlacePortalsTest
