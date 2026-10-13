@@ -3,6 +3,7 @@
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
+#include "CKObjectManager.h"
 #include "CKDependencies.h"
 #include "CKGlobals.h"
 #include "CKMemoryPool.h"
@@ -229,7 +230,13 @@ CKERROR RCKKeyedAnimation::RemoveAnimation(CKObjectAnimation *anim) {
     if (!anim)
         return CKERR_INVALIDPARAMETER;
 
-    m_Animations.RemoveObject(anim);
+    if (m_Animations.RemoveObject(anim) && !m_Animations.IsHere(anim)) {
+        RCKObjectAnimation *objectAnimation = static_cast<RCKObjectAnimation *>(anim);
+        if (objectAnimation->m_ParentKeyedAnimation == this)
+            SetParentKeyedAnimation(objectAnimation, nullptr);
+        if (m_RootAnimation == objectAnimation)
+            m_RootAnimation = nullptr;
+    }
 
     ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
     m_Flags &= ~CKANIMATION_SUBANIMSSORTED;
@@ -244,7 +251,9 @@ int RCKKeyedAnimation::GetAnimationCount() {
 CKObjectAnimation *RCKKeyedAnimation::GetAnimation(CK3dEntity *ent) {
     if (ent == (CK3dEntity *) m_RootEntity) {
         if (m_RootAnimation) {
-            return (CKObjectAnimation *) m_RootAnimation;
+            if (m_Animations.IsHere(m_RootAnimation) && m_RootAnimation->Get3dEntity() == ent)
+                return (CKObjectAnimation *) m_RootAnimation;
+            m_RootAnimation = nullptr;
         }
 
         // Search for and cache root animation
@@ -269,12 +278,25 @@ CKObjectAnimation *RCKKeyedAnimation::GetAnimation(CK3dEntity *ent) {
 }
 
 CKObjectAnimation *RCKKeyedAnimation::GetAnimation(int index) {
+    if (index < 0 || index >= m_Animations.Size())
+        return nullptr;
     return (CKObjectAnimation *) m_Animations[index];
 }
 
 void RCKKeyedAnimation::Clear() {
+    // Clear is also called by the SDL destructor. A child may already have
+    // unregistered itself, so only detach pointers still owned by the context.
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *anim = static_cast<RCKObjectAnimation *>(*it);
+        if (m_Context->m_ObjectManager->IsObjectSafe(anim) && anim->m_ParentKeyedAnimation == this)
+            SetParentKeyedAnimation(anim, nullptr);
+    }
     m_Animations.Clear();
     m_RootAnimation = nullptr;
+    m_RootEntity = nullptr;
+    m_Vector.Set(0.0f, 0.0f, 0.0f);
+    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
+    m_Flags &= ~CKANIMATION_SUBANIMSSORTED;
 }
 
 //=============================================================================
@@ -668,17 +690,20 @@ float RCKKeyedAnimation::CreateTransition(CKAnimation *out, CKAnimation *in, CKD
 void RCKKeyedAnimation::UpdateRootEntity() {
     m_RootAnimation = nullptr;
     m_RootEntity = nullptr;
-    ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
+    ModifyObjectFlags(CK_OBJECT_UPTODATE, 0);
 
     if (m_Animations.Size() == 0)
         return;
 
-    // Get first animation's entity
-    RCKObjectAnimation *firstAnim = (RCKObjectAnimation *) m_Animations[0];
-    if (!firstAnim)
-        return;
-
-    CK3dEntity *entity = firstAnim->Get3dEntity();
+    // Empty snapshot slots and unbound animations do not identify a hierarchy.
+    CK3dEntity *entity = nullptr;
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *anim = static_cast<RCKObjectAnimation *>(*it);
+        if (anim && anim->Get3dEntity()) {
+            entity = anim->Get3dEntity();
+            break;
+        }
+    }
     while (entity) {
         CK3dEntity *parent = entity->GetParent();
         if (parent) {
@@ -733,4 +758,126 @@ CKKeyedAnimation *RCKKeyedAnimation::CreateInstance(CKContext *Context) {
     // Object size is 0x54 (84 bytes)
     RCKKeyedAnimation *anim = new RCKKeyedAnimation(Context, nullptr);
     return reinterpret_cast<CKKeyedAnimation *>(anim);
+}
+
+void RCKKeyedAnimation::SortAnimations() {
+    m_Flags |= CKANIMATION_SUBANIMSSORTED;
+    if (!m_Character)
+        return;
+    CK3dEntity *floor = m_Character->GetFloorReferenceObject();
+    for (int i = 0; i < m_Animations.Size(); ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (!animation)
+            continue;
+        CK3dEntity *entity = animation->Get3dEntity();
+        float contribution = -1.0e10f;
+        if (entity) {
+            if (entity == reinterpret_cast<CK3dEntity *>(m_RootEntity) || entity == floor)
+                contribution = 1.0e30f;
+            else
+                contribution = ComputeAnimationContribution(animation);
+        }
+        memcpy(&animation->m_field_38, &contribution, sizeof(contribution));
+    }
+    // Stable equal-score order avoids arbitrarily reordering duplicate channels.
+    for (int i = 1; i < m_Animations.Size(); ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        float contribution = -1.0e30f;
+        if (animation) memcpy(&contribution, &animation->m_field_38, sizeof(contribution));
+        int j = i;
+        while (j > 0) {
+            RCKObjectAnimation *previous = static_cast<RCKObjectAnimation *>(m_Animations[j - 1]);
+            float previousContribution = -1.0e30f;
+            if (previous) memcpy(&previousContribution, &previous->m_field_38, sizeof(previousContribution));
+            if (previousContribution >= contribution)
+                break;
+            m_Animations[j] = previous;
+            --j;
+        }
+        m_Animations[j] = animation;
+    }
+}
+
+float RCKKeyedAnimation::ComputeAnimationContribution(RCKObjectAnimation *animation) {
+    if (!animation)
+        return 0.0f;
+    float contribution = 0.0f;
+    if (animation->IsMerged()) {
+        contribution = (ComputeAnimationContribution(animation->m_Anim1) +
+            ComputeAnimationContribution(animation->m_Anim2)) * 0.5f;
+    } else if (animation->m_KeyframeData) {
+        CKKeyframeData *data = animation->m_KeyframeData;
+        CKAnimController *vectors[] = {data->m_PositionController, data->m_ScaleController};
+        for (int channel = 0; channel < 2; ++channel) {
+            CKAnimController *controller = vectors[channel];
+            if (!controller || !controller->GetKeyCount())
+                continue;
+            const VxVector &first = static_cast<CKPositionKey *>(controller->GetKey(0))->Pos;
+            float extent = 0.0f;
+            for (int i = 1; i < controller->GetKeyCount(); ++i) {
+                const VxVector &value = static_cast<CKPositionKey *>(controller->GetKey(i))->Pos;
+                float difference = fabsf(first.x - value.x + first.y - value.y + first.z - value.z);
+                if (difference > extent) extent = difference;
+            }
+            contribution += extent;
+        }
+        CKAnimController *rotations = data->m_RotationController;
+        float rotationExtent = 0.0f;
+        if (rotations) {
+            for (int i = 0; i < rotations->GetKeyCount(); ++i) {
+                const VxQuaternion &first = static_cast<CKRotationKey *>(rotations->GetKey(i))->Rot;
+                for (int j = i + 1; j < rotations->GetKeyCount(); ++j) {
+                    const VxQuaternion &second = static_cast<CKRotationKey *>(rotations->GetKey(j))->Rot;
+                    float difference = (1.0f - fabsf(first.x * second.x + first.y * second.y +
+                        first.z * second.z + first.w * second.w)) * 1000.0f;
+                    if (difference > rotationExtent) rotationExtent = difference;
+                }
+            }
+        }
+        contribution += rotationExtent;
+        if (data->m_MorphController)
+            contribution += 1000.0f;
+    }
+    memcpy(&animation->m_field_38, &contribution, sizeof(contribution));
+    return contribution;
+}
+
+void RCKKeyedAnimation::SetStep(float step) {
+    if (step > 1.0f) step = 1.0f;
+    if (step < 0.0f) step = 0.0f;
+    RCKObjectAnimation *root = static_cast<RCKObjectAnimation *>(GetAnimation(GetRootEntity()));
+    if (root)
+        SetParentKeyedAnimation(root, this);
+    if (!(m_Flags & CKANIMATION_SUBANIMSSORTED))
+        SortAnimations();
+
+    int count = m_Animations.Size();
+    if (m_Character && count) {
+        int required = m_Character->GetFloorReferenceObject() ? 2 : 1;
+        float lod = (m_Character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED)
+            ? m_Character->GetAnimationLevelOfDetail() : 0.0f;
+        if (count > required && lod < 1.0f)
+            count = static_cast<int>((count - required) * lod) + required;
+    }
+    for (int i = 0; i < count; ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (animation)
+            animation->SetStep(step, reinterpret_cast<CKKeyedAnimation *>(this));
+    }
+    if (m_Character && count)
+        m_Character->LocalMatrixChanged(FALSE, TRUE);
+    m_Step = step;
+}
+
+void RCKKeyedAnimation::SetFrame(float frame) {
+    SetStep(m_Length != 0.0f ? frame / m_Length : 0.0f);
+}
+
+void RCKKeyedAnimation::SetLength(float nbframe) {
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(*it);
+        if (animation)
+            animation->SetLength(nbframe);
+    }
+    RCKAnimation::SetLength(nbframe);
 }

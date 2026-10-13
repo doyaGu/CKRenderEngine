@@ -34,6 +34,9 @@ public:
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
     // Override CKAnimation methods with RCKKeyedAnimation-specific implementations
+    void SetLength(float nbframe) override;
+    void SetFrame(float frame) override;
+    void SetStep(float step) override;
     void CenterAnimation(float frame) override;
     float GetMergeFactor() override;
     void SetMergeFactor(float factor) override;
@@ -57,11 +60,15 @@ public:
     static void SetParentKeyedAnimation(RCKObjectAnimation *objAnim, RCKKeyedAnimation *parent);
 
 protected:
-    XSObjectPointerArray m_Animations; // 0x34-0x3B (XSArray has m_Begin at 0x34, m_End at 0x38)
-    CKBOOL m_Merged;                   // 0x3C
-    float m_MergeFactor;               // 0x40
-    RCKObjectAnimation *m_RootAnimation; // 0x44
-    VxVector m_Vector;                 // 0x48-0x53 (12 bytes)
+    void SortAnimations();
+    static float ComputeAnimationContribution(RCKObjectAnimation *animation);
+
+    // Original Virtools 2.1 Win32 reference offsets; SDL layout is platform-dependent.
+    XSObjectPointerArray m_Animations; // Native +0x34/+0x38 array begin/end
+    CKBOOL m_Merged;                   // Native +0x3C
+    float m_MergeFactor;               // Native +0x40
+    RCKObjectAnimation *m_RootAnimation; // Native +0x44
+    VxVector m_Vector;                 // Native +0x48..0x53 (12 bytes)
 };
 
 #endif // RCKKEYEDANIMATION_H

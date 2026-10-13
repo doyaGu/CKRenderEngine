@@ -523,10 +523,13 @@ if (TARGET gtest_main)
             Object3dLifecycleTest
             AnimationSerializationTest
             AnimationDependenciesTest
+            KeyedAnimationListTest
+            KeyedAnimationPlaybackTest
             AnimationClockTest
             AnimationFlagsTest
             AnimationLifecycleTest
             AnimationFieldsTest
+            KeyedAnimationFieldsTest
             BodyPartSerializationTest
             BodyPartRegistrationTest
             BodyPartLoadTest
