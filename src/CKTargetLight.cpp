@@ -120,17 +120,25 @@ Summary: Copies target light data from another object.
 Purpose: Deep copy including target reference.
 Remarks:
 - Calls base class Copy first
-- Copies m_Target ID
+- Replaces the target attachment while retaining the source's raw ID
 
 Implementation based on decompilation at 0x1004479a.
 *************************************************/
 CKERROR RCKTargetLight::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     CKERROR err = RCKLight::Copy(o, context);
     if (err != CK_OK)
         return err;
 
     RCKTargetLight *srcLight = static_cast<RCKTargetLight *>(&o);
-    m_Target = srcLight->m_Target;
+    CK_ID targetID = srcLight->m_Target;
+    CK3dEntity *target = srcLight->GetTarget();
+    SetTarget(nullptr);
+    SetTarget(target);
+    // Keep deferred and loaded self references; SetTarget only attaches entities.
+    m_Target = targetID;
 
     return CK_OK;
 }
@@ -186,7 +194,8 @@ Summary: Remaps dependencies after a copy operation.
 Purpose: Updates internal object references to point to copied objects.
 Remarks:
 - Calls base class RemapDependencies first
-- Remaps m_Target to the new copied target object
+- Remaps the stored ID without requiring the object to have been created
+- Updates attachment flags only when a nonzero replacement changes the ID
 
 Implementation based on decompilation at 0x1004475D.
 *************************************************/
@@ -196,10 +205,13 @@ CKERROR RCKTargetLight::RemapDependencies(CKDependenciesContext &context) {
     if (result != CK_OK)
         return result;
 
-    // Remap target ID
-    if (m_Target) {
-        CKObject *remapped = context.Remap(m_Context->GetObject(m_Target));
-        m_Target = remapped ? remapped->GetID() : 0;
+    CK_ID remappedID = m_Target;
+    context.RemapID(remappedID);
+    if (remappedID && remappedID != m_Target) {
+        CK3dEntity *target = static_cast<CK3dEntity *>(m_Context->GetObject(remappedID));
+        SetTarget(nullptr);
+        SetTarget(target);
+        m_Target = remappedID;
     }
 
     return CK_OK;
