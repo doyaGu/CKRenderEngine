@@ -480,6 +480,11 @@ if (TARGET gtest_main)
             CameraSerializationTest
             CameraGeometryTest
             CameraProjectionTest
+            SpriteTextLifecycleTest
+            SpriteTextCopyTest
+            SpriteTextStateTest
+            SpriteTextSerializationTest
+            SpriteTextRenderTest
             SpriteLifecycleTest
             SpriteSerializationTest
             SpriteCopyTest

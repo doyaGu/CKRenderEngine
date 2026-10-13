@@ -55,19 +55,14 @@ int RCKSpriteText::GetMemoryOccupation() {
 
 // SetText: 0x10062021
 void RCKSpriteText::SetText(CKSTRING text) {
-    if ((!m_Text && (!text || !*text)) || (m_Text && text && strcmp(m_Text, text) == 0))
-        return;
-
-    if (m_Text) {
-        delete[] m_Text;
-    }
-    m_Text = nullptr;
-
+    char *newText = nullptr;
     if (text) {
         size_t len = strlen(text);
-        m_Text = new char[len + 1];
-        strcpy(m_Text, text);
+        newText = new char[len + 1];
+        strcpy(newText, text);
     }
+    delete[] m_Text;
+    m_Text = newText;
 
     Redraw();
 }
@@ -79,9 +74,6 @@ CKSTRING RCKSpriteText::GetText() {
 
 // SetTextColor: 0x100620c0
 void RCKSpriteText::SetTextColor(CKDWORD col) {
-    if (m_FontColor == col)
-        return;
-
     m_FontColor = col;
     Redraw();
 }
@@ -93,9 +85,6 @@ CKDWORD RCKSpriteText::GetTextColor() {
 
 // SetBackgroundColor: 0x100620f5
 void RCKSpriteText::SetBackgroundColor(CKDWORD col) {
-    if (m_BkColor == col)
-        return;
-
     m_BkColor = col;
     Redraw();
 }
@@ -107,28 +96,30 @@ CKDWORD RCKSpriteText::GetBackgroundTextColor() {
 
 // SetFont: 0x10062349
 void RCKSpriteText::SetFont(CKSTRING FontName, int FontSize, int Weight, CKBOOL italic, CKBOOL underline) {
-    const char *newFontName = FontName ? FontName : "";
-    const char *oldFontName = m_FontName ? m_FontName : "";
-    if (m_Font &&
+    if (m_Font && FontName && m_FontName &&
         m_FontSize == FontSize &&
         m_FontWeight == Weight &&
         m_FontItalic == italic &&
         m_FontUnderline == underline &&
-        strcmp(oldFontName, newFontName) == 0)
+        strcmp(m_FontName, FontName) == 0) {
+        Redraw();
         return;
+    }
+
+    char *ownedFontName = nullptr;
+    if (FontName) {
+        size_t len = strlen(FontName);
+        ownedFontName = new char[len + 1];
+        strcpy(ownedFontName, FontName);
+    }
 
     if (m_Font) {
         VxDeleteFont(m_Font);
     }
-    m_Font = VxCreateFont(FontName, FontSize, Weight, italic, underline);
+    m_Font = VxCreateFont(ownedFontName, FontSize, Weight, italic, underline);
 
     delete[] m_FontName;
-    m_FontName = nullptr;
-    if (FontName) {
-        size_t len = strlen(FontName);
-        m_FontName = new char[len + 1];
-        strcpy(m_FontName, FontName);
-    }
+    m_FontName = ownedFontName;
     m_FontSize = FontSize;
     m_FontWeight = Weight;
     m_FontItalic = italic;
@@ -139,9 +130,6 @@ void RCKSpriteText::SetFont(CKSTRING FontName, int FontSize, int Weight, CKBOOL 
 
 // SetAlign: 0x1006212a
 void RCKSpriteText::SetAlign(CKSPRITETEXT_ALIGNMENT align) {
-    if ((m_Flags & 0xFFFF) == ((CKDWORD)align & 0xFFFF))
-        return;
-
     m_Flags &= 0xFFFF0000;
     m_Flags |= (CKDWORD) align & 0xFFFF;
     Redraw();
@@ -181,6 +169,7 @@ CKERROR RCKSpriteText::Render(CKRenderContext *dev) {
 
 // Redraw: 0x100623a3
 void RCKSpriteText::Redraw() {
+    m_Flags &= ~0x10000u;
     int slot = GetCurrentSlot();
     CKRECT rect;
     rect.right = GetWidth();
@@ -197,17 +186,19 @@ void RCKSpriteText::Redraw() {
         VxFillStructure(desc.Height * desc.Width, surfacePtr, 4, 4, &m_BitmapData.m_TransColor);
         desc.Image = surfacePtr;
 
-        if (m_Text) {
+        CKBOOL complete = TRUE;
+        if (m_Text && *m_Text) {
+            complete = FALSE;
             BITMAP_HANDLE bitmap = VxCreateBitmap(desc);
             if (bitmap) {
-                VxDrawBitmapText(bitmap, m_Font, m_Text, &rect, m_Flags, m_BkColor, m_FontColor);
-                VxCopyBitmap(bitmap, desc);
+                if (VxDrawBitmapText(bitmap, m_Font, m_Text, &rect, m_Flags, m_BkColor, m_FontColor))
+                    complete = VxCopyBitmap(bitmap, desc);
                 VxDeleteBitmap(bitmap);
             }
         }
 
-        // Mark as up to date
-        m_Flags |= 0x10000;
+        if (complete)
+            m_Flags |= 0x10000;
         ReleaseSurfacePtr(slot);
     }
 }
@@ -224,24 +215,15 @@ CKStateChunk *RCKSpriteText::Save(CKFile *file, CKDWORD flags) {
     chunk->WriteIdentifier(CK_STATESAVE_SPRITETEXT);
     chunk->WriteString(m_Text);
 
-    // Write font info
-    VXFONTINFO fontInfo;
-    if (!VxGetFontInfo(m_Font, fontInfo)) {
-        // A new sprite or an unavailable platform font has no queryable handle.
-        // Preserve its requested state rather than serializing undefined fields.
-        fontInfo.FaceName = m_FontName ? m_FontName : "";
-        fontInfo.Height = m_FontSize;
-        fontInfo.Weight = m_FontWeight;
-        fontInfo.Italic = m_FontItalic;
-        fontInfo.Underline = m_FontUnderline;
-    }
-
+    // Preserve requested units: positive sizes are points, negative sizes are
+    // logical pixel heights. Querying the handle returns pixels and would make
+    // a positive size grow on each subsequent Load at non-72 DPI.
     chunk->WriteIdentifier(CK_STATESAVE_SPRITEFONT);
-    chunk->WriteString(fontInfo.FaceName.CStr());
-    chunk->WriteInt(fontInfo.Height);
-    chunk->WriteInt(fontInfo.Weight);
-    chunk->WriteInt(fontInfo.Italic);
-    chunk->WriteInt(fontInfo.Underline);
+    chunk->WriteString(m_FontName ? m_FontName : const_cast<char *>(""));
+    chunk->WriteInt(m_FontSize);
+    chunk->WriteInt(m_FontWeight);
+    chunk->WriteInt(m_FontItalic);
+    chunk->WriteInt(m_FontUnderline);
 
     // Write colors
     chunk->WriteIdentifier(CK_STATESAVE_SPRITETEXTCOLOR);
@@ -293,6 +275,9 @@ CKERROR RCKSpriteText::Load(CKStateChunk *chunk, CKFile *file) {
 
 // Copy: 0x10062712
 CKERROR RCKSpriteText::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     CKERROR err = RCKSprite::Copy(o, context);
     if (err != CK_OK)
         return err;
@@ -318,7 +303,7 @@ CKERROR RCKSpriteText::Copy(CKObject &o, CKDependenciesContext &context) {
 
 // GetClassName: 0x10062659
 CKSTRING RCKSpriteText::GetClassName() {
-    return "SpriteText";
+    return "Sprite Text";
 }
 
 // GetDependenciesCount: returns 0 (no dependencies)
