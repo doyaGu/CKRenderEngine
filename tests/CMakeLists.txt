@@ -534,10 +534,16 @@ if (TARGET gtest_main)
             AnimationLifecycleTest
             AnimationFieldsTest
             KeyedAnimationFieldsTest
+            AnimationInterfaceTest
+            CharacterLoadTest
+            CharacterSaveTest
             BodyPartSerializationTest
             BodyPartRegistrationTest
             BodyPartLoadTest
+            CharacterOwnershipTest
+            CharacterDependenciesTest
             BodyPartJointTest
+            CharacterRegistrationTest
 )
         ckre_add_engine_test(${animation_test} ${animation_test}.cpp)
         target_link_libraries(${animation_test} PRIVATE gtest_main)

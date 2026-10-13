@@ -10,17 +10,19 @@ typedef enum CK_SECONDARYANIMATION_RUNTIME_MODE {
     CKSECONDARYANIMATIONRUNTIME_STOPPINGWARP = 3,
 } CK_SECONDARYANIMATION_RUNTIME_MODE;
 
-// Layout verified against IDA decompilation (28 bytes total)
-// PlaySecondaryAnimation allocates: 28 * (count + 2) bytes
+// Native 2.1 uses seven 32-bit fields (28-byte stride): ID +0, warper +4,
+// flags +8, warp length +12, start frame +16, mode +20, loop count +24.
+// This SDL record retains an additional reserved word and a native pointer;
+// its size/offsets depend on architecture and are not native ABI guarantees.
 struct CKSecondaryAnimation {
-    CK_ID AnimID;                              // +0x00: CK_ID of the secondary animation
-    RCKKeyedAnimation *Animation;              // +0x04: Transition animation (warper) when warping
-    CKDWORD Flags;                             // +0x08: CK_SECONDARYANIMATION_FLAGS bitmask
-    float WarpLength;                          // +0x0C: Warp duration in frames
-    CKDWORD Padding;                           // +0x10: Unused padding
-    CKDWORD StartingFrameBits;                 // +0x14: Raw float bits of starting frame (field_14)
-    CK_SECONDARYANIMATION_RUNTIME_MODE Mode;   // +0x18: Runtime mode
-    CKDWORD LoopCountRemaining;                // +0x1C: Loop count when LOOPNTIMES is set
+    CK_ID AnimID;                              // Public source animation identity
+    RCKKeyedAnimation *Animation;              // Reusable transition, retained outside the active prefix
+    CKDWORD Flags;                             // CK_SECONDARYANIMATION_FLAGS, unshifted
+    float WarpLength;                          // Requested transition duration in frames
+    CKDWORD Padding;                           // SDL live-return target ID for mixed clocks/held main, otherwise 0; not a native field
+    CKDWORD StartingFrameBits;                 // Bit-preserved float starting frame
+    CK_SECONDARYANIMATION_RUNTIME_MODE Mode;   // 0 unused, 1 starting warp, 2 playing, 3 stopping warp
+    CKDWORD LoopCountRemaining;                // Requested remaining loops for LOOPNTIMES
 
     float GetStartingFrame() const {
         float frame;
@@ -105,6 +107,10 @@ protected:
     float m_FrameSrc;
     RCKAnimation *m_AnimSrc;
     CKDWORD m_TransitionMode;
+
+private:
+    RCKCharacter(const RCKCharacter &) = delete;
+    RCKCharacter &operator=(const RCKCharacter &) = delete;
 };
 
 #endif // RCKCHARACTER_H

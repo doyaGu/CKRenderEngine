@@ -11,12 +11,13 @@
 #include "RCKAnimation.h"
 #include "RCKKeyedAnimation.h"
 #include "RCKObjectAnimation.h"
+#include <math.h>
 
 //=============================================================================
 // Helper function corresponding to sub_10048148 in IDA
 // Iterates animation entities and sets exclusive animation on body parts
 // When exclusiveAnim is non-null, sets the body part's exclusive animation to it
-// When exclusiveAnim is null, clears the body part's exclusive animation
+// When exclusiveAnim is null, releases this animation's exclusive gate
 //=============================================================================
 
 static void NotifyBodyPartsInAnimation(CKAnimation *anim, CKAnimation *exclusiveAnim) {
@@ -42,7 +43,9 @@ static void NotifyBodyPartsInAnimation(CKAnimation *anim, CKAnimation *exclusive
         if (CKIsChildClassOf(entity, CKCID_BODYPART)) {
             // Call SetExclusiveAnimation (vtable+0x1D8) on the body part
             CKBodyPart *bp = (CKBodyPart *)entity;
-            bp->SetExclusiveAnimation(exclusiveAnim);
+            // A removed secondary must not release a later secondary's gate.
+            if (exclusiveAnim || bp->GetExclusiveAnimation() == anim)
+                bp->SetExclusiveAnimation(exclusiveAnim);
         }
     }
 }
@@ -71,7 +74,7 @@ RCKCharacter::RCKCharacter(CKContext *Context, CKSTRING name)
     m_Warper = (RCKKeyedAnimation *)m_Context->CreateObject(
         CKCID_KEYEDANIMATION,
         nullptr,
-        CK_OBJECTCREATION_SameDynamic,
+        CK_OBJECTCREATION_Dynamic(isDynamic),
         nullptr);
 
     if (m_Warper) {
@@ -89,6 +92,23 @@ RCKCharacter::RCKCharacter(CKContext *Context, CKSTRING name)
 }
 
 RCKCharacter::~RCKCharacter() {
+    // Context-wide cleanup can already have destroyed a list member or the
+    // warper. Visit only live registry objects, never dereference stale slots.
+    for (int id = 1; id <= m_Context->GetObjectCount(); ++id) {
+        CKObject *object = m_Context->GetObject(id);
+        if (!object)
+            continue;
+        if (CKIsChildClassOf(object, CKCID_BODYPART)) {
+            RCKBodyPart *part = static_cast<RCKBodyPart *>(object);
+            if (part->m_Character == this)
+                part->m_Character = nullptr;
+        } else if (CKIsChildClassOf(object, CKCID_ANIMATION)) {
+            RCKAnimation *animation = static_cast<RCKAnimation *>(object);
+            if (animation->m_Character == this)
+                animation->m_Character = nullptr;
+        }
+    }
+
     // Based on IDA decompilation at 0x1000FB5B
     // Delete secondary animations array
     if (m_SecondaryAnimations) {
@@ -165,6 +185,12 @@ CKStateChunk *RCKCharacter::Save(CKFile *file, CKDWORD flags) {
             CKStateChunk *subChunk = nullptr;
             if (bp) {
                 subChunk = bp->Save(nullptr, CK_STATESAVE_BODYPARTALL);
+                // A missing slot is a valid empty snapshot; failure of a
+                // present body part cannot produce a successful parent save.
+                if (!subChunk) {
+                    DeleteCKStateChunk(chunk);
+                    return nullptr;
+                }
             }
             chunk->WriteSubChunkSequence(subChunk);
             if (subChunk) {
@@ -233,12 +259,15 @@ CKERROR RCKCharacter::Load(CKStateChunk *chunk, CKFile *file) {
                     const CK_ID objID = chunk->ReadObjectID();
                     CKObject *bp = m_Context->GetObject(objID);
                     CKStateChunk *subChunk = chunk->ReadSubChunk();
+                    CKERROR loadError = CK_OK;
                     if (bp && subChunk) {
-                        bp->Load(subChunk, nullptr);
+                        loadError = bp->Load(subChunk, nullptr);
                     }
                     if (subChunk) {
                         DeleteCKStateChunk(subChunk);
                     }
+                    if (loadError != CK_OK)
+                        return loadError;
                 }
             }
         }
@@ -264,12 +293,15 @@ CKERROR RCKCharacter::Load(CKStateChunk *chunk, CKFile *file) {
                 for (int i = 0; i < sequenceCount; ++i) {
                     CKStateChunk *subChunk = chunk->ReadSubChunk();
                     CKObject *bp = m_BodyParts.GetObject(i);
+                    CKERROR loadError = CK_OK;
                     if (bp && subChunk) {
-                        bp->Load(subChunk, nullptr);
+                        loadError = bp->Load(subChunk, nullptr);
                     }
                     if (subChunk) {
                         DeleteCKStateChunk(subChunk);
                     }
+                    if (loadError != CK_OK)
+                        return loadError;
                 }
             }
         }
@@ -354,6 +386,9 @@ void RCKCharacter::CheckPreDeletion() {
     if (m_AnimDest && ((CKObject *) m_AnimDest)->IsToBeDeleted()) {
         m_AnimDest = nullptr;
     }
+    if (m_Warper && m_Warper->IsToBeDeleted()) {
+        m_Warper = nullptr;
+    }
 
     // Check body parts array (removes deleted objects)
     m_BodyParts.Check();
@@ -370,7 +405,8 @@ void RCKCharacter::CheckPreDeletion() {
 }
 
 int RCKCharacter::GetMemoryOccupation() {
-    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCharacter) - sizeof(RCK3dEntity)) + m_BodyParts.GetMemoryOccupation(FALSE) + m_Animations.GetMemoryOccupation(FALSE);
+    return RCK3dEntity::GetMemoryOccupation() + (sizeof(RCKCharacter) - sizeof(RCK3dEntity)) + m_BodyParts.GetMemoryOccupation(FALSE) + m_Animations.GetMemoryOccupation(FALSE)
+        + m_SecondaryAnimationsAllocated * sizeof(CKSecondaryAnimation);
 }
 
 CKBOOL RCKCharacter::IsObjectUsed(CKObject *o, CK_CLASSID cid) {
@@ -462,8 +498,7 @@ void RCKCharacter::AddToScene(CKScene *scene, CKBOOL dependencies) {
 
 void RCKCharacter::RemoveFromScene(CKScene *scene, CKBOOL dependencies) {
     // Based on IDA decompilation at 0x10012357
-    // NOTE: Original has a bug - it calls AddToScene on animations instead of RemoveFromScene
-    // We preserve this behavior for binary compatibility
+    // Correct the original animation branch so removal cannot add an animation.
     if (!scene) return;
 
     RCK3dEntity::RemoveFromScene(scene, dependencies);
@@ -477,12 +512,10 @@ void RCKCharacter::RemoveFromScene(CKScene *scene, CKBOOL dependencies) {
             }
         }
 
-        // BUG in original: This should call RemoveFromScene, but original calls AddToScene
-        // Keeping original behavior for binary compatibility
         for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
             CKObject *anim = *it;
             if (anim) {
-                ((CKBeObject *)anim)->AddToScene(scene, dependencies);
+                ((CKBeObject *)anim)->RemoveFromScene(scene, dependencies);
             }
         }
     }
@@ -500,7 +533,7 @@ CKERROR RCKCharacter::PrepareDependencies(CKDependenciesContext &context) {
     }
 
     CKDWORD charDeps = context.GetClassDependencies(CKCID_CHARACTER);
-    CKDWORD animDeps = context.GetClassDependencies(CKCID_ANIMATION);
+    CKDWORD entityDeps = context.GetClassDependencies(CKCID_3DENTITY);
 
     // Prepare body parts
     m_BodyParts.Prepare(context);
@@ -510,8 +543,8 @@ CKERROR RCKCharacter::PrepareDependencies(CKDependenciesContext &context) {
         ((CKObject *) m_FloorRef)->PrepareDependencies(context);
     }
 
-    // Prepare animations if needed (if not copying, or if anim deps bit 2 set, or char deps bit 0 set)
-    if (!context.IsInMode(CK_DEPENDENCIES_COPY) || (animDeps & 4) != 0 || (charDeps & 1) != 0) {
+    // The entity animation dependency or character animation dependency enables copying.
+    if (!context.IsInMode(CK_DEPENDENCIES_COPY) || (entityDeps & 4) != 0 || (charDeps & 1) != 0) {
         m_Animations.Prepare(context);
     }
 
@@ -532,7 +565,7 @@ CKERROR RCKCharacter::PrepareDependencies(CKDependenciesContext &context) {
 }
 
 CKERROR RCKCharacter::RemapDependencies(CKDependenciesContext &context) {
-    // Based on decompilation at 0x10012FE6
+    // Based on decompilation at 0x10012FE3
     CKERROR err = RCK3dEntity::RemapDependencies(context);
     if (err != CK_OK) {
         return err;
@@ -573,10 +606,10 @@ CKERROR RCKCharacter::Copy(CKObject &o, CKDependenciesContext &context) {
 
     // Check class dependencies for animation copy
     CKDWORD charDeps = context.GetClassDependencies(CKCID_CHARACTER);
-    CKDWORD animDeps = context.GetClassDependencies(CKCID_ANIMATION);
+    CKDWORD entityDeps = context.GetClassDependencies(CKCID_3DENTITY);
 
-    // Copy animations if deps allow (CKCID_ANIMATION=33, check bit 2; or CKCID_CHARACTER bit 0)
-    if ((animDeps & 4) != 0 || (charDeps & 1) != 0) {
+    // Native class 33 is CKCID_3DENTITY, whose bit 2 selects animation dependencies.
+    if ((entityDeps & 4) != 0 || (charDeps & 1) != 0) {
         // Copy animations array
         m_Animations = src->m_Animations;
 
@@ -628,25 +661,31 @@ CKERROR RCKCharacter::AddBodyPart(CKBodyPart *part) {
         return CKERR_ALREADYPRESENT;
     }
 
-    // Add to our list
-    m_BodyParts.PushBack((CKObject *) part);
-
-    // Get previous character and remove from it
     RCKBodyPart *rckPart = (RCKBodyPart *) part;
     RCKCharacter *prevChar = rckPart->m_Character;
+    RCK3dEntity *parent = rckPart->m_Parent;
+    const CKBOOL rootPart = !parent ||
+        (prevChar && prevChar != this && parent == static_cast<RCK3dEntity *>(prevChar));
+    // Moving a character's direct root keeps its world pose. A joint that
+    // already has another parent keeps that hierarchy.
+    if (rootPart && !AddChild(reinterpret_cast<CK3dEntity *>(part), TRUE))
+        return CKERR_INVALIDPARAMETER;
+
+    m_BodyParts.PushBack(reinterpret_cast<CKObject *>(part));
+
+    // Get previous character and remove all snapshot aliases from it.
     if (prevChar && prevChar != this) {
-        // Call RemoveBodyPart on the previous character
-        prevChar->RemoveBodyPart(part);
+        while (prevChar->m_BodyParts.FindObject(reinterpret_cast<CKObject *>(part)))
+            prevChar->RemoveBodyPart(part);
+        if (prevChar->m_RootBodyPart == rckPart)
+            prevChar->SetRootBodyPart(nullptr);
     }
 
     // Set character reference on body part
     rckPart->m_Character = this;
 
-    // If no parent, add as child and set as root
-    if (!((CK3dEntity *) part)->GetParent()) {
-        AddChild((CK3dEntity *) part, TRUE);
-        m_RootBodyPart = (RCKBodyPart *) part;
-    }
+    if (rootPart)
+        m_RootBodyPart = rckPart;
 
     // Find floor reference if not set
     if (!m_FloorRef) {
@@ -664,12 +703,19 @@ CKERROR RCKCharacter::RemoveBodyPart(CKBodyPart *part) {
 
     // Find and remove from list
     int removed = m_BodyParts.RemoveObject((CKObject *) part);
-    if (removed < 0) {
+    if (!removed) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    // Clear character reference
-    ((RCKBodyPart *) part)->m_Character = nullptr;
+    // Snapshot lists can contain duplicates; the remaining slot still owns
+    // the same association. A borrowed slot must not clear another owner.
+    if (m_BodyParts.FindObject(reinterpret_cast<CKObject *>(part)))
+        return CK_OK;
+    RCKBodyPart *rckPart = reinterpret_cast<RCKBodyPart *>(part);
+    if (rckPart->m_Character == this)
+        rckPart->m_Character = nullptr;
+    if (m_RootBodyPart == rckPart)
+        m_RootBodyPart = nullptr;
 
     // Update floor reference if it was this body part
     if ((CKBodyPart *) m_FloorRef == part) {
@@ -687,15 +733,24 @@ CKBodyPart *RCKCharacter::GetRootBodyPart() {
 CKERROR RCKCharacter::SetRootBodyPart(CKBodyPart *part) {
     // Based on decompilation at 0x1000FF9A
     if ((RCKBodyPart *) part != m_RootBodyPart) {
-        // Clear previous root's character reference
-        if (m_RootBodyPart) {
+        // Selecting a different root does not remove an existing member.
+        if (m_RootBodyPart && CKIsChildClassOf(m_RootBodyPart, CKCID_BODYPART) &&
+            m_RootBodyPart->m_Character == this &&
+            !m_BodyParts.FindObject(m_RootBodyPart)) {
             m_RootBodyPart->m_Character = nullptr;
         }
 
         m_RootBodyPart = (RCKBodyPart *) part;
 
         // Set new root's character reference
-        if (m_RootBodyPart) {
+        if (m_RootBodyPart && CKIsChildClassOf(m_RootBodyPart, CKCID_BODYPART)) {
+            RCKCharacter *previous = m_RootBodyPart->m_Character;
+            if (previous && previous != this) {
+                while (previous->m_BodyParts.FindObject(m_RootBodyPart))
+                    previous->RemoveBodyPart(part);
+                if (previous->m_RootBodyPart == m_RootBodyPart)
+                    previous->SetRootBodyPart(nullptr);
+            }
             m_RootBodyPart->m_Character = this;
         }
     }
@@ -723,24 +778,21 @@ CKERROR RCKCharacter::AddAnimation(CKAnimation *anim) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    // Check if already in list
-    if (m_Animations.FindObject((CKObject *) anim)) {
-        return CK_OK; // Already present
-    }
-
-    // Add to our list
-    m_Animations.PushBack((CKObject *) anim);
-
-    // Get previous character and remove from it via RCKAnimation
     RCKAnimation *rckAnim = (RCKAnimation *) anim;
-    RCKCharacter *prevChar = rckAnim->m_Character;
-    if (prevChar && prevChar != this) {
-        // Call RemoveAnimation on the previous character
-        prevChar->RemoveAnimation(anim);
-    }
+    // The original refreshes exact KeyedAnimation instances even on a
+    // repeated Add. Derived implementations retain their own root policy.
+    if (anim->GetClassID() == CKCID_KEYEDANIMATION)
+        static_cast<RCKKeyedAnimation *>(rckAnim)->UpdateRootEntity();
 
-    // Set character reference on animation
-    rckAnim->m_Character = this;
+    if (!m_Animations.FindObject(reinterpret_cast<CKObject *>(anim))) {
+        m_Animations.PushBack(reinterpret_cast<CKObject *>(anim));
+        RCKCharacter *prevChar = rckAnim->m_Character;
+        if (prevChar && prevChar != this) {
+            while (prevChar->m_Animations.FindObject(reinterpret_cast<CKObject *>(anim)))
+                prevChar->RemoveAnimation(anim);
+        }
+        rckAnim->m_Character = this;
+    }
 
     // Handle keyed animations
     if (CKIsChildClassOf((CKObject *) anim, CKCID_KEYEDANIMATION)) {
@@ -769,12 +821,14 @@ CKERROR RCKCharacter::RemoveAnimation(CKAnimation *anim) {
 
     // Find and remove from list
     int removed = m_Animations.RemoveObject((CKObject *) anim);
-    if (removed < 0) {
+    if (!removed) {
         return CKERR_INVALIDPARAMETER;
     }
 
-    // Clear character reference
-    ((RCKAnimation *) anim)->m_Character = nullptr;
+    RCKAnimation *animation = static_cast<RCKAnimation *>(anim);
+    if (!m_Animations.FindObject(reinterpret_cast<CKObject *>(anim)) &&
+        animation->m_Character == this)
+        animation->m_Character = nullptr;
 
     return CK_OK;
 }
