@@ -527,6 +527,7 @@ if (TARGET gtest_main)
             AnimationDependenciesTest
             KeyedAnimationDependenciesTest
             KeyedAnimationListTest
+            KeyedAnimationCompositionTest
             KeyedAnimationPlaybackTest
             AnimationClockTest
             AnimationFlagsTest

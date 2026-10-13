@@ -347,10 +347,137 @@ void RCKKeyedAnimation::Clear() {
 // Animation Manipulation Methods
 //=============================================================================
 
-void RCKKeyedAnimation::CenterAnimation(float frame) {
-    if (!m_RootAnimation) {
-        m_RootAnimation = (RCKObjectAnimation *) GetAnimation((CK3dEntity *) m_RootEntity);
+// CK2_3D.dll 0x100481BB: propagate duration without rescaling key times.
+void RCKKeyedAnimation::SetLength(float nbframe) {
+    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(*it);
+        if (animation)
+            animation->SetLength(nbframe);
     }
+    RCKAnimation::SetLength(nbframe);
+}
+
+// CK2_3D.dll 0x1004A2F0 dispatches to the keyed SetStep override.
+void RCKKeyedAnimation::SetFrame(float frame) {
+    SetStep(m_Length != 0.0f ? frame / m_Length : 0.0f);
+}
+
+// CK2_3D.dll 0x10048366: apply the selected channels, then update hierarchy.
+void RCKKeyedAnimation::SetStep(float step) {
+    if (step > 1.0f) step = 1.0f;
+    if (step < 0.0f) step = 0.0f;
+    RCKObjectAnimation *root = static_cast<RCKObjectAnimation *>(GetAnimation(GetRootEntity()));
+    if (root)
+        SetParentKeyedAnimation(root, this);
+    if (!(m_Flags & CKANIMATION_SUBANIMSSORTED))
+        SortAnimations();
+
+    int count = m_Animations.Size();
+    if (m_Character && count) {
+        int required = m_Character->GetFloorReferenceObject() ? 2 : 1;
+        float lod = (m_Character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED)
+            ? m_Character->GetAnimationLevelOfDetail() : 0.0f;
+        if (count > required && lod < 1.0f)
+            count = static_cast<int>((count - required) * lod) + required;
+    }
+    for (int i = 0; i < count; ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (animation)
+            animation->SetStep(step, reinterpret_cast<CKKeyedAnimation *>(this));
+    }
+    if (m_Character && count)
+        m_Character->LocalMatrixChanged(FALSE, TRUE);
+    m_Step = step;
+}
+
+// CK2_3D.dll 0x10056362: cache the native contribution in the reserved slot.
+float RCKKeyedAnimation::ComputeAnimationContribution(RCKObjectAnimation *animation) {
+    if (!animation)
+        return 0.0f;
+    float contribution = 0.0f;
+    if (animation->IsMerged()) {
+        contribution = (ComputeAnimationContribution(animation->m_Anim1) +
+            ComputeAnimationContribution(animation->m_Anim2)) * 0.5f;
+    } else if (animation->m_KeyframeData) {
+        CKKeyframeData *data = animation->m_KeyframeData;
+        CKAnimController *vectors[] = {data->m_PositionController, data->m_ScaleController};
+        for (int channel = 0; channel < 2; ++channel) {
+            CKAnimController *controller = vectors[channel];
+            if (!controller || !controller->GetKeyCount())
+                continue;
+            const VxVector &first = static_cast<CKPositionKey *>(controller->GetKey(0))->Pos;
+            float extent = 0.0f;
+            for (int i = 1; i < controller->GetKeyCount(); ++i) {
+                const VxVector &value = static_cast<CKPositionKey *>(controller->GetKey(i))->Pos;
+                float difference = fabsf(first.x - value.x + first.y - value.y + first.z - value.z);
+                if (difference > extent) extent = difference;
+            }
+            contribution += extent;
+        }
+        CKAnimController *rotations = data->m_RotationController;
+        float rotationExtent = 0.0f;
+        if (rotations) {
+            for (int i = 0; i < rotations->GetKeyCount(); ++i) {
+                const VxQuaternion &first = static_cast<CKRotationKey *>(rotations->GetKey(i))->Rot;
+                for (int j = i + 1; j < rotations->GetKeyCount(); ++j) {
+                    const VxQuaternion &second = static_cast<CKRotationKey *>(rotations->GetKey(j))->Rot;
+                    float difference = (1.0f - fabsf(first.x * second.x + first.y * second.y +
+                        first.z * second.z + first.w * second.w)) * 1000.0f;
+                    if (difference > rotationExtent) rotationExtent = difference;
+                }
+            }
+        }
+        contribution += rotationExtent;
+        if (data->m_MorphController)
+            contribution += 1000.0f;
+    }
+    memcpy(&animation->m_field_38, &contribution, sizeof(contribution));
+    return contribution;
+}
+
+// CK2_3D.dll 0x10048282/0x1004821E: root/floor first, contribution descending.
+void RCKKeyedAnimation::SortAnimations() {
+    m_Flags |= CKANIMATION_SUBANIMSSORTED;
+    if (!m_Character)
+        return;
+    CK3dEntity *floor = m_Character->GetFloorReferenceObject();
+    for (int i = 0; i < m_Animations.Size(); ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (!animation)
+            continue;
+        CK3dEntity *entity = animation->Get3dEntity();
+        float contribution = -1.0e10f;
+        if (entity) {
+            if (entity == reinterpret_cast<CK3dEntity *>(m_RootEntity) || entity == floor)
+                contribution = 1.0e30f;
+            else
+                contribution = ComputeAnimationContribution(animation);
+        }
+        memcpy(&animation->m_field_38, &contribution, sizeof(contribution));
+    }
+    // Stable equal-score order avoids arbitrarily reordering duplicate channels.
+    for (int i = 1; i < m_Animations.Size(); ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        float contribution = -1.0e30f;
+        if (animation) memcpy(&contribution, &animation->m_field_38, sizeof(contribution));
+        int j = i;
+        while (j > 0) {
+            RCKObjectAnimation *previous = static_cast<RCKObjectAnimation *>(m_Animations[j - 1]);
+            float previousContribution = -1.0e30f;
+            if (previous) memcpy(&previousContribution, &previous->m_field_38, sizeof(previousContribution));
+            if (previousContribution >= contribution)
+                break;
+            m_Animations[j] = previous;
+            --j;
+        }
+        m_Animations[j] = animation;
+    }
+}
+
+void RCKKeyedAnimation::CenterAnimation(float frame) {
+    // Resolve the hierarchy lazily and revalidate a channel that may have
+    // been rebound since the last centering operation.
+    m_RootAnimation = static_cast<RCKObjectAnimation *>(GetAnimation(GetRootEntity()));
 
     if (m_RootAnimation) {
         VxVector position(0.0f, 0.0f, 0.0f);
@@ -384,349 +511,235 @@ CKBOOL RCKKeyedAnimation::IsMerged() {
 }
 
 CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL dynamic) {
-    if (!anim2)
+    if (!anim2 || !GetCharacter())
         return nullptr;
 
-    // Get the character associated with this animation
-    CKCharacter *character = GetCharacter();
-    if (!character)
-        return nullptr;
+    RCKKeyedAnimation *other = static_cast<RCKKeyedAnimation *>(anim2);
+    // The SDL object flags differ from the original DLL's legacy dynamic bit.
+    // Animation transition/orientation flags must not determine object lifetime.
+    CKBOOL dynamicObject = IsDynamic();
+    CK_OBJECTCREATION_OPTIONS options = dynamicObject ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
+    XString name;
+    if (GetName()) name << GetName();
+    name << "+";
+    if (other->GetName()) name << other->GetName();
 
-    RCKKeyedAnimation *otherAnim = (RCKKeyedAnimation *) anim2;
-
-    // Determine creation options based on GetFlags() & 0x80 (CK_OBJECT_DYNAMIC)
-    CKDWORD dynamicFlag = GetFlags() & CK_OBJECT_DYNAMIC;
-    CK_OBJECTCREATION_OPTIONS options = dynamicFlag ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
-
-    // Create name for the merged animation
-    CKSTRING otherName = otherAnim->GetName();
-    CKSTRING thisName = GetName();
-
-    if (!otherName)
-        otherName = "";
-
-    XString mergedName;
-    if (thisName)
-        mergedName << thisName;
-    mergedName << "+" << otherName;
-
-    // Create a new keyed animation object
-    RCKKeyedAnimation *merged = (RCKKeyedAnimation *) m_Context->CreateObject(CKCID_KEYEDANIMATION, mergedName.CStr(), options, nullptr);
+    RCKKeyedAnimation *merged = static_cast<RCKKeyedAnimation *>(
+        m_Context->CreateObject(CKCID_KEYEDANIMATION, name.CStr(), options, nullptr));
     if (!merged)
         return nullptr;
-
-    // Set the character for the merged animation
-    merged->m_Character = (RCKCharacter *) character;
-
-    // Add merged animation to character's scenes
-    ((CKBeObject *) character)->AddToSelfScenes((CKSceneObject *) merged);
-
-    // Set length to the max of both animations
-    float maxLength = (otherAnim->GetLength() >= m_Length) ? otherAnim->GetLength() : m_Length;
-
-    // Set merged animation properties
+    merged->m_Character = m_Character;
     merged->m_Merged = TRUE;
     merged->m_RootEntity = m_RootEntity;
+    float length = other->GetLength() >= m_Length ? other->GetLength() : m_Length;
+    CKBOOL complete = TRUE;
 
-    // Process all animations from this keyed animation
-    int thisAnimCount = m_Animations.Size();
-
-    for (int i = 0; i < thisAnimCount; ++i) {
-        RCKObjectAnimation *thisObjAnim = (RCKObjectAnimation *) m_Animations[i];
-        if (!thisObjAnim)
-            continue;
-
-        CK3dEntity *entity = thisObjAnim->Get3dEntity();
-        if (!entity)
-            continue;
-
-        // Find matching entity in other animation
-        CKObjectAnimation *otherObjAnim = otherAnim->GetAnimation(entity);
-
-        if (otherObjAnim) {
-            // Both animations have this entity, create merged object animation
-            // Pass dynamic flag to sub-animation's CreateMergedAnimation
-            // Note: IDA shows flag manipulation before call, but simplified here
-            CKObjectAnimation *mergedObjAnim = thisObjAnim->CreateMergedAnimation(otherObjAnim, dynamicFlag ? TRUE : FALSE);
-            if (mergedObjAnim) {
-                merged->AddAnimation(mergedObjAnim);
-            }
-        } else if (!dynamic) {
-            // Only this animation has this entity - copy it and scale length
-            CKDependencies dep;
-            CKCopyDefaultClassDependencies(dep, CK_DEPENDENCIES_COPY);
-            dep.m_Flags = CK_DEPENDENCIES_CUSTOM;
-
-            CKObjectAnimation *copiedAnim = (CKObjectAnimation *) m_Context->CopyObject(
-                thisObjAnim, &dep, nullptr, options);
-
-            if (copiedAnim) {
-                // Scale the animation length: maxLength / original length
-                float origLength = copiedAnim->GetLength();
-                if (origLength > 0.0f) {
-                    float scale = maxLength / origLength;
-                    copiedAnim->SetLength(scale);
-                }
-                merged->AddAnimation(copiedAnim);
-            }
-        }
-    }
-
-    // Process animations from other animation that are not in this animation
-    if (!dynamic) {
-        int otherAnimCount = otherAnim->GetAnimationCount();
-        for (int j = 0; j < otherAnimCount; ++j) {
-            RCKObjectAnimation *otherObjAnim = (RCKObjectAnimation *) otherAnim->GetAnimation(j);
-            if (!otherObjAnim)
+    // The original boolean selects intersection-only versus union membership.
+    // First keep this list's order, then append unmatched entries from the other.
+    for (int side = 0; side < (dynamic ? 1 : 2) && complete; ++side) {
+        RCKKeyedAnimation *source = side ? other : this;
+        RCKKeyedAnimation *opposite = side ? this : other;
+        for (int i = 0; i < source->GetAnimationCount(); ++i) {
+            RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(source->GetAnimation(i));
+            if (!animation || !animation->Get3dEntity())
+                continue;
+            CKObjectAnimation *match = opposite->GetAnimation(animation->Get3dEntity());
+            if (side && match)
                 continue;
 
-            CK3dEntity *otherEntity = otherObjAnim->Get3dEntity();
-            if (!otherEntity)
-                continue;
-
-            // Check if this entity already exists in this animation
-            CKObjectAnimation *existingAnim = GetAnimation(otherEntity);
-
-            if (!existingAnim) {
-                // Copy this animation and scale length
-                CKDependencies dep;
-                CKCopyDefaultClassDependencies(dep, CK_DEPENDENCIES_COPY);
-                dep.m_Flags = CK_DEPENDENCIES_CUSTOM;
-
-                CKObjectAnimation *copiedAnim = (CKObjectAnimation *) m_Context->CopyObject(
-                    otherObjAnim, &dep, nullptr, options);
-
-                if (copiedAnim) {
-                    // Scale the animation length: maxLength / original length
-                    float origLength = copiedAnim->GetLength();
-                    if (origLength > 0.0f) {
-                        float scale = maxLength / origLength;
-                        copiedAnim->SetLength(scale);
+            RCKObjectAnimation *child = nullptr;
+            if (match) {
+                // The object-animation factory reads this internal creation bit.
+                // Restore it afterwards so creating a blend does not edit its source.
+                CKDWORD flags = animation->GetFlags();
+                animation->SetFlags(dynamicObject ? flags | 0x20000000u : flags & ~0x20000000u);
+                child = static_cast<RCKObjectAnimation *>(animation->CreateMergedAnimation(match));
+                animation->SetFlags(flags);
+            } else if (!dynamic) {
+                CKDependencies dependencies;
+                CKCopyDefaultClassDependencies(dependencies, CK_DEPENDENCIES_COPY);
+                dependencies.m_Flags = CK_DEPENDENCIES_CUSTOM;
+                dependencies.ModifyOptions(CKCID_CHARACTER, 0, 1);
+                child = static_cast<RCKObjectAnimation *>(m_Context->CopyObject(animation, &dependencies, nullptr, options));
+                if (child && child->m_KeyframeData && child->GetLength() > 0.0f) {
+                    // Original 0x1004A64D scales key times, not the duration.
+                    float factor = length / child->GetLength();
+                    CKKeyframeData *data = child->m_KeyframeData;
+                    CKAnimController *controllers[] = {data->m_PositionController, data->m_ScaleController,
+                        data->m_RotationController, data->m_ScaleAxisController, data->m_MorphController};
+                    if (factor > 0.0f && factor != 1.0f) {
+                        for (int channel = 0; channel < 5; ++channel) {
+                            CKAnimController *controller = controllers[channel];
+                            if (!controller)
+                                continue;
+                            for (int key = 0; key < controller->GetKeyCount(); ++key) {
+                                CKKey *value = controller->GetKey(key);
+                                value->SetTime(value->GetTime() * factor);
+                            }
+                        }
                     }
-                    merged->AddAnimation(copiedAnim);
                 }
+            } else {
+                continue;
             }
-        }
-    }
-
-    // Set the length of merged animation
-    merged->SetLength(maxLength);
-
-    // Update animation state
-    merged->ModifyObjectFlags(CK_OBJECT_UPTODATE, 0);
-    merged->UpdateRootEntity();
-
-    return (CKAnimation *) merged;
-}
-
-float RCKKeyedAnimation::CreateTransition(CKAnimation *out, CKAnimation *in, CKDWORD OutTransitionMode, float length, float FrameTo) {
-    // IDA: 0x10048b57 - RCKKeyedAnimation::CreateTransition
-    // Note: Parameter order is (out, in) based on IDA analysis
-    if (!out)
-        return 0.0f;
-
-    RCKKeyedAnimation *animOut = (RCKKeyedAnimation *) out;
-    RCKKeyedAnimation *animIn = (RCKKeyedAnimation *) in;
-
-    // Ensure length is at least 1 frame
-    if (length < 1.0f)
-        length = 1.0f;
-
-    if (!animIn)
-        return 0.0f;
-
-    // Set SUBANIMSSORTED flag on this and both animations
-    m_Flags |= CKANIMATION_SUBANIMSSORTED;
-
-    if (!(animIn->m_Flags & CKANIMATION_SUBANIMSSORTED)) {
-        // SortAnimations would be called here
-        animIn->m_Flags |= CKANIMATION_SUBANIMSSORTED;
-    }
-
-    if (!(animOut->m_Flags & CKANIMATION_SUBANIMSSORTED)) {
-        // SortAnimations would be called here
-        animOut->m_Flags |= CKANIMATION_SUBANIMSSORTED;
-    }
-
-    // Handle OutTransitionMode flag 0x100 - compute FrameTo from animation length
-    if ((OutTransitionMode & CK_TRANSITION_WARPTOSAMEPOS) == CK_TRANSITION_WARPTOSAMEPOS) {
-        FrameTo = animIn->GetLength() * animOut->m_MergeFactor;
-    }
-
-    // If both animations are the same, return 0
-    if (animIn == animOut)
-        return 0.0f;
-
-    // Get the current step from animIn
-    float inStep = animIn->GetLength();
-
-    // Compute step values
-    float stepTo = FrameTo / animOut->m_MergeFactor;
-
-    // Set up the root entity and character from animOut
-    m_RootEntity = animOut->m_RootEntity;
-    m_RootAnimation = nullptr;
-    m_Character = animOut->m_Character;
-
-    // Check that both animations have the same character
-    if (animIn->m_Character != m_Character)
-        return -1.0f;
-
-    // Get the number of steps in animOut
-    float outStepCount = fabsf(animOut->GetLength());
-
-    // Copy the ALLOWTURN flag from animOut
-    LinkToFrameRate((CKBOOL)(outStepCount), (float)(int)outStepCount);
-
-    if (animOut->m_Flags & CKANIMATION_ALLOWTURN) {
-        m_Flags |= CKANIMATION_ALLOWTURN;
-    } else {
-        m_Flags &= ~CKANIMATION_ALLOWTURN;
-    }
-
-    // Get counts of object animations
-    int inAnimCount = animIn->GetAnimationCount();
-    int outAnimCount = animOut->GetAnimationCount();
-
-    // Build mapping arrays: outList[i] = animOut subanim, outToIn[i] = matching animIn subanim (by entity)
-    // Use CKMemoryPool (dword-sized) to match SDK conventions.
-    const size_t ptrBytes = sizeof(RCKObjectAnimation *);
-    const size_t mappingBytes = (size_t)outAnimCount * ptrBytes * 2;
-    const int mappingDwords = (int)((mappingBytes + sizeof(XDWORD) - 1) / sizeof(XDWORD));
-
-    CKMemoryPool mappingPool(m_Context, mappingDwords);
-    char *mappingMem = (char *)mappingPool.Mem();
-    memset(mappingMem, 0, mappingBytes);
-
-    RCKObjectAnimation **outToIn = (RCKObjectAnimation **)mappingMem;
-    RCKObjectAnimation **outList = (RCKObjectAnimation **)(mappingMem + (size_t)outAnimCount * ptrBytes);
-
-    // Build the mapping: for each animation in animOut, find matching entity in animIn
-    for (int i = 0; i < outAnimCount; ++i) {
-        RCKObjectAnimation *outObjAnim = (RCKObjectAnimation *)animOut->GetAnimation(i);
-        outList[i] = outObjAnim;
-
-        if (!outObjAnim)
-            continue;
-
-        CK3dEntity *entity = outObjAnim->Get3dEntity();
-        if (!entity)
-            continue;
-
-        for (CKObject **it = animIn->m_Animations.Begin(); it != animIn->m_Animations.End(); ++it) {
-            RCKObjectAnimation *inObjAnim = (RCKObjectAnimation *)*it;
-            if (inObjAnim && inObjAnim->Get3dEntity() == entity) {
-                outToIn[i] = inObjAnim;
+            if (!child) {
+                complete = FALSE;
                 break;
             }
+            merged->AddAnimation(child);
         }
     }
 
-    // Check if we're using velocity-based warp (0x20 flag)
-    CKAnimKey *velocityData = nullptr;
-    // Simplified: skip velocity calculations (would need CKMemoryPool)
-    // The original uses complex position/rotation velocity matching
+    if (!complete) {
+        // Only objects created for this result are destroyed; source animations
+        // and their dependencies remain live when a child factory fails.
+        CKDependencies none;
+        none.m_Flags = CK_DEPENDENCIES_NONE;
+        while (merged->GetAnimationCount()) {
+            CKObjectAnimation *child = merged->GetAnimation(0);
+            merged->RemoveAnimation(child);
+            m_Context->DestroyObject(child, 0, &none);
+        }
+        m_Context->DestroyObject(merged, 0, &none);
+        return nullptr;
+    }
+    merged->SetLength(length);
+    reinterpret_cast<CKBeObject *>(m_Character)->AddToSelfScenes(merged);
+    merged->UpdateRootEntity();
+    return merged;
+}
 
-    // Check the animations array
+float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out, CKDWORD OutTransitionMode, float length, float FrameTo) {
+    // CK2_3D.dll 0x10048B57: first source is in, second is out.
+    if (!in || !out || in == out)
+        return 0.0f;
+    RCKKeyedAnimation *animIn = static_cast<RCKKeyedAnimation *>(in);
+    RCKKeyedAnimation *animOut = static_cast<RCKKeyedAnimation *>(out);
+    if (animIn->m_Character != animOut->m_Character)
+        return -1.0f;
+    if (length < 1.0f) length = 1.0f;
+    if (!(animIn->m_Flags & CKANIMATION_SUBANIMSSORTED)) animIn->SortAnimations();
+    if (!(animOut->m_Flags & CKANIMATION_SUBANIMSSORTED)) animOut->SortAnimations();
+    float inStep = animIn->GetStep();
+    float outLength = animOut->GetLength();
+    if (OutTransitionMode & CK_TRANSITION_WARPTOSAMEPOS)
+        FrameTo = inStep * outLength;
+    float stepTo = outLength != 0.0f ? FrameTo / outLength : 0.0f;
+    RCK3dEntity *root = animOut->m_RootEntity;
+    RCKCharacter *character = animOut->m_Character;
+    CKDWORD inFlags = animIn->m_Flags;
+    CKDWORD outFlags = animOut->m_Flags;
+    float fps = fabsf(animOut->GetLinkedFrameRate());
+    CKBOOL linked = animOut->IsLinkedToFrameRate();
+
+    int outCount = animOut->GetAnimationCount();
+    XSArray<RCKObjectAnimation *> outList, inList;
+    outList.Resize(outCount); inList.Resize(outCount);
+    for (int i = 0; i < outCount; ++i) {
+        RCKObjectAnimation *destination = static_cast<RCKObjectAnimation *>(animOut->GetAnimation(i));
+        outList[i] = destination; inList[i] = nullptr;
+        if (!destination || !destination->Get3dEntity())
+            continue;
+        // The native loop deliberately keeps the last matching source channel.
+        for (int j = 0; j < animIn->GetAnimationCount(); ++j) {
+            RCKObjectAnimation *source = static_cast<RCKObjectAnimation *>(animIn->GetAnimation(j));
+            if (source && source->Get3dEntity() == destination->Get3dEntity())
+                inList[i] = source;
+        }
+    }
+
+    XSArray<CKAnimKey> startingKeys;
+    if (OutTransitionMode & CK_TRANSITION_WARPTOBEST) {
+        startingKeys.Resize(outCount);
+        for (int i = 0; i < outCount; ++i) {
+            startingKeys[i].m_Pos.Set(0, 0, 0); startingKeys[i].m_Scl.Set(1, 1, 1);
+            startingKeys[i].m_Rot = VxQuaternion(0, 0, 0, 1);
+            startingKeys[i].m_SclRot = VxQuaternion(0, 0, 0, 1);
+            if (inList[i] && outList[i])
+                inList[i]->EvaluateKeys(inStep, &startingKeys[i].m_Rot, &startingKeys[i].m_Pos,
+                    &startingKeys[i].m_Scl, &startingKeys[i].m_SclRot);
+        }
+        int samples = static_cast<int>(outLength * 0.5f);
+        if (samples < 1) samples = 1;
+        float bestError = 1.0e30f;
+        float bestFrame = 0.0f;
+        for (int frame = 0; frame < samples; ++frame) {
+            float error = 0.0f;
+            for (int i = 0; i < outCount; ++i) {
+                if (!inList[i] || !outList[i]) continue;
+                RCKObjectAnimation *destination = outList[i];
+                const CKAnimKey &start = startingKeys[i];
+                VxVector value;
+                VxQuaternion rotation;
+                if (destination->HasPositionInfo() && destination->EvaluatePosition(static_cast<float>(frame), value))
+                    error += fabsf(value.x - start.m_Pos.x) + fabsf(value.y - start.m_Pos.y) + fabsf(value.z - start.m_Pos.z);
+                if (destination->HasScaleInfo() && destination->EvaluateScale(static_cast<float>(frame), value))
+                    error += fabsf(value.x - start.m_Scl.x) + fabsf(value.y - start.m_Scl.y) + fabsf(value.z - start.m_Scl.z);
+                if (destination->HasRotationInfo() && destination->EvaluateRotation(static_cast<float>(frame), rotation))
+                    error += 10.0f * (1.0f - fabsf(rotation.x * start.m_Rot.x + rotation.y * start.m_Rot.y +
+                        rotation.z * start.m_Rot.z + rotation.w * start.m_Rot.w));
+            }
+            // Sum all channels; the original overwrites each category's score
+            // with its last channel. Keep the earliest frame on equal scores.
+            if (error < bestError) { bestError = error; bestFrame = static_cast<float>(frame); }
+        }
+        stepTo = outLength != 0.0f ? bestFrame / outLength : 0.0f;
+    }
+
     m_Animations.Check();
-
-    // Ensure we have enough object animations (match outAnimCount)
-    int currentCount = m_Animations.Size();
-    if (currentCount < outAnimCount) {
-        int neededCount = outAnimCount - currentCount;
-        for (int i = 0; i < neededCount; ++i) {
-            CKBOOL isDynamic = (GetFlags() & CK_OBJECT_DYNAMIC) != 0;
-            CK_OBJECTCREATION_OPTIONS opts = isDynamic ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
-
-            RCKObjectAnimation *newAnim = (RCKObjectAnimation *) m_Context->CreateObject(
-                CKCID_OBJECTANIMATION, nullptr, opts, nullptr);
-
-            if (newAnim) {
-                m_Animations.PushBack(newAnim);
-                SetParentKeyedAnimation(newAnim, this);
+    int previousCount = m_Animations.Size();
+    while (m_Animations.Size() < outCount) {
+        CK_OBJECTCREATION_OPTIONS options = IsDynamic() ? CK_OBJECTCREATION_DYNAMIC : CK_OBJECTCREATION_NONAMECHECK;
+        RCKObjectAnimation *created = static_cast<RCKObjectAnimation *>(
+            m_Context->CreateObject(CKCID_OBJECTANIMATION, nullptr, options, nullptr));
+        if (!created) {
+            CKDependencies none; none.m_Flags = CK_DEPENDENCIES_NONE;
+            while (m_Animations.Size() > previousCount) {
+                RCKObjectAnimation *last = static_cast<RCKObjectAnimation *>(m_Animations[m_Animations.Size() - 1]);
+                RemoveAnimation(last); m_Context->DestroyObject(last, 0, &none);
             }
+            return -1.0f;
+        }
+        AddAnimation(created);
+    }
+    m_RootEntity = root; m_RootAnimation = nullptr; m_Character = character;
+    m_Flags |= CKANIMATION_SUBANIMSSORTED;
+    LinkToFrameRate(linked, fps);
+    m_Flags = (m_Flags & ~CKANIMATION_ALLOWTURN) | (outFlags & CKANIMATION_ALLOWTURN);
+    for (int i = 0; i < m_Animations.Size(); ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (animation) animation->m_Flags |= CK_OBJECTANIMATION_WARPER | CK_OBJECTANIMATION_RESERVED;
+    }
+    // In-place input transitions modify their mapped channels, not array indices.
+    int count = animIn == this ? outCount : m_Animations.Size();
+    for (int i = 0; i < count; ++i) {
+        RCKObjectAnimation *destination = i < outCount ? outList[i] : nullptr;
+        RCKObjectAnimation *source = i < outCount ? inList[i] : nullptr;
+        RCKObjectAnimation *animation = animIn == this ? source : static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (!animation) continue;
+        if (source && destination) {
+            animation->m_Flags &= ~CK_OBJECTANIMATION_WARPER;
+            CKBOOL isRoot = root == reinterpret_cast<RCK3dEntity *>(destination->Get3dEntity());
+            CKBOOL velocity = isRoot && (OutTransitionMode & CK_TRANSITION_USEVELOCITY);
+            CKBOOL dontTurn = isRoot && (inFlags & CKANIMATION_ALIGNORIENTATION);
+            // Repair the entity's registration before the lower-level builder
+            // directly assigns its entity pointer, including reused channels.
+            animation->Set3dEntity(destination->Get3dEntity());
+            animation->CreateTransition(length, source, inStep, destination, stepTo, velocity, dontTurn,
+                startingKeys.Size() ? &startingKeys[i] : nullptr);
+            SetParentKeyedAnimation(animation, this);
+        } else if (animIn != this) {
+            animation->ClearAll();
         }
     }
-
-    // Mark all object animations with flag 0xC0000000 initially
-    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
-        RCKObjectAnimation *objAnim = (RCKObjectAnimation *) *it;
-        if (objAnim) {
-            objAnim->m_Flags |= (CK_OBJECTANIMATION_WARPER | CK_OBJECTANIMATION_RESERVED);
-        }
+    for (int i = 0; i < m_Animations.Size(); ++i) {
+        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
+        if (!animation) continue;
+        if (animation->m_Flags & CK_OBJECTANIMATION_WARPER) animation->ClearAll();
+        animation->m_Flags &= ~CK_OBJECTANIMATION_WARPER;
     }
-
-    // Create transition for each object animation
-    // Check if animIn == this (special case for in-place transition)
-    if (animIn == (RCKKeyedAnimation *) this) {
-        for (int k = 0; k < outAnimCount; ++k) {
-            RCKObjectAnimation *outObjAnim = outList[k];
-            RCKObjectAnimation *inObjAnim = outToIn[k];
-
-            if (outObjAnim && inObjAnim) {
-                inObjAnim->m_Flags &= ~CK_OBJECTANIMATION_WARPER;
-
-                CKBOOL veloc = FALSE;
-                CKBOOL dontTurn = FALSE;
-
-                if (m_RootEntity == (RCK3dEntity *) outObjAnim->Get3dEntity()) {
-                    veloc = (OutTransitionMode & CK_TRANSITION_USEVELOCITY) != 0;
-                    dontTurn = (animIn->m_Flags & CKANIMATION_ALIGNORIENTATION) != 0;
-                }
-
-                inObjAnim->CreateTransition(length, inObjAnim, inStep, outObjAnim, stepTo, veloc, dontTurn, velocityData);
-            }
-        }
-    } else {
-        // Normal case: animIn != this
-        int thisAnimCount = m_Animations.Size();
-        for (int k = 0; k < thisAnimCount; ++k) {
-            RCKObjectAnimation *outObjAnim = nullptr;
-            RCKObjectAnimation *inObjAnim = nullptr;
-
-            if (k < outAnimCount) {
-                outObjAnim = outList[k];
-                inObjAnim = outToIn[k];
-            }
-
-            RCKObjectAnimation *objAnim = (RCKObjectAnimation *) m_Animations[k];
-            if (!objAnim)
-                continue;
-
-            objAnim->m_Flags &= ~CK_OBJECTANIMATION_WARPER;
-
-            if (outObjAnim && inObjAnim && objAnim) {
-                CKBOOL veloc = FALSE;
-                CKBOOL dontTurn = FALSE;
-
-                if (m_RootEntity == (RCK3dEntity *) outObjAnim->Get3dEntity()) {
-                    veloc = (OutTransitionMode & CK_TRANSITION_USEVELOCITY) != 0;
-                    dontTurn = (animIn->m_Flags & CKANIMATION_ALIGNORIENTATION) != 0;
-                }
-
-                objAnim->CreateTransition(length, inObjAnim, inStep, outObjAnim, stepTo, veloc, dontTurn, velocityData);
-            } else {
-                objAnim->ClearAll();
-            }
-        }
-    }
-
-    // Clear any animations that weren't used (still have flag 0x80000000)
-    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
-        RCKObjectAnimation *objAnim = (RCKObjectAnimation *) *it;
-        if (objAnim) {
-            if (objAnim->m_Flags & CK_OBJECTANIMATION_WARPER) {
-                objAnim->ClearAll();
-            }
-            objAnim->m_Flags &= ~CK_OBJECTANIMATION_WARPER;
-        }
-    }
-
-    // Set the length
     SetLength(length);
-
-    // Return the computed step value
-    return stepTo * animOut->m_MergeFactor;
+    return stepTo * outLength;
 }
 
 
@@ -802,126 +815,4 @@ CKKeyedAnimation *RCKKeyedAnimation::CreateInstance(CKContext *Context) {
     // Object size is 0x54 (84 bytes)
     RCKKeyedAnimation *anim = new RCKKeyedAnimation(Context, nullptr);
     return reinterpret_cast<CKKeyedAnimation *>(anim);
-}
-
-void RCKKeyedAnimation::SortAnimations() {
-    m_Flags |= CKANIMATION_SUBANIMSSORTED;
-    if (!m_Character)
-        return;
-    CK3dEntity *floor = m_Character->GetFloorReferenceObject();
-    for (int i = 0; i < m_Animations.Size(); ++i) {
-        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
-        if (!animation)
-            continue;
-        CK3dEntity *entity = animation->Get3dEntity();
-        float contribution = -1.0e10f;
-        if (entity) {
-            if (entity == reinterpret_cast<CK3dEntity *>(m_RootEntity) || entity == floor)
-                contribution = 1.0e30f;
-            else
-                contribution = ComputeAnimationContribution(animation);
-        }
-        memcpy(&animation->m_field_38, &contribution, sizeof(contribution));
-    }
-    // Stable equal-score order avoids arbitrarily reordering duplicate channels.
-    for (int i = 1; i < m_Animations.Size(); ++i) {
-        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
-        float contribution = -1.0e30f;
-        if (animation) memcpy(&contribution, &animation->m_field_38, sizeof(contribution));
-        int j = i;
-        while (j > 0) {
-            RCKObjectAnimation *previous = static_cast<RCKObjectAnimation *>(m_Animations[j - 1]);
-            float previousContribution = -1.0e30f;
-            if (previous) memcpy(&previousContribution, &previous->m_field_38, sizeof(previousContribution));
-            if (previousContribution >= contribution)
-                break;
-            m_Animations[j] = previous;
-            --j;
-        }
-        m_Animations[j] = animation;
-    }
-}
-
-float RCKKeyedAnimation::ComputeAnimationContribution(RCKObjectAnimation *animation) {
-    if (!animation)
-        return 0.0f;
-    float contribution = 0.0f;
-    if (animation->IsMerged()) {
-        contribution = (ComputeAnimationContribution(animation->m_Anim1) +
-            ComputeAnimationContribution(animation->m_Anim2)) * 0.5f;
-    } else if (animation->m_KeyframeData) {
-        CKKeyframeData *data = animation->m_KeyframeData;
-        CKAnimController *vectors[] = {data->m_PositionController, data->m_ScaleController};
-        for (int channel = 0; channel < 2; ++channel) {
-            CKAnimController *controller = vectors[channel];
-            if (!controller || !controller->GetKeyCount())
-                continue;
-            const VxVector &first = static_cast<CKPositionKey *>(controller->GetKey(0))->Pos;
-            float extent = 0.0f;
-            for (int i = 1; i < controller->GetKeyCount(); ++i) {
-                const VxVector &value = static_cast<CKPositionKey *>(controller->GetKey(i))->Pos;
-                float difference = fabsf(first.x - value.x + first.y - value.y + first.z - value.z);
-                if (difference > extent) extent = difference;
-            }
-            contribution += extent;
-        }
-        CKAnimController *rotations = data->m_RotationController;
-        float rotationExtent = 0.0f;
-        if (rotations) {
-            for (int i = 0; i < rotations->GetKeyCount(); ++i) {
-                const VxQuaternion &first = static_cast<CKRotationKey *>(rotations->GetKey(i))->Rot;
-                for (int j = i + 1; j < rotations->GetKeyCount(); ++j) {
-                    const VxQuaternion &second = static_cast<CKRotationKey *>(rotations->GetKey(j))->Rot;
-                    float difference = (1.0f - fabsf(first.x * second.x + first.y * second.y +
-                        first.z * second.z + first.w * second.w)) * 1000.0f;
-                    if (difference > rotationExtent) rotationExtent = difference;
-                }
-            }
-        }
-        contribution += rotationExtent;
-        if (data->m_MorphController)
-            contribution += 1000.0f;
-    }
-    memcpy(&animation->m_field_38, &contribution, sizeof(contribution));
-    return contribution;
-}
-
-void RCKKeyedAnimation::SetStep(float step) {
-    if (step > 1.0f) step = 1.0f;
-    if (step < 0.0f) step = 0.0f;
-    RCKObjectAnimation *root = static_cast<RCKObjectAnimation *>(GetAnimation(GetRootEntity()));
-    if (root)
-        SetParentKeyedAnimation(root, this);
-    if (!(m_Flags & CKANIMATION_SUBANIMSSORTED))
-        SortAnimations();
-
-    int count = m_Animations.Size();
-    if (m_Character && count) {
-        int required = m_Character->GetFloorReferenceObject() ? 2 : 1;
-        float lod = (m_Character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED)
-            ? m_Character->GetAnimationLevelOfDetail() : 0.0f;
-        if (count > required && lod < 1.0f)
-            count = static_cast<int>((count - required) * lod) + required;
-    }
-    for (int i = 0; i < count; ++i) {
-        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
-        if (animation)
-            animation->SetStep(step, reinterpret_cast<CKKeyedAnimation *>(this));
-    }
-    if (m_Character && count)
-        m_Character->LocalMatrixChanged(FALSE, TRUE);
-    m_Step = step;
-}
-
-void RCKKeyedAnimation::SetFrame(float frame) {
-    SetStep(m_Length != 0.0f ? frame / m_Length : 0.0f);
-}
-
-void RCKKeyedAnimation::SetLength(float nbframe) {
-    for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
-        RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(*it);
-        if (animation)
-            animation->SetLength(nbframe);
-    }
-    RCKAnimation::SetLength(nbframe);
 }
