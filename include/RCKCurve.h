@@ -39,6 +39,7 @@ public:
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
     CKBOOL Render(CKRenderContext *Dev, CKDWORD Flags = CKRENDER_UPDATEEXTENTS) override;
+    void Show(CK_OBJECT_SHOWOPTION show = CKSHOW) override;
 
     //--------------------------------------------
     // Class Registering	{Secret}

@@ -86,7 +86,20 @@ RCKCurve::RCKCurve(CKContext *Context, CKSTRING name) : RCK3dEntity(Context, nam
 /**
  * @brief RCKCurve destructor
  */
-RCKCurve::~RCKCurve() {}
+RCKCurve::~RCKCurve() {
+    // Removed or reparented points can still retain the curve's non-owning link.
+    const CK_ID lastID = static_cast<CK_ID>(m_Context->GetObjectCount());
+    for (CK_ID id = 1; id <= lastID; ++id) {
+        CKObject *object = m_Context->GetObject(id);
+        if (!object || !CKIsChildClassOf(object, CKCID_CURVEPOINT))
+            continue;
+        RCKCurvePoint *point = static_cast<RCKCurvePoint *>(object);
+        if (point->GetCurve() == reinterpret_cast<CKCurve *>(this))
+            point->SetCurve(nullptr);
+        if (point->GetParent() == reinterpret_cast<CK3dEntity *>(this))
+            point->SetParent(nullptr, TRUE);
+    }
+}
 
 /**
  * @brief Get the class ID for RCKCurve
@@ -334,6 +347,9 @@ CKERROR RCKCurve::RemapDependencies(CKDependenciesContext &context) {
  * @return CKERROR indicating success or failure
  */
 CKERROR RCKCurve::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK) {
         return err;
@@ -366,6 +382,11 @@ CKBOOL RCKCurve::Render(CKRenderContext *Dev, CKDWORD Flags) {
         Update();
     }
     return RCK3dEntity::Render(Dev, Flags);
+}
+
+void RCKCurve::Show(CK_OBJECT_SHOWOPTION show) {
+    RCK3dEntity::Show(show);
+    UpdateMesh();
 }
 
 // =====================================================
@@ -433,29 +454,6 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
     step = NormalizeStep(step, m_Opened);
     const float targetLen = step * m_Length;
 
-    if (!m_Opened && targetLen <= 0.0f) {
-        RCKCurvePoint *firstPt = (RCKCurvePoint *)m_ControlPoints[0];
-        if (!firstPt)
-            return CKERR_INVALIDPARAMETER;
-
-        firstPt->GetFittedVector(Pos);
-        if (Dir) {
-            firstPt->GetTangents(nullptr, Dir);
-            if (Dir->Magnitude() == 0.0f) {
-                RCKCurvePoint *nextPt = (RCKCurvePoint *)m_ControlPoints[1];
-                if (nextPt) {
-                    VxVector nextPos;
-                    nextPt->GetFittedVector(&nextPos);
-                    Dir->x = nextPos.x - Pos->x;
-                    Dir->y = nextPos.y - Pos->y;
-                    Dir->z = nextPos.z - Pos->z;
-                }
-            }
-            Dir->Normalize();
-        }
-        return CK_OK;
-    }
-
     VxVector p0, p1;
     VxVector t0, t1;
 
@@ -465,7 +463,7 @@ CKERROR RCKCurve::GetLocalPos(float step, VxVector *Pos, VxVector *Dir) {
         RCKCurvePoint *pt = ppPoints[i];
         if (pt) {
             const float ptLen = pt->GetLength();
-            if (!(ptLen < targetLen)) {
+            if (ptLen > targetLen) {
                 endIndex = i;
                 break;
             }
@@ -639,6 +637,14 @@ CKERROR RCKCurve::SetTangentsByIndex(int index, VxVector *InTangent, VxVector *O
 
     const float tension = pt->GetTension();
 
+    // Unit tension fixes both TCB tangents at zero, independently of bias.
+    if (tension == 1.0f) {
+        if (InTangent->x != 0.0f || InTangent->y != 0.0f || InTangent->z != 0.0f ||
+            OutTangent->x != 0.0f || OutTangent->y != 0.0f || OutTangent->z != 0.0f)
+            return CKERR_INVALIDPARAMETER;
+        return CK_OK;
+    }
+
     float newBias = 0.0f;
     // Choose a stable component (matches DLL dominant-axis selection).
     const float ax = fabsf(chordDiff.x);
@@ -646,13 +652,13 @@ CKERROR RCKCurve::SetTangentsByIndex(int index, VxVector *InTangent, VxVector *O
     const float az = fabsf(chordDiff.z);
     if (ax >= ay && ax >= az) {
         if (chordDiff.x != 0.0f)
-            newBias = (tanSum.x / (1.0f - tension) + chordSum.x) / chordDiff.x;
+            newBias = (tanSum.x / (1.0f - tension) - chordSum.x) / chordDiff.x;
     } else if (ay >= az) {
         if (chordDiff.y != 0.0f)
-            newBias = (tanSum.y / (1.0f - tension) + chordSum.y) / chordDiff.y;
+            newBias = (tanSum.y / (1.0f - tension) - chordSum.y) / chordDiff.y;
     } else {
         if (chordDiff.z != 0.0f)
-            newBias = (tanSum.z / (1.0f - tension) + chordSum.z) / chordDiff.z;
+            newBias = (tanSum.z / (1.0f - tension) - chordSum.z) / chordDiff.z;
     }
 
     pt->SetBias(newBias);
@@ -862,7 +868,8 @@ CKERROR RCKCurve::UpdateMesh() {
             pEnd->GetFittedVector(&p1);
             pEnd->GetTangents(&m1, nullptr);
 
-            int segSteps = (int)((l1 - l0) * m_StepCount * invTotalLen);
+            // Match the allocation pass exactly, including float rounding.
+            int segSteps = (int)(m_StepCount * invTotalLen * (l1 - l0));
             if (segSteps < 1)
                 segSteps = 1;
 
@@ -930,10 +937,7 @@ void RCKCurve::Update() {
 
     const int count = m_ControlPoints.Size();
 
-    VxMatrix invCurveWorld;
-    Vx3DInverseMatrix(invCurveWorld, m_WorldMatrix);
-
-    VxVector worldPos, localPos;
+    VxVector localPos;
     RCKCurvePoint **ppPoints = (RCKCurvePoint **)m_ControlPoints.Begin();
 
     // Cache curve-space positions into curve points (reserved + fitted).
@@ -941,8 +945,7 @@ void RCKCurve::Update() {
         RCKCurvePoint *pt = ppPoints[i];
         if (!pt)
             continue;
-        pt->GetPosition(&worldPos, nullptr);
-        Vx3DMultiplyMatrixVector(&localPos, invCurveWorld, &worldPos);
+        pt->GetPosition(&localPos, reinterpret_cast<CK3dEntity *>(this));
         pt->SetReservedVector(&localPos);
         pt->SetFittedVector(&localPos);
     }
