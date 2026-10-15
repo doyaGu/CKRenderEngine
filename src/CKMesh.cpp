@@ -82,12 +82,42 @@ static CKBOOL CKMeshMonoPassStageBlend(CKDWORD stageBlend) {
            (src == VXBLEND_DESTCOLOR && dst == VXBLEND_ZERO);
 }
 
+// Positive texture stages owned by an already applied built-in base effect.
+// These channel ordinals supply extra mesh UV streams; they are not extra
+// independently blended color layers while the base effect owns their stages.
+static int CKMeshEffectStagePrefix(CKMaterial *material) {
+    if (!material || !material->GetTexture(0))
+        return 0;
+    switch (material->GetEffect()) {
+    case VXEFFECT_NONE:
+    case VXEFFECT_TEXGEN:
+    case VXEFFECT_TEXGENREF:
+        return 0;
+    case VXEFFECT_DP3:
+        return 1;
+    case VXEFFECT_BUMPENV:
+        return material->GetTexture(1) && material->GetTexture(2) ? 2 :
+            (material->GetTexture(1) || material->GetTexture(2) ? 1 : 0);
+    case VXEFFECT_2TEXTURES:
+        return material->GetTexture(1) ? 1 : 0;
+    case VXEFFECT_3TEXTURES:
+        return material->GetTexture(1) ? (material->GetTexture(2) ? 2 : 1) : 0;
+    default:
+        return -1; // Custom effect footprint is not determined by UV-count metadata.
+    }
+}
+
+static CKBOOL CKMeshChannelEffectCanFold(CKMaterial *material) {
+    const VX_EFFECT effect = material->GetEffect();
+    return effect == VXEFFECT_NONE || effect == VXEFFECT_TEXGEN || effect == VXEFFECT_TEXGENREF;
+}
+
 void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
     if (dev)
         BindMonoPassTextureChannelsChecked(dev);
 }
 
-CKWORD RCKMesh::BindMonoPassTextureChannelsChecked(RCKRenderContext *dev) {
+CKWORD RCKMesh::BindMonoPassTextureChannelsChecked(RCKRenderContext *dev, int effectStagePrefix) {
     CKRasterizerContext *rst = dev->m_RasterizerContext;
     CKWORD failedChannels = 0;
     CKBOOL deferSuffix = FALSE;
@@ -96,8 +126,11 @@ CKWORD RCKMesh::BindMonoPassTextureChannelsChecked(RCKRenderContext *dev) {
         if (channelIndex < 0 || channelIndex >= m_MaterialChannels.Size())
             continue;
         VxMaterialChannel &channel = m_MaterialChannels[channelIndex];
-        if (!channel.m_Material || !(channel.m_Flags & VXCHANNEL_ACTIVE) ||
-            !CKMeshMonoPassStageBlend(STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend)))
+        if (!channel.m_Material || !(channel.m_Flags & VXCHANNEL_ACTIVE))
+            continue;
+        if (i + 1 <= effectStagePrefix)
+            continue; // The applied base effect owns these texture stages, including operations.
+        if (!CKMeshMonoPassStageBlend(STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend)))
             continue;
         if (deferSuffix) {
             failedChannels |= static_cast<CKWORD>(1u << channelIndex);
@@ -2478,6 +2511,9 @@ CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
     }
 
     SetFlags(copiedSemanticFlags);
+    // New PM data needs its own groups even when the destination was already
+    // up-to-date before Copy. The pre-render callback performs the rebuild.
+    CKObject::ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
     m_Valid = FALSE;
     InvalidateHardwareBuffers();
 
@@ -3194,9 +3230,10 @@ void RCKMesh::BuildRenderMesh() {
         }
     }
 
-    // Mark mesh as modified
+    // The current LOD groups are complete; ordinary group rebuilding would
+    // replace their global PM indices with authored topology and remap data.
     m_FaceChannelMask = 0;
-    m_Flags |= VXMESH_POS_CHANGED;
+    m_Flags |= VXMESH_POS_CHANGED | VXMESH_OPTIMIZED;
     CKObject::ModifyObjectFlags(CK_OBJECT_UPTODATE, 0);
     VertexMove();
 }
@@ -4372,7 +4409,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         drawFaceIndexCount = pmFaceIndices.Size();
     }
 
-    CKBOOL hasAlphaMaterial = FALSE;
+    CKBOOL hasEffectMaterial = FALSE;
+    int commonEffectStagePrefix = -1;
     RCKMaterial *firstMat = nullptr;
 
     if (faceCount) {
@@ -4389,15 +4427,27 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         if (m_FaceChannelMask)
             UpdateChannelIndices();
 
-        // Check if any group material is alpha transparent (IDA reads internal flags; SDK method is equivalent)
+        // Native checks effect flags here: an effect may own additional stages.
         for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
             CKMaterialGroup *group = m_MaterialGroups[i];
             if (group && group->m_Material) {
                 firstMat = group->m_Material;
-                if (group->m_Material->IsAlphaTransparent()) {
-                    hasAlphaMaterial = TRUE;
+                if (group->m_Material->GetEffect() != VXEFFECT_NONE) {
+                    hasEffectMaterial = TRUE;
                     break;
                 }
+            }
+        }
+
+        // A provider can be selected globally only when all rendered groups
+        // reserve the same stage prefix. Mixed footprints need per-group planning.
+        commonEffectStagePrefix = CKMeshEffectStagePrefix(firstMat);
+        for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
+            CKMaterialGroup *group = m_MaterialGroups[i];
+            if (group && group->m_HasValidPrimitives &&
+                CKMeshEffectStagePrefix(group->m_Material) != commonEffectStagePrefix) {
+                commonEffectStagePrefix = -1;
+                break;
             }
         }
 
@@ -4507,6 +4557,26 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                         continue;
                     }
 
+                    const int effectStagePrefix = commonEffectStagePrefix;
+                    if (effectStagePrefix > usedStages) {
+                        // Existing extra-effect textures consume these physical
+                        // stages. Preserve their corresponding channel UV streams.
+                        channel.m_Flags |= VXCHANNEL_MONO;
+                        ++usedStages;
+                        const int slot = m_ActiveTextureChannels.Size();
+                        dpData.TexCoordPtrs[slot] = (channel.m_Flags & VXCHANNEL_SAMEUV)
+                            ? dpData.TexCoordPtr : channel.m_UVs;
+                        dpData.TexCoordStrides[slot] = (channel.m_Flags & VXCHANNEL_SAMEUV)
+                            ? dpData.TexCoordStride : sizeof(Vx2DVector);
+                        m_ActiveTextureChannels.PushBack(c);
+                        continue;
+                    }
+                    if (!CKMeshChannelEffectCanFold(channel.m_Material)) {
+                        needsMultiPass = TRUE;
+                        lastMultiPass = &channel;
+                        usedStages = maxAdditionalStages;
+                        continue;
+                    }
                     if (channel.m_FaceIndices || !channel.m_Material->GetTexture(0)) {
                         needsMultiPass = TRUE;
                         lastMultiPass = &channel;
@@ -4550,8 +4620,10 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 
                     const int slot = (int) m_ActiveTextureChannels.Size();
                     if (slot < 7) {
-                        dpData.TexCoordPtrs[slot] = channel.m_UVs;
-                        dpData.TexCoordStrides[slot] = sizeof(Vx2DVector);
+                        dpData.TexCoordPtrs[slot] = (channel.m_Flags & VXCHANNEL_SAMEUV)
+                            ? dpData.TexCoordPtr : channel.m_UVs;
+                        dpData.TexCoordStrides[slot] = (channel.m_Flags & VXCHANNEL_SAMEUV)
+                            ? dpData.TexCoordStride : sizeof(Vx2DVector);
                     }
 
                     m_ActiveTextureChannels.PushBack(c);
@@ -4563,7 +4635,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 renderChannels = needsMultiPass;
             }
 
-            if (!hasAlphaMaterial && m_ActiveTextureChannels.Size() == 0) {
+            if (!hasEffectMaterial && m_ActiveTextureChannels.Size() == 0) {
                 rc->DisableTextureStagesFrom(1);
                 rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_DISABLE);
                 rc->m_RasterizerContext->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_DISABLE);
@@ -4796,8 +4868,13 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
     }
 
     CKWORD failedChannels = 0;
-    if (!callbacksOwnMaterial && textureStagesReset)
-        failedChannels = BindMonoPassTextureChannelsChecked(dev);
+    if (!callbacksOwnMaterial && textureStagesReset) {
+        const int effectStagePrefix = CKMeshEffectStagePrefix(mat);
+        // A custom effect which reaches the ordinary stage reset has yielded
+        // its texture chain. SKIPALLTEX owners never enter this branch.
+        failedChannels = BindMonoPassTextureChannelsChecked(dev,
+            effectStagePrefix >= 0 ? effectStagePrefix : 0);
+    }
 
     dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags));
 
@@ -4814,6 +4891,19 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         mat->IsTwoSided() && mat->IsAlphaTransparent();
     const int passCount = twoSidedTransparent ? 2 : 1;
     for (int pass = 0; pass < passCount; ++pass) {
+        // A channel callback may upload its own material during back-side
+        // recovery. Restore ordinary lit base data without replaying callbacks.
+        if (pass && failedChannels && allowMaterialStateOverrides &&
+            !(m_Flags & VXMESH_PRELITMODE)) {
+            CKMaterialData baseMaterial;
+            baseMaterial.Diffuse = mat->GetDiffuse();
+            baseMaterial.Ambient = mat->GetAmbient();
+            baseMaterial.Emissive = mat->GetEmissive();
+            baseMaterial.SpecularPower = mat->GetPower();
+            baseMaterial.Specular = baseMaterial.SpecularPower > 0.05f
+                ? mat->GetSpecular() : VxColor(0.0f, 0.0f, 0.0f, 0.0f);
+            dev->m_RasterizerContext->SetMaterial(&baseMaterial);
+        }
         if (twoSidedTransparent)
             dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_CULLMODE,
                 pass == 0 ? VXCULL_CW : VXCULL_CCW);
@@ -4989,7 +5079,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                         // The hardware index buffer holds absolute vertex indices
                         // A primitive without an index buffer draws its own indices
                         // relative to the group base.
-                        if (ib && !(twoSidedTransparent && pass == 0)) {
+                        if (ib && (m_VertexBufferWrapAware || !(twoSidedTransparent && pass == 0))) {
                             dev->m_RasterizerContext->DrawPrimitiveVBIB(
                                 prim->m_Type, m_VertexBuffer, ib,
                                 hwBaseVertex, hwVertexCount,
@@ -5004,10 +5094,11 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
                 }
             }
         }
+        // Complete missing channels for this visible side before the next
+        // transparent side blends over it. Post callbacks still run once.
+        if (failedChannels)
+            RenderMonoPassFallback(dev, group, ent, data, failedChannels);
     }
-
-    if (failedChannels)
-        RenderMonoPassFallback(dev, group, ent, data, failedChannels);
 
     // Execute post-render submesh callbacks
     if (m_SubMeshCallbacks && m_SubMeshCallbacks->m_PostCallBacks.Size() > 0) {
@@ -5036,6 +5127,8 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
                                    CKWORD failedChannels) {
     CKRasterizerContext *rst = dev->m_RasterizerContext;
     CKRenderContextStateGuard state(rst);
+    const CKDWORD baseCull = dev->GetRasterizerRenderState(VXRENDERSTATE_CULLMODE);
+    const CKDWORD baseFill = dev->GetRasterizerRenderState(VXRENDERSTATE_FILLMODE);
     VxDrawPrimitiveData data;
     if (baseData) {
         data = *baseData;
@@ -5095,6 +5188,11 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
             continue;
         }
         if (binding.AllowsRenderStateOverrides()) {
+            // A recovered mono channel covers the same geometry as its base
+            // draw. The channel's ordinary material must not hide its backs
+            // or fill interiors when the base used wireframe coverage.
+            rst->SetRenderState(VXRENDERSTATE_CULLMODE, baseCull);
+            rst->SetRenderState(VXRENDERSTATE_FILLMODE, baseFill);
             rst->SetRenderState(VXRENDERSTATE_FOGENABLE,
                 channel.m_SourceBlend == VXBLEND_SRCALPHA && channel.m_DestBlend == VXBLEND_INVSRCALPHA
                     ? fogEnable : FALSE);
@@ -5201,24 +5299,29 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         // Determine if lighting should be used
         CKBOOL useLighting = (m_Flags & VXMESH_PRELITMODE) == 0 && (channelFlags & VXCHANNEL_NOTLIT) == 0;
 
+        CKMaterialBindingScope binding(mat, dev, 0);
         mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
         // Folded mono channels have already contributed to the framebuffer.
         // This pass supplies only the current channel's stage0 coordinates.
-        dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
+        if (binding.AllowsRenderStateOverrides())
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, useLighting);
+        else
+            useLighting = dev->GetRasterizerRenderState(VXRENDERSTATE_LIGHTING) != 0;
 
         // Every pass starts with the caller's streams. An unlit predecessor
         // must not remove the diffuse/specular input of a later lit channel.
         data->ColorPtr = origColorPtr;
         data->SpecularColorPtr = origSpecularPtr;
+        data->Flags = m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_STAGES0;
 
         // Handle unlit channel - clear color pointers
-        if ((channelFlags & VXCHANNEL_NOTLIT) != 0) {
+        if (binding.AllowsRenderStateOverrides() && (channelFlags & VXCHANNEL_NOTLIT) != 0) {
             data->ColorPtr = nullptr;
             data->SpecularColorPtr = nullptr;
             CKDWORD dpFlags = data->Flags;
-            dpFlags = dpFlags & ~CKRST_DP_LIGHT;
+            dpFlags &= ~(CKRST_DP_LIGHT | CKRST_DP_DIFFUSE | CKRST_DP_SPECULAR);
             data->Flags = dpFlags;
-        } else if ((m_Flags & VXMESH_PRELITMODE) != 0) {
+        } else if (binding.AllowsRenderStateOverrides() && (m_Flags & VXMESH_PRELITMODE) != 0) {
             // Vertex color mode
             data->Flags &= ~CKRST_DP_LIGHT;
             data->Flags |= CKRST_DP_DIFFUSE | CKRST_DP_SPECULAR;
@@ -5227,7 +5330,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
         } else {
             // Normal lighting mode
             CKDWORD dpFlags = data->Flags;
-            dpFlags = dpFlags | CKRST_DP_LIGHT;
+            dpFlags = useLighting ? dpFlags | CKRST_DP_LIGHT : dpFlags & ~CKRST_DP_LIGHT;
             data->Flags = dpFlags;
         }
 
@@ -5240,6 +5343,30 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
             // Use channel-specific UVs
             data->TexCoordPtr = channel.m_UVs;
             data->TexCoordStride = sizeof(Vx2DVector);
+        }
+
+        // Combine effects consume ordinal mesh UV sets in addition to the
+        // current channel's primary UV. Declare those streams for submission.
+        VxDrawPrimitiveData effectData;
+        VxDrawPrimitiveData *channelData = data;
+        const VX_EFFECT effect = mat->GetEffect();
+        if (effect == VXEFFECT_2TEXTURES || effect == VXEFFECT_3TEXTURES) {
+            UserDrawPrimitiveDataClass::CopySubmissionData(effectData, data);
+            channelData = &effectData;
+            const int extraUVCount = CKMeshEffectStagePrefix(mat);
+            for (int uv = 0; uv < extraUVCount; ++uv) {
+                effectData.TexCoordPtrs[uv] = data->TexCoordPtr;
+                effectData.TexCoordStrides[uv] = data->TexCoordStride;
+                if (uv < m_MaterialChannels.Size()) {
+                    VxMaterialChannel &provider = m_MaterialChannels[uv];
+                    effectData.TexCoordPtrs[uv] = (provider.m_Flags & VXCHANNEL_SAMEUV)
+                        ? origTexCoordPtr : provider.m_UVs;
+                    effectData.TexCoordStrides[uv] = (provider.m_Flags & VXCHANNEL_SAMEUV)
+                        ? origTexCoordStride : sizeof(Vx2DVector);
+                }
+            }
+            effectData.Flags = (effectData.Flags & ~CKRST_DP_STAGESMASK) |
+                CKRST_DP_STAGE(extraUVCount);
         }
 
         // Get indices to draw
@@ -5263,7 +5390,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
                                 VX_TRIANGLELIST,
                                 (CKDWORD)indexCount,
                                 (CKDWORD)data->VertexCount);
-        dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, data);
+        dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, channelData);
 
         // Restore material state exactly
         mat->RestoreAfterChannelRender(savedSourceBlend, savedDestBlend, savedFlags);
