@@ -4251,7 +4251,12 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         renderChannels = ((ent->m_MoveableFlags & VX_MOVEABLE_RENDERCHANNELS) != 0) && renderChannels;
     }
 
-    const int renderVertexCount = m_ProgressiveMesh ? ClampPMVertexCount(this, GetVerticesRendered()) : vertexCount;
+    const int renderVertexCount = m_ProgressiveMesh ? m_ProgressiveMesh->m_Reserved : vertexCount;
+    VxVertex *renderVertices = m_Vertices.Begin();
+    if (m_ProgressiveMesh && m_ProgressiveMesh->m_MorphEnabled) {
+        m_Valid = 0;
+        renderVertices = reinterpret_cast<VxVertex *>(m_ProgressiveMesh->m_EdgeCollapseData.Begin());
+    }
 
     // Setup VxDrawPrimitiveData (matches IDA setup; strides are based on SDK structs)
     VxDrawPrimitiveData dpData;
@@ -4265,9 +4270,9 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     dpData.SpecularColorStride = sizeof(VxColors);
 
     if (m_Vertices.Size() > 0) {
-        dpData.PositionPtr = &m_Vertices[0].m_Position;
-        dpData.NormalPtr = &m_Vertices[0].m_Normal;
-        dpData.TexCoordPtr = &m_Vertices[0].m_UV;
+        dpData.PositionPtr = &renderVertices[0].m_Position;
+        dpData.NormalPtr = &renderVertices[0].m_Normal;
+        dpData.TexCoordPtr = &renderVertices[0].m_UV;
     }
 
     dpData.ColorPtr = (m_VertexColors.Size() > 0) ? (void *) &m_VertexColors[0].Color : nullptr;
