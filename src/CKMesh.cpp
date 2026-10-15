@@ -1121,106 +1121,94 @@ void RCKMesh::InverseWinding() {
 }
 
 void RCKMesh::Consolidate() {
-    // Match IDA at 0x1001eb80
-    // This method removes degenerate faces (with zero normal) and unused vertices
-
-    int removedFaces = 0;
-    int removedVertices = 0;
-    int faceCount = m_Faces.Size();
-    int newFaceCount = faceCount;
-    int i = 0;
-
-    // Remove degenerate faces (faces with zero normal)
-    while (i < newFaceCount) {
-        CKFace &face = m_Faces[i];
-        VxVector &normal = face.m_Normal;
-
-        if (normal.x == 0.0f && normal.y == 0.0f && normal.z == 0.0f) {
-            --newFaceCount;
-            ++removedFaces;
-
-            if (i != newFaceCount) {
-                // Swap with last valid face
-                m_Faces[i] = m_Faces[newFaceCount];
-                m_FaceVertexIndices[i * 3] = m_FaceVertexIndices[newFaceCount * 3];
-                m_FaceVertexIndices[i * 3 + 1] = m_FaceVertexIndices[newFaceCount * 3 + 1];
-                m_FaceVertexIndices[i * 3 + 2] = m_FaceVertexIndices[newFaceCount * 3 + 2];
-            }
-        } else {
-            ++i;
+    const int vertexCount = m_Vertices.Size();
+    const int faceCount = m_Faces.Size();
+    int retainedFaces = 0;
+    for (int i = 0; i < faceCount; ++i) {
+        const VxVector &normal = m_Faces[i].m_Normal;
+        if (normal.x == 0.0f && normal.y == 0.0f && normal.z == 0.0f)
+            continue;
+        if (retainedFaces != i) {
+            m_Faces[retainedFaces] = m_Faces[i];
+            for (int corner = 0; corner < 3; ++corner)
+                m_FaceVertexIndices[retainedFaces * 3 + corner] = m_FaceVertexIndices[i * 3 + corner];
         }
+        ++retainedFaces;
     }
+    m_Faces.Resize(retainedFaces);
+    m_FaceVertexIndices.Resize(retainedFaces * 3);
 
-    if (newFaceCount != faceCount) {
-        SetFaceCount(newFaceCount);
-    }
-
-    // Mark used vertices
-    int vertexCount = m_Vertices.Size();
     XArray<int> vertexMap;
     vertexMap.Resize(vertexCount);
-    for (i = 0; i < vertexCount; ++i) {
-        vertexMap[i] = -2; // Mark as unused
-    }
+    for (int i = 0; i < vertexCount; ++i)
+        vertexMap[i] = -1;
+    for (int i = 0; i < m_FaceVertexIndices.Size(); ++i)
+        vertexMap[m_FaceVertexIndices[i]] = 0;
+    for (int i = 0; i < m_LineIndices.Size(); ++i)
+        vertexMap[m_LineIndices[i]] = 0;
 
-    // Mark vertices used by faces
-    for (i = 0; i < m_FaceVertexIndices.Size(); ++i) {
-        vertexMap[m_FaceVertexIndices[i]] = 666666; // Mark as used
-    }
-
-    // Compact vertices
-    int newVertexCount = vertexCount;
-    for (i = 0; i < newVertexCount; ++i) {
-        if (vertexMap[i] == -2) {
-            --newVertexCount;
-            ++removedVertices;
-
-            // Find last used vertex
-            int k = newVertexCount;
-            while (k > i && vertexMap[k] == -2) {
-                --k;
+    XArray<float> remappedWeights;
+    if (m_VertexWeights)
+        remappedWeights.Resize(vertexCount);
+    int retainedVertices = 0;
+    for (int i = 0; i < vertexCount; ++i) {
+        if (vertexMap[i] < 0)
+            continue;
+        vertexMap[i] = retainedVertices;
+        if (retainedVertices != i) {
+            m_Vertices[retainedVertices] = m_Vertices[i];
+            m_VertexColors[retainedVertices] = m_VertexColors[i];
+            for (int channel = 0; channel < m_MaterialChannels.Size(); ++channel) {
+                Vx2DVector *uvs = m_MaterialChannels[channel].m_UVs;
+                if (uvs)
+                    uvs[retainedVertices] = uvs[i];
             }
+        }
+        if (m_VertexWeights)
+            remappedWeights[retainedVertices] = GetVertexWeight(i);
+        ++retainedVertices;
+    }
 
-            if (i == k) {
-                vertexMap[i] = -1;
-            } else {
-                // Move vertex k to position i
-                m_Vertices[i] = m_Vertices[k];
-                m_VertexColors[i] = m_VertexColors[k];
-                vertexMap[k] = i;
-                vertexMap[i] = -2;
+    if (retainedVertices != vertexCount) {
+        m_Vertices.Resize(retainedVertices);
+        m_VertexColors.Resize(retainedVertices);
+        if (m_VertexWeights) {
+            remappedWeights.Resize(retainedVertices);
+            *m_VertexWeights = remappedWeights;
+        }
+        for (int channel = 0; channel < m_MaterialChannels.Size(); ++channel) {
+            Vx2DVector *oldUVs = m_MaterialChannels[channel].m_UVs;
+            if (oldUVs) {
+                Vx2DVector *newUVs = retainedVertices ? new Vx2DVector[retainedVertices] : nullptr;
+                for (int i = 0; i < retainedVertices; ++i)
+                    newUVs[i] = oldUVs[i];
+                delete[] oldUVs;
+                m_MaterialChannels[channel].m_UVs = newUVs;
             }
-        } else if (vertexMap[i] == 666666) {
-            vertexMap[i] = i; // Keep at same position
         }
-    }
+        for (int i = 0; i < m_FaceVertexIndices.Size(); ++i)
+            m_FaceVertexIndices[i] = static_cast<CKWORD>(vertexMap[m_FaceVertexIndices[i]]);
+        for (int i = 0; i < m_LineIndices.Size(); ++i)
+            m_LineIndices[i] = static_cast<CKWORD>(vertexMap[m_LineIndices[i]]);
 
-    // Resize and remap face indices
-    if (newVertexCount != vertexCount) {
-        m_Vertices.Resize(newVertexCount);
-        m_VertexColors.Resize(newVertexCount);
-
-        for (i = 0; i < m_FaceVertexIndices.Size(); ++i) {
-            m_FaceVertexIndices[i] = vertexMap[m_FaceVertexIndices[i]];
-        }
-    }
-
-    // Update skins if vertices were removed (IDA lines 126-140)
-    if (removedVertices) {
         const XObjectPointerArray &entities = m_Context->GetObjectListByType(CKCID_3DENTITY, TRUE);
         for (CKObject **it = entities.Begin(); it != entities.End(); ++it) {
-            CK3dEntity *entity = (CK3dEntity *) *it;
+            CK3dEntity *entity = static_cast<CK3dEntity *>(*it);
             if (entity && entity->GetCurrentMesh() == this) {
                 CKSkin *skin = entity->GetSkin();
-                if (skin) {
+                if (skin)
                     skin->RemapVertices(vertexMap);
-                }
             }
         }
+        VertexMove();
+        UVChanged();
+        NormalChanged();
+        ColorChanged();
     }
-
-    if (removedFaces || removedVertices) {
+    if (retainedFaces != faceCount || retainedVertices != vertexCount) {
+        m_FaceChannelMask = 0xFFFF;
         UnOptimize();
+        DestroyPM();
     }
 }
 
@@ -2922,18 +2910,7 @@ void RCKMesh::BuildRenderMesh() {
     const int faceCount = m_FaceVertexIndices.Size() / 3;
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
         CKMaterialGroup *group = m_MaterialGroups[i];
-        // Resize primitives for face count (IDA: sub_1002A0F0)
-        group->m_Primitives.Resize(1);
-        CKPrimitiveEntry &prim = group->m_Primitives[0];
-        prim.m_Indices.Reserve(3 * faceCount);
-        prim.m_Indices.Resize(0);
-        prim.m_Type = VX_TRIANGLELIST;
-        group->m_FaceIndices.Resize(0);
-        group->m_HasValidPrimitives = 0x10000;
-        group->m_MaxVertexIndex = 0;
-        group->m_BaseVertex = 0;
-        group->m_MinVertexIndex = 0;
-        // Set vertex count for the group
+        ResetMaterialGroup(group, faceCount);
         group->m_VertexCount = m_Vertices.Size();
     }
 
@@ -3092,7 +3069,9 @@ void RCKMesh::BuildRenderMesh() {
         g_BuildNormalsFunc(m_Faces.Begin(),
                           renderIndices.Begin(),
                           pmVertexCount / 3,
-                          m_Vertices.Begin(),
+                          m_ProgressiveMesh->m_MorphEnabled
+                              ? reinterpret_cast<VxVertex *>(m_ProgressiveMesh->m_EdgeCollapseData.Begin())
+                              : m_Vertices.Begin(),
                           m_ProgressiveMesh->m_Reserved);
         m_Flags &= ~VXMESH_PM_BUILDNORM;
     }
@@ -3233,6 +3212,7 @@ void RCKMesh::ScaleVertices(VxVector *Vector, VxVector *Pivot) {
     CKDWORD normalStride;
     VxVector *normals = (VxVector *) GetNormalsPtr(&normalStride);
 
+    // Cofactors transform normals with triangle winding under nonuniform scaling.
     // CKPatchMesh (ClassID 53) doesn't scale normals
     if (GetClassID() != CKCID_PATCHMESH && normals) {
         if (Pivot) {
@@ -3240,9 +3220,9 @@ void RCKMesh::ScaleVertices(VxVector *Vector, VxVector *Pivot) {
                 positions[0] = (positions[0] - Pivot->x) * Vector->x + Pivot->x;
                 positions[1] = (positions[1] - Pivot->y) * Vector->y + Pivot->y;
                 positions[2] = (positions[2] - Pivot->z) * Vector->z + Pivot->z;
-                normals->x *= Vector->x;
-                normals->y *= Vector->y;
-                normals->z *= Vector->z;
+                normals->x *= Vector->y * Vector->z;
+                normals->y *= Vector->x * Vector->z;
+                normals->z *= Vector->x * Vector->y;
                 normals->Normalize();
                 positions = (float *) ((CKBYTE *) positions + stride);
                 normals = (VxVector *) ((CKBYTE *) normals + normalStride);
@@ -3252,9 +3232,9 @@ void RCKMesh::ScaleVertices(VxVector *Vector, VxVector *Pivot) {
                 positions[0] *= Vector->x;
                 positions[1] *= Vector->y;
                 positions[2] *= Vector->z;
-                normals->x *= Vector->x;
-                normals->y *= Vector->y;
-                normals->z *= Vector->z;
+                normals->x *= Vector->y * Vector->z;
+                normals->y *= Vector->x * Vector->z;
+                normals->z *= Vector->x * Vector->y;
                 normals->Normalize();
                 positions = (float *) ((CKBYTE *) positions + stride);
                 normals = (VxVector *) ((CKBYTE *) normals + normalStride);
@@ -3418,39 +3398,63 @@ void RCKMesh::ApplyGlobalMaterial(CKMaterial *Mat) {
 
 // Match IDA at 0x1001e8e4
 void RCKMesh::DissociateAllFaces() {
-    // Create temporary copies of current vertex and color data
-    XArray<VxVertex> tempVertices;
-    XArray<VxColors> tempColors;
-    tempVertices = m_Vertices;
-    tempColors = m_VertexColors;
+    const int indexCount = m_FaceVertexIndices.Size();
+    // Every triangle corner must remain representable by the public WORD index stream.
+    if (indexCount > 0x10000)
+        return;
 
-    // Get total number of face vertex indices (faces * 3)
-    int indexCount = m_FaceVertexIndices.Size();
+    const XArray<VxVertex> oldVertices = m_Vertices;
+    const XArray<VxColors> oldColors = m_VertexColors;
+    XArray<float> oldWeights;
+    if (m_VertexWeights)
+        oldWeights = *m_VertexWeights;
 
-    // Resize vertex array to hold one vertex per face index
-    SetVertexCount(indexCount);
-
-    // If weights exist, duplicate them for each vertex
-    if (m_VertexWeights) {
-        XArray<float> tempWeights;
-        tempWeights.Resize(indexCount);
-        for (int i = 0; i < indexCount; ++i) {
-            CKWORD oldIndex = m_FaceVertexIndices[i];
-            tempWeights[i] = (*m_VertexWeights)[oldIndex];
-        }
-        *m_VertexWeights = tempWeights;
+    m_Vertices.Resize(indexCount);
+    m_VertexColors.Resize(indexCount);
+    if (m_VertexWeights)
+        m_VertexWeights->Resize(indexCount);
+    for (int channel = 0; channel < m_MaterialChannels.Size(); ++channel) {
+        Vx2DVector *oldUVs = m_MaterialChannels[channel].m_UVs;
+        if (!oldUVs)
+            continue;
+        Vx2DVector *newUVs = indexCount ? new Vx2DVector[indexCount] : nullptr;
+        for (int corner = 0; corner < indexCount; ++corner)
+            newUVs[corner] = oldUVs[m_FaceVertexIndices[corner]];
+        delete[] oldUVs;
+        m_MaterialChannels[channel].m_UVs = newUVs;
     }
 
-    // Copy vertex and color data from original locations to new sequential locations
-    for (int j = 0; j < indexCount; ++j) {
-        CKWORD oldIndex = m_FaceVertexIndices[j];
-        m_Vertices[j] = tempVertices[oldIndex];
-        m_VertexColors[j] = tempColors[oldIndex];
-        // Set each index to its sequential value
-        m_FaceVertexIndices[j] = (CKWORD) j;
+    XArray<int> firstCopy;
+    firstCopy.Resize(oldVertices.Size());
+    for (int i = 0; i < firstCopy.Size(); ++i)
+        firstCopy[i] = -1;
+    for (int corner = 0; corner < indexCount; ++corner) {
+        const int oldIndex = m_FaceVertexIndices[corner];
+        m_Vertices[corner] = oldVertices[oldIndex];
+        m_VertexColors[corner] = oldColors[oldIndex];
+        if (m_VertexWeights)
+            (*m_VertexWeights)[corner] = oldIndex < oldWeights.Size() ? oldWeights[oldIndex] : 0.0f;
+        if (firstCopy[oldIndex] < 0)
+            firstCopy[oldIndex] = corner;
+        m_FaceVertexIndices[corner] = static_cast<CKWORD>(corner);
     }
-
+    int retainedLines = 0;
+    for (int line = 0; line < GetLineCount(); ++line) {
+        const int a = firstCopy[m_LineIndices[line * 2]];
+        const int b = firstCopy[m_LineIndices[line * 2 + 1]];
+        if (a < 0 || b < 0)
+            continue;
+        m_LineIndices[retainedLines * 2] = static_cast<CKWORD>(a);
+        m_LineIndices[retainedLines * 2 + 1] = static_cast<CKWORD>(b);
+        ++retainedLines;
+    }
+    m_LineIndices.Resize(retainedLines * 2);
+    VertexMove();
+    UVChanged();
+    NormalChanged();
+    ColorChanged();
     UnOptimize();
+    DestroyPM();
 }
 
 void RCKMesh::CreateLineStrip(int StartingLine, int Count, int StartingVertexIndex) {
