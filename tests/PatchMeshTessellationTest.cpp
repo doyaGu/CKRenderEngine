@@ -202,23 +202,117 @@ TEST_F(PatchMeshTessellationTest, TriangleGridUVsIdentifyTheIndependentQuarticSa
     for (int b = 0; b <= 5; ++b) for (int c = 0; c <= 5 - b; ++c) EXPECT_TRUE(visited[b][c]);
 }
 
+TEST_F(PatchMeshTessellationTest, NoTexturePayloadDoesNotCreateArtificialHardGeometryEdges) {
+    TessellatedPatch mesh(Context); Adjacent(mesh, 2, false, true, false); mesh.BuildRenderMesh();
+    int matches[4]; ASSERT_EQ(1, VerticesAt(mesh, VxVector(1, .5f, 0), matches));
+    VxVector expected(0.70710678f, 0, -1.70710678f); expected.Normalize(); VecIs(Normal(mesh, matches[0]), expected);
+}
 
+TEST_F(PatchMeshTessellationTest, BaseUVSeamDuplicatesCoordinatesButPreservesSmoothingGroupNormals) {
+    TessellatedPatch mesh(Context); Adjacent(mesh, 2, true, true); mesh.BuildRenderMesh();
+    int matches[4]; ASSERT_EQ(2, VerticesAt(mesh, VxVector(1, .5f, 0), matches));
+    VxVector expected(0.70710678f, 0, -1.70710678f); expected.Normalize();
+    for (int i = 0; i < 2; ++i) VecIs(Normal(mesh, matches[i]), expected);
+    float firstU, firstV, secondU, secondV; mesh.GetVertexTextureCoordinates(matches[0], &firstU, &firstV, -1); mesh.GetVertexTextureCoordinates(matches[1], &secondU, &secondV, -1);
+    EXPECT_FLOAT_EQ(.5f, firstV); EXPECT_FLOAT_EQ(.5f, secondV); EXPECT_TRUE((firstU == 1 && secondU == 10) || (firstU == 10 && secondU == 1));
+}
 
+TEST_F(PatchMeshTessellationTest, DisjointSmoothingGroupsPreserveSharpNormalsAtSharedGeometry) {
+    TessellatedPatch mesh(Context); Adjacent(mesh, 2, false, false); mesh.BuildRenderMesh();
+    int matches[4]; ASSERT_EQ(2, VerticesAt(mesh, VxVector(1, .5f, 0), matches));
+    const VxVector first = Normal(mesh, matches[0]), second = Normal(mesh, matches[1]);
+    EXPECT_TRUE(fabsf(first.x) < .0001f || fabsf(second.x) < .0001f);
+    EXPECT_TRUE(fabsf(first.x - .70710678f) < .0001f || fabsf(second.x - .70710678f) < .0001f);
+}
 
+TEST_F(PatchMeshTessellationTest, ExtraChannelUVSeamKeepsBothPatchPayloadsAndSmoothNormals) {
+    RCKMaterial material(Context); TessellatedPatch mesh(Context); Adjacent(mesh, 2, false, true);
+    mesh.ExtraChannel(reinterpret_cast<CKMaterial *>(&material)); mesh.SetTVPatchCount(2, 0); mesh.SetTVCount(8, 0);
+    CKTVPatch firstTV = {{0,1,2,3}}, secondTV = {{4,5,6,7}}; mesh.SetTVPatch(0, &firstTV, 0); mesh.SetTVPatch(1, &secondTV, 0);
+    for (int i = 0; i < 4; ++i) { mesh.SetTV(i, i == 1 || i == 2 ? 1.0f : 0.0f, i >= 2 ? 1.0f : 0.0f, 0); mesh.SetTV(i + 4, i == 0 || i == 3 ? 10.0f : 20.0f, i >= 2 ? 1.0f : 0.0f, 0); }
+    mesh.BuildRenderMesh(); ASSERT_EQ(1, mesh.GetChannelCount());
+    int matches[4]; ASSERT_EQ(2, VerticesAt(mesh, VxVector(1, .5f, 0), matches));
+    float u0,v0,u1,v1; mesh.GetVertexTextureCoordinates(matches[0], &u0, &v0, 0); mesh.GetVertexTextureCoordinates(matches[1], &u1, &v1, 0);
+    EXPECT_TRUE((u0 == 1 && u1 == 10) || (u0 == 10 && u1 == 1)); EXPECT_FLOAT_EQ(.5f,v0); EXPECT_FLOAT_EQ(.5f,v1);
+    UVIs(mesh,matches[0],1,.5f); UVIs(mesh,matches[1],1,.5f);
+    VecIs(Normal(mesh,matches[0]),Normal(mesh,matches[1]));
+}
 
+TEST_F(PatchMeshTessellationTest, FacesRetainPatchMaterialsAcrossTessellatedBoundaries) {
+    RCKMaterial first(Context), second(Context); TessellatedPatch mesh(Context); Adjacent(mesh, 3, false, true);
+    mesh.SetPatchMaterial(0,reinterpret_cast<CKMaterial *>(&first)); mesh.SetPatchMaterial(1,reinterpret_cast<CKMaterial *>(&second)); mesh.BuildRenderMesh();
+    ASSERT_EQ(36,mesh.GetFaceCount());
+    for(int i=0;i<36;++i) EXPECT_EQ(i<18?reinterpret_cast<CKMaterial *>(&first):reinterpret_cast<CKMaterial *>(&second),mesh.GetFaceMaterial(i));
+}
 
+TEST_F(PatchMeshTessellationTest, MixedTriangleAndQuadShareAnOrientedCurvedEdgeWithoutCracks) {
+    RCKMaterial left(Context), right(Context); TessellatedPatch mesh(Context);
+    mesh.SetVertVecCount(5,21); mesh.SetPatchCount(2); mesh.SetEdgeCount(6);
+    VxVector vertices[]={VxVector(0,0,0),VxVector(1,0,0),VxVector(1,1,0),VxVector(0,1,0),VxVector(2,0,0)};
+    for(int i=0;i<5;++i) mesh.SetVert(i,&vertices[i]);
+    const int quadCorners[]={0,1,2,3}, triCorners[]={1,4,2}, quadEdges[]={0,1,2,3}, triEdges[]={4,5,1};
+    CKPatch quad,tri; InitPatch(quad,4,0,quadCorners,quadEdges); InitPatch(tri,3,12,triCorners,triEdges);
+    mesh.SetPatch(0,&quad); mesh.SetPatch(1,&tri); EdgeControls(mesh,quad); EdgeControls(mesh,tri);
+    CKPatchEdge edges[]={{0,0,1,1,0,-1},{1,2,3,2,0,1},{2,4,5,3,0,-1},{3,6,7,0,0,-1},{1,12,13,4,1,-1},{4,14,15,2,1,-1}};
+    for(int i=0;i<6;++i) mesh.SetEdge(i,&edges[i]);
+    // Both patch boundaries are the same cubic with opposite local winding.
+    VxVector control0(1,.2f,.75f),control1(1,.8f,-.25f);
+    mesh.SetVec(2,&control0); mesh.SetVec(3,&control1); mesh.SetVec(16,&control1); mesh.SetVec(17,&control0);
+    mesh.SetTVPatchCount(2); mesh.SetTVCount(5); CKTVPatch qTV={{0,1,2,3}},tTV={{1,4,2,-1}};
+    mesh.SetTVPatch(0,&qTV); mesh.SetTVPatch(1,&tTV);
+    for(int i=0;i<5;++i) mesh.SetTV(i,vertices[i].x,vertices[i].y);
+    mesh.SetPatchMaterial(0,reinterpret_cast<CKMaterial *>(&left)); mesh.SetPatchMaterial(1,reinterpret_cast<CKMaterial *>(&right));
+    mesh.SetIterationCount(3); mesh.BuildRenderMesh(); ASSERT_EQ(48,mesh.GetFaceCount());
+    VxVector edgeControl[]={vertices[1],control0,control1,vertices[2]};
+    for(int sample=1;sample<4;++sample) {
+        int matches[4]; ASSERT_EQ(1,VerticesAt(mesh,CubicReference(edgeControl,sample*.25f),matches));
+        UVIs(mesh,matches[0],1,sample*.25f); int firstUses=0,secondUses=0;
+        for(int face=0;face<48;++face) {
+            int a,b,c; mesh.GetFaceVertexIndex(face,a,b,c);
+            if(a==matches[0] || b==matches[0] || c==matches[0]) { if(face<32) ++firstUses; else ++secondUses; }
+        }
+        EXPECT_GT(firstUses,0); EXPECT_GT(secondUses,0);
+    }
+    for(int face=0;face<48;++face) EXPECT_EQ(face<32?reinterpret_cast<CKMaterial *>(&left):reinterpret_cast<CKMaterial *>(&right),mesh.GetFaceMaterial(face));
+}
 
+TEST_F(PatchMeshTessellationTest, ReversedEdgeRecordsPreserveEverySamplePositionAndUV) {
+    TessellatedPatch mesh(Context); Single(mesh,4,4);
+    for(int i=0;i<4;++i) {
+        CKPatchEdge edge; mesh.GetEdge(i,&edge); const short first=edge.v1,vec=edge.vec12;
+        edge.v1=edge.v2; edge.v2=first; edge.vec12=edge.vec21; edge.vec21=vec; mesh.SetEdge(i,&edge);
+    }
+    mesh.BuildRenderMesh();
+    for(int y=0;y<=4;++y) for(int x=0;x<=4;++x) {
+        int matches[4]; ASSERT_EQ(1,VerticesAt(mesh,VxVector(x*.75f,y*.75f,0),matches)); UVIs(mesh,matches[0],x*.25f,y*.25f);
+    }
+    double area=0;
+    for(int face=0;face<mesh.GetFaceCount();++face) {
+        int a,b,c; mesh.GetFaceVertexIndex(face,a,b,c); const VxVector pa=Position(mesh,a),pb=Position(mesh,b),pc=Position(mesh,c);
+        const float twice=(pb.x-pa.x)*(pc.y-pa.y)-(pb.y-pa.y)*(pc.x-pa.x); EXPECT_LT(twice,0); area-=twice*.5;
+    }
+    EXPECT_NEAR(9,area,.0001);
+}
 
+TEST_F(PatchMeshTessellationTest, InvalidCornerUVLookupAndStridedWritesPreserveUnrelatedPayload) {
+    TessellatedPatch mesh(Context); Single(mesh,4,1); float u=-7,v=-9;
+    EXPECT_FALSE(mesh.CornerUV(3,0,0,u,v)); EXPECT_FLOAT_EQ(-7,u); EXPECT_FLOAT_EQ(-9,v);
+    EXPECT_FALSE(mesh.CornerUV(0,-1,0,u,v)); EXPECT_FALSE(mesh.CornerUV(0,0,4,u,v));
+    mesh.GetTVPatches()[0].tv[1]=-1; EXPECT_FALSE(mesh.CornerUV(0,0,1,u,v));
+    struct UVRecord { float Before,U,V,After; } records[3]={{1,2,3,4},{5,6,7,8},{9,10,11,12}};
+    mesh.WriteUV(&records[0].U,sizeof(UVRecord),1,.25f,.75f);
+    EXPECT_FLOAT_EQ(1,records[0].Before); EXPECT_FLOAT_EQ(2,records[0].U); EXPECT_FLOAT_EQ(3,records[0].V); EXPECT_FLOAT_EQ(4,records[0].After);
+    EXPECT_FLOAT_EQ(5,records[1].Before); EXPECT_FLOAT_EQ(.25f,records[1].U); EXPECT_FLOAT_EQ(.75f,records[1].V); EXPECT_FLOAT_EQ(8,records[1].After);
+    EXPECT_FLOAT_EQ(9,records[2].Before); EXPECT_FLOAT_EQ(10,records[2].U); EXPECT_FLOAT_EQ(11,records[2].V); EXPECT_FLOAT_EQ(12,records[2].After);
+}
 
-
-
-
-
-
-
-
-
-
+TEST_F(PatchMeshTessellationTest, AuthoredControlEditAndIterationChangeRefreshPositionsAndNormals) {
+    TessellatedPatch mesh(Context); Single(mesh,4,2); mesh.BuildRenderMesh();
+    VxVector raised(3,3,3); mesh.SetVert(2,&raised); mesh.SetIterationCount(2); mesh.BuildRenderMesh();
+    EXPECT_EQ(16,mesh.GetVertexCount()); EXPECT_EQ(18,mesh.GetFaceCount()); VecIs(Position(mesh,2),raised);
+    const VxBbox &box=mesh.GetLocalBox(); EXPECT_NEAR(3,box.Max.z,.0001f);
+    EXPECT_LT(Normal(mesh,2).z,0); EXPECT_GT(Normal(mesh,2).z,-1);
+}
 
 
 

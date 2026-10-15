@@ -1287,6 +1287,15 @@ void RCKPatchMesh::BuildRenderMesh() {
     if (!positions)
         return;
 
+    // UV storage can survive a same-size vertex rebuild. Clear generated
+    // coordinates first so removing TV data cannot retain an earlier surface.
+    for (int channel = 0; channel < m_TexturePatches.Size(); ++channel) {
+        CKDWORD uvStride = 0;
+        void *uvs = GetTextureChannelPtr(channel, &uvStride);
+        for (int vertex = 0; uvs && vertex < totalVertices; ++vertex)
+            WriteTextureCoordinate(uvs, uvStride, vertex, 0.0f, 0.0f);
+    }
+
     // Base control vertices (including duplicated shared sources).
     for (int i = 0; i < m_VertCount; ++i) {
         VxVector *dst = (VxVector *)((CKBYTE *)positions + (size_t)i * (size_t)posStride);
@@ -1587,9 +1596,64 @@ void RCKPatchMesh::BuildRenderMesh() {
         }
     }
 
-    // Build normals if requested (geometry already duplicates Hard-edge vertices).
-    if ((m_PatchFlags & CK_PATCHMESH_BUILDNORMALS) != 0)
-        BuildNormals();
+    // UV seams duplicate geometry, but smoothing groups still join their
+    // normals. Accumulate unit face normals as the native patch builder does.
+    if ((m_PatchFlags & CK_PATCHMESH_BUILDNORMALS) != 0) {
+        BuildFaceNormals();
+        XArray<int> normalRoots;
+        normalRoots.Resize(totalVertices);
+        for (int i = 0; i < totalVertices; ++i) {
+            normalRoots[i] = i;
+            m_Vertices[i].m_Normal = VxVector(0, 0, 0);
+        }
+        for (int e = 0; e < edgeCount; ++e) {
+            const CKPatchEdge &edge = m_PatchEdges[e];
+            if (edge.patch2 < 0 ||
+                (m_Patches[edge.patch1].SmoothingGroup & m_Patches[edge.patch2].SmoothingGroup) == 0)
+                continue;
+            for (int k = 0; k <= steps; ++k) {
+                int first;
+                int second;
+                if (k == 0 || k == steps) {
+                    int control = k == 0 ? edge.v1 : edge.v2;
+                    int corner1 = GetPatchCornerForVertex(m_Patches[edge.patch1], control);
+                    int corner2 = GetPatchCornerForVertex(m_Patches[edge.patch2], control);
+                    first = static_cast<int>(m_CornerVertexMap[edge.patch1 * 4 + corner1]);
+                    second = static_cast<int>(m_CornerVertexMap[edge.patch2 * 4 + corner2]);
+                } else {
+                    if (!edgeTess[e].Hard)
+                        continue;
+                    first = edgeTess[e].BasePatch1 + k - 1;
+                    second = edgeTess[e].BasePatch2 + k - 1;
+                }
+                while (normalRoots[first] != first)
+                    first = normalRoots[first];
+                while (normalRoots[second] != second)
+                    second = normalRoots[second];
+                normalRoots[second] = first;
+            }
+        }
+        for (int i = 0; i < totalVertices; ++i) {
+            int root = i;
+            while (normalRoots[root] != root)
+                root = normalRoots[root];
+            normalRoots[i] = root;
+        }
+        for (int f = 0; f < totalFaces; ++f) {
+            const VxVector &normal = GetFaceNormal(f);
+            for (int corner = 0; corner < 3; ++corner) {
+                int vertex = m_FaceVertexIndices[f * 3 + corner];
+                m_Vertices[normalRoots[vertex]].m_Normal += normal;
+            }
+        }
+        for (int i = 0; i < totalVertices; ++i) {
+            if (normalRoots[i] == i)
+                m_Vertices[i].m_Normal.Normalize();
+        }
+        for (int i = 0; i < totalVertices; ++i)
+            m_Vertices[i].m_Normal = m_Vertices[normalRoots[i]].m_Normal;
+        m_Flags |= VXMESH_NORMAL_CHANGED | VXMESH_GENNORMALS;
+    }
 
     m_PatchFlags |= (CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
     VertexMove();
@@ -1657,10 +1721,9 @@ CKBOOL RCKPatchMesh::GetCornerTextureCoordinate(int textureChannel, int patchInd
 CKBOOL RCKPatchMesh::DoPatchesShareUVOnEdge(int edgeIndex) const {
     if (edgeIndex < 0 || edgeIndex >= m_PatchEdges.Size())
         return FALSE;
-    if (m_TexturePatches.Size() == 0)
-        return FALSE;
     const CKPatchEdge &edge = m_PatchEdges[edgeIndex];
-    if (edge.patch1 < 0 || edge.patch2 < 0)
+    if (edge.patch1 < 0 || edge.patch2 < 0 ||
+        edge.patch1 >= m_Patches.Size() || edge.patch2 >= m_Patches.Size())
         return FALSE;
 
     const CKPatch &patchA = m_Patches[edge.patch1];
@@ -1672,17 +1735,19 @@ CKBOOL RCKPatchMesh::DoPatchesShareUVOnEdge(int edgeIndex) const {
     if (cornerA1 < 0 || cornerA2 < 0 || cornerB1 < 0 || cornerB2 < 0)
         return FALSE;
 
-    float uA1, vA1, uA2, vA2, uB1, vB1, uB2, vB2;
-    if (!GetCornerTextureCoordinate(0, edge.patch1, cornerA1, uA1, vA1) ||
-        !GetCornerTextureCoordinate(0, edge.patch2, cornerB1, uB1, vB1) ||
-        !GetCornerTextureCoordinate(0, edge.patch1, cornerA2, uA2, vA2) ||
-        !GetCornerTextureCoordinate(0, edge.patch2, cornerB2, uB2, vB2)) {
-        return FALSE;
+    // Every stored channel has independent tessellation coordinates. A seam
+    // in an extra channel must not overwrite the neighbouring patch's UVs.
+    for (int channel = 0; channel < m_TexturePatches.Size(); ++channel) {
+        float uA1, vA1, uA2, vA2, uB1, vB1, uB2, vB2;
+        CKBOOL first = GetCornerTextureCoordinate(channel, edge.patch1, cornerA1, uA1, vA1) &&
+                       GetCornerTextureCoordinate(channel, edge.patch1, cornerA2, uA2, vA2);
+        CKBOOL second = GetCornerTextureCoordinate(channel, edge.patch2, cornerB1, uB1, vB1) &&
+                        GetCornerTextureCoordinate(channel, edge.patch2, cornerB2, uB2, vB2);
+        if (first != second)
+            return FALSE;
+        if (first && (uA1 != uB1 || vA1 != vB1 || uA2 != uB2 || vA2 != vB2))
+            return FALSE;
     }
-
-    if (uA1 != uB1 || vA1 != vB1 || uA2 != uB2 || vA2 != vB2)
-        return FALSE;
-
     return TRUE;
 }
 
