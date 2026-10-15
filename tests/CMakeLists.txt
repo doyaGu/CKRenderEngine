@@ -448,7 +448,7 @@ if (TARGET gtest_main)
             MeshCallbackStateReentryTest RasterizerCallbackIdentityTest CallbackEntryObservationTest
             CallbackObservationLifetimeTest CallbackObservationDeviceTest
             MeshRenderCompletionTest MeshSerializationCompletionTest MeshGeometryCompletionTest MaterialCompletionTest
-            SkinStorageTest SkinCacheTest
+            SkinStorageTest SkinCalculationTest SkinCacheTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

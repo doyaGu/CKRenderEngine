@@ -215,7 +215,7 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
     if (skinVertexCount == 0)
         return FALSE;
 
-    if (VertexCount == 0)
+    if (VertexCount <= 0)
         return FALSE;
 
     // Public vertex data and normal references can change without setters.
@@ -249,13 +249,13 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
     } else {
         // Standard mode: zero all vertices
         VxVector zero(0.0f, 0.0f, 0.0f);
-        VxFillStructure(VertexCount, VertexPtr, VStride, sizeof(VxVector), &zero);
+        VxFillStructure(outputVertexCount, VertexPtr, VStride, sizeof(VxVector), &zero);
     }
 
     // Zero normals if provided
     if (m_Normals.Size() > 0 && NormalPtr) {
         VxVector zero(0.0f, 0.0f, 0.0f);
-        VxFillStructure(VertexCount, NormalPtr, NStride, sizeof(VxVector), &zero);
+        VxFillStructure(outputVertexCount, NormalPtr, NStride, sizeof(VxVector), &zero);
     }
 
     bool anyBoneProcessed = false;
@@ -291,7 +291,7 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
         // Transform vertices affected by this bone
         for (int p = 0; p < pointCount; ++p) {
             CKWORD vertexIdx = bonePoints.m_VertexIndices[p];
-            if (vertexIdx >= VertexCount)
+            if (vertexIdx >= outputVertexCount)
                 continue;
 
             VxVector4 &weightedVertex = bonePoints.m_WeightedVertices[p];
@@ -314,7 +314,7 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
             int normalCount = bonePoints.m_WeightedNormals.Size();
             for (int n = 0; n < normalCount; ++n) {
                 CKWORD vertexIdx = bonePoints.m_VertexIndices[n];
-                if (vertexIdx >= VertexCount)
+                if (vertexIdx >= outputVertexCount)
                     continue;
 
                 VxVector4 &weightedNormal = bonePoints.m_WeightedNormals[n];
@@ -499,108 +499,19 @@ void RCKSkin::BuildBonePointLists() {
 }
 
 CKBOOL RCKSkin::CalcLocalBBox(CKContext *context, VxBbox *bbox) {
-    if (!bbox)
+    (void) context;
+    if (!bbox || m_VertexData.Size() == 0)
         return FALSE;
 
-    const int skinVertexCount = m_VertexData.Size();
-    if (skinVertexCount <= 0)
+    const int vertexCount = m_VertexData.Size();
+    XClassArray<VxVector> positions;
+    positions.Resize(vertexCount);
+    if (!CalcPoints(vertexCount, reinterpret_cast<CKBYTE *>(positions.Begin()), sizeof(VxVector)))
         return FALSE;
-
-    // Build bone point lists if not already done
-    if (m_Points.Size() == 0)
-        BuildBonePointLists();
-
-    XClassArray<VxVector> outPositions;
-    outPositions.Resize(skinVertexCount);
-
-    // Initialize output array similarly to CalcPoints
-    if (m_Flags & 1) {
-        for (int i = 0; i < skinVertexCount; ++i) {
-            RCKSkinVertexData &vd = m_VertexData[i];
-            const int boneCount = vd.GetBoneCount();
-            if (boneCount == 0) {
-                outPositions[i] = vd.GetInitialPos();
-            } else if (boneCount == 1 && vd.GetWeight(0) == 1.0f) {
-                outPositions[i].x = 0.0f;
-                outPositions[i].y = 0.0f;
-                outPositions[i].z = 0.0f;
-            } else {
-                float totalWeight = 0.0f;
-                for (int b = 0; b < boneCount; ++b)
-                    totalWeight += vd.GetWeight(b);
-
-                const float remainder = 1.0f - totalWeight;
-                if (remainder > 0.0f) {
-                    const VxVector &initPos = vd.GetInitialPos();
-                    outPositions[i].x = initPos.x * remainder;
-                    outPositions[i].y = initPos.y * remainder;
-                    outPositions[i].z = initPos.z * remainder;
-                } else {
-                    outPositions[i].x = 0.0f;
-                    outPositions[i].y = 0.0f;
-                    outPositions[i].z = 0.0f;
-                }
-            }
-        }
-    } else {
-        VxVector zero(0.0f, 0.0f, 0.0f);
-        VxFillStructure(skinVertexCount, (CKBYTE *) outPositions.Begin(), sizeof(VxVector), sizeof(VxVector), &zero);
-    }
-
-    bool anyBoneProcessed = false;
-    const int boneCount = m_BoneData.Size();
-
-    for (int boneIdx = 0; boneIdx < boneCount; ++boneIdx) {
-        RCKSkinBonePoints &bonePoints = m_Points[boneIdx];
-        const int pointCount = bonePoints.m_WeightedVertices.Size();
-        if (pointCount == 0)
-            continue;
-
-        RCKSkinBoneData &boneData = m_BoneData[boneIdx];
-        CK3dEntity *bone = boneData.GetBone();
-        if (!bone) {
-            boneData.SetBone(nullptr);
-            continue;
-        }
-
-        // Keep transform-matrix construction aligned with CalcPoints
-        const VxMatrix &boneWorldMatrix = bone->GetWorldMatrix();
-        VxMatrix temp;
-        Vx3DMultiplyMatrix(temp, m_InverseWorldMatrix, boneWorldMatrix);
-        boneData.GetTransformMatrix() = temp;
-        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(), boneData.GetInitialInverseMatrix());
-        Vx3DMultiplyMatrix(boneData.GetTransformMatrix(), boneData.GetTransformMatrix(), m_ObjectInitMatrix);
-
-        anyBoneProcessed = true;
-        const VxMatrix &transformMatrix = boneData.GetTransformMatrix();
-
-        for (int p = 0; p < pointCount; ++p) {
-            const CKWORD vertexIdx = bonePoints.m_VertexIndices[p];
-            if ((int) vertexIdx >= skinVertexCount)
-                continue;
-
-            VxVector4 &weightedVertex = bonePoints.m_WeightedVertices[p];
-            VxVector srcPos(weightedVertex.x, weightedVertex.y, weightedVertex.z);
-
-            VxVector transformed;
-            Vx3DMultiplyMatrixVector(&transformed, transformMatrix, &srcPos);
-
-            const float weight = weightedVertex.w;
-            outPositions[vertexIdx].x += transformed.x * weight;
-            outPositions[vertexIdx].y += transformed.y * weight;
-            outPositions[vertexIdx].z += transformed.z * weight;
-        }
-    }
-
-    if (!anyBoneProcessed) {
-        for (int i = 0; i < skinVertexCount; ++i)
-            outPositions[i] = m_VertexData[i].GetInitialPos();
-    }
 
     bbox->Reset();
-    for (int i = 0; i < skinVertexCount; ++i)
-        bbox->Merge(outPositions[i]);
-
+    for (int i = 0; i < vertexCount; ++i)
+        bbox->Merge(positions[i]);
     return TRUE;
 }
 
