@@ -218,9 +218,8 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
     if (VertexCount == 0)
         return FALSE;
 
-    // Build bone point lists if not already done
-    if (m_Points.Size() == 0)
-        BuildBonePointLists();
+    // Public vertex data and normal references can change without setters.
+    BuildBonePointLists();
 
     // Initialize output arrays
     const int outputVertexCount = (VertexCount < skinVertexCount) ? VertexCount : skinVertexCount;
@@ -234,28 +233,17 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
 
             if (boneCount == 0) {
                 *outPos = vd.GetInitialPos();
-            } else if (boneCount == 1 && vd.GetWeight(0) == 1.0f) {
-                // Single bone with full weight - clear for accumulation
+            } else if (boneCount == 1 && vd.GetWeight(0) != 1.0f) {
+                // A partial single-bone influence retains its rest-pose share.
+                const float remainder = 1.0f - vd.GetWeight(0);
+                const VxVector &initial = vd.GetInitialPos();
+                outPos->x = initial.x * remainder;
+                outPos->y = initial.y * remainder;
+                outPos->z = initial.z * remainder;
+            } else {
                 outPos->x = 0.0f;
                 outPos->y = 0.0f;
                 outPos->z = 0.0f;
-            } else {
-                // Multiple bones or partial weight - start with remainder
-                float totalWeight = 0.0f;
-                for (int b = 0; b < boneCount; ++b)
-                    totalWeight += vd.GetWeight(b);
-
-                float remainder = 1.0f - totalWeight;
-                if (remainder > 0.0f) {
-                    VxVector &initPos = vd.GetInitialPos();
-                    outPos->x = initPos.x * remainder;
-                    outPos->y = initPos.y * remainder;
-                    outPos->z = initPos.z * remainder;
-                } else {
-                    outPos->x = 0.0f;
-                    outPos->y = 0.0f;
-                    outPos->z = 0.0f;
-                }
             }
         }
     } else {
@@ -448,69 +436,64 @@ void RCKSkin::ClearBonePointLists() {
 }
 
 void RCKSkin::BuildBonePointLists() {
-    int boneCount = m_BoneData.Size();
-    int vertexCount = m_VertexData.Size();
-    bool hasNormals = m_Normals.Size() > 0;
+    const int boneCount = m_BoneData.Size();
+    const int vertexCount = m_VertexData.Size();
+    const CKBOOL hasNormals = m_Normals.Size() == vertexCount && vertexCount > 0;
 
-    // Allocate bone point arrays
+    // Public vertex data and normal references are mutable. Rebuild their
+    // derived lists for each evaluation, retaining the allocated storage.
     m_Points.Resize(boneCount);
-
-    // First pass: count vertices per bone
-    XArray<int> vertexCounts(boneCount);
+    m_Flags &= ~1u;
+    XArray<int> vertexCounts;
+    vertexCounts.Resize(boneCount);
     for (int i = 0; i < boneCount; ++i)
         vertexCounts[i] = 0;
 
     for (int v = 0; v < vertexCount; ++v) {
         RCKSkinVertexData &vd = m_VertexData[v];
-        int numBones = vd.GetBoneCount();
-        for (int b = 0; b < numBones; ++b) {
-            int boneIdx = vd.GetBone(b);
-            if (boneIdx >= 0 && boneIdx < boneCount)
-                vertexCounts[boneIdx]++;
+        const int count = vd.GetBoneCount();
+        float totalWeight = 0.0f;
+        for (int b = 0; b < count; ++b) {
+            const float weight = vd.GetWeight(b);
+            totalWeight += weight;
+            const int bone = vd.GetBone(b);
+            if (weight > 0.0f && bone >= 0 && bone < boneCount)
+                ++vertexCounts[bone];
         }
+        if (count == 0 || (totalWeight != 0.0f && XAbs(totalWeight - 1.0f) > 0.00001f))
+            m_Flags |= 1;
     }
 
-    // Allocate arrays for each bone
     for (int i = 0; i < boneCount; ++i) {
         m_Points[i].m_WeightedVertices.Resize(vertexCounts[i]);
-        if (hasNormals)
-            m_Points[i].m_WeightedNormals.Resize(vertexCounts[i]);
+        m_Points[i].m_WeightedNormals.Resize(hasNormals ? vertexCounts[i] : 0);
         m_Points[i].m_VertexIndices.Resize(vertexCounts[i]);
-        vertexCounts[i] = 0; // Reset for use as insertion index
+        vertexCounts[i] = 0;
     }
 
-    // Second pass: fill arrays
     for (int v = 0; v < vertexCount; ++v) {
         RCKSkinVertexData &vd = m_VertexData[v];
-        int numBones = vd.GetBoneCount();
-        VxVector &initPos = vd.GetInitialPos();
-
-        for (int b = 0; b < numBones; ++b) {
-            int boneIdx = vd.GetBone(b);
-            if (boneIdx >= 0 && boneIdx < boneCount) {
-                float weight = vd.GetWeight(b);
-                int idx = vertexCounts[boneIdx]++;
-
-                // Store weighted vertex (position with weight in w)
-                VxVector4 &wv = m_Points[boneIdx].m_WeightedVertices[idx];
-                wv.x = initPos.x;
-                wv.y = initPos.y;
-                wv.z = initPos.z;
-                wv.w = weight;
-
-                // Store weighted normal if available
-                if (hasNormals) {
-                    VxVector &norm = m_Normals[v];
-                    VxVector4 &wn = m_Points[boneIdx].m_WeightedNormals[idx];
-                    wn.x = norm.x;
-                    wn.y = norm.y;
-                    wn.z = norm.z;
-                    wn.w = weight;
-                }
-
-                // Store vertex index
-                m_Points[boneIdx].m_VertexIndices[idx] = (CKWORD) v;
+        const VxVector &position = vd.GetInitialPos();
+        for (int b = 0; b < vd.GetBoneCount(); ++b) {
+            const int bone = vd.GetBone(b);
+            const float weight = vd.GetWeight(b);
+            if (weight <= 0.0f || bone < 0 || bone >= boneCount)
+                continue;
+            const int index = vertexCounts[bone]++;
+            VxVector4 &point = m_Points[bone].m_WeightedVertices[index];
+            point.x = position.x;
+            point.y = position.y;
+            point.z = position.z;
+            point.w = weight;
+            if (hasNormals) {
+                const VxVector &normal = m_Normals[v];
+                VxVector4 &weightedNormal = m_Points[bone].m_WeightedNormals[index];
+                weightedNormal.x = normal.x;
+                weightedNormal.y = normal.y;
+                weightedNormal.z = normal.z;
+                weightedNormal.w = weight;
             }
+            m_Points[bone].m_VertexIndices[index] = (CKWORD) v;
         }
     }
 }
