@@ -1983,7 +1983,29 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
         int channelCount = chunk->ReadInt();
         for (int k = 0; k < channelCount; k++) {
             CKMaterial *material = (CKMaterial *) chunk->ReadObject(m_Context);
-            int channelIndex = AddChannel(material, TRUE);
+            int channelIndex = -1;
+            if (file) {
+                // File reloads retain the native material-based merge contract.
+                channelIndex = AddChannel(material, TRUE);
+            } else if (m_MaterialChannels.Size() < 16) {
+                // State chunks describe stored slots, including null or duplicate
+                // materials. Their ordinals are used by the face channel masks.
+                VxMaterialChannel channel;
+                channel.m_Material = material;
+                const int vertexCount = GetVertexCount();
+                if (vertexCount > 0) {
+                    channel.m_UVs = new Vx2DVector[vertexCount];
+                    for (int vertex = 0; vertex < vertexCount; ++vertex)
+                        channel.m_UVs[vertex] = m_Vertices[vertex].m_UV;
+                }
+                m_MaterialChannels.PushBack(channel);
+                channelIndex = m_MaterialChannels.Size() - 1;
+                UVChanged();
+                m_FaceChannelMask = 0xFFFF;
+                const CKWORD channelBit = static_cast<CKWORD>(1u << channelIndex);
+                for (CKFace *face = m_Faces.Begin(); face != m_Faces.End(); ++face)
+                    face->m_ChannelMask |= channelBit;
+            }
 
             if (channelIndex < 0) {
                 // Skip channel data if channel wasn't added
@@ -2056,32 +2078,23 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
         }
     }
 
-    // Load face channel masks
+    // Consume the complete packed mask stream and copy its available prefix,
+    // including an odd target face after truncating a larger source mesh.
     if (chunk->SeekIdentifier(CK_STATESAVE_MESHFACECHANMASK)) {
-        int maskCount = chunk->ReadInt();
-        int faceCount = GetFaceCount();
-
-        // IDA logic: calculate pairs and remainder
-        int pairCount = maskCount >> 1;
-        int hasRemainder = maskCount - 2 * pairCount;
-
-        // Boundary check: if our face count is less than file's mask count
-        if (faceCount < maskCount) {
-            pairCount = faceCount >> 1;
-            hasRemainder = 0;
+        const int maskCount = chunk->ReadInt();
+        const int faceCount = GetFaceCount();
+        for (int i = 0; i < maskCount / 2; ++i) {
+            const CKDWORD packed = chunk->ReadDwordAsWords();
+            const int face = 2 * i;
+            if (face < faceCount)
+                m_Faces[face].m_ChannelMask = static_cast<CKWORD>(packed);
+            if (face + 1 < faceCount)
+                m_Faces[face + 1].m_ChannelMask = static_cast<CKWORD>(packed >> 16);
         }
-
-        // Read pairs
-        for (int i = 0; i < pairCount; i++) {
-            CKDWORD packed = chunk->ReadDwordAsWords();
-            m_Faces[2 * i].m_ChannelMask = (CKWORD) (packed & 0xFFFF);
-            m_Faces[2 * i + 1].m_ChannelMask = (CKWORD) (packed >> 16);
-        }
-
-        // Read remainder (odd face)
-        if (hasRemainder) {
-            CKWORD mask = chunk->ReadWord();
-            m_Faces[maskCount - 1].m_ChannelMask = mask;
+        if (maskCount & 1) {
+            const CKWORD mask = chunk->ReadWord();
+            if (maskCount - 1 < faceCount)
+                m_Faces[maskCount - 1].m_ChannelMask = mask;
         }
     }
 
