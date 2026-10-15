@@ -859,9 +859,10 @@ CKBOOL RCKLinearScaleAxisController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    float t1 = m_Keys[low].TimeStep;
-    float t2 = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    // Keep finite time differences wide until the Slerp parameter is stored.
+    const double t1 = m_Keys[low].TimeStep;
+    const double t2 = m_Keys[high].TimeStep;
+    const float t = static_cast<float>((TimeStep - t1) / (t2 - t1));
 
     *result = Slerp(t, m_Keys[low].Rot, m_Keys[high].Rot);
 
