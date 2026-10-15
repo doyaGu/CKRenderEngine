@@ -181,9 +181,54 @@ TEST_F(MeshGeometryCompletionTest, ConsolidatePreservesWeightedSkinAndBothMorphK
     mesh.Consolidate(); Consumers(*skin, *morph, sources, 3);
 }
 
+TEST_F(MeshGeometryCompletionTest, DissociationDuplicatesSkinAndMorphPayloadAndKeepsIndependentLineEndpoint) {
+    CompletionMesh mesh(Context); RCKMaterial layer(Context); Payload(mesh, 5);
+    mesh.SetFaceCount(2); mesh.SetFaceVertexIndex(0, 0, 1, 2); mesh.SetFaceVertexIndex(1, 0, 2, 3);
+    mesh.SetLineCount(1); mesh.SetLine(0, 1, 4); ASSERT_EQ(0, mesh.AddChannel(&layer, FALSE));
+    for (int i = 0; i < 5; ++i) mesh.SetVertexTextureCoordinates(i, .5f + i * .0625f, .75f, 0);
+    RCK3dEntity a(Context), b(Context);
+    RegisteredGeometryConsumers consumers(Context); ASSERT_NE(nullptr, consumers.Entity); ASSERT_NE(nullptr, consumers.Animation);
+    CKSkin *skin = Skin(*consumers.Entity, mesh, a, b); ASSERT_NE(nullptr, skin);
+    RCKMorphController *morph = Morph(*consumers.Animation, *consumers.Entity, 5); ASSERT_NE(nullptr, morph);
+    mesh.DissociateAllFaces(); ASSERT_EQ(7, mesh.GetVertexCount()); ASSERT_EQ(1, mesh.GetLineCount());
+    const int sources[] = {0, 1, 2, 0, 2, 3, 4}; Consumers(*skin, *morph, sources, 7);
+    for (int i = 0; i < 7; ++i) ExpectedPayload(mesh, i, sources[i], 0);
+    for (int i = 0; i < 6; ++i) EXPECT_EQ(i, mesh.GetFacesIndices()[i]);
+    int first = 0, last = 0; mesh.GetLine(0, &first, &last); EXPECT_EQ(1, first); EXPECT_EQ(6, last);
+    skin->GetVertexData(3)->SetWeight(0, .9f); EXPECT_FLOAT_EQ(.1f, skin->GetVertexData(0)->GetWeight(0));
+}
 
+TEST_F(MeshGeometryCompletionTest, DissociationLeavesPureLineMeshAndWordMaximumEndpointIntact) {
+    CompletionMesh mesh(Context); ASSERT_TRUE(mesh.SetVertexCount(65536)); ASSERT_TRUE(mesh.SetLineCount(1));
+    VxVector a(1.0f, 2.0f, 3.0f), b(4.0f, 5.0f, 6.0f);
+    mesh.SetVertexPosition(0, &a); mesh.SetVertexPosition(65535, &b); mesh.SetLine(0, 0, 65535);
+    mesh.DissociateAllFaces(); ASSERT_EQ(65536, mesh.GetVertexCount()); ASSERT_EQ(1, mesh.GetLineCount());
+    ASSERT_EQ(1, mesh.DefaultRender(Device, nullptr)); ASSERT_EQ(1, Target.Count);
+    EXPECT_EQ(VX_LINELIST, Target.Draws[0].Type); EXPECT_EQ(65535, Target.Draws[0].Indices[1]);
+    Vec(Target.Draws[0].Positions[0], a); Vec(Target.Draws[0].Positions[1], b);
+}
 
+TEST_F(MeshGeometryCompletionTest, DissociationUsesLastWordSlotForLineOnlyEndpoint) {
+    CompletionMesh mesh(Context); Payload(mesh, 4); ASSERT_TRUE(mesh.SetFaceCount(21845));
+    for (int i = 0; i < 21845; ++i) mesh.SetFaceVertexIndex(i, 0, 1, 2);
+    mesh.SetLineCount(1); mesh.SetLine(0, 2, 3); mesh.DissociateAllFaces();
+    ASSERT_EQ(65536, mesh.GetVertexCount()); EXPECT_EQ(65534, mesh.GetFacesIndices()[65534]);
+    int a = 0, b = 0; mesh.GetLine(0, &a, &b); EXPECT_EQ(2, a); EXPECT_EQ(65535, b);
+    ExpectedPayload(mesh, 65535, 3);
+}
 
+TEST_F(MeshGeometryCompletionTest, DissociationOverWordBudgetLeavesGeometryAndPrivateUVsUnchanged) {
+    CompletionMesh mesh(Context); RCKMaterial layer(Context); Payload(mesh, 5);
+    ASSERT_EQ(0, mesh.AddChannel(&layer, FALSE)); mesh.SetVertexTextureCoordinates(4, .875f, .75f, 0);
+    ASSERT_TRUE(mesh.SetFaceCount(21845));
+    for (int i = 0; i < 21845; ++i) mesh.SetFaceVertexIndex(i, 0, 1, 2);
+    mesh.SetLineCount(1); mesh.SetLine(0, 3, 4); mesh.DissociateAllFaces();
+    EXPECT_EQ(5, mesh.GetVertexCount()); EXPECT_EQ(21845, mesh.GetFaceCount()); EXPECT_EQ(1, mesh.GetLineCount());
+    EXPECT_EQ(0, mesh.GetFacesIndices()[65532]); EXPECT_EQ(2, mesh.GetFacesIndices()[65534]);
+    int a = 0, b = 0; mesh.GetLine(0, &a, &b); EXPECT_EQ(3, a); EXPECT_EQ(4, b);
+    float u = 0.0f, v = 0.0f; mesh.GetVertexTextureCoordinates(4, &u, &v, 0); EXPECT_FLOAT_EQ(.875f, u);
+    ExpectedPayload(mesh, 4, 4);
+}
 
 
 

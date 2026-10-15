@@ -3578,58 +3578,119 @@ void RCKMesh::ApplyGlobalMaterial(CKMaterial *Mat) {
 }
 
 // Match IDA at 0x1001e8e4
+// Duplicate skin payload by source vertex identity; no two new vertices
+// share owned bone/weight arrays. This also handles line-only appended copies.
+static void MeshDuplicateSkinVertices(CKContext *context, CKMesh *mesh,
+                                      const XArray<int> &sources, int oldCount) {
+    const XObjectPointerArray &entities = context->GetObjectListByType(CKCID_3DENTITY, TRUE);
+    for (CKObject **it = entities.Begin(); it != entities.End(); ++it) {
+        CK3dEntity *entity = static_cast<CK3dEntity *>(*it);
+        if (!entity || entity->GetCurrentMesh() != mesh)
+            continue;
+        CKSkin *skin = entity->GetSkin();
+        if (!skin || skin->GetVertexCount() != oldCount)
+            continue;
+        XArray<VxVector> positions, normals;
+        XArray<int> offsets, bones;
+        XArray<float> weights;
+        positions.Resize(oldCount);
+        offsets.Resize(oldCount + 1);
+        offsets[0] = 0;
+        for (int i = 0; i < oldCount; ++i) {
+            CKSkinVertexData *data = skin->GetVertexData(i);
+            positions[i] = data->GetInitialPos();
+            offsets[i + 1] = offsets[i] + data->GetBoneCount();
+            for (int bone = 0; bone < data->GetBoneCount(); ++bone) {
+                bones.PushBack(data->GetBone(bone));
+                weights.PushBack(data->GetWeight(bone));
+            }
+        }
+        const int normalCount = skin->GetNormalCount();
+        normals.Resize(normalCount);
+        for (int i = 0; i < normalCount; ++i)
+            normals[i] = skin->GetNormal(i);
+        skin->SetVertexCount(0);
+        skin->SetVertexCount(sources.Size());
+        skin->SetNormalCount(normalCount ? sources.Size() : 0);
+        for (int i = 0; i < sources.Size(); ++i) {
+            const int source = sources[i];
+            CKSkinVertexData *data = skin->GetVertexData(i);
+            data->SetInitialPos(positions[source]);
+            data->SetBoneCount(offsets[source + 1] - offsets[source]);
+            for (int bone = offsets[source]; bone < offsets[source + 1]; ++bone) {
+                data->SetBone(bone - offsets[source], bones[bone]);
+                data->SetWeight(bone - offsets[source], weights[bone]);
+            }
+            if (normalCount) {
+                const VxVector normal = source < normalCount ? normals[source] : VxVector(0.0f, 0.0f, 0.0f);
+                skin->SetNormal(i, normal);
+            }
+        }
+    }
+}
+
 void RCKMesh::DissociateAllFaces() {
     const int indexCount = m_FaceVertexIndices.Size();
-    // Every triangle corner must remain representable by the public WORD index stream.
+    // A pure line mesh has no shared triangle corners to dissociate.
+    if (!indexCount)
+        return;
     if (indexCount > 0x10000)
         return;
+
+    XArray<int> firstCopy, sources;
+    firstCopy.Resize(m_Vertices.Size());
+    for (int i = 0; i < firstCopy.Size(); ++i)
+        firstCopy[i] = -1;
+    sources.Reserve(indexCount);
+    for (int corner = 0; corner < indexCount; ++corner) {
+        const int source = m_FaceVertexIndices[corner];
+        sources.PushBack(source);
+        if (firstCopy[source] < 0)
+            firstCopy[source] = corner;
+    }
+    // Lines keep their endpoints, including vertices unused by any triangle.
+    for (int i = 0; i < m_LineIndices.Size(); ++i) {
+        const int source = m_LineIndices[i];
+        if (firstCopy[source] >= 0)
+            continue;
+        if (sources.Size() == 0x10000)
+            return;
+        firstCopy[source] = sources.Size();
+        sources.PushBack(source);
+    }
 
     const XArray<VxVertex> oldVertices = m_Vertices;
     const XArray<VxColors> oldColors = m_VertexColors;
     XArray<float> oldWeights;
     if (m_VertexWeights)
         oldWeights = *m_VertexWeights;
-
-    m_Vertices.Resize(indexCount);
-    m_VertexColors.Resize(indexCount);
+    m_Vertices.Resize(sources.Size());
+    m_VertexColors.Resize(sources.Size());
     if (m_VertexWeights)
-        m_VertexWeights->Resize(indexCount);
+        m_VertexWeights->Resize(sources.Size());
     for (int channel = 0; channel < m_MaterialChannels.Size(); ++channel) {
         Vx2DVector *oldUVs = m_MaterialChannels[channel].m_UVs;
         if (!oldUVs)
             continue;
-        Vx2DVector *newUVs = indexCount ? new Vx2DVector[indexCount] : nullptr;
-        for (int corner = 0; corner < indexCount; ++corner)
-            newUVs[corner] = oldUVs[m_FaceVertexIndices[corner]];
+        Vx2DVector *newUVs = new Vx2DVector[sources.Size()];
+        for (int i = 0; i < sources.Size(); ++i)
+            newUVs[i] = oldUVs[sources[i]];
         delete[] oldUVs;
         m_MaterialChannels[channel].m_UVs = newUVs;
     }
-
-    XArray<int> firstCopy;
-    firstCopy.Resize(oldVertices.Size());
-    for (int i = 0; i < firstCopy.Size(); ++i)
-        firstCopy[i] = -1;
-    for (int corner = 0; corner < indexCount; ++corner) {
-        const int oldIndex = m_FaceVertexIndices[corner];
-        m_Vertices[corner] = oldVertices[oldIndex];
-        m_VertexColors[corner] = oldColors[oldIndex];
+    for (int i = 0; i < sources.Size(); ++i) {
+        const int source = sources[i];
+        m_Vertices[i] = oldVertices[source];
+        m_VertexColors[i] = oldColors[source];
         if (m_VertexWeights)
-            (*m_VertexWeights)[corner] = oldIndex < oldWeights.Size() ? oldWeights[oldIndex] : 0.0f;
-        if (firstCopy[oldIndex] < 0)
-            firstCopy[oldIndex] = corner;
+            (*m_VertexWeights)[i] = source < oldWeights.Size() ? oldWeights[source] : 0.0f;
+    }
+    for (int corner = 0; corner < indexCount; ++corner)
         m_FaceVertexIndices[corner] = static_cast<CKWORD>(corner);
-    }
-    int retainedLines = 0;
-    for (int line = 0; line < GetLineCount(); ++line) {
-        const int a = firstCopy[m_LineIndices[line * 2]];
-        const int b = firstCopy[m_LineIndices[line * 2 + 1]];
-        if (a < 0 || b < 0)
-            continue;
-        m_LineIndices[retainedLines * 2] = static_cast<CKWORD>(a);
-        m_LineIndices[retainedLines * 2 + 1] = static_cast<CKWORD>(b);
-        ++retainedLines;
-    }
-    m_LineIndices.Resize(retainedLines * 2);
+    for (int i = 0; i < m_LineIndices.Size(); ++i)
+        m_LineIndices[i] = static_cast<CKWORD>(firstCopy[m_LineIndices[i]]);
+    MeshDuplicateSkinVertices(m_Context, this, sources, oldVertices.Size());
+    MeshRemapMorphVertices(m_Context, this, sources, oldVertices.Size());
     VertexMove();
     UVChanged();
     NormalChanged();
