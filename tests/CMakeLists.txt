@@ -449,7 +449,7 @@ if (TARGET gtest_main)
             CallbackObservationLifetimeTest CallbackObservationDeviceTest
             MeshRenderCompletionTest MeshSerializationCompletionTest MeshGeometryCompletionTest MaterialCompletionTest
             SkinStorageTest SkinCalculationTest SkinCacheTest SkinEntityIntegrationTest
-            KinematicChainLifecycleTest KinematicChainMathTest
+            KinematicChainLifecycleTest KinematicChainSolveTest KinematicChainMathTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

@@ -299,13 +299,6 @@ CKERROR RCKKinematicChain::SetEndEffector(CKBodyPart *end) {
 //=============================================================================
 
 /**
- * Helper: compare vector components - Based on IDA sub_10056170
- */
-static CKBOOL CompareVectorComponents(const VxVector &a, const VxVector &b) {
-    return (a.x < b.x) && (a.y < b.y) && (a.z < b.z);
-}
-
-/**
  * IKSetEffectorPos - Based on IDA decompilation at 0x10053CCE
  */
 CKERROR RCKKinematicChain::IKSetEffectorPos(VxVector *pos, CK3dEntity *ref, CKBodyPart *body) {
@@ -321,8 +314,6 @@ CKERROR RCKKinematicChain::IKSetEffectorPos(VxVector *pos, CK3dEntity *ref, CKBo
         return CKERR_INVALIDOPERATION;
     if (!endEffector)
         return CKERR_INVALIDOPERATION;
-
-    CKBodyPart *ikEndEffector = endEffector;
 
     // Calculate chain body count
     m_ChainBodyCount = GetChainBodyCount(endEffector);
@@ -507,30 +498,34 @@ CKERROR RCKKinematicChain::IKSetEffectorPos(VxVector *pos, CK3dEntity *ref, CKBo
         targetPos = firstUnlockedPos + ikDelta;
     }
 
-    // Save current transforms for rollback
+    // Preserve local transforms so parent/child rollback uses one consistent frame
     VxMatrix *savedMatrices = new VxMatrix[m_ChainBodyCount];
     for (CKDWORD i = 0; i < m_ChainBodyCount; ++i) {
-        savedMatrices[i] = m_ChainData[i].m_BodyPart->GetWorldMatrix();
+        savedMatrices[i] = m_ChainData[i].m_BodyPart->GetLocalMatrix();
     }
 
     // IK solver iteration
-    int converged = 0;
     float stepSize = 10.0f;
     int maxIterations = 30;
 
     endEffector->GetPosition(&currentEndPos, nullptr);
     VxVector errorVec = targetPos - currentEndPos;
     float initialError = Magnitude(errorVec);
+    int converged = initialError <= 0.05f;
 
     int iteration = 0;
     while (iteration < maxIterations && !converged) {
         endEffector->GetPosition(&currentEndPos, nullptr);
 
         VxVector toGoal = targetPos - currentEndPos;
-        toGoal *= stepSize;
+        // Native scales the Cartesian displacement by division (100168D0).
+        toGoal /= stepSize;
 
         CKERROR err = IKRotateToward(&toGoal, body);
         if (err != CK_OK) {
+            for (CKDWORD i = 0; i < m_ChainBodyCount; ++i) {
+                m_ChainData[i].m_BodyPart->SetLocalMatrix(savedMatrices[i]);
+            }
             delete[] savedMatrices;
             return err;
         }
@@ -547,10 +542,11 @@ CKERROR RCKKinematicChain::IKSetEffectorPos(VxVector *pos, CK3dEntity *ref, CKBo
         float expectedImprovement = stepMag * stepSize;
 
         if (newError >= expectedImprovement) {
-            // Step too large, reduce and restore
+            // A larger divisor reduces the next Cartesian displacement.
             stepSize *= 2.0f;
+            converged = 0;
             for (CKDWORD i = 0; i < m_ChainBodyCount; ++i) {
-                m_ChainData[i].m_BodyPart->SetWorldMatrix(savedMatrices[i]);
+                m_ChainData[i].m_BodyPart->SetLocalMatrix(savedMatrices[i]);
             }
         } else if (2.0f * newError < expectedImprovement) {
             stepSize *= 0.75f;
@@ -561,11 +557,13 @@ CKERROR RCKKinematicChain::IKSetEffectorPos(VxVector *pos, CK3dEntity *ref, CKBo
 
     // Check final error against initial
     if (!converged) {
-        VxVector initErrorVec(initialError, initialError, initialError);
-        if (CompareVectorComponents(initErrorVec, errorVec)) {
+        endEffector->GetPosition(&currentEndPos, nullptr);
+        errorVec = targetPos - currentEndPos;
+        // Compare distances, independent of the direction of the error.
+        if (Magnitude(errorVec) > initialError) {
             // Final error is worse, restore
             for (CKDWORD i = 0; i < m_ChainBodyCount; ++i) {
-                m_ChainData[i].m_BodyPart->SetWorldMatrix(savedMatrices[i]);
+                m_ChainData[i].m_BodyPart->SetLocalMatrix(savedMatrices[i]);
             }
         }
     }
