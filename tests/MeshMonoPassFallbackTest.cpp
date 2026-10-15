@@ -23,6 +23,8 @@ public:
     float RejectBaseDiffuse = -1.0f;
     CKBOOL Once = TRUE, CreateOnce = FALSE, UploadOnce = FALSE;
     int FailedCreates = 0, FailedUploads = 0, FailedBinds = 0, FailedSamplers = 0, FailedCoordinates = 0;
+    CKBOOL RejectFallbackBind = FALSE;
+    int FailedFallbackBinds = 0;
     CKBOOL MatchesBase() const {
         // DefaultRender first prepares a material while selecting channels.
         // Group-specific failures target actual group binds after that setup.
@@ -38,6 +40,7 @@ public:
         return TextureTestObserver::LoadTexture(handle,image,level,face,region);
     }
     CKBOOL SetTexture(CKDWORD handle,int stage) override {
+        if (handle && stage == 0 && RejectFallbackBind) { ++FailedFallbackBinds; return FALSE; }
         if (handle && stage == RejectBindStage && MatchesBase() && (!Once || !FailedBinds)) { ++FailedBinds; return FALSE; }
         return TextureTestObserver::SetTexture(handle,stage);
     }
@@ -265,4 +268,22 @@ TEST_F(MeshMonoPassFallbackTest, MixedMultipassChannelDoesNotReplayAlreadyFolded
     EXPECT_EQ(A, State.Draws[0].Textures[1]);
     EXPECT_EQ(B, State.Draws[1].Textures[0]);
     for (int stage = 1; stage < 4; ++stage) EXPECT_EQ(0u, State.Draws[1].Textures[stage]);
+}
+
+TEST_F(MeshMonoPassFallbackTest, FailedFallbackMaterialPropagatesToDefaultRenderAndCanRetryNextFrame) {
+    MonoFallbackMesh mesh(Context); RCKMaterial base(Context), channel(Context);
+    RCKTexture texture(Context); Geometry(mesh, base); Channel(mesh, channel, texture, A);
+    CallbackObservation observation = {&State};
+    mesh.AddSubMeshPostRenderCallBack(ObserveSubMeshPost, &observation, FALSE);
+    ASSERT_EQ(1, mesh.CreateRenderGroups()); mesh.Cold();
+    State.RejectBindStage = 1; State.RejectFallbackBind = TRUE;
+    EXPECT_EQ(0, mesh.DefaultRender(Device, nullptr));
+    EXPECT_EQ(1, State.FailedBinds); EXPECT_EQ(1, State.FailedFallbackBinds);
+    ASSERT_EQ(1, State.DrawCount); EXPECT_EQ(0u, State.Draws[0].Textures[1]);
+    EXPECT_EQ(1, observation.Calls);
+    State.RejectBindStage = -1; State.RejectFallbackBind = FALSE;
+    State.DrawCount = 0; mesh.Cold();
+    EXPECT_EQ(1, mesh.DefaultRender(Device, nullptr));
+    ASSERT_EQ(1, State.DrawCount); EXPECT_EQ(A, State.Draws[0].Textures[1]);
+    EXPECT_EQ(2, observation.Calls);
 }

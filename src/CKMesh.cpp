@@ -5351,8 +5351,8 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
         }
         // Complete missing channels for this visible side before the next
         // transparent side blends over it. Post callbacks still run once.
-        if (failedChannels)
-            RenderMonoPassFallback(dev, group, ent, data, failedChannels);
+        if (failedChannels && !RenderMonoPassFallback(dev, group, ent, data, failedChannels))
+            renderResult = 0;
         if (localChannels && data && (m_Flags & VXMESH_RENDERCHANNELS) &&
             (!ent || (ent->m_MoveableFlags & VX_MOVEABLE_RENDERCHANNELS))) {
             const CKDWORD fogEnable =
@@ -5483,9 +5483,10 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
             CKMeshSetDrawAnnotation(dev, (CKSTRING)"CHANNEL-FALLBACK", ent, this,
                 material, c, p, primitive.m_Type, primitive.m_Indices.Size(), data.VertexCount);
             CKMeshDrawScope meshDraw(dev, &data);
-            if (!dev->DrawPrimitive(primitive.m_Type, primitive.m_Indices.Begin(),
-                                     primitive.m_Indices.Size(), &data))
-                result = 0;
+            // DrawPrimitive records backend refusal in the frame error. Like
+            // native channel draws, it does not change the group return value.
+            dev->DrawPrimitive(primitive.m_Type, primitive.m_Indices.Begin(),
+                               primitive.m_Indices.Size(), &data);
         }
     }
     return result;
