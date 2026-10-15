@@ -222,5 +222,11 @@ TEST_F(PatchMeshTessellationTest, TriangleGridUVsIdentifyTheIndependentQuarticSa
 
 
 
-
+TEST_F(PatchMeshTessellationTest, HugeIterationRequestReducesToAnActualRepresentableLattice) {
+    TessellatedPatch mesh(Context); Single(mesh,4,2); mesh.SetIterationCount(INT_MAX); mesh.BuildRenderMesh();
+    const int steps=mesh.GetIterationCount()+1;
+    ASSERT_EQ(253,steps); EXPECT_EQ(64516,mesh.GetVertexCount()); EXPECT_EQ(2*253*253,mesh.GetFaceCount());
+    int a,b,c; mesh.GetFaceVertexIndex(mesh.GetFaceCount()-1,a,b,c); EXPECT_LT(a,mesh.GetVertexCount()); EXPECT_LT(b,mesh.GetVertexCount()); EXPECT_LT(c,mesh.GetVertexCount());
+    VecIs(Position(mesh,2),VxVector(3,3,0));
+}
 } // namespace

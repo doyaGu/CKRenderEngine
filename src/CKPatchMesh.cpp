@@ -1107,7 +1107,14 @@ void RCKPatchMesh::BuildRenderMesh() {
         EnsureCornerVertexMapAllocated(patchCount);
     }
 
-    // Clamp iteration count if vertex count would exceed 16-bit indices.
+    // Even one triangular patch needs (steps - 1) * (steps - 2) / 2
+    // interior vertices. Bound the initial search before doing count arithmetic.
+    int maxSteps = 2;
+    while ((maxSteps - 1) * (maxSteps - 2) / 2 <= 65000)
+        ++maxSteps;
+    --maxSteps;
+    if (m_IterationCount >= maxSteps)
+        m_IterationCount = maxSteps - 1;
     int steps = m_IterationCount + 1;
     if (steps < 1)
         steps = 1;
@@ -1120,9 +1127,9 @@ void RCKPatchMesh::BuildRenderMesh() {
     while (true) {
         int intermediate = steps - 1;
         int cornerVertices = m_VertCount + (int)m_SharedVertexSources.Size();
-        int edgeVertices = 0;
-        int interiorVertices = 0;
-        totalFaces = 0;
+        unsigned long long edgeVertices = 0;
+        unsigned long long interiorVertices = 0;
+        unsigned long long faceCount = 0;
 
         for (int e = 0; e < edgeCount; ++e) {
             const CKPatchEdge &edge = m_PatchEdges[e];
@@ -1143,20 +1150,26 @@ void RCKPatchMesh::BuildRenderMesh() {
         for (int p = 0; p < patchCount; ++p) {
             CKPatch &patch = m_Patches[p];
             if (patch.type == CK_PATCH_TRI) {
-                totalFaces += steps * steps;
+                faceCount += steps * steps;
                 if (steps >= 3)
                     interiorVertices += (steps - 1) * (steps - 2) / 2;
             } else if (patch.type == CK_PATCH_QUAD) {
-                totalFaces += 2 * steps * steps;
+                faceCount += 2 * steps * steps;
                 if (steps >= 2)
                     interiorVertices += (steps - 1) * (steps - 1);
             }
         }
 
-        totalVertices = cornerVertices + edgeVertices + interiorVertices;
-
-        if (totalVertices <= 0xFDE8 || m_IterationCount == 0)
+        const unsigned long long vertexCount = cornerVertices + edgeVertices + interiorVertices;
+        if (vertexCount <= 65000 && faceCount <= 0x7fffffff) {
+            totalVertices = static_cast<int>(vertexCount);
+            totalFaces = static_cast<int>(faceCount);
             break;
+        }
+        if (m_IterationCount == 0) {
+            CleanRenderMesh();
+            return;
+        }
 
         // Reduce iteration and retry.
         m_IterationCount -= 1;
