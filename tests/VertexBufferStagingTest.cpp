@@ -150,7 +150,22 @@ TEST(VertexBufferStagingTest, PaletteHintWithoutBlendWeightsDoesNotChangeOrdinar
     EXPECT_FLOAT_EQ(7, ReadFloat(packed, 8)); buffer.Unlock(nullptr);
 }
 
-
+TEST(VertexBufferStagingTest, CheckDuringWriteLockDoesNotReplaceOrPublishTheBorrowedStorage) {
+    StagingProbe buffer;
+    ASSERT_EQ(CK_VB_LOST, buffer.Check(nullptr, 3, CKRST_DP_TRANSFORM, FALSE));
+    VxDrawPrimitiveData *data = buffer.Lock(nullptr, 1, 2, CK_LOCK_DEFAULT); ASSERT_NE(nullptr, data);
+    void *position = data->PositionPtr; const VxVector original(4, 5, 6); memcpy(position, &original, sizeof(original));
+    EXPECT_EQ(CK_VB_FAILED, buffer.Check(nullptr, 3, CKRST_DP_TRANSFORM, FALSE));
+    EXPECT_EQ(CK_VB_FAILED, buffer.Check(nullptr, 5, CKRST_DP_TR_VC, TRUE));
+    EXPECT_EQ(3u, buffer.Description().m_MaxVertexCount); EXPECT_EQ(2u, buffer.LockedCount());
+    EXPECT_EQ(0u, buffer.Version());
+    // Rejected Check must preserve the borrowed memory, so the writer can finish normally.
+    if (buffer.Description().m_MaxVertexCount == 3) EXPECT_EQ(0, memcmp(position, &original, sizeof(original)));
+    buffer.Unlock(nullptr); EXPECT_EQ(0u, buffer.LockedCount());
+    EXPECT_EQ(CK_VB_LOST, buffer.Check(nullptr, 5, CKRST_DP_TR_VC, TRUE));
+    data = buffer.Lock(nullptr, 0, 5, CK_LOCK_DEFAULT); ASSERT_NE(nullptr, data);
+    EXPECT_NE(nullptr, data->ColorPtr); EXPECT_EQ(5, data->VertexCount); buffer.Unlock(nullptr);
+}
 
 TEST(VertexBufferStagingTest, LockClipsOnlyTheEndAndRejectsNestedZeroOrUnsupportedRequests) {
     StagingProbe buffer; ASSERT_EQ(CK_VB_LOST, buffer.Check(nullptr, 4, CKRST_DP_TRANSFORM, FALSE));

@@ -450,7 +450,7 @@ if (TARGET gtest_main)
             MeshRenderCompletionTest MeshSerializationCompletionTest MeshGeometryCompletionTest MaterialCompletionTest
             SkinStorageTest SkinCalculationTest SkinCacheTest SkinEntityIntegrationTest
             KinematicChainLifecycleTest KinematicChainSolveTest KinematicChainMathTest
-            VertexBufferStagingTest
+            VertexBufferStagingTest VertexBufferDrawTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

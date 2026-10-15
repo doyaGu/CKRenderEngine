@@ -211,7 +211,7 @@ void RCKVertexBuffer::Destroy() {
 CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, CKRST_DPFLAGS Format, CKBOOL Dynamic) {
     CKRST_DPFLAGS cpuFormat = (CKRST_DPFLAGS)(Format & ~CKRST_DP_VBUFFER);
     const CKDWORD vertexSize = ComputeVertexStagingSize(cpuFormat);
-    if (MaxVertexCount == 0 || vertexSize == 0)
+    if (m_LockedCount != 0 || MaxVertexCount == 0 || vertexSize == 0)
         return CK_VB_FAILED;
 
     const CKDWORD bufferFlags = Dynamic ? CKRST_VB_DYNAMIC : 0;
@@ -390,7 +390,8 @@ void RCKVertexBuffer::Unlock(CKRenderContext *Ctx) {
 }
 
 CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD *Indices, int IndexCount, CKDWORD StartVertex, CKDWORD VertexCount) {
-    if (!Ctx || !m_Valid || VertexCount == 0 || StartVertex >= m_Desc.m_CurrentVCount)
+    if (!Ctx || !m_Valid || m_LockedCount != 0 || VertexCount == 0 ||
+        StartVertex >= m_Desc.m_CurrentVCount)
         return FALSE;
 
     if (VertexCount > m_Desc.m_CurrentVCount - StartVertex)
