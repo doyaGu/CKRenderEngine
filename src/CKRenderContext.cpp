@@ -37,6 +37,7 @@
 #include "RCKMaterial.h"
 #include "RCKSprite3D.h"
 #include "CKRenderDrawAnnotation.h"
+#include "CKMeshDrawScope.h"
 
 
 #include <stdio.h>
@@ -1603,14 +1604,39 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
     UserDrawPrimitiveDataClass::CopySubmissionData(drawData, data);
     drawData.Flags &= ~CKRST_DP_VBUFFER;
 
-    // Set lighting mode based on normals
-    if ((drawData.Flags & CKRST_DP_LIGHT) != 0 && drawData.NormalPtr) {
-        m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
-    } else {
+    if (!(drawData.Flags & CKRST_DP_LIGHT) || !drawData.NormalPtr) {
         if (drawData.SpecularColorPtr)
             drawData.Flags |= CKRST_DP_SPECULAR;
         if (drawData.ColorPtr)
             drawData.Flags |= CKRST_DP_DIFFUSE;
+    }
+    CKMeshDrawCall meshDraw(this, data);
+    if (meshDraw.PreservesLighting()) {
+        // Read the effective stages after virtual delegation: an override may
+        // have changed them. Generated normals/reflection need a normal stream
+        // even when the channel or its owning callback has disabled lighting.
+        if ((drawData.Flags & CKRST_DP_TRANSFORM) && drawData.NormalPtr) {
+            for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+                CKDWORD operation = 0;
+                if (!m_RasterizerContext->GetTextureStageState(stage, CKRST_TSS_OP, &operation) ||
+                    operation == 0 || operation == CKRST_TOP_DISABLE)
+                    break;
+                CKDWORD texture = 0, coordinates = 0;
+                if (!m_RasterizerContext->GetTexture(stage, &texture) || !texture ||
+                    !m_RasterizerContext->GetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX, &coordinates))
+                    continue;
+                const CKDWORD generation = CKRSTTexcoordGeneration(coordinates);
+                if (generation == CKRST_TEXGEN_CAMERASPACENORMAL ||
+                    generation == CKRST_TEXGEN_CAMERASPACEREFLECTIONVECTOR) {
+                    drawData.Flags |= CKRST_DP_LIGHT;
+                    break;
+                }
+            }
+        }
+    } else if ((drawData.Flags & CKRST_DP_LIGHT) != 0 && drawData.NormalPtr) {
+        // Ordinary public calls retain the original automatic lighting rule.
+        m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
+    } else {
         m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 0);
     }
 

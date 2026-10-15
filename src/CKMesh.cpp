@@ -1,4 +1,5 @@
 #include "CKMaterialBindingScope.h"
+#include "CKMeshDrawScope.h"
 #include "RCKMesh.h"
 
 #include "CKMemoryPool.h"
@@ -5225,6 +5226,7 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
                 continue;
             CKMeshSetDrawAnnotation(dev, (CKSTRING)"CHANNEL-FALLBACK", ent, this,
                 material, c, p, primitive.m_Type, primitive.m_Indices.Size(), data.VertexCount);
+            CKMeshDrawScope meshDraw(dev, &data);
             if (!dev->DrawPrimitive(primitive.m_Type, primitive.m_Indices.Begin(),
                                      primitive.m_Indices.Size(), &data))
                 result = 0;
@@ -5390,7 +5392,10 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
                                 VX_TRIANGLELIST,
                                 (CKDWORD)indexCount,
                                 (CKDWORD)data->VertexCount);
-        dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, channelData);
+        {
+            CKMeshDrawScope meshDraw(dev, channelData);
+            dev->DrawPrimitive(VX_TRIANGLELIST, indices, indexCount, channelData);
+        }
 
         // Restore material state exactly
         mat->RestoreAfterChannelRender(savedSourceBlend, savedDestBlend, savedFlags);
