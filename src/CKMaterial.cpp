@@ -34,6 +34,68 @@
 #include "CKRenderPerfStats.h"
 #include "CKRenderFrameCostStats.h"
 #include "CKScene.h"
+
+// Zero capability fields mean that the driver has not supplied a limit. The
+// submission ABI limit still applies independently of driver capabilities.
+static int CKMaterialStageCapacity(RCKRenderContext *dev) {
+    int capacity = CKRST_MAX_TEXTURE_STAGES;
+    VxDriverDescEx *driver = dev && dev->m_RenderManager
+        ? dev->m_RenderManager->GetDriverDescription(dev->m_DriverIndex) : nullptr;
+    if (driver) {
+        const CKDWORD blendStages = driver->Caps3D.MaxNumberBlendStage;
+        if (blendStages && blendStages < (CKDWORD)capacity)
+            capacity = (int)blendStages;
+    }
+    return capacity;
+}
+
+static CKBOOL CKMaterialStageRangeFits(RCKRenderContext *dev, int firstStage,
+                                        int stageCount, int textureCount) {
+    const int capacity = CKMaterialStageCapacity(dev);
+    if (firstStage < 0 || stageCount <= 0 || stageCount > capacity ||
+        firstStage > capacity - stageCount)
+        return FALSE;
+    VxDriverDescEx *driver = dev && dev->m_RenderManager
+        ? dev->m_RenderManager->GetDriverDescription(dev->m_DriverIndex) : nullptr;
+    const CKDWORD textureCapacity = driver ? driver->Caps3D.MaxNumberTextureStage : 0;
+    if (textureCapacity) {
+        // Positive-stage submissions retain the preceding bindings. Texture
+        // capacity limits simultaneous non-null bindings, not stage ordinals.
+        for (int stage = 0; stage < firstStage; ++stage) {
+            CKDWORD texture = 0;
+            if (dev->m_RasterizerContext->GetTexture(stage, &texture) && texture)
+                ++textureCount;
+        }
+        if ((CKDWORD)textureCount > textureCapacity)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static int CKMaterialConfiguredStageCount(CKMaterial *material) {
+    switch (material->GetEffect()) {
+    case VXEFFECT_DP3:
+        return 2;
+    case VXEFFECT_BUMPENV:
+        return 1 + (material->GetTexture(1) ? 1 : 0) +
+            (material->GetTexture(2) ? 1 : 0);
+    case VXEFFECT_2TEXTURES:
+        return material->GetTexture(1) ? 2 : 1;
+    case VXEFFECT_3TEXTURES:
+        return material->GetTexture(1) ? (material->GetTexture(2) ? 3 : 2) : 1;
+    default:
+        return 1;
+    }
+}
+
+static int CKMaterialConfiguredTextureCount(CKMaterial *material) {
+    if (!material->GetTexture(0))
+        return 0;
+    if (material->GetEffect() == VXEFFECT_DP3)
+        return material->GetTexture(1) ? 2 : 1;
+    return CKMaterialConfiguredStageCount(material);
+}
+
 static VX_EFFECTTEXGEN ReadTexGenParameter(CKParameter *parameter) {
     if (!parameter)
         return VXEFFECT_TGNONE;
@@ -1487,6 +1549,15 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
     const CKBOOL skipAllTextures = (effectCallbackResult & VXEFFECTRETVAL_SKIPALLTEX) != 0;
     const CKBOOL skipTextureMatrix = (effectCallbackResult & VXEFFECTRETVAL_SKIPTEXMAT) != 0;
+    if (!skipAllTextures) {
+        const CKBOOL applyEffect = m_Textures[0] && !skipTextureMatrix;
+        const int firstStage = applyEffect && effect == VXEFFECT_BUMPENV ? 0 : TextureStage;
+        const int stageCount = applyEffect ? CKMaterialConfiguredStageCount(this) : 1;
+        const int textureCount = applyEffect ? CKMaterialConfiguredTextureCount(this) :
+            (m_Textures[0] ? 1 : 0);
+        if (!CKMaterialStageRangeFits(dev, firstStage, stageCount, textureCount))
+            return FALSE;
+    }
     VxMatrix callbackTextureMatrix;
     CKDWORD callbackTextureTransformFlags = CKRST_TTF_NONE;
     CKDWORD callbackTextureCoordinates = 0;
@@ -1788,6 +1859,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
     if (!dev || !m_Textures[0])
         return 0;
 
+    const int configuredTextures = 1 + (m_Textures[1] ? 1 : 0) + (m_Textures[2] ? 1 : 0);
+    if (!CKMaterialStageRangeFits(dev, 0, configuredTextures, configuredTextures))
+        return CKRE_MATERIAL_EFFECT_FAILED;
+
     CKMaterialBumpEnvParams params;
     ReadBumpEnvParameter(m_EffectParameter, params);
 
@@ -1869,7 +1944,7 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
         rst->SetTextureStageState(envStage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2);
         rst->SetTextureStageState(envStage, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
         rst->SetTextureStageState(envStage, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
-    } else if (envStage < CKRST_MAX_TEXTURE_STAGES) {
+    } else if (envStage < CKMaterialStageCapacity(dev)) {
         rst->SetTextureStageState(envStage, CKRST_TSS_OP, CKRST_TOP_DISABLE);
     }
 
@@ -1887,8 +1962,10 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
-    if (!dev || !dev->m_RasterizerContext || stage < 0 || stage >= CKRST_MAX_TEXTURE_STAGES - 1 || !m_Textures[0])
+    if (!dev || !dev->m_RasterizerContext || !m_Textures[0])
         return 0;
+    if (!CKMaterialStageRangeFits(dev, stage, 2, m_Textures[1] ? 2 : 1))
+        return CKRE_MATERIAL_EFFECT_FAILED;
 
     CKRasterizerContext *rst = dev->m_RasterizerContext;
     if (m_Textures[1]) {
@@ -1965,13 +2042,17 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
  * @return Effect result flags (2 for multi-texture effect)
  */
 CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
-    if (!dev || stage < 0 || stage >= CKRST_MAX_TEXTURE_STAGES)
+    if (!dev)
         return 0;
 
     const VX_EFFECT effect = GetEffect();
     const int textureCount = (effect == VXEFFECT_3TEXTURES) ? 2 : 1;
-    if (stage + textureCount > CKRST_MAX_TEXTURE_STAGES)
+    const int configuredExtras = m_Textures[1]
+        ? (textureCount == 2 && m_Textures[2] ? 2 : 1) : 0;
+    if (!configuredExtras)
         return 0;
+    if (!CKMaterialStageRangeFits(dev, stage, configuredExtras, configuredExtras))
+        return CKRE_MATERIAL_EFFECT_FAILED;
 
     CKMaterialCombine3Params params;
     if (effect == VXEFFECT_3TEXTURES) {
