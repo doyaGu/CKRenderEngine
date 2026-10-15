@@ -135,7 +135,7 @@ public:
     virtual int GetChannelCount() override;
     virtual int AddChannel(CKMaterial *Mat, CKBOOL CopySrcUv = TRUE) override;
     virtual void RemoveChannelByMaterial(CKMaterial *Mat) override;
-    virtual void RemoveChannel(CKMaterial *material);
+    void RemoveChannel(CKMaterial *material);
     virtual void RemoveChannel(int Index) override;
     virtual int GetChannelByMaterial(CKMaterial *mat) override;
     virtual void ActivateChannel(int Index, CKBOOL Active = TRUE) override;

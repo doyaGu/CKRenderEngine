@@ -1,5 +1,6 @@
 #include "CKMaterialBindingScope.h"
 #include "CKMeshDrawScope.h"
+#include "CKMeshRenderScope.h"
 #include "RCKMesh.h"
 
 #include "CKMemoryPool.h"
@@ -1281,8 +1282,12 @@ void RCKMesh::Consolidate() {
 }
 
 void RCKMesh::UnOptimize() {
-    // Match IDA at 0x1002a980
+    // Native 0x1002a980 invalidates ordinary groups and transparency.
     m_Flags &= ~(VXMESH_OPTIMIZED | VXMESH_TRANSPARENCYUPTODATE);
+    // PM groups also depend on face material assignments. Rebuild the current
+    // LOD instead of replacing its topology with ordinary authored groups.
+    if (m_ProgressiveMesh)
+        CKObject::ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
 }
 
 // Callback system methods
@@ -4328,6 +4333,10 @@ CKBOOL RCKMesh::IsPM() {
 // DefaultRender - Main mesh rendering function
 //--------------------------------------------
 int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
+    CKMeshRenderScope renderScope(this, m_ActiveTextureChannels, m_MaterialChannels, m_DrawFlags);
+    int renderResult = 1;
+    XArray<CKMaterialGroup *> completedGroups;
+    CKBOOL groupFailed = FALSE;
     CK_RENDER_PERF_DECLARE_ENABLED(renderStats);
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CK_FRAME_COST_ADD_MESH_DEFAULT();
@@ -4708,11 +4717,18 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 }
 
                 if (group && (!group->m_Material || !group->m_Material->IsAlphaTransparent())) {
+                    int groupResult;
                     if (dp) {
                         VxDrawPrimitiveData groupDp = *dp;
-                        RenderGroupWithChannels(rc, group, ent, &groupDp, groupLocalChannels);
+                        groupResult = RenderGroupWithChannels(rc, group, ent, &groupDp, groupLocalChannels);
                     } else {
-                        RenderGroup(rc, group, ent, nullptr);
+                        groupResult = RenderGroup(rc, group, ent, nullptr);
+                    }
+                    if (groupResult)
+                        completedGroups.PushBack(group);
+                    else {
+                        renderResult = 0;
+                        groupFailed = TRUE;
                     }
                 }
             }
@@ -4723,11 +4739,18 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 if (!group || !group->m_HasValidPrimitives)
                     continue;
                 if (group && group->m_Material && group->m_Material->IsAlphaTransparent()) {
+                    int groupResult;
                     if (dp) {
                         VxDrawPrimitiveData groupDp = *dp;
-                        RenderGroupWithChannels(rc, group, ent, &groupDp, groupLocalChannels);
+                        groupResult = RenderGroupWithChannels(rc, group, ent, &groupDp, groupLocalChannels);
                     } else {
-                        RenderGroup(rc, group, ent, nullptr);
+                        groupResult = RenderGroup(rc, group, ent, nullptr);
+                    }
+                    if (groupResult)
+                        completedGroups.PushBack(group);
+                    else {
+                        renderResult = 0;
+                        groupFailed = TRUE;
                     }
                 }
             }
@@ -4762,7 +4785,16 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         // Render material channels if needed
         if (renderChannels) {
             CKDWORD fogEnable = rc->GetRasterizerRenderState(VXRENDERSTATE_FOGENABLE);
-            RenderChannels(rc, ent, &dpData, fogEnable);
+            if (groupFailed) {
+                // Only groups with a successful base may receive the remaining
+                // independent suffix. The folded prefix has already contributed.
+                for (int g = 0; g < completedGroups.Size(); ++g) {
+                    if (!RenderChannelsForGroup(rc, ent, &dpData, fogEnable,
+                                                completedGroups[g], m_ActiveTextureChannels.Size()))
+                        renderResult = 0;
+                }
+            } else if (!RenderChannels(rc, ent, &dpData, fogEnable))
+                renderResult = 0;
             rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
         }
     }
@@ -4797,7 +4829,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         rc->DisableTextureStagesFrom(1);
 
     CK_RENDER_PERF_ADD(renderStats, MeshDefaultUs, CKRenderPerfElapsedUs(perfStart));
-    return 1;
+    return renderResult;
 }
 
 //--------------------------------------------
@@ -4840,6 +4872,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
             ++CKRenderPerfCurrent().AlphaGroups;
     );
     RCKMaterial *mat = group->m_Material;
+    int renderResult = 1;
     const CKBOOL callbacksOwnMaterial = m_SubMeshCallbacks &&
         m_SubMeshCallbacks->m_PreCallBacks.Size() > 0;
     CKBOOL textureStagesReset = FALSE;
@@ -4876,7 +4909,8 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
     } else if (mat) {
         // Normal case - set material as current
         CKMaterialBindingScope materialBinding(mat, dev, 0);
-        mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
+        if (!mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0))
+            return 0;
         textureStagesReset = materialBinding.TextureStagesWereReset();
         allowMaterialStateOverrides = materialBinding.AllowsRenderStateOverrides();
 
@@ -4890,7 +4924,8 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
         // No material - use default
         mat = (RCKMaterial *) dev->m_RenderManager->GetDefaultMaterial();
         CKMaterialBindingScope materialBinding(mat, dev, 0);
-        mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
+        if (!mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0))
+            return 0;
         textureStagesReset = materialBinding.TextureStagesWereReset();
         allowMaterialStateOverrides = materialBinding.AllowsRenderStateOverrides();
 
@@ -5191,8 +5226,9 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
             (!ent || (ent->m_MoveableFlags & VX_MOVEABLE_RENDERCHANNELS))) {
             const CKDWORD fogEnable =
                 dev->GetRasterizerRenderState(VXRENDERSTATE_FOGENABLE);
-            RenderChannelsForGroup(dev, ent, &originalData, fogEnable,
-                                   group, localEffectPrefix);
+            if (!RenderChannelsForGroup(dev, ent, &originalData, fogEnable,
+                                       group, localEffectPrefix))
+                renderResult = 0;
         }
     }
 
@@ -5211,7 +5247,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
     }
 
     CK_RENDER_PERF_ADD(renderStats, MeshGroupUs, CKRenderPerfElapsedUs(perfStart));
-    return 1;
+    return renderResult;
 }
 
 //--------------------------------------------
@@ -5441,7 +5477,7 @@ int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
 
         CKMaterialBindingScope binding(mat, dev, 0);
         const CKBOOL accepted = mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
-        if (group && !accepted) {
+        if (!accepted) {
             mat->RestoreAfterChannelRender(savedSourceBlend, savedDestBlend, savedFlags);
             result = 0;
             continue;
