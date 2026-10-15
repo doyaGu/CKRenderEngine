@@ -349,9 +349,20 @@ CKBOOL RCKVertexBuffer::Upload(CKRenderContext *Ctx, CKDWORD StartVertex,
         LockFlags = CKRST_LOCK_DEFAULT;
     }
 
-    // DISCARD replaces the native buffer contents. The engine's CPU staging
-    // still contains every current vertex, so upload the complete snapshot
-    // even when the caller only changed a subrange.
+    // A subrange describes only the latest CPU edit. A context that missed
+    // an earlier edit, or whose last transfer failed, needs the whole snapshot
+    // before its hardware version can be advanced to the current CPU version.
+    const CKDWORD previousVersion = m_ContentVersion == 1
+        ? CKDWORD(-1)
+        : m_ContentVersion - 1;
+    if (!m_HardwareValid || m_HardwareVersion != previousVersion) {
+        StartVertex = 0;
+        VertexCount = m_Desc.m_CurrentVCount;
+        if (LockFlags != CKRST_LOCK_DISCARD)
+            LockFlags = CKRST_LOCK_DEFAULT;
+    }
+
+    // DISCARD replaces the native buffer contents, including unchanged ranges.
     if (LockFlags == CKRST_LOCK_DISCARD) {
         StartVertex = 0;
         VertexCount = m_Desc.m_CurrentVCount;
