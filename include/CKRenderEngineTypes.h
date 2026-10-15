@@ -282,10 +282,10 @@ struct PMEdgeCollapseData {
 
     ~PMEdgeCollapseData() {
         // Clean up allocated vertices and faces
-        for (PMVertexEx **it = vertices.Begin(); it != vertices.End(); ++it) {
+        for (PMFace **it = faces.Begin(); it != faces.End(); ++it) {
             delete *it;
         }
-        for (PMFace **it = faces.Begin(); it != faces.End(); ++it) {
+        for (PMVertexEx **it = vertices.Begin(); it != vertices.End(); ++it) {
             delete *it;
         }
     }
