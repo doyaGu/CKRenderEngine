@@ -4680,10 +4680,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
             ++CKRenderPerfCurrent().AlphaGroups;
     );
     RCKMaterial *mat = group->m_Material;
-    CKBOOL orderedCallbacks = ((m_SubMeshCallbacks &&
-                                (m_SubMeshCallbacks->m_PreCallBacks.Size() > 0 ||
-                                 m_SubMeshCallbacks->m_PostCallBacks.Size() > 0)) ||
-                               (mat && mat->GetCallback(nullptr)));
+    const CKBOOL callbacksOwnMaterial = m_SubMeshCallbacks &&
+        m_SubMeshCallbacks->m_PreCallBacks.Size() > 0;
     int groupIndex = -1;
     for (int i = 0; i < m_MaterialGroups.Size(); ++i) {
         if (m_MaterialGroups[i] == group) {
@@ -4728,6 +4726,13 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         mat = (RCKMaterial *) dev->m_RenderManager->GetDefaultMaterial();
         mat->SetAsCurrent((CKRenderContext *) dev, !(m_Flags & VXMESH_PRELITMODE), 0);
 
+        if ((m_Flags & (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) ==
+            (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) {
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+        }
+
         if (m_ActiveTextureChannels.Size() > 0) {
             dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
             dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
@@ -4736,7 +4741,8 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
         }
     }
 
-    BindMonoPassTextureChannels(dev);
+    if (!callbacksOwnMaterial)
+        BindMonoPassTextureChannels(dev);
 
     dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags));
 
@@ -4747,188 +4753,198 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
             dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
     }
 
-    // Render primitives
-    if (data) {
-        // Software vertex path (data != null)
+    // Solid transparent two-sided material draws back faces before front faces.
+    // Preserve the original all-back-primitives / all-front-primitives ordering.
+    const CKBOOL twoSidedTransparent = mat->GetFillMode() == VXFILL_SOLID &&
+        mat->IsTwoSided() && mat->IsAlphaTransparent();
+    const int passCount = twoSidedTransparent ? 2 : 1;
+    for (int pass = 0; pass < passCount; ++pass) {
+        if (twoSidedTransparent)
+            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_CULLMODE,
+                pass == 0 ? VXCULL_CW : VXCULL_CCW);
+        // Render primitives
+        if (data) {
+            // Software vertex path (data != null)
 
-        // Update data pointers if group has remapped vertices
-        if (group->m_RemapData) {
-            CKVBuffer *vb = GetVBuffer(group);
-            if (vb && group->m_VertexCount > 0 && vb->m_Vertices.Size() >= (int) group->m_VertexCount &&
-                vb->m_Colors.Size() >= (int) group->m_VertexCount) {
-                VxVertex *verts = vb->m_Vertices.Begin();
-                VxColors *colors = vb->m_Colors.Begin();
+            // Update data pointers if group has remapped vertices
+            if (group->m_RemapData) {
+                CKVBuffer *vb = GetVBuffer(group);
+                if (vb && group->m_VertexCount > 0 && vb->m_Vertices.Size() >= (int) group->m_VertexCount &&
+                    vb->m_Colors.Size() >= (int) group->m_VertexCount) {
+                    VxVertex *verts = vb->m_Vertices.Begin();
+                    VxColors *colors = vb->m_Colors.Begin();
 
-                data->VertexCount = group->m_VertexCount;
-                data->PositionPtr = &verts[0].m_Position;
-                data->NormalPtr = &verts[0].m_Normal;
-                data->TexCoordPtr = &verts[0].m_UV;
-                data->ColorPtr = &colors[0].Color;
-                data->SpecularColorPtr = &colors[0].Specular;
+                    data->VertexCount = group->m_VertexCount;
+                    data->PositionPtr = &verts[0].m_Position;
+                    data->NormalPtr = &verts[0].m_Normal;
+                    data->TexCoordPtr = &verts[0].m_UV;
+                    data->ColorPtr = &colors[0].Color;
+                    data->SpecularColorPtr = &colors[0].Specular;
 
-                for (int j = 0; j < m_ActiveTextureChannels.Size(); ++j) {
-                    const int channelIdx = m_ActiveTextureChannels[j];
-                    Vx2DVector *channelUVs = nullptr;
-                    if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
-                        if (vb->m_UVs[channelIdx].Size() == (int) group->m_VertexCount)
-                            channelUVs = vb->m_UVs[channelIdx].Begin();
+                    for (int j = 0; j < m_ActiveTextureChannels.Size(); ++j) {
+                        const int channelIdx = m_ActiveTextureChannels[j];
+                        Vx2DVector *channelUVs = nullptr;
+                        if (channelIdx >= 0 && channelIdx < vb->m_UVs.Size()) {
+                            if (vb->m_UVs[channelIdx].Size() == (int) group->m_VertexCount)
+                                channelUVs = vb->m_UVs[channelIdx].Begin();
+                        }
+                        data->TexCoordPtrs[j] = channelUVs;
+                        data->TexCoordStrides[j] = sizeof(Vx2DVector);
                     }
-                    data->TexCoordPtrs[j] = channelUVs;
-                    data->TexCoordStrides[j] = sizeof(Vx2DVector);
                 }
             }
-        }
 
-        // Submit draw via fixed-function pipeline (software vertex path)
-        if (dev->m_RasterizerContext) {
-            // Iterate through primitive entries and submit draws
-            for (int p = 0; p < group->m_Primitives.Size(); p++) {
-                CKPrimitiveEntry *prim = &group->m_Primitives[p];
-                if (prim->m_Indices.Size() > 0) {
-                    CK_RENDER_PERF_IF(renderStats,
-                        ++CKRenderPerfCurrent().PrimitiveEntries;
-                        ++CKRenderPerfCurrent().SoftwarePrimitiveEntries;
-                        CKRenderPerfCurrent().TotalGroupIndices += (CKDWORD)prim->m_Indices.Size();
-                    );
-                    static int s_meshDrawLogCount = 0;
+            // Submit draw via fixed-function pipeline (software vertex path)
+            if (dev->m_RasterizerContext) {
+                // Iterate through primitive entries and submit draws
+                for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                    CKPrimitiveEntry *prim = &group->m_Primitives[p];
+                    if (prim->m_Indices.Size() > 0) {
+                        CK_RENDER_PERF_IF(renderStats,
+                            ++CKRenderPerfCurrent().PrimitiveEntries;
+                            ++CKRenderPerfCurrent().SoftwarePrimitiveEntries;
+                            CKRenderPerfCurrent().TotalGroupIndices += (CKDWORD)prim->m_Indices.Size();
+                        );
+                        static int s_meshDrawLogCount = 0;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
+                        const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
 #else
-                    const int meshLogLimit = 0;
+                        const int meshLogLimit = 0;
 #endif
-                    if (s_meshDrawLogCount < meshLogLimit) {
-                        const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
-                        const VxBbox &box = GetLocalBox();
-                        VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
-                        CKDWORD texBlend = 0;
-                        CKDWORD alphaBlend = 0;
-                        CKDWORD srcBlend = 0;
-                        CKDWORD dstBlend = 0;
-                        if (mat) {
-                            diffuse = mat->GetDiffuse();
-                            texBlend = (CKDWORD)mat->GetTextureBlendMode();
-                            alphaBlend = mat->AlphaBlendEnabled();
-                            srcBlend = (CKDWORD)mat->GetSourceBlend();
-                            dstBlend = (CKDWORD)mat->GetDestBlend();
+                        if (s_meshDrawLogCount < meshLogLimit) {
+                            const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
+                            const VxBbox &box = GetLocalBox();
+                            VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
+                            CKDWORD texBlend = 0;
+                            CKDWORD alphaBlend = 0;
+                            CKDWORD srcBlend = 0;
+                            CKDWORD dstBlend = 0;
+                            if (mat) {
+                                diffuse = mat->GetDiffuse();
+                                texBlend = (CKDWORD)mat->GetTextureBlendMode();
+                                alphaBlend = mat->AlphaBlendEnabled();
+                                srcBlend = (CKDWORD)mat->GetSourceBlend();
+                                dstBlend = (CKDWORD)mat->GetDestBlend();
+                            }
+                            CK_LOG_FMT("Mesh",
+                                       "Mesh draw #%d: path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                       s_meshDrawLogCount,
+                                       prim->m_Type,
+                                       ent && ent->GetName() ? ent->GetName() : "",
+                                       GetName() ? GetName() : "",
+                                       mat && mat->GetName() ? mat->GetName() : "",
+                                       data->VertexCount,
+                                       group->m_VertexCount,
+                                       prim->m_Indices.Size(),
+                                       m_Flags,
+                                       diffuse.r, diffuse.g, diffuse.b, diffuse.a,
+                                       texBlend,
+                                       alphaBlend,
+                                       srcBlend,
+                                       dstBlend,
+                                       world[3][0], world[3][1], world[3][2],
+                                       box.Min.x, box.Min.y, box.Min.z,
+                                       box.Max.x, box.Max.y, box.Max.z);
+                            ++s_meshDrawLogCount;
                         }
-                        CK_LOG_FMT("Mesh",
-                                   "Mesh draw #%d: path=SW prim=%d ent=%s mesh=%s mat=%s verts=%d groupVerts=%d indices=%d meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
-                                   s_meshDrawLogCount,
-                                   prim->m_Type,
-                                   ent && ent->GetName() ? ent->GetName() : "",
-                                   GetName() ? GetName() : "",
-                                   mat && mat->GetName() ? mat->GetName() : "",
-                                   data->VertexCount,
-                                   group->m_VertexCount,
-                                   prim->m_Indices.Size(),
-                                   m_Flags,
-                                   diffuse.r, diffuse.g, diffuse.b, diffuse.a,
-                                   texBlend,
-                                   alphaBlend,
-                                   srcBlend,
-                                   dstBlend,
-                                   world[3][0], world[3][1], world[3][2],
-                                   box.Min.x, box.Min.y, box.Min.z,
-                                   box.Max.x, box.Max.y, box.Max.z);
-                        ++s_meshDrawLogCount;
+                        CKMeshSetDrawAnnotation(dev, (CKSTRING)"SW",
+                                        ent, this, mat, groupIndex, p,
+                                                prim->m_Type,
+                                                (CKDWORD)prim->m_Indices.Size(),
+                                                (CKDWORD)data->VertexCount);
+                        if (dev->m_DrawAnnotationState) {
+                            dev->ApplyDrawAnnotation(prim->m_Type,
+                                                     (CKDWORD)prim->m_Indices.Size(),
+                                                     (CKDWORD)data->VertexCount);
+                        }
+                        dev->m_RasterizerContext->DrawPrimitive(
+                            prim->m_Type, prim->m_Indices.Begin(), prim->m_Indices.Size(), data);
                     }
-                    CKMeshSetDrawAnnotation(dev, (CKSTRING)"SW",
-                                    ent, this, mat, groupIndex, p,
-                                            prim->m_Type,
-                                            (CKDWORD)prim->m_Indices.Size(),
-                                            (CKDWORD)data->VertexCount);
-                    if (dev->m_DrawAnnotationState) {
-                        dev->ApplyDrawAnnotation(prim->m_Type,
-                                                 (CKDWORD)prim->m_Indices.Size(),
-                                                 (CKDWORD)data->VertexCount);
-                    }
-                    dev->m_RasterizerContext->DrawPrimitive(
-                        prim->m_Type, prim->m_Indices.Begin(), prim->m_Indices.Size(), data);
                 }
             }
-        }
-    } else {
-        // Submit draw via fixed-function pipeline (hardware VB path)
-        if (dev->m_RasterizerContext) {
-            for (int p = 0; p < group->m_Primitives.Size(); p++) {
-                CKPrimitiveEntry *prim = &group->m_Primitives[p];
-                CKDWORD indexCount = prim->m_Indices.Size();
-                if (indexCount > 0) {
-                    CK_RENDER_PERF_IF(renderStats,
-                        ++CKRenderPerfCurrent().PrimitiveEntries;
-                        ++CKRenderPerfCurrent().HardwarePrimitiveEntries;
-                        ++CKRenderPerfCurrent().DrawVertexBufferCalls;
-                        CKRenderPerfCurrent().TotalGroupIndices += indexCount;
-                    );
-                    CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
-                    CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
-                    static int s_meshDrawLogCount = 0;
+        } else {
+            // Submit draw via fixed-function pipeline (hardware VB path)
+            if (dev->m_RasterizerContext) {
+                for (int p = 0; p < group->m_Primitives.Size(); p++) {
+                    CKPrimitiveEntry *prim = &group->m_Primitives[p];
+                    CKDWORD indexCount = prim->m_Indices.Size();
+                    if (indexCount > 0) {
+                        CK_RENDER_PERF_IF(renderStats,
+                            ++CKRenderPerfCurrent().PrimitiveEntries;
+                            ++CKRenderPerfCurrent().HardwarePrimitiveEntries;
+                            ++CKRenderPerfCurrent().DrawVertexBufferCalls;
+                            CKRenderPerfCurrent().TotalGroupIndices += indexCount;
+                        );
+                        CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
+                        CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
+                        static int s_meshDrawLogCount = 0;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                    const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
+                        const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
 #else
-                    const int meshLogLimit = 0;
+                        const int meshLogLimit = 0;
 #endif
-                    if (s_meshDrawLogCount < meshLogLimit) {
-                        const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
-                        const VxBbox &box = GetLocalBox();
-                        VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
-                        CKDWORD texBlend = 0;
-                        CKDWORD alphaBlend = 0;
-                        CKDWORD srcBlend = 0;
-                        CKDWORD dstBlend = 0;
-                        if (mat) {
-                            diffuse = mat->GetDiffuse();
-                            texBlend = (CKDWORD)mat->GetTextureBlendMode();
-                            alphaBlend = mat->AlphaBlendEnabled();
-                            srcBlend = (CKDWORD)mat->GetSourceBlend();
-                            dstBlend = (CKDWORD)mat->GetDestBlend();
+                        if (s_meshDrawLogCount < meshLogLimit) {
+                            const VxMatrix &world = ent ? ent->GetWorldMatrix() : VxMatrix::Identity();
+                            const VxBbox &box = GetLocalBox();
+                            VxColor diffuse(1.0f, 1.0f, 1.0f, 1.0f);
+                            CKDWORD texBlend = 0;
+                            CKDWORD alphaBlend = 0;
+                            CKDWORD srcBlend = 0;
+                            CKDWORD dstBlend = 0;
+                            if (mat) {
+                                diffuse = mat->GetDiffuse();
+                                texBlend = (CKDWORD)mat->GetTextureBlendMode();
+                                alphaBlend = mat->AlphaBlendEnabled();
+                                srcBlend = (CKDWORD)mat->GetSourceBlend();
+                                dstBlend = (CKDWORD)mat->GetDestBlend();
+                            }
+                            CK_LOG_FMT("Mesh",
+                                       "Mesh draw #%d: path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
+                                       s_meshDrawLogCount,
+                                       prim->m_Type,
+                                       ent && ent->GetName() ? ent->GetName() : "",
+                                       GetName() ? GetName() : "",
+                                       mat && mat->GetName() ? mat->GetName() : "",
+                                       group->m_BaseVertex,
+                                       group->m_VertexCount,
+                                       startIndex,
+                                       indexCount,
+                                       m_Flags,
+                                       diffuse.r, diffuse.g, diffuse.b, diffuse.a,
+                                       texBlend,
+                                       alphaBlend,
+                                       srcBlend,
+                                       dstBlend,
+                                       world[3][0], world[3][1], world[3][2],
+                                       box.Min.x, box.Min.y, box.Min.z,
+                                       box.Max.x, box.Max.y, box.Max.z);
+                            ++s_meshDrawLogCount;
                         }
-                        CK_LOG_FMT("Mesh",
-                                   "Mesh draw #%d: path=HW prim=%d ent=%s mesh=%s mat=%s baseVertex=%u verts=%u startIndex=%u indices=%u meshFlags=0x%X matDiffuse=(%.3f %.3f %.3f %.3f) texBlend=%u matAlpha=%u matBlend=%u/%u worldPos=(%.3f %.3f %.3f) localBoxMin=(%.3f %.3f %.3f) localBoxMax=(%.3f %.3f %.3f)",
-                                   s_meshDrawLogCount,
-                                   prim->m_Type,
-                                   ent && ent->GetName() ? ent->GetName() : "",
-                                   GetName() ? GetName() : "",
-                                   mat && mat->GetName() ? mat->GetName() : "",
-                                   group->m_BaseVertex,
-                                   group->m_VertexCount,
-                                   startIndex,
-                                   indexCount,
-                                   m_Flags,
-                                   diffuse.r, diffuse.g, diffuse.b, diffuse.a,
-                                   texBlend,
-                                   alphaBlend,
-                                   srcBlend,
-                                   dstBlend,
-                                   world[3][0], world[3][1], world[3][2],
-                                   box.Min.x, box.Min.y, box.Min.z,
-                                   box.Max.x, box.Max.y, box.Max.z);
-                        ++s_meshDrawLogCount;
-                    }
-                    const CKDWORD hwBaseVertex = m_VertexBufferWrapAware ? 0 : group->m_BaseVertex;
-                    const CKDWORD hwVertexCount = m_VertexBufferWrapAware ? m_VertexBufferVertexCount : group->m_VertexCount;
-                    CKMeshSetDrawAnnotation(dev, (CKSTRING)"HW",
-                                    ent, this, mat, groupIndex, p,
-                                            prim->m_Type,
-                                            indexCount,
-                                            hwVertexCount);
-                    if (dev->m_DrawAnnotationState) {
-                        dev->ApplyDrawAnnotation(prim->m_Type,
-                                                 indexCount, hwVertexCount);
-                    }
-                    // The hardware index buffer holds absolute vertex indices
-                    // A primitive without an index buffer draws its own indices
-                    // relative to the group base.
-                    if (ib) {
-                        dev->m_RasterizerContext->DrawPrimitiveVBIB(
-                            prim->m_Type, m_VertexBuffer, ib,
-                            hwBaseVertex, hwVertexCount,
-                            startIndex, (int) indexCount);
-                    } else {
-                        dev->m_RasterizerContext->DrawPrimitiveVB(
-                            prim->m_Type, m_VertexBuffer,
-                            hwBaseVertex, hwVertexCount,
-                            prim->m_Indices.Begin(), (int) indexCount);
+                        const CKDWORD hwBaseVertex = m_VertexBufferWrapAware ? 0 : group->m_BaseVertex;
+                        const CKDWORD hwVertexCount = m_VertexBufferWrapAware ? m_VertexBufferVertexCount : group->m_VertexCount;
+                        CKMeshSetDrawAnnotation(dev, (CKSTRING)"HW",
+                                        ent, this, mat, groupIndex, p,
+                                                prim->m_Type,
+                                                indexCount,
+                                                hwVertexCount);
+                        if (dev->m_DrawAnnotationState) {
+                            dev->ApplyDrawAnnotation(prim->m_Type,
+                                                     indexCount, hwVertexCount);
+                        }
+                        // The hardware index buffer holds absolute vertex indices
+                        // A primitive without an index buffer draws its own indices
+                        // relative to the group base.
+                        if (ib && !(twoSidedTransparent && pass == 0)) {
+                            dev->m_RasterizerContext->DrawPrimitiveVBIB(
+                                prim->m_Type, m_VertexBuffer, ib,
+                                hwBaseVertex, hwVertexCount,
+                                startIndex, (int) indexCount);
+                        } else {
+                            dev->m_RasterizerContext->DrawPrimitiveVB(
+                                prim->m_Type, m_VertexBuffer,
+                                hwBaseVertex, hwVertexCount,
+                                prim->m_Indices.Begin(), (int) indexCount);
+                        }
                     }
                 }
             }
@@ -5110,6 +5126,22 @@ int RCKMesh::CreateRenderGroups() {
     m_Flags |= VXMESH_MONOMATERIAL;
     m_Valid = 0;
 
+    // Reset all existing material groups (IDA: sub_1002A0F0(group, 0))
+    for (int i = 0; i < m_MaterialGroups.Size(); i++) {
+        ResetMaterialGroup(m_MaterialGroups[i], 0);
+    }
+
+    // Clear channel face indices
+    for (int c = 0; c < m_MaterialChannels.Size(); c++) {
+        if (m_MaterialChannels[c].m_FaceIndices) {
+            delete m_MaterialChannels[c].m_FaceIndices;
+            m_MaterialChannels[c].m_FaceIndices = nullptr;
+        }
+    }
+
+    // Reset face channel mask (will trigger rebuild on next render)
+    m_FaceChannelMask = 0xFFFF;
+
     // Check for valid geometry
     int vertexCount = m_Vertices.Size();
     int faceCount = m_Faces.Size();
@@ -5118,18 +5150,14 @@ int RCKMesh::CreateRenderGroups() {
         return 0;
     }
 
-    // Reset all existing material groups (IDA: sub_1002A0F0(group, 0))
-    for (int i = 0; i < m_MaterialGroups.Size(); i++) {
-        ResetMaterialGroup(m_MaterialGroups[i], 0);
-    }
-
     // Allocate temporary tracker array (IDA uses CKMemoryPool(context, vertexCount) and then treats it as CKDWORD[vertexCount])
     CKMemoryPool pool(m_Context, vertexCount);
     CKDWORD *vertexTracker = (CKDWORD *) pool.Mem();
 
     // Track min/max material indices
     int maxMatIndex = 0;
-    int minMatIndex = 2048;
+    // CKFace material ordinals span the full WORD range.
+    int minMatIndex = 0x10000;
 
     // Pointer to face vertex indices
     CKWORD *faceIndices = m_FaceVertexIndices.Begin();
@@ -5316,17 +5344,6 @@ int RCKMesh::CreateRenderGroups() {
                 --m_Faces[f].m_MatIndex;
         }
     }
-
-    // Clear channel face indices
-    for (int c = 0; c < m_MaterialChannels.Size(); c++) {
-        if (m_MaterialChannels[c].m_FaceIndices) {
-            delete m_MaterialChannels[c].m_FaceIndices;
-            m_MaterialChannels[c].m_FaceIndices = nullptr;
-        }
-    }
-
-    // Reset face channel mask (will trigger rebuild on next render)
-    m_FaceChannelMask = 0xFFFF;
 
     // Triangle strip optimization (if enabled)
     if ((m_Flags & VXMESH_STRIPIFY) != 0) {
@@ -5532,11 +5549,16 @@ CKBOOL RCKMesh::CreateHardwareVertexBuffer(CKRasterizerContext *rst, CKDWORD ver
         return FALSE;
     }
 
-    if (m_VertexBuffer &&
-        m_VertexBufferVertexFormat == vertexFormat &&
-        m_VertexBufferStride == stride &&
-        m_VertexBufferVertexCount == vertexCount) {
-        return TRUE;
+    if (m_VertexBuffer) {
+        CKVertexBufferDesc actual;
+        if (!rst->GetVertexBufferDesc(m_VertexBuffer, &actual)) {
+            m_VertexBuffer = 0;
+            ResetHardwareVertexBufferState();
+        } else if (actual.m_VertexFormat == vertexFormat &&
+                   actual.m_VertexSize == stride &&
+                   actual.m_MaxVertexCount >= vertexCount) {
+            return TRUE;
+        }
     }
 
     if (m_VertexBuffer &&
@@ -5566,6 +5588,11 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         !rst || !data || data->VertexCount <= 0)
         return FALSE;
 
+    // Native DefaultRender resets the reuse age on every morph draw and
+    // consumes interpolation scratch through software vertices.
+    if (m_ProgressiveMesh && m_ProgressiveMesh->m_MorphEnabled)
+        return FALSE;
+
     RCKRenderManager *renderManager = renderContext->m_RenderManager;
     if (!renderManager)
         return FALSE;
@@ -5591,6 +5618,30 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
         renderManager->MeshIndicesChanged(this);
 
     renderManager->SelectMeshBuffers(this, rst);
+
+    if (m_VertexBuffer) {
+        CKVertexBufferDesc actual;
+        if (!rst->GetVertexBufferDesc(m_VertexBuffer, &actual)) {
+            m_VertexBuffer = 0;
+            ResetHardwareVertexBufferState();
+        } else if (actual.m_VertexFormat != m_VertexBufferVertexFormat ||
+                   actual.m_VertexSize != m_VertexBufferStride ||
+                   actual.m_MaxVertexCount < m_VertexBufferVertexCount) {
+            m_VertexBufferReady = 0;
+        }
+    }
+    if (m_IndexBuffer) {
+        CKIndexBufferDesc actual;
+        if (!rst->GetIndexBufferDesc(m_IndexBuffer, &actual)) {
+            m_IndexBuffer = 0;
+            m_IndexBufferIndexCount = 0;
+            m_IndexBufferReady = FALSE;
+        } else {
+            if (actual.m_MaxIndexCount < m_IndexBufferIndexCount)
+                m_IndexBufferReady = FALSE;
+            m_IndexBufferIndexCount = actual.m_MaxIndexCount;
+        }
+    }
 
     // Public vertex format and the canonical interleaved layout Lock memory uses.
     const CKDWORD vertexFormat = CKRSTVertexFormatFromDrawData(data);
@@ -5643,6 +5694,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
 
         if (m_VertexBufferReady != 0 &&
             m_VertexBufferWrapAware &&
+            m_IndexBufferReady && m_IndexBuffer &&
+            m_IndexBufferIndexCount >= totalVertexCount &&
             !geometryChanged &&
             m_VertexBufferDpFlags == data->Flags &&
             m_VertexBufferVertexFormat == vertexFormat &&
@@ -5707,6 +5760,20 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
                 groupData.TexCoordPtr = &remappedVerts[0].m_UV;
                 groupData.ColorPtr = data->ColorPtr ? &remappedColors[0].Color : nullptr;
                 groupData.SpecularColorPtr = data->SpecularColorPtr ? &remappedColors[0].Specular : nullptr;
+                groupData.PositionStride = sizeof(VxVertex);
+                groupData.NormalStride = sizeof(VxVertex);
+                groupData.TexCoordStride = sizeof(VxVertex);
+                groupData.ColorStride = sizeof(VxColors);
+                groupData.SpecularColorStride = sizeof(VxColors);
+                for (int j = 0; j < m_ActiveTextureChannels.Size() && j < CKRST_MAX_STAGES - 1; ++j) {
+                    const int channelIndex = m_ActiveTextureChannels[j];
+                    Vx2DVector *uvs = nullptr;
+                    if (channelIndex >= 0 && channelIndex < vb->m_UVs.Size() &&
+                        vb->m_UVs[channelIndex].Size() == (int)group->m_VertexCount)
+                        uvs = vb->m_UVs[channelIndex].Begin();
+                    groupData.TexCoordPtrs[j] = uvs;
+                    groupData.TexCoordStrides[j] = sizeof(Vx2DVector);
+                }
             }
 
             group->m_BaseVertex = 0;
@@ -5890,12 +5957,16 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
             if (!IsRenderableMaterialGroup(group))
                 continue;
             if (!group->m_RemapData) {
+                if (group->m_BaseVertex != 0)
+                    m_IndexBufferReady = FALSE;
                 group->m_BaseVertex = 0;
                 continue;
             }
 
             CKVBuffer *vb = GetVBuffer(group);
             if (!vb || group->m_VertexCount <= 0) {
+                if (group->m_BaseVertex != 0)
+                    m_IndexBufferReady = FALSE;
                 group->m_BaseVertex = 0;
                 continue;
             }
@@ -5904,6 +5975,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
 
             if (vb->m_Vertices.Size() < (int)group->m_VertexCount ||
                 vb->m_Colors.Size() < (int)group->m_VertexCount) {
+                if (group->m_BaseVertex != 0)
+                    m_IndexBufferReady = FALSE;
                 group->m_BaseVertex = 0;
                 continue;
             }
@@ -5911,6 +5984,8 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
             VxVertex *remappedVerts = vb->m_Vertices.Begin();
             VxColors *remappedColors = vb->m_Colors.Begin();
 
+            if (group->m_BaseVertex != currentOffset)
+                m_IndexBufferReady = FALSE;
             group->m_BaseVertex = currentOffset;
 
             VxDrawPrimitiveData remapData = *data;
@@ -5920,6 +5995,11 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
             remapData.TexCoordPtr = &remappedVerts[0].m_UV;
             remapData.ColorPtr = data->ColorPtr ? &remappedColors[0].Color : nullptr;
             remapData.SpecularColorPtr = data->SpecularColorPtr ? &remappedColors[0].Specular : nullptr;
+            remapData.PositionStride = sizeof(VxVertex);
+            remapData.NormalStride = sizeof(VxVertex);
+            remapData.TexCoordStride = sizeof(VxVertex);
+            remapData.ColorStride = sizeof(VxColors);
+            remapData.SpecularColorStride = sizeof(VxColors);
 
             for (int j = 0; j < m_ActiveTextureChannels.Size(); ++j) {
                 const int channelIdx = m_ActiveTextureChannels[j];
@@ -5969,6 +6049,19 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
 CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     if (!rst)
         return FALSE;
+
+    if (m_IndexBuffer) {
+        CKIndexBufferDesc actual;
+        if (!rst->GetIndexBufferDesc(m_IndexBuffer, &actual)) {
+            m_IndexBuffer = 0;
+            m_IndexBufferIndexCount = 0;
+            m_IndexBufferReady = FALSE;
+        } else {
+            if (actual.m_MaxIndexCount < m_IndexBufferIndexCount)
+                m_IndexBufferReady = FALSE;
+            m_IndexBufferIndexCount = actual.m_MaxIndexCount;
+        }
+    }
 
     CKBOOL needUpdate = !m_IndexBufferReady;
     CKDWORD totalIndexCount = 0;
