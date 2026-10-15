@@ -64,7 +64,7 @@ void RCKKinematicChain::Register() {
 }
 
 /**
- * CreateInstance - Based on IDA decompilation at 0x10056000
+ * CreateInstance - Based on IDA decompilation at 0x10055FF5
  */
 CKKinematicChain *RCKKinematicChain::CreateInstance(CKContext *Context) {
     return new RCKKinematicChain(Context);
@@ -203,53 +203,39 @@ CKERROR RCKKinematicChain::Copy(CKObject &o, CKDependenciesContext &context) {
  * GetChainLength - Based on IDA decompilation at 0x1005267E
  */
 float RCKKinematicChain::GetChainLength(CKBodyPart *End) {
-    CKBodyPart *startEffector = m_StartEffector;
-    CKBodyPart *endEffector = m_EndEffector;
-
-    if (End)
-        endEffector = End;
-
-    if (startEffector == endEffector)
-        return 0.0f;
-    if (!endEffector)
+    CKBodyPart *endEffector = End ? End : m_EndEffector;
+    if (GetChainBodyCount(endEffector) == 0)
         return 0.0f;
 
-    CK3dEntity *parent = endEffector->GetParent();
-    if (!parent)
-        return 0.0f;
-
-    VxVector endPos, parentPos;
-    endEffector->GetPosition(&endPos, nullptr);
-    parent->GetPosition(&parentPos, nullptr);
-
-    VxVector diff = endPos - parentPos;
-    float distance = Magnitude(diff);
-
-    return distance + GetChainLength((CKBodyPart *)parent);
+    float distance = 0.0f;
+    CK3dEntity *current = endEffector;
+    while (current != m_StartEffector) {
+        CK3dEntity *parent = current->GetParent();
+        VxVector currentPos, parentPos;
+        current->GetPosition(&currentPos, nullptr);
+        parent->GetPosition(&parentPos, nullptr);
+        distance += Magnitude(currentPos - parentPos);
+        current = parent;
+    }
+    return distance;
 }
 
 /**
  * GetChainBodyCount - Based on IDA decompilation at 0x100527E4
  */
 int RCKKinematicChain::GetChainBodyCount(CKBodyPart *End) {
-    CKBodyPart *startEffector = m_StartEffector;
-    CKBodyPart *endEffector = m_EndEffector;
-
-    if (End)
-        endEffector = End;
-
-    if (startEffector == endEffector)
-        return 1;
-    if (!startEffector)
-        return 0;
-    if (!endEffector)
+    CK3dEntity *current = End ? End : m_EndEffector;
+    if (!m_StartEffector || !current)
         return 0;
 
-    CKBodyPart *parent = (CKBodyPart *)endEffector->GetParent();
-    if (parent)
-        return GetChainBodyCount(parent) + 1;
-    else
-        return 0;
+    int count = 0;
+    while (current && CKIsChildClassOf(current, CKCID_BODYPART)) {
+        ++count;
+        if (current == m_StartEffector)
+            return count;
+        current = current->GetParent();
+    }
+    return 0;
 }
 
 /**
