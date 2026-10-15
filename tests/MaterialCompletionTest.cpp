@@ -233,3 +233,23 @@ TEST_F(MaterialCompletionTest, ExplicitSlotUploadRefusalClearsItsPartialGenerate
     color.DirtyFailure = FALSE; ASSERT_TRUE(material.BindTextureSlotToStage(Device, 1, 2)); Draw();
     EXPECT_EQ(41u, State.SubmittedTextures[2]); EXPECT_EQ(70u, State.SubmittedTextures[0]); EXPECT_EQ(77u, State.SubmittedTextures[7]);
 }
+TEST_F(MaterialCompletionTest, ReflectionAtThePositiveVerticalPoleKeepsAnOrthonormalProjection) {
+    Pole(VXEFFECT_TGREFLECT, VxVector(0.0f, 4.0f, 0.0f), .9f);
+}
+TEST_F(MaterialCompletionTest, ChromeAtTheNegativeVerticalPoleKeepsAnOrthonormalProjection) {
+    Pole(VXEFFECT_TGCHROME, VxVector(0.0f, -4.0f, 0.0f), .1f);
+}
+TEST_F(MaterialCompletionTest, CoincidentReflectionReferentialUsesAStableForwardProjection) {
+    Pole(VXEFFECT_TGREFLECT, VxVector(0.0f, 0.0f, 0.0f), .5f);
+}
+TEST_F(MaterialCompletionTest, UnknownTexgenResetsOnlyTheSelectedGeneratedCoordinateState) {
+    RCKMaterial material(Context); State.Textures[0] = 70; State.Textures[7] = 77;
+    VxMatrix old = VxMatrix::Identity(); old[3][0] = 9.0f; State.Matrices[VXMATRIX_TEXTURE0 + 2] = old;
+    State.StageStates[2][CKRST_TSS_TEXCOORDINDEX] = CKRSTPackTexcoordIndex(2, CKRST_TEXGEN_CAMERASPACENORMAL);
+    State.StageStates[2][CKRST_TSS_TEXTURETRANSFORMFLAGS] = CKRST_TTF_COUNT3;
+    ASSERT_EQ(1u, material.TexGenEffect(Device, static_cast<VX_EFFECTTEXGEN>(12345), nullptr, 2)); Draw();
+    EXPECT_EQ(2u, State.SubmittedCoordinates[2]); EXPECT_EQ(CKRST_TTF_NONE, State.StageStates[2][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+    EXPECT_EQ(70u, State.SubmittedTextures[0]); EXPECT_EQ(77u, State.SubmittedTextures[7]);
+    for (int row = 0; row < 4; ++row) for (int column = 0; column < 4; ++column)
+        EXPECT_FLOAT_EQ(row == column ? 1.0f : 0.0f, State.SubmittedMatrices[2][row][column]);
+}

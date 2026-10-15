@@ -1911,9 +1911,17 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
             VxVector direction(world[3][0] - reference[3][0],
                                world[3][1] - reference[3][1],
                                world[3][2] - reference[3][2]);
-            direction.Normalize();
-            VxVector up = VxVector::axisY() - direction * direction.y;
-            up.Normalize();
+            // A coincident referential has no preferred look direction. At
+            // the vertical poles, use another up axis to keep the basis valid.
+            const float directionLength = sqrtf(direction.SquareMagnitude());
+            if (directionLength == 0.0f)
+                direction = VxVector::axisZ();
+            else
+                direction /= directionLength;
+            const VxVector upAxis = fabsf(direction.y) > 0.999f
+                ? VxVector::axisX() : VxVector::axisY();
+            VxVector up = upAxis - direction * DotProduct(upAxis, direction);
+            up /= sqrtf(up.SquareMagnitude());
             const VxVector right = CrossProduct(up, direction);
             VxMatrix basis = VxMatrix::Identity();
             basis[0].Set(right.x, right.y, right.z, 0.0f);
