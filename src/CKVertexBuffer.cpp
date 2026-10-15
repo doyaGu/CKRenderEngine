@@ -211,7 +211,11 @@ void RCKVertexBuffer::Destroy() {
 CKVB_STATE RCKVertexBuffer::Check(CKRenderContext *Ctx, CKDWORD MaxVertexCount, CKRST_DPFLAGS Format, CKBOOL Dynamic) {
     CKRST_DPFLAGS cpuFormat = (CKRST_DPFLAGS)(Format & ~CKRST_DP_VBUFFER);
     const CKDWORD vertexSize = ComputeVertexStagingSize(cpuFormat);
-    if (m_LockedCount != 0 || MaxVertexCount == 0 || vertexSize == 0)
+    // The public draw count is signed and allocation/offset products use
+    // CKDWORD. Reject unrepresentable storage before changing the live buffer.
+    if (m_LockedCount != 0 || MaxVertexCount == 0 ||
+        MaxVertexCount > 0x7fffffffu || vertexSize == 0 ||
+        MaxVertexCount > 0xffffffffu / vertexSize)
         return CK_VB_FAILED;
 
     const CKDWORD bufferFlags = Dynamic ? CKRST_VB_DYNAMIC : 0;

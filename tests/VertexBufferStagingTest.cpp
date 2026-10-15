@@ -180,7 +180,14 @@ TEST(VertexBufferStagingTest, LockClipsOnlyTheEndAndRejectsNestedZeroOrUnsupport
     EXPECT_EQ(2u, buffer.Version());
 }
 
-
+TEST(VertexBufferStagingTest, ImpossibleCountOrByteSizeFailsBeforeMutatingExistingData) {
+    StagingProbe buffer; ASSERT_EQ(CK_VB_LOST, buffer.Check(nullptr, 2, CKRST_DP_TRANSFORM, FALSE));
+    const void *position = buffer.Storage().PositionPtr;
+    EXPECT_EQ(CK_VB_FAILED, buffer.Check(nullptr, 0, CKRST_DP_TRANSFORM, FALSE));
+    EXPECT_EQ(CK_VB_FAILED, buffer.Check(nullptr, UINT_MAX / 12u + 1u, CKRST_DP_TRANSFORM, FALSE));
+    EXPECT_EQ(CK_VB_FAILED, buffer.Check(nullptr, static_cast<CKDWORD>(INT_MAX) + 1u, CKRST_DP_TRANSFORM, FALSE));
+    EXPECT_EQ(2u, buffer.Description().m_MaxVertexCount); EXPECT_EQ(position, buffer.Storage().PositionPtr);
+}
 
 TEST(VertexBufferStagingTest, ReconfigurationClearsChannelsAndKeepsUnusedCapacityOnCompatibleCheck) {
     StagingProbe buffer;
