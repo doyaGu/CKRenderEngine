@@ -2848,7 +2848,7 @@ int RCKMesh::AddChannel(CKMaterial *material, CKBOOL CopySrcUv) {
         return -1;
 
     // Check if channel already exists
-    int existingIndex = GetChannelByMaterial(material);
+    int existingIndex = RCKMesh::GetChannelByMaterial(material);
     if (existingIndex >= 0)
         return existingIndex;
 

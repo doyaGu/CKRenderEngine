@@ -586,6 +586,154 @@ CKPatchMesh *RCKPatchMesh::CreateInstance(CKContext *Context) {
     return reinterpret_cast<CKPatchMesh *>(patchMesh);
 }
 
+// 0x1003CB28: Mesh dependency bit 0 controls material references.
+int RCKPatchMesh::GetChannelCount() {
+    return m_TexturePatches.Size() > 0 ? m_TexturePatches.Size() - 1 : 0;
+}
+
+int RCKPatchMesh::AddChannel(CKMaterial *Mat, CKBOOL CopySrcUv) {
+    const int existing = GetChannelByMaterial(Mat);
+    if (existing >= 0)
+        return existing;
+    const int count = GetChannelCount();
+    if (count >= static_cast<int>(sizeof(CKWORD) * 8))
+        return -1;
+    if (m_TexturePatches.Size() == 0)
+        m_TexturePatches.Resize(1);
+    m_TexturePatches.Resize(count + 2);
+    CKPatchChannel &channel = m_TexturePatches[count + 1];
+    const CKPatchChannel &source = m_TexturePatches[0];
+    channel.Material = Mat ? Mat->GetID() : 0;
+    channel.Flags = VXBLEND_ZERO;
+    channel.Type = VXBLEND_SRCCOLOR;
+    channel.SubType = VXCHANNEL_ACTIVE;
+    channel.Patches.Resize(m_Patches.Size());
+    for (int patch = 0; patch < channel.Patches.Size(); ++patch) {
+        for (int corner = 0; corner < 4; ++corner)
+            channel.Patches[patch].tv[corner] = patch < source.Patches.Size() ? source.Patches[patch].tv[corner] : 0;
+    }
+    channel.UVs.Resize(source.UVs.Size());
+    for (int uv = 0; uv < channel.UVs.Size(); ++uv) {
+        channel.UVs[uv].u = CopySrcUv ? source.UVs[uv].u : 0.0f;
+        channel.UVs[uv].v = CopySrcUv ? source.UVs[uv].v : 0.0f;
+    }
+    RCKMesh::AddChannel(Mat, CopySrcUv);
+    m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+    m_PatchChanged = TRUE;
+    return count;
+}
+
+void RCKPatchMesh::RemoveChannel(int Index) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    m_TexturePatches.RemoveAt(Index + 1);
+    RCKMesh::RemoveChannel(Index);
+    m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+    m_PatchChanged = TRUE;
+}
+
+void RCKPatchMesh::RemoveChannelByMaterial(CKMaterial *Mat) {
+    if (!Mat)
+        return;
+    const CK_ID material = Mat->GetID();
+    for (int channel = GetChannelCount() - 1; channel >= 0; --channel) {
+        if (m_TexturePatches[channel + 1].Material == material)
+            RemoveChannel(channel);
+    }
+}
+
+int RCKPatchMesh::GetChannelByMaterial(CKMaterial *Mat) {
+    const CK_ID material = Mat ? Mat->GetID() : 0;
+    for (int channel = 1; channel < m_TexturePatches.Size(); ++channel) {
+        if (m_TexturePatches[channel].Material == material)
+            return channel - 1;
+    }
+    return -1;
+}
+
+void RCKPatchMesh::ActivateChannel(int Index, CKBOOL Active) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    if (Active)
+        m_TexturePatches[Index + 1].SubType |= VXCHANNEL_ACTIVE;
+    else
+        m_TexturePatches[Index + 1].SubType &= ~VXCHANNEL_ACTIVE;
+    RCKMesh::ActivateChannel(Index, Active);
+}
+
+CKBOOL RCKPatchMesh::IsChannelActive(int Index) {
+    return Index >= 0 && Index < GetChannelCount() && (m_TexturePatches[Index + 1].SubType & VXCHANNEL_ACTIVE) != 0;
+}
+
+void RCKPatchMesh::ActivateAllChannels(CKBOOL Active) {
+    for (int channel = 1; channel < m_TexturePatches.Size(); ++channel) {
+        if (Active)
+            m_TexturePatches[channel].SubType |= VXCHANNEL_ACTIVE;
+        else
+            m_TexturePatches[channel].SubType &= ~VXCHANNEL_ACTIVE;
+    }
+    RCKMesh::ActivateAllChannels(Active);
+}
+
+void RCKPatchMesh::LitChannel(int Index, CKBOOL Lit) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    if (Lit)
+        m_TexturePatches[Index + 1].SubType &= ~VXCHANNEL_NOTLIT;
+    else
+        m_TexturePatches[Index + 1].SubType |= VXCHANNEL_NOTLIT;
+    RCKMesh::LitChannel(Index, Lit);
+}
+
+CKBOOL RCKPatchMesh::IsChannelLit(int Index) {
+    return Index >= 0 && Index < GetChannelCount() && !(m_TexturePatches[Index + 1].SubType & VXCHANNEL_NOTLIT);
+}
+
+CKDWORD RCKPatchMesh::GetChannelFlags(int Index) {
+    return Index >= 0 && Index < GetChannelCount() ? m_TexturePatches[Index + 1].SubType : 0;
+}
+
+void RCKPatchMesh::SetChannelFlags(int Index, CKDWORD Flags) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    m_TexturePatches[Index + 1].SubType = Flags;
+    RCKMesh::SetChannelFlags(Index, Flags);
+}
+
+CKMaterial *RCKPatchMesh::GetChannelMaterial(int Index) {
+    return Index >= 0 && Index < GetChannelCount() ? static_cast<CKMaterial *>(m_Context->GetObject(m_TexturePatches[Index + 1].Material)) : nullptr;
+}
+
+VXBLEND_MODE RCKPatchMesh::GetChannelSourceBlend(int Index) {
+    return Index >= 0 && Index < GetChannelCount() ? static_cast<VXBLEND_MODE>(m_TexturePatches[Index + 1].Flags) : VXBLEND_ZERO;
+}
+
+VXBLEND_MODE RCKPatchMesh::GetChannelDestBlend(int Index) {
+    return Index >= 0 && Index < GetChannelCount() ? static_cast<VXBLEND_MODE>(m_TexturePatches[Index + 1].Type) : VXBLEND_ZERO;
+}
+
+void RCKPatchMesh::SetChannelMaterial(int Index, CKMaterial *Mat) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    m_TexturePatches[Index + 1].Material = Mat ? Mat->GetID() : 0;
+    RCKMesh::SetChannelMaterial(Index, Mat);
+}
+
+void RCKPatchMesh::SetChannelSourceBlend(int Index, VXBLEND_MODE BlendMode) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    m_TexturePatches[Index + 1].Flags = static_cast<CKDWORD>(BlendMode);
+    RCKMesh::SetChannelSourceBlend(Index, BlendMode);
+}
+
+void RCKPatchMesh::SetChannelDestBlend(int Index, VXBLEND_MODE BlendMode) {
+    if (Index < 0 || Index >= GetChannelCount())
+        return;
+    m_TexturePatches[Index + 1].Type = static_cast<CKDWORD>(BlendMode);
+    RCKMesh::SetChannelDestBlend(Index, BlendMode);
+}
+
+
 // Modifiers operate on authored controls, not on the derived render mesh.
 // 0x1003406D / 0x1003408C: one packed [verts][vecs] stream.
 CKBYTE *RCKPatchMesh::GetModifierVertices(CKDWORD *Stride) {
@@ -1329,32 +1477,35 @@ void RCKPatchMesh::BuildRenderMesh() {
     // New channels need their own UV storage even when their saved flag is SAMEUV.
     SetVertexCount(totalVertices);
 
-    // Ensure mesh has the correct number of extra material channels: (textureChannels - 1).
+    // Authored texture channels and derived mesh streams are separate arrays.
+    // Keep their ordinals even when dependency remapping creates null or equal
+    // material references; the public AddChannel entry deduplicates materials.
     int desiredExtraChannels = m_TexturePatches.Size() - 1;
     if (desiredExtraChannels < 0)
         desiredExtraChannels = 0;
-    while (GetChannelCount() > desiredExtraChannels)
-        RemoveChannel(GetChannelCount() - 1);
-    while (GetChannelCount() < desiredExtraChannels) {
-        int texIndex = GetChannelCount() + 1;
-        CKMaterial *mat = nullptr;
-        if (texIndex >= 0 && texIndex < m_TexturePatches.Size()) {
-            CK_ID matId = m_TexturePatches[texIndex].Material;
-            if (matId)
-                mat = (CKMaterial *)m_Context->GetObject(matId);
+    while (RCKMesh::GetChannelCount() > desiredExtraChannels)
+        RCKMesh::RemoveChannel(RCKMesh::GetChannelCount() - 1);
+    while (RCKMesh::GetChannelCount() < desiredExtraChannels) {
+        VxMaterialChannel channel;
+        channel.m_UVs = new Vx2DVector[totalVertices];
+        for (int vertex = 0; vertex < totalVertices; ++vertex)
+            channel.m_UVs[vertex] = Vx2DVector(0.0f, 0.0f);
+        m_MaterialChannels.PushBack(channel);
+        const int channelIndex = RCKMesh::GetChannelCount() - 1;
+        if (channelIndex < static_cast<int>(sizeof(CKWORD) * 8)) {
+            const CKWORD channelBit = static_cast<CKWORD>(1u << channelIndex);
+            for (int face = 0; face < m_Faces.Size(); ++face)
+                m_Faces[face].m_ChannelMask |= channelBit;
         }
-        if (!mat)
-            break;
-        const int nextChannel = GetChannelCount();
-        if (AddChannel(mat, TRUE) != nextChannel)
-            break;
+        m_FaceChannelMask = 0xFFFF;
     }
 
-    // 0x1003424F restores this state on every rebuild, including retained
-    // channels. Patch channel offsets 28/32/36 are source/dest blend and flags.
-    for (int i = 0; i < GetChannelCount(); ++i) {
+    // Channel offsets 28/32/36 store source blend, destination blend and flags.
+    for (int i = 0; i < RCKMesh::GetChannelCount(); ++i) {
         const CKPatchChannel &patchChannel = m_TexturePatches[i + 1];
         VxMaterialChannel &channel = m_MaterialChannels[i];
+        if (!channel.m_UVs)
+            channel.m_UVs = new Vx2DVector[totalVertices];
         channel.m_SourceBlend = static_cast<VXBLEND_MODE>(patchChannel.Flags);
         channel.m_DestBlend = static_cast<VXBLEND_MODE>(patchChannel.Type);
         channel.m_Flags = patchChannel.SubType;

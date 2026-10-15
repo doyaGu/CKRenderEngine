@@ -1146,10 +1146,13 @@ void PatchRebuildRestoresMaterialChannelState() {
     Chunk chunk = TexturedQuadPatch(expectedMaterial);
     LoadChunk(mesh, chunk.get());
     if (ExistingChannel) {
-        mesh.SetChannelMaterial(0, reinterpret_cast<CKMaterial *>(&stale));
-        mesh.SetChannelSourceBlend(0, VXBLEND_ONE);
-        mesh.SetChannelDestBlend(0, VXBLEND_ZERO);
-        mesh.SetChannelFlags(0, 0);
+        // Disturb the derived cache, keeping the authored patch channel intact.
+        mesh.RCKMesh::SetChannelMaterial(0, reinterpret_cast<CKMaterial *>(&stale));
+        mesh.RCKMesh::SetChannelSourceBlend(0, VXBLEND_ONE);
+        mesh.RCKMesh::SetChannelDestBlend(0, VXBLEND_ZERO);
+        mesh.RCKMesh::SetChannelFlags(0, 0);
+        Check(mesh.RCKMesh::GetChannelMaterial(0) == reinterpret_cast<CKMaterial *>(&stale),
+              "Patch fixture did not disturb the derived material channel");
         mesh.SetIterationCount(1);
         mesh.BuildRenderMesh();
     }
@@ -1158,6 +1161,12 @@ void PatchRebuildRestoresMaterialChannelState() {
     Check(mesh.GetChannelSourceBlend(0) == VXBLEND_SRCALPHA && mesh.GetChannelDestBlend(0) == VXBLEND_INVSRCCOLOR,
           "Patch rebuild discarded saved channel blending");
     Check(mesh.GetChannelFlags(0) == (VXCHANNEL_ACTIVE | VXCHANNEL_NOTLIT), "Patch rebuild discarded channel flags");
+    Check(mesh.RCKMesh::GetChannelCount() == 1 && mesh.RCKMesh::GetChannelMaterial(0) == expectedMaterial,
+          "Patch rebuild did not restore the actual derived channel material");
+    Check(mesh.RCKMesh::GetChannelSourceBlend(0) == VXBLEND_SRCALPHA &&
+          mesh.RCKMesh::GetChannelDestBlend(0) == VXBLEND_INVSRCCOLOR &&
+          mesh.RCKMesh::GetChannelFlags(0) == (VXCHANNEL_ACTIVE | VXCHANNEL_NOTLIT),
+          "Patch rebuild did not restore the actual derived channel state");
     float u = 0.0f, v = 0.0f;
     mesh.GetVertexTextureCoordinates(2, &u, &v, 0);
     Check(u == 2.0f && v == 2.0f, "Patch extra channel UVs did not reach the render mesh");

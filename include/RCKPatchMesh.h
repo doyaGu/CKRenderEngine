@@ -67,6 +67,26 @@ public:
     int GetModifierUVCount(int channel = -1) override;
     void ModifierUVMove() override;
 
+    using RCKMesh::RemoveChannel;
+    int GetChannelCount() override;
+    int AddChannel(CKMaterial *Mat, CKBOOL CopySrcUv = TRUE) override;
+    void RemoveChannel(int Index) override;
+    void RemoveChannelByMaterial(CKMaterial *Mat) override;
+    int GetChannelByMaterial(CKMaterial *Mat) override;
+    void ActivateChannel(int Index, CKBOOL Active = TRUE) override;
+    CKBOOL IsChannelActive(int Index) override;
+    void ActivateAllChannels(CKBOOL Active = TRUE) override;
+    void LitChannel(int Index, CKBOOL Lit = TRUE) override;
+    CKBOOL IsChannelLit(int Index) override;
+    CKDWORD GetChannelFlags(int Index) override;
+    void SetChannelFlags(int Index, CKDWORD Flags) override;
+    CKMaterial *GetChannelMaterial(int Index) override;
+    VXBLEND_MODE GetChannelSourceBlend(int Index) override;
+    VXBLEND_MODE GetChannelDestBlend(int Index) override;
+    void SetChannelMaterial(int Index, CKMaterial *Mat) override;
+    void SetChannelSourceBlend(int Index, VXBLEND_MODE BlendMode) override;
+    void SetChannelDestBlend(int Index, VXBLEND_MODE BlendMode) override;
+
     int GetMemoryOccupation() override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
