@@ -15,6 +15,7 @@
 #include "CKSkin.h"
 #include "CKObjectAnimation.h"
 #include "CKKeyframeData.h"
+#include "RCKKeyframeData.h"
 #include "CKRasterizer.h"
 #include "CKVertexPacking.h"
 #include "RCKRenderManager.h"
@@ -1198,6 +1199,46 @@ void RCKMesh::InverseWinding() {
     ModifierVertexMove(TRUE, TRUE);
 }
 
+// Keys are indexed by mesh vertex identity, including optional normal-only
+// keys. Preserve key addresses/times while changing their owned vertex payload.
+static void MeshRemapMorphVertices(CKContext *context, CKMesh *mesh,
+                                   const XArray<int> &sources, int oldCount) {
+    CK_ID *ids = context->GetObjectsListByClassID(CKCID_OBJECTANIMATION);
+    const int count = context->GetObjectsCountByClassID(CKCID_OBJECTANIMATION);
+    for (int i = 0; i < count; ++i) {
+        CKObjectAnimation *animation = static_cast<CKObjectAnimation *>(context->GetObject(ids[i]));
+        if (!animation || !animation->Get3dEntity() || animation->Get3dEntity()->GetCurrentMesh() != mesh)
+            continue;
+        RCKMorphController *controller = static_cast<RCKMorphController *>(animation->GetMorphController());
+        if (!controller || controller->GetMorphVertexCount() != oldCount)
+            continue;
+        XArray<VxVector *> positions;
+        XArray<VxCompressedVector *> normals;
+        const int keys = controller->GetKeyCount();
+        positions.Resize(keys); normals.Resize(keys);
+        for (int keyIndex = 0; keyIndex < keys; ++keyIndex) {
+            CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(keyIndex));
+            positions[keyIndex] = key->PosArray ? new VxVector[sources.Size()] : nullptr;
+            normals[keyIndex] = key->NormArray ? new VxCompressedVector[sources.Size()] : nullptr;
+            for (int vertex = 0; vertex < sources.Size(); ++vertex) {
+                if (positions[keyIndex]) positions[keyIndex][vertex] = key->PosArray[sources[vertex]];
+                if (normals[keyIndex]) normals[keyIndex][vertex] = key->NormArray[sources[vertex]];
+            }
+        }
+        controller->SetMorphVertexCount(sources.Size());
+        const CKBOOL resized = controller->GetMorphVertexCount() == sources.Size();
+        for (int keyIndex = 0; keyIndex < keys; ++keyIndex) {
+            if (resized) {
+                CKMorphKey *key = static_cast<CKMorphKey *>(controller->GetKey(keyIndex));
+                delete[] key->PosArray; delete[] key->NormArray;
+                key->PosArray = positions[keyIndex]; key->NormArray = normals[keyIndex];
+            } else {
+                delete[] positions[keyIndex]; delete[] normals[keyIndex];
+            }
+        }
+    }
+}
+
 void RCKMesh::Consolidate() {
     const int vertexCount = m_Vertices.Size();
     const int faceCount = m_Faces.Size();
@@ -1228,10 +1269,12 @@ void RCKMesh::Consolidate() {
     XArray<float> remappedWeights;
     if (m_VertexWeights)
         remappedWeights.Resize(vertexCount);
+    XArray<int> retainedSources;
     int retainedVertices = 0;
     for (int i = 0; i < vertexCount; ++i) {
         if (vertexMap[i] < 0)
             continue;
+        retainedSources.PushBack(i);
         vertexMap[i] = retainedVertices;
         if (retainedVertices != i) {
             m_Vertices[retainedVertices] = m_Vertices[i];
@@ -1278,6 +1321,7 @@ void RCKMesh::Consolidate() {
                     skin->RemapVertices(vertexMap);
             }
         }
+        MeshRemapMorphVertices(m_Context, this, retainedSources, vertexCount);
         VertexMove();
         UVChanged();
         NormalChanged();

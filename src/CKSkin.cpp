@@ -354,25 +354,27 @@ void RCKSkin::RemapVertices(const XArray<int> &permutation) {
     XClassArray<RCKSkinVertexData> newVertexData;
     newVertexData.Resize(vertexCount);
 
-    // Count valid vertices and remap
+    // Each vertex owns its influence arrays. Copy values into new owners;
+    // shallow assignment would leave both arrays deleting the same pointers.
     int validCount = 0;
     for (int i = 0; i < vertexCount; ++i) {
         if (permutation[i] >= 0) {
-            // Copy vertex data to new position
             int newIdx = permutation[i];
-            newVertexData[newIdx] = m_VertexData[i];
+            RCKSkinVertexData &source = m_VertexData[i];
+            RCKSkinVertexData &destination = newVertexData[newIdx];
+            destination.SetInitialPos(source.GetInitialPos());
+            destination.SetBoneCount(source.GetBoneCount());
+            for (int bone = 0; bone < source.GetBoneCount(); ++bone) {
+                destination.SetBone(bone, source.GetBone(bone));
+                destination.SetWeight(bone, source.GetWeight(bone));
+            }
             ++validCount;
         }
     }
 
     // Resize to actual count
     newVertexData.Resize(validCount);
-    m_VertexData = newVertexData;
-
-    // Clear bone/weight pointers in old array positions
-    for (int i = 0; i < vertexCount; ++i) {
-        // The old array elements will be destroyed, so we don't need to clear manually
-    }
+    m_VertexData.Swap(newVertexData);
 
     // Remap normals if present
     if (m_Normals.Size() > 0) {
