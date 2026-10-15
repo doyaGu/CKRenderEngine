@@ -152,25 +152,35 @@ static TCBCoefficients ComputeTCBCoefficients(float tension, float continuity, f
 // scale share this implementation in the original DLL as well.
 static void ComputeTCBVectorTangents(const CKTCBPositionKey *keys, int count, VxVector *tangents) {
     if (count == 2) {
-        const VxVector delta = keys[1].Pos - keys[0].Pos;
-        tangents[1] = (1.0f - keys[0].tension) * delta;
-        tangents[2] = (1.0f - keys[1].tension) * delta;
+        for (int component = 0; component < 3; ++component) {
+            const double delta = static_cast<double>(keys[1].Pos[component]) - keys[0].Pos[component];
+            tangents[1][component] = static_cast<float>((1.0f - keys[0].tension) * delta);
+            tangents[2][component] = static_cast<float>((1.0f - keys[1].tension) * delta);
+        }
         return;
     }
     for (int i = 1; i < count - 1; ++i) {
         const auto &key = keys[i];
         const auto weights = ComputeTCBTimeWeights(keys[i - 1].TimeStep, key.TimeStep, keys[i + 1].TimeStep, key.continuity);
         const auto factors = ComputeTCBCoefficients(key.tension, key.continuity, key.bias, weights);
-        const VxVector previous = key.Pos - keys[i - 1].Pos;
-        const VxVector next = keys[i + 1].Pos - key.Pos;
-        tangents[2 * i] = factors.incomingPrevious * previous + factors.incomingNext * next;
-        tangents[2 * i + 1] = factors.outgoingPrevious * previous + factors.outgoingNext * next;
+        // A finite scaled tangent may remain representable even when either
+        // unweighted position difference overflows float.
+        for (int component = 0; component < 3; ++component) {
+            const double previous = static_cast<double>(key.Pos[component]) - keys[i - 1].Pos[component];
+            const double next = static_cast<double>(keys[i + 1].Pos[component]) - key.Pos[component];
+            tangents[2 * i][component] = static_cast<float>(factors.incomingPrevious * previous + factors.incomingNext * next);
+            tangents[2 * i + 1][component] = static_cast<float>(factors.outgoingPrevious * previous + factors.outgoingNext * next);
+        }
     }
-    tangents[1] = ((keys[1].Pos - keys[0].Pos) * 3.0f - tangents[2]) * ((1.0f - keys[0].tension) * 0.5f);
-    // The original last endpoint uses the previous INCOMING tangent and a
-    // negative multiplier. Preserve this asymmetric rule (runtime verified).
-    tangents[2 * (count - 1)] = ((keys[count - 2].Pos - keys[count - 1].Pos) * 3.0f - tangents[2 * (count - 2)]) *
-                              (-(1.0f - keys[count - 1].tension) * 0.5f);
+    for (int component = 0; component < 3; ++component) {
+        const double firstDelta = static_cast<double>(keys[1].Pos[component]) - keys[0].Pos[component];
+        tangents[1][component] = static_cast<float>((firstDelta * 3.0 - tangents[2][component]) *
+                                                  ((1.0f - keys[0].tension) * 0.5f));
+        // Native uses the previous INCOMING tangent and a negative multiplier.
+        const double lastDelta = static_cast<double>(keys[count - 2].Pos[component]) - keys[count - 1].Pos[component];
+        tangents[2 * (count - 1)][component] = static_cast<float>((lastDelta * 3.0 - tangents[2 * (count - 2)][component]) *
+                                                               (-(1.0f - keys[count - 1].tension) * 0.5f));
+    }
 }
 
 // 0x10051040: logarithmic quaternion differences with hemisphere correction,
