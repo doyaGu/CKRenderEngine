@@ -27,6 +27,11 @@ public:
         }
         Current() = this;
     }
+    // A direct group consumes an existing plan rather than rebuilding it.
+    void KeepActiveChannels() {
+        if (m_Nested)
+            m_ActiveChannels = m_SavedActive;
+    }
     ~CKMeshRenderScope() {
         if (m_Nested) {
             m_ActiveChannels.Swap(m_SavedActive);

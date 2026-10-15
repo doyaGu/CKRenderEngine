@@ -63,7 +63,9 @@ static CKBOOL CKMaterialStageRangeFits(RCKRenderContext *dev, int firstStage,
         // capacity limits simultaneous non-null bindings, not stage ordinals.
         for (int stage = 0; stage < firstStage; ++stage) {
             CKDWORD texture = 0;
-            if (dev->m_RasterizerContext->GetTexture(stage, &texture) && texture)
+            if (!dev->m_RasterizerContext->GetTexture(stage, &texture))
+                return FALSE;
+            if (texture)
                 ++textureCount;
         }
         if ((CKDWORD)textureCount > textureCapacity)
@@ -1556,6 +1558,12 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
     const CKBOOL skipAllTextures = (effectCallbackResult & VXEFFECTRETVAL_SKIPALLTEX) != 0;
     const CKBOOL skipTextureMatrix = (effectCallbackResult & VXEFFECTRETVAL_SKIPTEXMAT) != 0;
+    // The base path now knows who owns ordinary state, even when a later
+    // preflight or required snapshot fails before texture stages are reset.
+    if (skipAllTextures)
+        bindingCall.OwnTextureStages();
+    else
+        bindingCall.UseDefaultTextures();
     if (!skipAllTextures) {
         const CKBOOL applyEffect = m_Textures[0] && !skipTextureMatrix;
         const int firstStage = applyEffect && effect == VXEFFECT_BUMPENV ? 0 : TextureStage;
@@ -1565,10 +1573,11 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         if (!CKMaterialStageRangeFits(dev, firstStage, stageCount, textureCount))
             return FALSE;
     }
+    const CKBOOL preserveTextureMatrix = skipTextureMatrix && !skipAllTextures;
     VxMatrix callbackTextureMatrix;
     CKDWORD callbackTextureTransformFlags = CKRST_TTF_NONE;
     CKDWORD callbackTextureCoordinates = 0;
-    if (skipTextureMatrix) {
+    if (preserveTextureMatrix) {
         // The callback owns the texture matrix and transform flags: read them
         // back before the stage reset and re-apply them afterwards.
         if (!rst->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage), callbackTextureMatrix) ||
@@ -1577,31 +1586,36 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
             return FALSE;
     }
 
-    if (skipAllTextures) {
-        bindingCall.OwnTextureStages();
-    } else if (TextureStage == 0) {
+    if (!skipAllTextures && TextureStage == 0) {
         if (!rst->ResetTextureStages(TextureStage, CKRST_MAX_TEXTURE_STAGES - TextureStage))
             return FALSE;
         bindingCall.ResetTextureStages();
-    } else {
-        // Additional stages retain the primary stage and preceding channels.
-        bindingCall.UseDefaultTextures();
     }
 
     if (Lit) {
-        rst->SetMaterial(&m_MaterialData);
-        rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE,
-                            m_MaterialData.SpecularPower > 0.05f);
+        if (!rst->SetMaterial(&m_MaterialData))
+            return FALSE;
+        if (!rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE,
+                            m_MaterialData.SpecularPower > 0.05f))
+            return FALSE;
     }
-    rst->SetRenderState(VXRENDERSTATE_CULLMODE, IsTwoSided() ? VXCULL_NONE : VXCULL_CCW);
-    rst->SetRenderState(VXRENDERSTATE_FILLMODE, m_FillMode);
-    rst->SetRenderState(VXRENDERSTATE_SHADEMODE, m_ShadeMode);
-    rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled());
-    rst->SetRenderState(VXRENDERSTATE_ZFUNC, GetZFunc());
-    rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, AlphaBlendEnabled());
+    if (!rst->SetRenderState(VXRENDERSTATE_CULLMODE, IsTwoSided() ? VXCULL_NONE : VXCULL_CCW))
+        return FALSE;
+    if (!rst->SetRenderState(VXRENDERSTATE_FILLMODE, m_FillMode))
+        return FALSE;
+    if (!rst->SetRenderState(VXRENDERSTATE_SHADEMODE, m_ShadeMode))
+        return FALSE;
+    if (!rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled()))
+        return FALSE;
+    if (!rst->SetRenderState(VXRENDERSTATE_ZFUNC, GetZFunc()))
+        return FALSE;
+    if (!rst->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, AlphaBlendEnabled()))
+        return FALSE;
     if (AlphaBlendEnabled() && TextureStage == 0) {
-        rst->SetRenderState(VXRENDERSTATE_SRCBLEND, m_SourceBlend);
-        rst->SetRenderState(VXRENDERSTATE_DESTBLEND, m_DestBlend);
+        if (!rst->SetRenderState(VXRENDERSTATE_SRCBLEND, m_SourceBlend))
+            return FALSE;
+        if (!rst->SetRenderState(VXRENDERSTATE_DESTBLEND, m_DestBlend))
+            return FALSE;
     }
 
     CKDWORD effectResult = 0;
@@ -1668,7 +1682,8 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
                 dev->ResetTextureStage(TextureStage);
                 return FALSE;
             }
-            rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, PerspectiveCorrectionEnabled());
+            if (!rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, PerspectiveCorrectionEnabled()))
+                return FALSE;
         } else {
             if (!rst->SetTexture(0, TextureStage)) {
                 dev->ResetTextureStage(TextureStage);
@@ -1694,7 +1709,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         }
     }
 
-    if (skipTextureMatrix) {
+    if (preserveTextureMatrix) {
         if (!rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage),
                          callbackTextureMatrix)) {
             dev->ResetTextureStage(TextureStage);
@@ -1723,11 +1738,15 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
 
     if (!textureOwnsAlphaTest) {
         if (AlphaTestEnabled()) {
-            rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE);
-            rst->SetRenderState(VXRENDERSTATE_ALPHAFUNC, (CKDWORD)GetAlphaFunc());
-            rst->SetRenderState(VXRENDERSTATE_ALPHAREF, m_AlphaRef);
+            if (!rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, TRUE))
+                return FALSE;
+            if (!rst->SetRenderState(VXRENDERSTATE_ALPHAFUNC, (CKDWORD)GetAlphaFunc()))
+                return FALSE;
+            if (!rst->SetRenderState(VXRENDERSTATE_ALPHAREF, m_AlphaRef))
+                return FALSE;
         } else {
-            rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE);
+            if (!rst->SetRenderState(VXRENDERSTATE_ALPHATESTENABLE, FALSE))
+                return FALSE;
         }
     }
 
@@ -1743,11 +1762,16 @@ CKBOOL RCKMaterial::BindTextureSlotToStage(CKRenderContext *context, int Texture
 
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(context);
     CKRasterizerContext *rst = dev->m_RasterizerContext;
-    dev->ResetTextureStage(TextureStage);
-
     CKTexture *tex = m_Textures[TextureSlot];
+    if (!CKMaterialStageRangeFits(dev, TextureStage, 1, tex ? 1 : 0))
+        return FALSE;
+    if (!rst->ResetTextureStages(TextureStage, 1))
+        return FALSE;
     if (!tex) {
-        rst->SetTexture(0, TextureStage);
+        if (!rst->SetTexture(0, TextureStage)) {
+            dev->ResetTextureStage(TextureStage);
+            return FALSE;
+        }
         return TRUE;
     }
 
@@ -1758,17 +1782,47 @@ CKBOOL RCKMaterial::BindTextureSlotToStage(CKRenderContext *context, int Texture
         return FALSE;
     }
 
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
-                             CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU));
-    rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESW, m_TextureAddressMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                             CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU))) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
+    if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE)) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
     return TRUE;
 }
 

@@ -120,7 +120,7 @@ void RCKMesh::BindMonoPassTextureChannels(RCKRenderContext *dev) {
         BindMonoPassTextureChannelsChecked(dev);
 }
 
-CKWORD RCKMesh::BindMonoPassTextureChannelsChecked(RCKRenderContext *dev, int effectStagePrefix) {
+CKDWORD RCKMesh::BindMonoPassTextureChannelsChecked(RCKRenderContext *dev, int effectStagePrefix) {
     CKRasterizerContext *rst = dev->m_RasterizerContext;
     CKWORD failedChannels = 0;
     CKBOOL deferSuffix = FALSE;
@@ -158,10 +158,17 @@ CKWORD RCKMesh::BindMonoPassTextureChannelsChecked(RCKRenderContext *dev, int ef
         CKMaterialBindingScope binding(channel.m_Material, dev, stage);
         CKBOOL accepted = channel.m_Material->SetAsCurrent(dev, FALSE, stage);
         if (binding.AllowsRenderStateOverrides()) {
+            CKBOOL restored = TRUE;
             for (int state = 0; state < stateCount; ++state) {
-                if (readable[state])
-                    rst->SetRenderState(materialStates[state], renderStates[state]);
+                if (!readable[state])
+                    restored = FALSE;
+                else if (!rst->SetRenderState(materialStates[state], renderStates[state]))
+                    restored = FALSE;
             }
+            // Low 16 bits identify retryable channels. Bit 16 means the base
+            // group's state could not be preserved; a texture retry cannot fix it.
+            if (!restored)
+                return 0x10000u | failedChannels;
         }
         if (accepted && binding.UsesDefaultTextures())
             accepted = rst->SetTextureStageState(stage, CKRST_TSS_STAGEBLEND,
@@ -4723,7 +4730,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                         VxDrawPrimitiveData groupDp = *dp;
                         groupResult = RenderGroupWithChannels(rc, group, ent, &groupDp, groupLocalChannels);
                     } else {
-                        groupResult = RenderGroup(rc, group, ent, nullptr);
+                        groupResult = RenderGroupWithChannels(rc, group, ent, nullptr, FALSE);
                     }
                     if (groupResult)
                         completedGroups.PushBack(group);
@@ -4745,7 +4752,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                         VxDrawPrimitiveData groupDp = *dp;
                         groupResult = RenderGroupWithChannels(rc, group, ent, &groupDp, groupLocalChannels);
                     } else {
-                        groupResult = RenderGroup(rc, group, ent, nullptr);
+                        groupResult = RenderGroupWithChannels(rc, group, ent, nullptr, FALSE);
                     }
                     if (groupResult)
                         completedGroups.PushBack(group);
@@ -4838,6 +4845,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 // IDA: 0x10022829 (1864 bytes)
 //--------------------------------------------
 int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data) {
+    CKMeshRenderScope renderScope(this, m_ActiveTextureChannels, m_MaterialChannels, m_DrawFlags);
+    renderScope.KeepActiveChannels();
     return RenderGroupWithChannels(dev, group, ent, data, FALSE);
 }
 
@@ -4916,10 +4925,11 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
         allowMaterialStateOverrides = materialBinding.AllowsRenderStateOverrides();
 
         if (textureStagesReset && !mat->GetTexture(0) && m_ActiveTextureChannels.Size() > 0) {
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+            if (!dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1) ||
+                !dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT) ||
+                !dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1) ||
+                !dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT))
+                return 0;
         }
     } else {
         // No material - use default
@@ -4933,16 +4943,18 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
         if (allowMaterialStateOverrides &&
             (m_Flags & (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) ==
             (VXMESH_PRELITMODE | VXMESH_FORCETRANSPARENCY)) {
-            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA);
-            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA);
-            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE);
+            if (!dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_SRCBLEND, VXBLEND_SRCALPHA) ||
+                !dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_DESTBLEND, VXBLEND_INVSRCALPHA) ||
+                !dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ALPHABLENDENABLE, TRUE))
+                return 0;
         }
 
         if (textureStagesReset && m_ActiveTextureChannels.Size() > 0) {
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1);
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT);
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1);
-            dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT);
+            if (!dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_OP, CKRST_TOP_SELECTARG1) ||
+                !dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_ARG1, CKRST_TA_CURRENT) ||
+                !dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AOP, CKRST_TOP_SELECTARG1) ||
+                !dev->m_RasterizerContext->SetTextureStageState(0, CKRST_TSS_AARG1, CKRST_TA_CURRENT))
+                return 0;
         }
     }
 
@@ -4951,8 +4963,11 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
         const int effectStagePrefix = CKMeshEffectStagePrefix(mat);
         // A custom effect which reaches the ordinary stage reset has yielded
         // its texture chain. SKIPALLTEX owners never enter this branch.
-        failedChannels = BindMonoPassTextureChannelsChecked(dev,
+        const CKDWORD channelResult = BindMonoPassTextureChannelsChecked(dev,
             effectStagePrefix >= 0 ? effectStagePrefix : 0);
+        if (channelResult & 0x10000u)
+            return 0;
+        failedChannels = static_cast<CKWORD>(channelResult);
     }
 
     int localEffectPrefix = CKMeshEffectStagePrefix(mat);
@@ -4987,13 +5002,16 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
             CKRST_DP_STAGE(localEffectPrefix);
     }
 
-    dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags));
+    if (!dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, TextureWrapModeFromMeshFlags(m_Flags)))
+        return 0;
 
     if (ent) {
-        if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERTEST) != 0)
-            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS);
-        if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERWRITE) != 0)
-            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
+        if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERTEST) != 0 &&
+            !dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_ALWAYS))
+            return 0;
+        if ((ent->m_MoveableFlags & VX_MOVEABLE_NOZBUFFERWRITE) != 0 &&
+            !dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE))
+            return 0;
     }
 
     // Solid transparent two-sided material draws back faces before front faces.
@@ -5013,11 +5031,13 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
             baseMaterial.SpecularPower = mat->GetPower();
             baseMaterial.Specular = baseMaterial.SpecularPower > 0.05f
                 ? mat->GetSpecular() : VxColor(0.0f, 0.0f, 0.0f, 0.0f);
-            dev->m_RasterizerContext->SetMaterial(&baseMaterial);
+            if (!dev->m_RasterizerContext->SetMaterial(&baseMaterial))
+                return 0;
         }
-        if (twoSidedTransparent)
-            dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_CULLMODE,
-                pass == 0 ? VXCULL_CW : VXCULL_CCW);
+        if (twoSidedTransparent &&
+            !dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_CULLMODE,
+                pass == 0 ? VXCULL_CW : VXCULL_CCW))
+            return 0;
         // Render primitives
         if (data) {
             // Software vertex path (data != null)
