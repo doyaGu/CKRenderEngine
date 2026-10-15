@@ -424,6 +424,8 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
         if (m_HardwareValid && m_ObjectIndex &&
             m_RasterizerContext == CKRasterizerObservation::Identity(rctx->m_RasterizerContext) &&
             m_HardwareVersion == m_ContentVersion) {
+            rctx->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING,
+                (m_DpData.Flags & CKRST_DP_LIGHT) && m_DpData.NormalPtr ? 1 : 0);
             return rctx->m_RasterizerContext->DrawPrimitiveVB(
                 pType, m_ObjectIndex, StartVertex, VertexCount, nullptr, 0);
         }

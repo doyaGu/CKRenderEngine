@@ -256,7 +256,16 @@ TEST_F(VertexBufferDrawTest, InvalidOrEmptyRangesDoNotSubmit) {
     EXPECT_EQ(0, Target.HardwareDraws); EXPECT_EQ(0, Target.SoftwareDraws);
 }
 
-
+TEST_F(VertexBufferDrawTest, HardwareLightingMatchesPublicFormatInsteadOfPreviousDraw) {
+    RCKVertexBuffer buffer(Context); Fill(buffer, static_cast<CKRST_DPFLAGS>(CKRST_DP_TRANSFORM | CKRST_DP_LIGHT));
+    Target.States[VXRENDERSTATE_LIGHTING] = 0;
+    ASSERT_TRUE(buffer.Draw(Device, VX_TRIANGLELIST, nullptr, 0, 0, 3));
+    EXPECT_EQ(1u, Target.Lighting);
+    Fill(buffer, CKRST_DP_TR_V);
+    Target.States[VXRENDERSTATE_LIGHTING] = 1;
+    ASSERT_TRUE(buffer.Draw(Device, VX_TRIANGLELIST, nullptr, 0, 0, 3));
+    EXPECT_EQ(0u, Target.Lighting);
+}
 
 
 
