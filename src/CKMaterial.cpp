@@ -1,3 +1,4 @@
+#include "CKMaterialBindingScope.h"
 #include "CKRenderProfile.h"
 /**
  * @file CKMaterial.cpp
@@ -1454,12 +1455,14 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     CK_RENDER_PERF_DECLARE_ENABLED(renderStats);
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CK_RENDER_PERF_INC(renderStats, MaterialSetCalls);
+    CKMaterialBindingCall bindingCall(this, context, TextureStage);
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(context);
     if (!dev || TextureStage < 0 || TextureStage >= CKRST_MAX_TEXTURE_STAGES)
         return FALSE;
 
     if (m_Callback) {
         if (m_Callback(dev, this, m_CallbackArgument)) {
+            bindingCall.OwnAllState();
             return TRUE;
         }
     }
@@ -1477,8 +1480,10 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     CKDWORD effectCallbackResult = VXEFFECTRETVAL_SKIPNONE;
     if (effectDesc && effectDesc->SetCallback) {
         effectCallbackResult = effectDesc->SetCallback(context, this, TextureStage, effectDesc->CallbackArg);
-        if (effectCallbackResult == VXEFFECTRETVAL_SKIPALL)
+        if (effectCallbackResult == VXEFFECTRETVAL_SKIPALL) {
+            bindingCall.OwnAllState();
             return TRUE;
+        }
     }
     const CKBOOL skipAllTextures = (effectCallbackResult & VXEFFECTRETVAL_SKIPALLTEX) != 0;
     const CKBOOL skipTextureMatrix = (effectCallbackResult & VXEFFECTRETVAL_SKIPTEXMAT) != 0;
@@ -1493,8 +1498,15 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         rst->GetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX, &callbackTextureCoordinates);
     }
 
-    if (!skipAllTextures)
+    if (skipAllTextures) {
+        bindingCall.OwnTextureStages();
+    } else if (TextureStage == 0) {
         dev->DisableTextureStagesFrom(TextureStage);
+        bindingCall.ResetTextureStages();
+    } else {
+        // Additional stages retain the primary stage and preceding channels.
+        bindingCall.UseDefaultTextures();
+    }
 
     if (Lit) {
         rst->SetMaterial(&m_MaterialData);
@@ -1532,6 +1544,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
 
 
     // --- Texture ---
+    CKBOOL textureStatesAccepted = TRUE;
     CKBOOL textureOwnsAlphaTest = FALSE;
     if (!skipAllTextures && !(effectResult & 2)) {
         CKTexture *tex = m_Textures[0];
@@ -1544,34 +1557,36 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
             }
             textureOwnsAlphaTest = (textureResult == 2);
 
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESW, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode) != FALSE) && textureStatesAccepted;
             rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, PerspectiveCorrectionEnabled());
         } else {
-            rst->SetTexture(0, TextureStage);
+            textureStatesAccepted = (rst->SetTexture(0, TextureStage) != FALSE) && textureStatesAccepted;
         }
 
-        if (!(effectResult & 1)) {
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
-                                     CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU));
-            rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
+        if (!skipTextureMatrix && !(effectResult & 1)) {
+            textureStatesAccepted = (rst->SetTransformMatrix(
+                (VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage), VxMatrix::Identity()) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                                     CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU)) != FALSE) && textureStatesAccepted;
+            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE) != FALSE) && textureStatesAccepted;
         }
     }
 
     if (skipTextureMatrix) {
-        rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage),
-                         callbackTextureMatrix);
-        rst->SetTextureStageState(TextureStage,
+        textureStatesAccepted = (rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage),
+                         callbackTextureMatrix) != FALSE) && textureStatesAccepted;
+        textureStatesAccepted = (rst->SetTextureStageState(TextureStage,
                                  CKRST_TSS_TEXTURETRANSFORMFLAGS,
-                                 callbackTextureTransformFlags);
-        rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
-                                 callbackTextureCoordinates);
+                                 callbackTextureTransformFlags) != FALSE) && textureStatesAccepted;
+        textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                                 callbackTextureCoordinates) != FALSE) && textureStatesAccepted;
     }
 
 
@@ -1592,6 +1607,10 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         }
     }
 
+    if (!textureStatesAccepted) {
+        dev->ResetTextureStage(TextureStage);
+        return FALSE;
+    }
     CK_RENDER_PERF_ADD(renderStats, MaterialSetUs, CKRenderPerfElapsedUs(perfStart));
     return TRUE;
 }

@@ -126,7 +126,7 @@ void CheckResetTextureStage(CKRasterizerContext &context, int stage) {
               "unused material stage must restore the identity texture transform");
 }
 
-void MaterialBindingClearsTailAndPreservesLowerStages() {
+void MaterialBindingClearsPrimaryTailAndPreservesOtherPositiveStages() {
     MaterialTestWorld world;
     RCKMaterial material(world.context, "StageResetMaterial");
     RCKTexture texture(world.context, "StageResetTexture");
@@ -168,8 +168,23 @@ void MaterialBindingClearsTailAndPreservesLowerStages() {
             TestCheck(memcmp(&matrix, &previousMatrices[stage], sizeof(matrix)) == 0,
                       "material on a later stage must preserve earlier texture matrices");
         }
-        for (int stage = current + 1; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
-            CheckResetTextureStage(context, stage);
+        for (int stage = current + 1; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+            if (current == 0) {
+                CheckResetTextureStage(context, stage);
+                continue;
+            }
+            CKDWORD value = 0;
+            TestCheck(context.GetTexture(stage, &value) && value == previousTextures[stage],
+                      "positive stage must preserve unrelated later texture bindings");
+            for (CKDWORD state = CKRST_TSS_OP; state < CKRST_TSS_MAXSTATE; ++state)
+                TestCheck(context.GetTextureStageState(stage, CKRST_TEXTURESTAGESTATETYPE(state), &value) &&
+                              value == previousStates[stage][state],
+                          "positive stage must preserve unrelated later stage states");
+            VxMatrix matrix;
+            context.GetTransformMatrix(VXMATRIX_TYPE(VXMATRIX_TEXTURE0 + stage), matrix);
+            TestCheck(memcmp(&matrix, &previousMatrices[stage], sizeof(matrix)) == 0,
+                      "positive stage must preserve unrelated later matrices");
+        }
         CKDWORD bound = 0;
         TestCheck(context.GetTexture(current, &bound) && bound == previousTextures[current],
                   "material must bind its own texture after resetting the chain");
@@ -325,7 +340,7 @@ void MultiTextureEffectPropagatesSecondaryUploadFailure() {
               "failed secondary texture upload must not leave the stage bound");
 }
 
-void MeshAdditionalPassPreservesMonoPassChannels() {
+void MeshAdditionalPassDoesNotReplayFoldedMonoPassChannels() {
     MaterialTestWorld world;
     RCKMaterial base(world.context, "Base"), lightmap(world.context, "Lightmap"), glow(world.context, "Glow");
     RCKTexture baseTexture(world.context, "BaseTexture"), lightmapTexture(world.context, "LightmapTexture"), glowTexture(world.context, "GlowTexture");
@@ -360,7 +375,7 @@ void MeshAdditionalPassPreservesMonoPassChannels() {
     for (const auto &binding : world.rasterizer->Log.TextureBindings)
         if (binding.Stage == 1 && binding.Texture)
             ++lightmapDraws;
-    TestCheck(lightmapDraws == 2, "DX8 keeps the mono-pass lightmap active during the additional channel draw");
+    TestCheck(lightmapDraws == 1, "folded lightmap must not multiply the later additive pass again");
     CKDWORD texture = 0xFFFFFFFFu;
     world.translated.Context->GetTexture(1, &texture);
     TestCheck(texture == 0, "mesh completion must retire its additional stages");
@@ -908,15 +923,15 @@ int main() {
               &DepthWritingAlphaTestCutoutsAreNotAlphaTransparent);
     tests.Run("Texture slot bounds are checked",
               &TextureSlotBoundsAreChecked);
-    tests.Run("Material binding clears tail and preserves lower stages",
-              &MaterialBindingClearsTailAndPreservesLowerStages);
+    tests.Run("Material binding clears primary tail and preserves other positive stages",
+              &MaterialBindingClearsPrimaryTailAndPreservesOtherPositiveStages);
     tests.Run("Material preserves callback-owned texture stages",
               &MaterialPreservesCallbackOwnedTextureStages);
     tests.Run("SetAsCurrent propagates texture upload failure",
               &SetAsCurrentPropagatesTextureUploadFailure);
     tests.Run("Channel texture binding preserves texture flags",
               &ChannelTextureBindingPreservesTextureFlags);
-    tests.Run("Mesh additional pass preserves mono-pass channels", &MeshAdditionalPassPreservesMonoPassChannels);
+    tests.Run("Mesh additional pass does not replay folded mono-pass channels", &MeshAdditionalPassDoesNotReplayFoldedMonoPassChannels);
     tests.Run("Mesh buffers are independent per context",
               &MeshBuffersAreIndependentPerContext);
     tests.Run("Mesh partial deletion retries only the failed buffer",

@@ -230,6 +230,11 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    CKWORD BindMonoPassTextureChannelsChecked(RCKRenderContext *dev);
+    int RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *group,
+                              RCK3dEntity *ent, VxDrawPrimitiveData *baseData,
+                              CKWORD failedChannels);
+
     CKDWORD m_Flags;
     VxVector m_BaryCenter;
     float m_Radius;

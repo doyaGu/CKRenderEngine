@@ -94,12 +94,12 @@ TEST_F(MaterialApplyTest, BaseBindingAppliesBorderFilteringAndAllTextureAddressA
     EXPECT_EQ(VXTEXTURE_ADDRESSCLAMP, State.StageStates[1][CKRST_TSS_ADDRESSU]); EXPECT_EQ(VXTEXTURE_ADDRESSCLAMP, State.StageStates[1][CKRST_TSS_ADDRESSV]);
     EXPECT_EQ(VXTEXTURE_ADDRESSCLAMP, State.StageStates[1][CKRST_TSS_ADDRESW]);
 }
-TEST_F(MaterialApplyTest, LaterStageApplicationPreservesEarlierStateAndClearsUnusedLaterStages) {
+TEST_F(MaterialApplyTest, LaterStageApplicationPreservesEarlierAndUnrelatedLaterStages) {
     RCKMaterial material(Context); ApplyObservedTexture texture(Context, &State, 41); material.SetTexture(0, Texture(texture));
     State.Textures[0] = 71; State.StageStates[0][CKRST_TSS_CONSTANT] = 72; State.Matrices[VXMATRIX_TEXTURE0][3][0] = 73;
     State.Textures[6] = 81; State.StageStates[6][CKRST_TSS_OP] = CKRST_TOP_ADD; ASSERT_TRUE(material.SetAsCurrent(Device, FALSE, 2));
     EXPECT_EQ(71u, State.Textures[0]); EXPECT_EQ(72u, State.StageStates[0][CKRST_TSS_CONSTANT]); EXPECT_FLOAT_EQ(73, State.Matrices[VXMATRIX_TEXTURE0][3][0]);
-    EXPECT_EQ(41u, State.Textures[2]); EXPECT_EQ(0u, State.Textures[6]); EXPECT_EQ(0u, State.StageStates[6][CKRST_TSS_OP]); Identity(6);
+    EXPECT_EQ(41u, State.Textures[2]); EXPECT_EQ(81u, State.Textures[6]); EXPECT_EQ(CKRST_TOP_ADD, State.StageStates[6][CKRST_TSS_OP]); Identity(6);
 }
 TEST_F(MaterialApplyTest, TextureOwnedAlphaTestIsNotOverwrittenByMaterialAlphaState) {
     RCKMaterial material(Context); ApplyObservedTexture texture(Context, &State, 41); texture.Result = 2; material.SetTexture(0, Texture(texture));
@@ -167,7 +167,7 @@ TEST_F(MaterialApplyTest, ExplicitBindingCarriesAllIndependentAddressAxesAndBord
     ASSERT_TRUE(material.BindTextureSlotToStage(Device, 3, 5)); EXPECT_TRUE(texture.Clamp); EXPECT_EQ(0x12345678u, State.StageStates[5][CKRST_TSS_BORDERCOLOR]);
     EXPECT_EQ(VXTEXTURE_ADDRESSCLAMP, State.StageStates[5][CKRST_TSS_ADDRESSU]); EXPECT_EQ(VXTEXTURE_ADDRESSCLAMP, State.StageStates[5][CKRST_TSS_ADDRESSV]); EXPECT_EQ(VXTEXTURE_ADDRESSCLAMP, State.StageStates[5][CKRST_TSS_ADDRESW]);
 }
-TEST_F(MaterialApplyTest, DP3AtLaterStageClearsUnusedTailAndPreservesEarlierStages) {
+TEST_F(MaterialApplyTest, DP3AtLaterStagePreservesStagesOutsideItsTwoStageChain) {
     RCKMaterial material(Context); ApplyObservedTexture primary(Context, &State, 41), normal(Context, &State, 42);
     material.SetTexture(0, Texture(primary)); material.SetTexture(1, Texture(normal)); material.SetEffect(VXEFFECT_DP3);
     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
@@ -181,6 +181,8 @@ TEST_F(MaterialApplyTest, DP3AtLaterStageClearsUnusedTailAndPreservesEarlierStag
         EXPECT_FLOAT_EQ(11.0f + stage, State.Matrices[VXMATRIX_TEXTURE0 + stage][3][0]);
     }
     for (int stage = 4; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
-        EXPECT_EQ(0u, State.Textures[stage]); EXPECT_EQ(0u, State.StageStates[stage][CKRST_TSS_CONSTANT]); Identity(stage);
+        EXPECT_EQ(static_cast<CKDWORD>(91 + stage), State.Textures[stage]); EXPECT_EQ(static_cast<CKDWORD>(101 + stage), State.StageStates[stage][CKRST_TSS_CONSTANT]);
+        for (int row = 0; row < 4; ++row) for (int column = 0; column < 4; ++column)
+            EXPECT_FLOAT_EQ(row == 3 && column == 0 ? 11.0f + stage : (row == column ? 1.0f : 0.0f), State.Matrices[VXMATRIX_TEXTURE0 + stage][row][column]);
     }
 }
