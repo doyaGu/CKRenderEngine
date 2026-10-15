@@ -69,9 +69,9 @@ void OffsetDrawPrimitiveData(VxDrawPrimitiveData &data, CKDWORD startVertex, CKD
 }
 
 CKDWORD ComputeVertexStagingSize(CKRST_DPFLAGS flags) {
-    CKDWORD size = (flags & CKRST_DP_TRANSFORM) ? sizeof(VxVector) : sizeof(VxVector4);
-    if ((flags & CKRST_DP_TRANSFORM) && (flags & CKRST_DP_WEIGHTMASK))
-        size = CKRSTGetBlendVertexSize(flags);
+    CKDWORD size = CKRSTGetVertexLayout(
+        flags & (CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTMASK | CKRST_DP_MATRIXPAL),
+        nullptr, nullptr);
     if (flags & CKRST_DP_LIGHT)
         size += sizeof(VxVector);
     if (flags & CKRST_DP_TWEEN) {
@@ -92,13 +92,9 @@ CKBOOL AllocateVertexBufferStaging(VxDrawPrimitiveData &data, CKRST_DPFLAGS flag
 
     data.Flags = flags & ~CKRST_DP_VBUFFER;
     data.VertexCount = (int)maxVertexCount;
-    if (flags & CKRST_DP_TRANSFORM) {
-        data.PositionStride = (flags & CKRST_DP_WEIGHTMASK)
-            ? CKRSTGetBlendVertexSize(flags)
-            : sizeof(VxVector);
-    } else {
-        data.PositionStride = sizeof(VxVector4);
-    }
+    data.PositionStride = CKRSTGetVertexLayout(
+        flags & (CKRST_DP_TRANSFORM | CKRST_DP_WEIGHTMASK | CKRST_DP_MATRIXPAL),
+        nullptr, nullptr);
     data.PositionPtr = VxNewAligned(data.PositionStride * maxVertexCount, 16);
     if (!data.PositionPtr)
         return FALSE;
