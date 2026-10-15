@@ -114,6 +114,54 @@ TEST_F(TCBPositionEvaluationTest, EndpointScalingKeepsRepresentableTangentsWhenT
     EXPECT_FLOAT_EQ(static_cast<float>(-.75 * static_cast<double>(FLT_MAX)), controller.Cache()[4].x);
 }
 
+TEST_F(TCBPositionEvaluationTest, HermiteTermsCancelBeforeNarrowingTheFinalRepresentablePosition) {
+    const float large = .95f * FLT_MAX;
+    InspectTCBPosition controller;
+    // Every stored tangent is representable: 0,large,large,large.
+    AddPosition(controller, 0, -large, 0, 0, 1);
+    AddPosition(controller, 1, large);
+    AddPosition(controller, 2, large, 0, 0, -1);
+    VxVector output; ASSERT_TRUE(controller.Evaluate(1.5f, &output)); PositionIs(output, large);
+    PositionIs(controller.Cache()[1], 0); PositionIs(controller.Cache()[2], large);
+    PositionIs(controller.Cache()[3], large); PositionIs(controller.Cache()[4], large);
+    EXPECT_TRUE(std::isfinite(output.x));
+}
+
+TEST_F(TCBPositionEvaluationTest, AsymmetricTimeSpansRetainSmallEndpointContributionsInBothDirections) {
+    const float large = 1.0e30f;
+    for (int reversed = 0; reversed < 2; ++reversed) {
+        SCOPED_TRACE(reversed); RCKTCBPositionController controller;
+        if (reversed) {
+            AddPosition(controller, -large, large); AddPosition(controller, 2, 0);
+        } else {
+            AddPosition(controller, -2, 0); AddPosition(controller, large, large);
+        }
+        // With two zero-TCB keys, Hermite reduces to a line. A distance of
+        // one time unit from the zero-valued endpoint contributes position 1.
+        VxVector output; ASSERT_TRUE(controller.Evaluate(reversed ? 1.0f : -1.0f, &output));
+        PositionIs(output, 1);
+    }
+}
+
+TEST_F(TCBPositionEvaluationTest, TinyEaseEndQuadraticKeepsItsRepresentableLargeTangentContribution) {
+    const float large = 1.0e30f;
+    for (int reversed = 0; reversed < 2; ++reversed) {
+        SCOPED_TRACE(reversed); RCKTCBPositionController controller;
+        if (reversed) {
+            AddPosition(controller, -large, large, 0, 0, 0, 0, 0, .875f, 0);
+            AddPosition(controller, 0, 0, 0, 0, 0, 0, 0, .5f, .875f);
+        } else {
+            AddPosition(controller, 0, 0, 0, 0, 0, 0, 0, .875f, .5f);
+            AddPosition(controller, large, large, 0, 0, 0, 0, 0, 0, .875f);
+        }
+        // Ease from .5 gives F(t)=(4/3)*t^2. The uneased curve is a line:
+        // F(1e-30)*1e30 = (4/3)*1e-30, though F itself underflows float.
+        VxVector output; ASSERT_TRUE(controller.Evaluate(reversed ? -1.0f : 1.0f, &output));
+        PositionIs(output, 1.3333333333333333e-30f);
+        EXPECT_GT(output.x, 0); EXPECT_TRUE(std::isfinite(output.x));
+    }
+}
+
 class TCBPositionAnimationTest : public ::testing::Test {
 protected:
     CKContext *Context = nullptr;
