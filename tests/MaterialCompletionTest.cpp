@@ -220,3 +220,16 @@ TEST_F(MaterialCompletionTest, UnreadableRetainedSuffixFailsBeforeMutationAndNex
     ASSERT_TRUE(material.SetAsCurrent(Device, FALSE, 2)); Draw();
     EXPECT_EQ(41u, State.SubmittedTextures[2]); EXPECT_EQ(77u, State.SubmittedTextures[7]);
 }
+TEST_F(MaterialCompletionTest, ExplicitSlotUploadRefusalClearsItsPartialGeneratedCoordinatesAndMatrix) {
+    RCKMaterial material(Context); CompletionTexture color(Context, 41); material.SetTexture(1, &color); color.DirtyFailure = TRUE;
+    State.Textures[0] = 70; State.Textures[7] = 77;
+    EXPECT_FALSE(material.BindTextureSlotToStage(Device, 1, 2));
+    EXPECT_EQ(0u, State.Textures[2]); EXPECT_EQ(CKRST_TOP_DISABLE, State.StageStates[2][CKRST_TSS_OP]);
+    EXPECT_EQ(CKRST_TTF_NONE, State.StageStates[2][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+    EXPECT_EQ(2u, State.StageStates[2][CKRST_TSS_TEXCOORDINDEX]);
+    for (int row = 0; row < 4; ++row) for (int column = 0; column < 4; ++column)
+        EXPECT_FLOAT_EQ(row == column ? 1.0f : 0.0f, State.Matrices[VXMATRIX_TEXTURE0 + 2][row][column]);
+    EXPECT_EQ(70u, State.Textures[0]); EXPECT_EQ(77u, State.Textures[7]);
+    color.DirtyFailure = FALSE; ASSERT_TRUE(material.BindTextureSlotToStage(Device, 1, 2)); Draw();
+    EXPECT_EQ(41u, State.SubmittedTextures[2]); EXPECT_EQ(70u, State.SubmittedTextures[0]); EXPECT_EQ(77u, State.SubmittedTextures[7]);
+}

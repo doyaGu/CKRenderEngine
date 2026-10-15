@@ -1815,7 +1815,7 @@ CKBOOL RCKMaterial::BindTextureSlotToStage(CKRenderContext *context, int Texture
     const CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
     int textureResult = tex->SetAsCurrent(context, clamped, TextureStage);
     if (!textureResult) {
-        rst->SetTexture(0, TextureStage);
+        dev->ResetTextureStage(TextureStage);
         return FALSE;
     }
 
