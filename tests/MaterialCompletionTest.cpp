@@ -253,3 +253,42 @@ TEST_F(MaterialCompletionTest, UnknownTexgenResetsOnlyTheSelectedGeneratedCoordi
     for (int row = 0; row < 4; ++row) for (int column = 0; column < 4; ++column)
         EXPECT_FLOAT_EQ(row == column ? 1.0f : 0.0f, State.SubmittedMatrices[2][row][column]);
 }
+
+TEST_F(MaterialCompletionTest, GlobalTextureDisableSkipsDefaultDotProductAndReenableRestoresItsCompleteChain) {
+    RCKMaterial material(Context); CompletionTexture color(Context, 41), normal(Context, 42);
+    Chain(material, color, normal, nullptr, VXEFFECT_DP3); Caps(1);
+    State.Textures[0] = 70; State.Textures[7] = 77;
+    Device->SetGlobalRenderMode(GouraudShading, FALSE, FALSE);
+    ASSERT_TRUE(material.SetAsCurrent(Device, TRUE, 0)); Draw();
+    EXPECT_EQ(0, color.Calls); EXPECT_EQ(0, normal.Calls); EXPECT_EQ(1, State.MaterialWrites);
+    for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage)
+        EXPECT_EQ(0u, State.SubmittedTextures[stage]);
+    EXPECT_EQ(CKRST_TOP_DISABLE, State.SubmittedOperations[0]);
+    Device->SetGlobalRenderMode(GouraudShading, TRUE, FALSE); Caps(2);
+    ASSERT_TRUE(material.SetAsCurrent(Device, TRUE, 0)); Draw();
+    EXPECT_EQ(42u, State.SubmittedTextures[0]); EXPECT_EQ(41u, State.SubmittedTextures[1]);
+    EXPECT_EQ(CKRST_TOP_DOTPRODUCT3, State.SubmittedOperations[0]);
+    EXPECT_EQ(1, color.Calls); EXPECT_EQ(1, normal.Calls);
+}
+TEST_F(MaterialCompletionTest, GlobalTextureDisableAtPositiveStageDoesNotInvokeAbsoluteBumpOrAlterRetainedBindings) {
+    RCKMaterial material(Context); CompletionTexture color(Context, 41), bump(Context, 42), environment(Context, 43);
+    Chain(material, color, bump, &environment, VXEFFECT_BUMPENV); Caps(2);
+    State.Textures[0] = 70; State.Textures[2] = 72; State.Textures[7] = 77;
+    Device->SetGlobalRenderMode(GouraudShading, FALSE, FALSE);
+    ASSERT_TRUE(material.SetAsCurrent(Device, FALSE, 2)); Draw();
+    EXPECT_EQ(70u, State.SubmittedTextures[0]); EXPECT_EQ(0u, State.SubmittedTextures[2]); EXPECT_EQ(77u, State.SubmittedTextures[7]);
+    EXPECT_EQ(0, color.Calls); EXPECT_EQ(0, bump.Calls); EXPECT_EQ(0, environment.Calls);
+}
+TEST_F(MaterialCompletionTest, GlobalTextureSwitchDoesNotOverrideExplicitMaterialOrEffectTextureOwners) {
+    RCKMaterial material(Context); CompletionTexture color(Context, 41); material.SetTexture(0, &color);
+    Device->SetGlobalRenderMode(GouraudShading, FALSE, FALSE); Caps(1);
+    int materialCalls = 0; material.SetCallback(CompletionMaterialOwner, &materialCalls);
+    ASSERT_TRUE(material.SetAsCurrent(Device, TRUE, 0)); Draw();
+    EXPECT_EQ(1, materialCalls); EXPECT_EQ(901u, State.SubmittedTextures[0]); EXPECT_EQ(0, State.MaterialWrites); EXPECT_EQ(0, color.Calls);
+    material.SetCallback(nullptr, nullptr); int effectCalls = 0;
+    VxEffectDescription effect; effect.Summary = "Explicit texture owner";
+    effect.SetCallback = CompletionEffectOwner; effect.CallbackArg = &effectCalls;
+    material.SetEffect(static_cast<VX_EFFECT>(Manager->AddEffect(effect)));
+    ASSERT_TRUE(material.SetAsCurrent(Device, FALSE, 2)); Draw();
+    EXPECT_EQ(1, effectCalls); EXPECT_EQ(902u, State.SubmittedTextures[2]); EXPECT_EQ(901u, State.SubmittedTextures[0]); EXPECT_EQ(0, color.Calls);
+}

@@ -13,7 +13,7 @@
  * - Destructor:  0x10062D34
  * - Save:        0x100652CF
  * - Load:        0x100655E1
- * - SetAsCurrent: 0x10064be0
+ * - SetAsCurrent: 0x10064B0E
  */
 
 #include "RCKMaterial.h"
@@ -1540,7 +1540,7 @@ VXSHADE_MODE RCKMaterial::GetShadeMode() {
  * - Render states (cull mode, shade mode, fill mode, z-write)
  * - Special effects (texture generation, bump mapping, etc.)
  *
- * Based on decompilation at 0x10064be0.
+ * Based on decompilation at 0x10064B0E.
  *
  * @param context The render context to apply material to
  * @param Lit Whether to apply lighting material data
@@ -1594,6 +1594,9 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
     const CKBOOL skipAllTextures = (effectCallbackResult & VXEFFECTRETVAL_SKIPALLTEX) != 0;
     const CKBOOL skipTextureMatrix = (effectCallbackResult & VXEFFECTRETVAL_SKIPTEXMAT) != 0;
+    // Native SetAsCurrent gates its ordinary textures/effects on the context's
+    // global texture switch. Explicit callback-owned state remains its owner.
+    const CKBOOL useTextures = dev->m_TextureEnabled;
     // The base path now knows who owns ordinary state, even when a later
     // preflight or required snapshot fails before texture stages are reset.
     if (skipAllTextures)
@@ -1601,11 +1604,11 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     else
         bindingCall.UseDefaultTextures();
     if (!skipAllTextures) {
-        const CKBOOL applyEffect = m_Textures[0] && !skipTextureMatrix;
+        const CKBOOL applyEffect = useTextures && m_Textures[0] && !skipTextureMatrix;
         const int firstStage = applyEffect && effect == VXEFFECT_BUMPENV ? 0 : TextureStage;
         const int stageCount = applyEffect ? CKMaterialConfiguredStageCount(this) : 1;
         const int textureCount = applyEffect ? CKMaterialConfiguredTextureCount(this) :
-            (m_Textures[0] ? 1 : 0);
+            (useTextures && m_Textures[0] ? 1 : 0);
         if (!CKMaterialStageRangeFits(dev, firstStage, stageCount, textureCount, TextureStage != 0))
             return FALSE;
     }
@@ -1656,7 +1659,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
 
     CKDWORD effectResult = 0;
-    if (m_Textures[0] && !skipAllTextures && !skipTextureMatrix) {
+    if (useTextures && m_Textures[0] && !skipAllTextures && !skipTextureMatrix) {
         if (effect == VXEFFECT_TEXGEN) {
             effectResult = TexGenEffect(dev, ReadTexGenParameter(m_EffectParameter), nullptr, TextureStage);
         } else if (effect == VXEFFECT_TEXGENREF) {
@@ -1677,7 +1680,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     // --- Texture ---
     CKBOOL textureOwnsAlphaTest = FALSE;
     if (!skipAllTextures && !(effectResult & 2)) {
-        CKTexture *tex = m_Textures[0];
+        CKTexture *tex = useTextures ? m_Textures[0] : nullptr;
         if (tex) {
             CKBOOL clamped = (m_TextureAddressMode == VXTEXTURE_ADDRESSCLAMP);
             int textureResult = tex->SetAsCurrent(context, clamped, TextureStage);
@@ -1766,7 +1769,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
 
 
-    if (m_Textures[0] && !skipAllTextures && !skipTextureMatrix &&
+    if (useTextures && m_Textures[0] && !skipAllTextures && !skipTextureMatrix &&
         (effect == VXEFFECT_2TEXTURES || effect == VXEFFECT_3TEXTURES)) {
         effectResult = BlendTexturesEffect(dev, TextureStage + 1);
         if ((effectResult & CKRE_MATERIAL_EFFECT_FAILED) != 0)
