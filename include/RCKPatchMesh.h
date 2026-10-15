@@ -89,6 +89,9 @@ public:
 
     int GetMemoryOccupation() override;
 
+    CKERROR PrepareDependencies(CKDependenciesContext &context) override;
+    CKERROR RemapDependencies(CKDependenciesContext &context) override;
+
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
     static CKSTRING GetClassName();

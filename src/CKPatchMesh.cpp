@@ -734,6 +734,57 @@ void RCKPatchMesh::SetChannelDestBlend(int Index, VXBLEND_MODE BlendMode) {
 }
 
 
+CKERROR RCKPatchMesh::PrepareDependencies(CKDependenciesContext &context) {
+    CKERROR result = CKBeObject::PrepareDependencies(context);
+    if (result != CK_OK)
+        return result;
+
+    if ((context.GetClassDependencies(CKCID_MESH) & 1) != 0) {
+        const int materialCount = GetMaterialCount();
+        for (int i = 0; i < materialCount; ++i) {
+            CKMaterial *material = GetMaterial(i);
+            if (material)
+                material->PrepareDependencies(context);
+        }
+        for (int i = 0; i < m_MaterialChannels.Size(); ++i) {
+            CKMaterial *material = m_MaterialChannels[i].m_Material;
+            if (material)
+                material->PrepareDependencies(context);
+        }
+
+        // Authored patches can own materials before any derived mesh exists.
+        for (int i = 0; i < m_Patches.Size(); ++i) {
+            CKMaterial *material = static_cast<CKMaterial *>(m_Context->GetObject(m_Patches[i].Material));
+            if (material)
+                material->PrepareDependencies(context);
+        }
+        for (int i = 1; i < m_TexturePatches.Size(); ++i) {
+            CKMaterial *material = static_cast<CKMaterial *>(m_Context->GetObject(m_TexturePatches[i].Material));
+            if (material)
+                material->PrepareDependencies(context);
+        }
+    }
+
+    return context.FinishPrepareDependencies(this, m_ClassID);
+}
+
+// 0x1003CC29: Remap both the inherited mesh and the authored patch state.
+CKERROR RCKPatchMesh::RemapDependencies(CKDependenciesContext &context) {
+    CKERROR result = RCKMesh::RemapDependencies(context);
+    if (result != CK_OK)
+        return result;
+
+    if ((context.GetClassDependencies(CKCID_MESH) & 1) != 0) {
+        for (int i = 0; i < m_Patches.Size(); ++i)
+            m_Patches[i].Material = context.RemapID(m_Patches[i].Material);
+        for (int i = 0; i < m_TexturePatches.Size(); ++i)
+            m_TexturePatches[i].Material = context.RemapID(m_TexturePatches[i].Material);
+        m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+    }
+
+    return CK_OK;
+}
+
 // Modifiers operate on authored controls, not on the derived render mesh.
 // 0x1003406D / 0x1003408C: one packed [verts][vecs] stream.
 CKBYTE *RCKPatchMesh::GetModifierVertices(CKDWORD *Stride) {
