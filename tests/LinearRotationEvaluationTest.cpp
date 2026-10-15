@@ -98,6 +98,35 @@ protected:
     }
 };
 
+TEST_F(LinearRotationAnimationTest, ObjectAnimationPlaybackPublishesRotationAndPreservesPositionAndScale) {
+    RCK3dEntity entity(Context);
+    VxMatrix initial = VxMatrix::Identity();
+    initial[0].Set(2, 0, 0);
+    initial[1].Set(0, 3, 0);
+    initial[2].Set(0, 0, 4);
+    initial[3].Set(5, 6, 7);
+    entity.SetWorldMatrix(initial);
+    RCKObjectAnimation animation(Context);
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    RCKLinearRotationController *controller = static_cast<RCKLinearRotationController *>(
+        animation.CreateController(CKANIMATION_LINROT_CONTROL));
+    ASSERT_NE(nullptr, controller);
+    AddRotation(*controller, 0, VxQuaternion(0, 0, 0, 1));
+    AddRotation(*controller, 10, VxQuaternion(0, 0, 1, 0));
+    animation.SetLength(10);
+    ASSERT_EQ(CK_OK, animation.SetStep(.5f));
+    const VxMatrix &local = entity.GetLocalMatrix();
+    EXPECT_NEAR(0, local[0][0], 1.0e-5f);
+    EXPECT_NEAR(-2, local[0][1], 1.0e-5f);
+    EXPECT_NEAR(3, local[1][0], 1.0e-5f);
+    EXPECT_NEAR(0, local[1][1], 1.0e-5f);
+    EXPECT_NEAR(4, local[2][2], 1.0e-5f);
+    EXPECT_FLOAT_EQ(5, local[3][0]);
+    EXPECT_FLOAT_EQ(6, local[3][1]);
+    EXPECT_FLOAT_EQ(7, local[3][2]);
+    animation.Set3dEntity(nullptr);
+}
+
 TEST_F(LinearRotationAnimationTest, ObjectAnimationPlaybackKeepsTheWideTimelineMidpointPose) {
     RCK3dEntity entity(Context);
     RCKObjectAnimation animation(Context);
@@ -115,6 +144,36 @@ TEST_F(LinearRotationAnimationTest, ObjectAnimationPlaybackKeepsTheWideTimelineM
     EXPECT_NEAR(1, local[1][0], 1.0e-5f);
     EXPECT_NEAR(0, local[1][1], 1.0e-5f);
     EXPECT_NEAR(1, local[2][2], 1.0e-5f);
+    animation.Set3dEntity(nullptr);
+}
+
+TEST_F(LinearRotationAnimationTest, ObjectAnimationPlaybackComposesRotationAfterAnimatedScaleAxis) {
+    RCK3dEntity entity(Context);
+    RCKObjectAnimation animation(Context);
+    animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity));
+    RCKLinearRotationController *controller = static_cast<RCKLinearRotationController *>(
+        animation.CreateController(CKANIMATION_LINROT_CONTROL));
+    ASSERT_NE(nullptr, controller);
+    AddRotation(*controller, 0, VxQuaternion(0, 0, 0, 1));
+    AddRotation(*controller, 10, VxQuaternion(0, 0, 1, 0));
+    VxVector position(5, 6, 7), scale(2, 3, 4);
+    VxQuaternion axis = ZRotation(90);
+    animation.AddPositionKey(0, &position);
+    animation.AddScaleKey(0, &scale);
+    animation.AddScaleAxisKey(0, &axis);
+    animation.SetLength(10);
+    ASSERT_EQ(CK_OK, animation.SetStep(.5f));
+    const VxMatrix &local = entity.GetLocalMatrix();
+    // A 90-degree scale axis swaps x/y scales: (3,2,4). The native pose
+    // helper multiplies that stretch by rotation, retaining each row scale.
+    EXPECT_NEAR(0, local[0][0], 1.0e-5f);
+    EXPECT_NEAR(-3, local[0][1], 1.0e-5f);
+    EXPECT_NEAR(2, local[1][0], 1.0e-5f);
+    EXPECT_NEAR(0, local[1][1], 1.0e-5f);
+    EXPECT_NEAR(4, local[2][2], 1.0e-5f);
+    EXPECT_FLOAT_EQ(5, local[3][0]);
+    EXPECT_FLOAT_EQ(6, local[3][1]);
+    EXPECT_FLOAT_EQ(7, local[3][2]);
     animation.Set3dEntity(nullptr);
 }
 

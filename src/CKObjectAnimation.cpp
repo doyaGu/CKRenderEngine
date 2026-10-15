@@ -2158,8 +2158,8 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
                 scaleMatrix[2][2] = scale.z;
             }
 
-            // Combine: result = scale * rotation
-            Vx3DMultiplyMatrix(localMatrix, scaleMatrix, rotMatrix);
+            // The native pose constructor applies stretch before rotation.
+            Vx3DMultiplyMatrix(localMatrix, rotMatrix, scaleMatrix);
 
             // Set position
             localMatrix[3][0] = pos.x;
