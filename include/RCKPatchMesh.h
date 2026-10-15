@@ -60,6 +60,13 @@ public:
     void PreSave(CKFile *file, CKDWORD flags) override;
     void LoadVertices(CKStateChunk *chunk) override;
 
+    CKBYTE *GetModifierVertices(CKDWORD *Stride) override;
+    int GetModifierVertexCount() override;
+    void ModifierVertexMove(CKBOOL RebuildNormals, CKBOOL RebuildFaceNormals) override;
+    CKBYTE *GetModifierUVs(CKDWORD *Stride, int channel = -1) override;
+    int GetModifierUVCount(int channel = -1) override;
+    void ModifierUVMove() override;
+
     int GetMemoryOccupation() override;
 
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;

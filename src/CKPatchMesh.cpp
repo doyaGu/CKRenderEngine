@@ -586,6 +586,46 @@ CKPatchMesh *RCKPatchMesh::CreateInstance(CKContext *Context) {
     return reinterpret_cast<CKPatchMesh *>(patchMesh);
 }
 
+// Modifiers operate on authored controls, not on the derived render mesh.
+// 0x1003406D / 0x1003408C: one packed [verts][vecs] stream.
+CKBYTE *RCKPatchMesh::GetModifierVertices(CKDWORD *Stride) {
+    if (Stride)
+        *Stride = sizeof(VxVector);
+    return reinterpret_cast<CKBYTE *>(m_Verts);
+}
+
+int RCKPatchMesh::GetModifierVertexCount() {
+    return m_VertCount + m_VecCount;
+}
+
+// 0x100340A9: the face-normal argument is intentionally unused.
+void RCKPatchMesh::ModifierVertexMove(CKBOOL RebuildNormals, CKBOOL RebuildFaceNormals) {
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    if (RebuildNormals)
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
+    else
+        m_PatchFlags &= ~CK_PATCHMESH_BUILDNORMALS;
+}
+
+// 0x1003DFA0 / 0x1003DFE0: channel -1 is authored channel record zero.
+CKBYTE *RCKPatchMesh::GetModifierUVs(CKDWORD *Stride, int channel) {
+    if (Stride)
+        *Stride = sizeof(VxUV);
+    return reinterpret_cast<CKBYTE *>(GetTVs(channel));
+}
+
+int RCKPatchMesh::GetModifierUVCount(int channel) {
+    return GetTVCount(channel);
+}
+
+// 0x1003E010 clears UPTODATE. Rebuild connectivity as well because raw UV
+// writes can create/remove a seam in any stored channel.
+void RCKPatchMesh::ModifierUVMove() {
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
+    m_PatchChanged = TRUE;
+}
+
 //=============================================================================
 // CKPatchMesh Virtual Methods Implementation
 //=============================================================================
@@ -960,6 +1000,7 @@ void RCKPatchMesh::BuildRenderMesh() {
     }
 
     m_Valid = FALSE;
+    const CKDWORD requestedNormalFlag = m_PatchFlags & CK_PATCHMESH_BUILDNORMALS;
 
     int patchCount = m_Patches.Size();
     int edgeCount = m_PatchEdges.Size();
@@ -1402,6 +1443,10 @@ void RCKPatchMesh::BuildRenderMesh() {
     // Ensure patch auxiliary data is ready.
     for (int p = 0; p < patchCount; ++p)
         ComputePatchInteriors(p);
+
+    // Public interior recomputation invalidates normals, but these internal
+    // calls must preserve ModifierVertexMove's explicit rebuild policy.
+    m_PatchFlags = (m_PatchFlags & ~CK_PATCHMESH_BUILDNORMALS) | requestedNormalFlag;
 
     // Fill edge vertices positions and UVs.
     for (int e = 0; e < edgeCount; ++e) {
