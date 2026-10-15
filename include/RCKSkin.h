@@ -22,7 +22,7 @@ class RCK3dEntity;
 struct RCKSkinBonePoints {
     XClassArray<VxVector4> m_WeightedVertices;  // Vertices with weight in w component
     XClassArray<VxVector4> m_WeightedNormals;   // Normals with weight in w component
-    XClassArray<CKWORD> m_VertexIndices;        // Indices of affected vertices
+    XClassArray<int> m_VertexIndices;           // Indices of affected vertices
 };
 
 /**

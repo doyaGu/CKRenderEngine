@@ -290,7 +290,7 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
 
         // Transform vertices affected by this bone
         for (int p = 0; p < pointCount; ++p) {
-            CKWORD vertexIdx = bonePoints.m_VertexIndices[p];
+            const int vertexIdx = bonePoints.m_VertexIndices[p];
             if (vertexIdx >= outputVertexCount)
                 continue;
 
@@ -313,7 +313,7 @@ CKBOOL RCKSkin::CalcPointsEx(int VertexCount, CKBYTE *VertexPtr, CKDWORD VStride
         if (NormalPtr && bonePoints.m_WeightedNormals.Size() > 0) {
             int normalCount = bonePoints.m_WeightedNormals.Size();
             for (int n = 0; n < normalCount; ++n) {
-                CKWORD vertexIdx = bonePoints.m_VertexIndices[n];
+                const int vertexIdx = bonePoints.m_VertexIndices[n];
                 if (vertexIdx >= outputVertexCount)
                     continue;
 
@@ -493,7 +493,7 @@ void RCKSkin::BuildBonePointLists() {
                 weightedNormal.z = normal.z;
                 weightedNormal.w = weight;
             }
-            m_Points[bone].m_VertexIndices[index] = (CKWORD) v;
+            m_Points[bone].m_VertexIndices[index] = v;
         }
     }
 }

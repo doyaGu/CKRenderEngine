@@ -109,7 +109,14 @@ TEST_F(SkinCacheTest, ZeroAndNegativeWeightsAreNotEmittedAsBoneContributions) {
     EXPECT_EQ(1, skin.CachedCount(0));
 }
 
-
+TEST_F(SkinCacheTest, VertexIndexBeyondWordRangeReachesItsOwnOutput) {
+    CacheSkin skin; RCK3dEntity bone(Context); Translation(bone, 10, 0, 0);
+    skin.SetBoneCount(1); skin.GetBoneData(0)->SetBone(reinterpret_cast<CK3dEntity *>(&bone)); skin.SetVertexCount(65537);
+    Influence(skin, 0, 0, 1, VxVector(1, 2, 3));
+    Influence(skin, 65536, 0, 1, VxVector(7, 8, 9));
+    VxVector *out = new VxVector[65537]; ASSERT_TRUE(Points(skin, 65537, out));
+    Vec(out[0], 11, 2, 3); Vec(out[65536], 17, 8, 9); delete[] out;
+}
 
 TEST_F(SkinCacheTest, BoneDataBindingsMatricesFlagsAndBorrowedLifetimeReachSkinConsumer) {
     RCK3dEntity first(Context), second(Context); Translation(first, 10, 0, 0); Translation(second, 20, 0, 0);
@@ -132,5 +139,18 @@ TEST_F(SkinCacheTest, BoneDataBindingsMatricesFlagsAndBorrowedLifetimeReachSkinC
     EXPECT_FLOAT_EQ(10, first.GetWorldMatrix()[3][0]); EXPECT_FLOAT_EQ(20, second.GetWorldMatrix()[3][0]);
 }
 
-
+TEST_F(SkinCacheTest, BoneAndPointStorageLayoutMatchesPortableOwnershipContract) {
+    MeasuredSkinBone bone;
+    const size_t pointer = sizeof(void *);
+    EXPECT_EQ(pointer, bone.BoneOffset()); EXPECT_EQ(pointer * 2, bone.FlagsOffset());
+    EXPECT_EQ(pointer * 2 + 4, bone.InitialOffset()); EXPECT_EQ(pointer * 2 + 68, bone.TransformOffset());
+    EXPECT_EQ(pointer == 4 ? 140u : 152u, sizeof(RCKSkinBoneData));
+    EXPECT_EQ(pointer * 9, sizeof(RCKSkinBonePoints)); EXPECT_EQ(alignof(void *), alignof(RCKSkinBonePoints));
+    RCKSkinBonePoints points;
+    EXPECT_EQ(0u, reinterpret_cast<const char *>(&points.m_WeightedVertices) - reinterpret_cast<const char *>(&points));
+    EXPECT_EQ(pointer * 3, reinterpret_cast<const char *>(&points.m_WeightedNormals) - reinterpret_cast<const char *>(&points));
+    EXPECT_EQ(pointer * 6, reinterpret_cast<const char *>(&points.m_VertexIndices) - reinterpret_cast<const char *>(&points));
+    points.m_WeightedVertices.Resize(1); points.m_WeightedNormals.Resize(1); points.m_VertexIndices.Resize(1);
+    points.m_VertexIndices[0] = 65536; EXPECT_EQ(65536, points.m_VertexIndices[0]);
+}
 }
