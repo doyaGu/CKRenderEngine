@@ -147,7 +147,19 @@ TEST(KinematicChainMathTest, TallLeastSquaresReconstructsAndLeavesOrthogonalResi
     EXPECT_NEAR(2, x[0], .0001); EXPECT_NEAR(4, x[1], .0001);
 }
 
-
+TEST(KinematicChainMathTest, LargeFiniteJacobianAvoidsIntermediateSquaringOverflow) {
+    const float scale = 1e20f;
+    Decomposition d(3, 3);
+    const float matrix[3][3] = {{3, -2, 1}, {1, 4, -2}, {2, 1, 5}};
+    float b[3] = {2 * scale, -3 * scale, scale}, x[3] = {};
+    for (int i = 0; i < 3; ++i) for (int j = 0; j < 3; ++j) d.Set(i, j, matrix[i][j] * scale);
+    d.Run(); d.Check(scale * .0002f); d.Solve(b, x);
+    for (int row = 0; row < 3; ++row) {
+        double predicted = 0;
+        for (int col = 0; col < 3; ++col) predicted += double(d.Original[row][col]) * x[col];
+        EXPECT_TRUE(std::isfinite(predicted)); EXPECT_NEAR(b[row], predicted, scale * .0002);
+    }
+}
 
 class KinematicChainJointTest : public TextureTestWorld {
 protected:

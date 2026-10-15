@@ -1001,7 +1001,7 @@ void RCKKinematicChain::SVDDecompose(float **a, int m, int n, float *w, float **
                         break;
 
                     g = w[i];
-                    float h = sqrtf(f * f + g * g);
+                    float h = (float)sqrt((double)f * f + (double)g * g);
                     w[i] = h;
                     h = 1.0f / h;
                     c = g * h;
@@ -1036,10 +1036,10 @@ void RCKKinematicChain::SVDDecompose(float **a, int m, int n, float *w, float **
             float y = (nm >= 0) ? w[nm] : 0.0f;
             g = (nm >= 0) ? rv1[nm] : 0.0f;
             float h = rv1[k];
-            float f = ((y - z) * (y + z) + (g - h) * (g + h)) / (2.0f * h * y);
-            g = sqrtf(f * f + 1.0f);
+            float f = (float)(((double)(y - z) * ((double)y + z) + (double)(g - h) * ((double)g + h)) / (2.0 * h * y));
+            g = (float)sqrt((double)f * f + 1.0);
             float sign_g = (f >= 0.0f) ? fabsf(g) : -fabsf(g);
-            f = ((x - z) * (x + z) + h * ((y / (f + sign_g)) - h)) / x;
+            f = (float)(((double)(x - z) * ((double)x + z) + (double)h * ((y / (f + sign_g)) - h)) / x);
 
             float c = 1.0f;
             float s = 1.0f;
@@ -1050,7 +1050,7 @@ void RCKKinematicChain::SVDDecompose(float **a, int m, int n, float *w, float **
                 y = w[i];
                 h = s * g;
                 g = c * g;
-                z = sqrtf(f * f + h * h);
+                z = (float)sqrt((double)f * f + (double)h * h);
                 rv1[j] = z;
                 c = f / z;
                 s = h / z;
@@ -1066,7 +1066,7 @@ void RCKKinematicChain::SVDDecompose(float **a, int m, int n, float *w, float **
                     v[jj][i] = z * c - x * s;
                 }
 
-                z = sqrtf(f * f + h * h);
+                z = (float)sqrt((double)f * f + (double)h * h);
                 w[j] = z;
                 if (z != 0.0f) {
                     z = 1.0f / z;
