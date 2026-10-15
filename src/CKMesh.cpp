@@ -3072,6 +3072,8 @@ void RCKMesh::BuildRenderMesh() {
     if (!m_ProgressiveMesh)
         return;
 
+    SetVerticesRendered(m_ProgressiveMesh->m_VertexCount);
+
     // Prepare material groups with proper primitive sizes
     const int faceCount = m_FaceVertexIndices.Size() / 3;
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {
@@ -3095,10 +3097,13 @@ void RCKMesh::BuildRenderMesh() {
         int targetVertexCount = m_Vertices.Size();
         int currentCount = targetVertexCount;
 
-        if (m_ProgressiveMesh->m_MorphStep) {
+        if (targetVertexCount == 0) {
+            currentCount = 0;
+        } else if (m_ProgressiveMesh->m_MorphStep > 0) {
             // With morph step, use additive stepping
             while (currentCount > m_ProgressiveMesh->m_VertexCount) {
-                currentCount -= m_ProgressiveMesh->m_MorphStep;
+                const int step = m_ProgressiveMesh->m_MorphStep;
+                currentCount = currentCount > step ? currentCount - step : 0;
             }
             int nextLod = currentCount + m_ProgressiveMesh->m_MorphStep;
             if (nextLod >= targetVertexCount)

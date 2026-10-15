@@ -260,6 +260,19 @@ TEST_F(MeshGeometryCompletionTest, DissociationOverWordBudgetLeavesGeometryAndPr
     ExpectedPayload(mesh, 4, 4);
 }
 
+TEST_F(MeshGeometryCompletionTest, OversizedGeoMorphStepInterpolatesFromZeroLodRatherThanNegativeVertexCount) {
+    CompletionMesh mesh(Context); RCKMaterial material(Context); Payload(mesh, 3);
+    mesh.SetFaceCount(1); mesh.SetFaceVertexIndex(0, 0, 1, 2); mesh.SetFaceMaterial(0, &material);
+    mesh.BuildFaceNormals(); ASSERT_EQ(CK_OK, mesh.CreatePM());
+    VxVector full[3]; for (int i = 0; i < 3; ++i) mesh.GetVertexPosition(i, &full[i]);
+    mesh.EnablePMGeoMorph(TRUE); mesh.SetPMGeoMorphStep(10); mesh.SetVerticesRendered(1); mesh.BuildRenderMesh();
+    ASSERT_EQ(1, mesh.DefaultRender(Device, nullptr)); ASSERT_EQ(1, Target.Count); ASSERT_EQ(3, Target.Draws[0].Count);
+    EXPECT_EQ(3, Target.Draws[0].VertexCount);
+    for (int i = 0; i < 3; ++i) {
+        const int vertex = Target.Draws[0].Indices[i]; ASSERT_LT(vertex, 3);
+        Vec(Target.Draws[0].Positions[i], full[0] + (full[vertex] - full[0]) * (1.0f / 3.0f));
+    }
+}
 
 TEST_F(MeshGeometryCompletionTest, CreateDestroyRecreateKeepsSingleProgressiveCallbackAndRebuildsCurrentLod) {
     CompletionMesh mesh(Context); RCKMaterial material(Context); Payload(mesh, 4);
@@ -277,5 +290,27 @@ TEST_F(MeshGeometryCompletionTest, CreateDestroyRecreateKeepsSingleProgressiveCa
     }
 }
 
-
+TEST_F(MeshGeometryCompletionTest, ChannelFaceMaskConsumerRebuildsIndicesAfterBothOrdinaryAndPmChanges) {
+    CompletionMesh mesh(Context); RCKMaterial base(Context), layer(Context); Payload(mesh, 6);
+    base.SetDiffuse(VxColor(.2f, .3f, .4f, 1.0f)); layer.SetDiffuse(VxColor(.8f, .7f, .6f, 1.0f));
+    mesh.SetFaceCount(2); mesh.SetFaceVertexIndex(0, 0, 1, 2); mesh.SetFaceVertexIndex(1, 3, 4, 5);
+    mesh.SetFaceMaterial(0, &base); mesh.SetFaceMaterial(1, &base);
+    ASSERT_EQ(0, mesh.AddChannel(&layer, FALSE));
+    for (int i = 0; i < 6; ++i) mesh.SetVertexTextureCoordinates(i, .5f + i * .0625f, .75f, 0);
+    mesh.SetChannelFlags(0, VXCHANNEL_ACTIVE | VXCHANNEL_NOTLIT);
+    for (int pm = 0; pm < 2; ++pm) {
+        if (pm) { mesh.BuildFaceNormals(); ASSERT_EQ(CK_OK, mesh.CreatePM()); mesh.BuildRenderMesh(); }
+        for (int face = 0; face < 2; ++face) {
+            Target.Count = 0; mesh.SetFaceChannelMask(0, face == 0 ? 1 : 0); mesh.SetFaceChannelMask(1, face == 1 ? 1 : 0);
+            ASSERT_EQ(1, mesh.DefaultRender(Device, nullptr)); ASSERT_EQ(2, Target.Count);
+            ASSERT_EQ(3, Target.Draws[1].Count);
+            for (int corner = 0; corner < 3; ++corner) {
+                const int vertex = mesh.GetFacesIndices()[face * 3 + corner];
+                const int source = Source(mesh, vertex);
+                Vec(Target.Draws[1].Positions[corner], Point(source));
+                EXPECT_FLOAT_EQ(.5f + source * .0625f, Target.Draws[1].UV[corner].x);
+            }
+        }
+    }
+}
 } // namespace
