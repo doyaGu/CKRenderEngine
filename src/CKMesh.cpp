@@ -732,10 +732,11 @@ CKBOOL RCKMesh::SetVertexCount(int Count) {
 
     // Update vertex weights if present
     if (m_VertexWeights) {
+        const int oldWeightCount = m_VertexWeights->Size();
         m_VertexWeights->Resize(Count);
-        if (currentCount < Count) {
-            // Initialize new weights to zero
-            memset(&(*m_VertexWeights)[currentCount], 0, sizeof(float) * (Count - currentCount));
+        if (oldWeightCount < Count) {
+            // A partial explicit weight stream may be shorter than the vertex stream.
+            memset(&(*m_VertexWeights)[oldWeightCount], 0, sizeof(float) * (Count - oldWeightCount));
         }
     }
 
@@ -1100,6 +1101,7 @@ void RCKMesh::Clean(CKBOOL KeepVertices) {
             delete m_VertexWeights;
             m_VertexWeights = nullptr;
         }
+        VertexMove();
     }
 }
 
@@ -2279,6 +2281,9 @@ CKERROR RCKMesh::RemapDependencies(CKDependenciesContext &context) {
 }
 
 CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     // Match IDA at 0x10028e2b
     // Call base class first
     CKERROR result = CKBeObject::Copy(o, context);
@@ -2376,31 +2381,21 @@ CKERROR RCKMesh::Copy(CKObject &o, CKDependenciesContext &context) {
     // Copy line topology.
     m_LineIndices = source->m_LineIndices;
 
-    // Copy channels
-    int channelCount = source->GetChannelCount();
+    // Channel ordinals and face membership remain meaningful after material deletion
+    // or dependency remapping. Clone stored slots instead of merging by material.
+    const int channelCount = source->GetChannelCount();
     for (int i = 0; i < channelCount; ++i) {
-        CKMaterial *channelMat = source->GetChannelMaterial(i);
-        AddChannel(channelMat, FALSE);
-        SetChannelSourceBlend(i, source->GetChannelSourceBlend(i));
-        SetChannelDestBlend(i, source->GetChannelDestBlend(i));
-        SetChannelFlags(i, source->GetChannelFlags(i));
-
-        // Copy channel UV coords if not using default UVs (flag 0x800000)
-        if (!(source->GetChannelFlags(i) & VXCHANNEL_SAMEUV)) {
-            CKDWORD destStride, srcStride;
-            void *destUV = GetTextureCoordinatesPtr(&destStride, i);
-            void *srcUV = source->GetTextureCoordinatesPtr(&srcStride, i);
-            if (destUV && srcUV) {
-                CKBYTE *dest = (CKBYTE *) destUV;
-                CKBYTE *src = (CKBYTE *) srcUV;
-                for (int v = 0; v < vertexCount; ++v) {
-                    // Copy UV (2 floats = 8 bytes)
-                    memcpy(dest, src, 8);
-                    dest += destStride;
-                    src += srcStride;
-                }
-            }
+        const VxMaterialChannel &srcChannel = source->m_MaterialChannels[i];
+        VxMaterialChannel channel;
+        channel.m_Material = srcChannel.m_Material;
+        channel.m_SourceBlend = srcChannel.m_SourceBlend;
+        channel.m_DestBlend = srcChannel.m_DestBlend;
+        channel.m_Flags = srcChannel.m_Flags;
+        if (srcChannel.m_UVs && vertexCount > 0) {
+            channel.m_UVs = new Vx2DVector[vertexCount];
+            memcpy(channel.m_UVs, srcChannel.m_UVs, sizeof(Vx2DVector) * vertexCount);
         }
+        m_MaterialChannels.PushBack(channel);
     }
 
     // Copy vertex weights
@@ -3470,9 +3465,13 @@ int RCKMesh::GetChannelCount() {
 }
 
 void RCKMesh::RemoveChannelByMaterial(CKMaterial *Mat) {
-    int index = GetChannelByMaterial(Mat);
-    if (index >= 0) {
-        RemoveChannel(index);
+    if (!Mat)
+        return;
+    for (int channel = 0; channel < m_MaterialChannels.Size();) {
+        if (m_MaterialChannels[channel].m_Material == Mat)
+            RemoveChannel(channel);
+        else
+            ++channel;
     }
 }
 

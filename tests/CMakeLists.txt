@@ -439,7 +439,8 @@ add_test(NAME RenderProfileDisabled COMMAND $<TARGET_FILE:test_render_profile_di
 if (TARGET gtest_main)
     ckre_add_engine_test(CKFileAnimationBindingTest CKFileAnimationBindingTest.cpp)
     target_link_libraries(CKFileAnimationBindingTest PRIVATE gtest_main)
-    foreach (animation_test TextureLifecycleTest TextureImageLifecycleTest TextureSerializationTest TextureCopyTest
+    foreach (animation_test MeshStateAlignmentTest
+            TextureLifecycleTest TextureImageLifecycleTest TextureSerializationTest TextureCopyTest
             TextureUploadTest TextureContextCopyTest TextureStateTest
             MaterialApplyTest MaterialPipelineTest MaterialLifecycleTest MaterialDependenciesTest
             MaterialBatchTest MaterialSerializationTest MaterialPropertiesTest MaterialStateTest MaterialEffectsStateTest
