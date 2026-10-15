@@ -426,8 +426,32 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
             m_HardwareVersion == m_ContentVersion) {
             rctx->m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING,
                 (m_DpData.Flags & CKRST_DP_LIGHT) && m_DpData.NormalPtr ? 1 : 0);
-            return rctx->m_RasterizerContext->DrawPrimitiveVB(
+            const CKBOOL submitted = rctx->m_RasterizerContext->DrawPrimitiveVB(
                 pType, m_ObjectIndex, StartVertex, VertexCount, nullptr, 0);
+            if (submitted) {
+                switch (pType) {
+                case VX_POINTLIST:
+                    rctx->m_Stats.NbPointsDrawn += VertexCount;
+                    break;
+                case VX_LINELIST:
+                    rctx->m_Stats.NbLinesDrawn += IndexCount >> 1;
+                    break;
+                case VX_LINESTRIP:
+                    rctx->m_Stats.NbLinesDrawn += IndexCount - 1;
+                    break;
+                case VX_TRIANGLELIST:
+                    rctx->m_Stats.NbTrianglesDrawn += IndexCount / 3;
+                    break;
+                case VX_TRIANGLESTRIP:
+                case VX_TRIANGLEFAN:
+                    rctx->m_Stats.NbTrianglesDrawn += IndexCount - 2;
+                    break;
+                default:
+                    break;
+                }
+                rctx->m_Stats.NbVerticesProcessed += VertexCount;
+            }
+            return submitted;
         }
     }
 

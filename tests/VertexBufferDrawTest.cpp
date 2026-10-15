@@ -267,7 +267,25 @@ TEST_F(VertexBufferDrawTest, HardwareLightingMatchesPublicFormatInsteadOfPreviou
     EXPECT_EQ(0u, Target.Lighting);
 }
 
-
+TEST_F(VertexBufferDrawTest, AcceptedHardwareDrawsUpdateEveryPrimitiveTopologyExactlyOnce) {
+    RCKVertexBuffer buffer(Context); Fill(buffer, CKRST_DP_TR_V);
+    const VXPRIMITIVETYPE types[] = {VX_POINTLIST, VX_LINELIST, VX_LINESTRIP, VX_TRIANGLELIST, VX_TRIANGLESTRIP, VX_TRIANGLEFAN};
+    const int points[] = {6, 0, 0, 0, 0, 0};
+    const int lines[] = {0, 3, 5, 0, 0, 0};
+    const int triangles[] = {0, 0, 0, 2, 4, 4};
+    for (int i = 0; i < 6; ++i) {
+        const int beforePoints = Device->m_Stats.NbPointsDrawn;
+        const int beforeLines = Device->m_Stats.NbLinesDrawn;
+        const int beforeTriangles = Device->m_Stats.NbTrianglesDrawn;
+        const int beforeVertices = Device->m_Stats.NbVerticesProcessed;
+        ASSERT_TRUE(buffer.Draw(Device, types[i], nullptr, 0, 0, 6));
+        EXPECT_EQ(points[i], Device->m_Stats.NbPointsDrawn - beforePoints);
+        EXPECT_EQ(lines[i], Device->m_Stats.NbLinesDrawn - beforeLines);
+        EXPECT_EQ(triangles[i], Device->m_Stats.NbTrianglesDrawn - beforeTriangles);
+        EXPECT_EQ(6, Device->m_Stats.NbVerticesProcessed - beforeVertices);
+    }
+    EXPECT_EQ(5, Target.HardwareDraws); EXPECT_EQ(1, Target.SoftwareDraws);
+}
 
 TEST_F(VertexBufferDrawTest, FailedHardwareDrawDoesNotCountVerticesOrPrimitives) {
     RCKVertexBuffer buffer(Context); Fill(buffer, CKRST_DP_TR_V);
