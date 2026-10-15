@@ -909,14 +909,11 @@ void RCKPatchMesh::BuildRenderMesh() {
     // Early exit conditions
     if ((m_PatchFlags & CK_PATCHMESH_UPTODATE) != 0)
         return;
-    if (m_PatchEdges.Size() == 0)
+    if (m_PatchEdges.Size() == 0 || m_Patches.Size() == 0 ||
+        m_VertCount == 0 || m_VecCount == 0) {
+        CleanRenderMesh();
         return;
-    if (m_Patches.Size() == 0)
-        return;
-    if (m_VertCount == 0)
-        return;
-    if (m_VecCount == 0)
-        return;
+    }
 
     m_Valid = FALSE;
 
@@ -2183,6 +2180,8 @@ void RCKPatchMesh::ComputePatchInteriors(int index) {
         VxVector diff3 = m_Vecs[patch->vec[6]] - m_Verts[patch->v[3]];
         m_Vecs[patch->interior[3]] = m_Vecs[patch->vec[5]] + diff3;
     }
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
 }
 
 CKDWORD RCKPatchMesh::GetPatchFlags() {
@@ -2224,6 +2223,8 @@ void RCKPatchMesh::SetVertVecCount(int VertCount, int VecCount) {
     }
 
     m_PatchChanged = TRUE;
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
 }
 
 int RCKPatchMesh::GetVertCount() {
@@ -2237,7 +2238,8 @@ int RCKPatchMesh::GetVertCount() {
 void RCKPatchMesh::SetVert(int index, VxVector *cp) {
     if (index >= 0 && index < (int) m_VertCount && cp) {
         m_Verts[index] = *cp;
-        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE; // Clear UPTODATE flag
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2266,7 +2268,8 @@ int RCKPatchMesh::GetVecCount() {
 void RCKPatchMesh::SetVec(int index, VxVector *cp) {
     if (index >= 0 && index < (int) m_VecCount && cp) {
         m_Vecs[index] = *cp;
-        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE; // Clear UPTODATE flag
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2291,6 +2294,8 @@ VxVector *RCKPatchMesh::GetVecs() {
 void RCKPatchMesh::SetEdgeCount(int count) {
     m_PatchEdges.Resize(count);
     m_PatchChanged = TRUE;
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
 }
 
 int RCKPatchMesh::GetEdgeCount() {
@@ -2304,6 +2309,9 @@ int RCKPatchMesh::GetEdgeCount() {
 void RCKPatchMesh::SetEdge(int index, CKPatchEdge *edge) {
     if (index >= 0 && index < m_PatchEdges.Size() && edge) {
         m_PatchEdges[index] = *edge;
+        m_PatchChanged = TRUE;
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2326,8 +2334,18 @@ CKPatchEdge *RCKPatchMesh::GetEdges() {
  * Based on IDA analysis at 0x10030cdc
  */
 void RCKPatchMesh::SetPatchCount(int count) {
+    // Auxiliary points are derived data. Discard them before XClassArray
+    // relocates CKPatch, whose SDK assignment only copies the raw pointer.
+    if (count != m_Patches.Size()) {
+        for (int i = 0; i < m_Patches.Size(); ++i) {
+            delete[] m_Patches[i].auxs;
+            m_Patches[i].auxs = nullptr;
+        }
+    }
     m_Patches.Resize(count);
     m_PatchChanged = TRUE;
+    m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+    m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
 }
 
 int RCKPatchMesh::GetPatchCount() {
@@ -2354,6 +2372,8 @@ void RCKPatchMesh::SetPatch(int index, CKPatch *p) {
             patch.vec[i] = p->vec[i];
         patch.Material = p->Material;
         m_PatchChanged = TRUE;
+        m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2396,6 +2416,8 @@ void RCKPatchMesh::SetPatchSM(int index, CKDWORD smoothing) {
     if (index >= 0 && index < m_Patches.Size()) {
         m_Patches[index].SmoothingGroup = smoothing;
         m_PatchChanged = TRUE;
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2445,6 +2467,9 @@ void RCKPatchMesh::SetTVPatchCount(int count, int Channel) {
         } else {
             m_TexturePatches[channelIndex].Patches.Resize(count);
         }
+        m_PatchChanged = TRUE;
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2469,6 +2494,9 @@ void RCKPatchMesh::SetTVPatch(int index, CKTVPatch *tvpatch, int Channel) {
     if (index >= 0 && channelIndex >= 0 && channelIndex < m_TexturePatches.Size()) {
         if (index < m_TexturePatches[channelIndex].Patches.Size() && tvpatch) {
             m_TexturePatches[channelIndex].Patches[index] = *tvpatch;
+            m_PatchChanged = TRUE;
+            m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+            m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
         }
     }
 }
@@ -2510,6 +2538,9 @@ void RCKPatchMesh::SetTVCount(int count, int Channel) {
         } else {
             m_TexturePatches[channelIndex].UVs.Resize(count);
         }
+        m_PatchChanged = TRUE;
+        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
     }
 }
 
@@ -2535,6 +2566,9 @@ void RCKPatchMesh::SetTV(int index, float u, float v, int Channel) {
         if (index < m_TexturePatches[channelIndex].UVs.Size()) {
             m_TexturePatches[channelIndex].UVs[index].u = u;
             m_TexturePatches[channelIndex].UVs[index].v = v;
+            m_PatchChanged = TRUE;
+            m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+            m_PatchFlags |= CK_PATCHMESH_BUILDNORMALS;
         }
     }
 }

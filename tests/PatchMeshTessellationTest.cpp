@@ -314,7 +314,10 @@ TEST_F(PatchMeshTessellationTest, AuthoredControlEditAndIterationChangeRefreshPo
     EXPECT_LT(Normal(mesh,2).z,0); EXPECT_GT(Normal(mesh,2).z,-1);
 }
 
-
+TEST_F(PatchMeshTessellationTest, EmptyTopologyClearsPreviouslyBuiltRenderMesh) {
+    TessellatedPatch mesh(Context); Single(mesh,4,2); mesh.BuildRenderMesh(); ASSERT_EQ(8,mesh.GetFaceCount());
+    mesh.SetPatchCount(0); mesh.Dirty(); mesh.BuildRenderMesh(); EXPECT_EQ(0,mesh.GetVertexCount()); EXPECT_EQ(0,mesh.GetFaceCount());
+}
 
 TEST_F(PatchMeshTessellationTest, HugeIterationRequestReducesToAnActualRepresentableLattice) {
     TessellatedPatch mesh(Context); Single(mesh,4,2); mesh.SetIterationCount(INT_MAX); mesh.BuildRenderMesh();

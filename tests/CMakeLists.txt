@@ -451,7 +451,7 @@ if (TARGET gtest_main)
             SkinStorageTest SkinCalculationTest SkinCacheTest SkinEntityIntegrationTest
             KinematicChainLifecycleTest KinematicChainSolveTest KinematicChainMathTest
             VertexBufferStagingTest VertexBufferUploadTest VertexBufferDrawTest
-            PatchMeshLifecycleTest PatchMeshTessellationTest
+            PatchMeshLifecycleTest PatchMeshTessellationTest PatchMeshTopologyTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
