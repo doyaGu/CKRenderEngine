@@ -457,7 +457,7 @@ if (TARGET gtest_main)
             LinearPositionLifecycleTest LinearPositionEvaluationTest LinearPositionStorageTest
             LinearRotationLifecycleTest LinearRotationEvaluationTest LinearRotationStorageTest
             LinearScaleLifecycleTest LinearScaleEvaluationTest LinearScaleStorageTest
-            LinearScaleAxisLifecycleTest LinearScaleAxisEvaluationTest
+            LinearScaleAxisLifecycleTest LinearScaleAxisEvaluationTest LinearScaleAxisStorageTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
