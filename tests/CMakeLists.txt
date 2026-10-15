@@ -456,7 +456,7 @@ if (TARGET gtest_main)
             MorphLifecycleTest MorphEvaluationTest MorphStorageTest MorphPackedAngleTest
             LinearPositionLifecycleTest LinearPositionEvaluationTest LinearPositionStorageTest
             LinearRotationLifecycleTest LinearRotationEvaluationTest LinearRotationStorageTest
-            LinearScaleLifecycleTest LinearScaleEvaluationTest
+            LinearScaleLifecycleTest LinearScaleEvaluationTest LinearScaleStorageTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
