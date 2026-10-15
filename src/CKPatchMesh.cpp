@@ -609,7 +609,8 @@ int RCKPatchMesh::GetMemoryOccupation() {
     for (int i = 0; i < m_TexturePatches.Size(); ++i) {
         int patchesSize = m_TexturePatches[i].Patches.GetMemoryOccupation(FALSE);
         int uvsSize = m_TexturePatches[i].UVs.GetMemoryOccupation(FALSE);
-        channelMem += sizeof(Vx2DVector) * patchesSize + sizeof(Vx2DVector) * uvsSize + sizeof(CKPatchChannel);
+        // Array memory queries already return allocated bytes, including channel storage.
+        channelMem += patchesSize + uvsSize;
     }
 
     // Patches memory (sizeof(CKPatch) each)
@@ -626,7 +627,10 @@ int RCKPatchMesh::GetMemoryOccupation() {
  * Based on IDA analysis at 0x1003cd40
  */
 CKERROR RCKPatchMesh::Copy(CKObject &o, CKDependenciesContext &context) {
-    CKERROR err = RCKMesh::Copy(o, context);
+    if (&o == this)
+        return CK_OK;
+
+    CKERROR err = CKBeObject::Copy(o, context);
     if (err != CK_OK)
         return err;
 
@@ -637,10 +641,10 @@ CKERROR RCKPatchMesh::Copy(CKObject &o, CKDependenciesContext &context) {
     if (!chunk)
         return CKERR_OUTOFMEMORY;
 
-    Load(chunk, nullptr);
+    CKERROR loadResult = Load(chunk, nullptr);
     DeleteCKStateChunk(chunk);
 
-    return CK_OK;
+    return loadResult;
 }
 
 static VxVector InterpolatePatchPoint(const VxVector &a, const VxVector &b, float t) {

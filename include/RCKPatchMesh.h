@@ -11,7 +11,8 @@
  * 
  * Each channel contains arrays of texture patch indices and UVs,
  * plus material and flags information.
- * Size: 40 bytes
+ * Native/SDL Win32: 40 bytes. SDL x64: 64 bytes.
+ * Offset comments below describe the native Win32 layout.
  */
 struct CKPatchChannel {
     XClassArray<CKTVPatch> Patches;  // 0x00 - Texture patch indices (12 bytes)
@@ -36,8 +37,9 @@ struct CKPatchChannel {
  * It supports both triangular (3-vertex) and quadrilateral (4-vertex) patches.
  * The mesh can be tessellated at runtime with configurable iteration count.
  *
- * Size: 428 bytes (0x1AC)
- * Base: RCKMesh (260 bytes)
+ * Native Win32: 428 bytes (0x1AC), including the 260-byte Mesh base.
+ * SDL: 460 bytes on Win32, 728 bytes on x64.
+ * Offset comments below describe the native Win32 layout, not the SDL ABI.
  */
 class RCKPatchMesh : public RCKMesh {
 public:
