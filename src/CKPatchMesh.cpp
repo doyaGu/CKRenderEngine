@@ -723,12 +723,29 @@ CKERROR RCKPatchMesh::FromMesh(CKMesh *m) {
     if (!m)
         return CKERR_INVALIDPARAMETER;
 
+    if (m == this) {
+        RCKMesh source(m_Context);
+        CopyMeshGeometry(&source, m);
+        return FromMesh(&source);
+    }
+
     const int vertexCount = m->GetVertexCount();
     const int faceCount = m->GetFaceCount();
-    if (vertexCount < 0 || vertexCount > 0x7FFF || faceCount < 0)
+    if (vertexCount < 0 || vertexCount > 0x8000 || faceCount < 0)
         return CKERR_INVALIDPARAMETER;
-    if (faceCount > 0x7FFF / 3)
+    if (faceCount > 0x8000 / 9)
         return CKERR_INVALIDPARAMETER;
+
+    // Every control index is a signed short. Validate before changing the
+    // destination, including the nine control vectors allocated per face.
+    for (int face = 0; face < faceCount; ++face) {
+        int v0 = 0, v1 = 0, v2 = 0;
+        m->GetFaceVertexIndex(face, v0, v1, v2);
+        if (!IsValidMeshVertexIndex(v0, vertexCount) ||
+            !IsValidMeshVertexIndex(v1, vertexCount) ||
+            !IsValidMeshVertexIndex(v2, vertexCount))
+            return CKERR_INVALIDPARAMETER;
+    }
 
     CopyMeshGeometry(this, m);
     Clear();
@@ -748,6 +765,24 @@ CKERROR RCKPatchMesh::FromMesh(CKMesh *m) {
 
     SetPatchCount(faceCount);
     SetEdgeCount(faceCount * 3);
+    const int channelCount = m->GetChannelCount();
+    m_TexturePatches.Resize(channelCount + 1);
+    m_TextureChannelCount = channelCount + 1;
+    for (int channel = 0; channel < channelCount; ++channel) {
+        CKPatchChannel &data = m_TexturePatches[channel + 1];
+        CKMaterial *material = m->GetChannelMaterial(channel);
+        data.Material = material ? material->GetID() : 0;
+        data.Flags = static_cast<CKDWORD>(m->GetChannelSourceBlend(channel));
+        data.Type = static_cast<CKDWORD>(m->GetChannelDestBlend(channel));
+        data.SubType = m->GetChannelFlags(channel);
+        SetTVCount(vertexCount, channel);
+        SetTVPatchCount(faceCount, channel);
+        for (int vertex = 0; vertex < vertexCount; ++vertex) {
+            float u = 0.0f, v = 0.0f;
+            m->GetVertexTextureCoordinates(vertex, &u, &v, channel);
+            SetTV(vertex, u, v, channel);
+        }
+    }
     SetTVCount(vertexCount, -1);
     SetTVPatchCount(faceCount, -1);
 
@@ -767,6 +802,11 @@ CKERROR RCKPatchMesh::FromMesh(CKMesh *m) {
             !IsValidMeshVertexIndex(v1, vertexCount) ||
             !IsValidMeshVertexIndex(v2, vertexCount))
             return CKERR_INVALIDPARAMETER;
+
+        // The native patch builder emits triangles in reverse control order.
+        const int firstVertex = v0;
+        v0 = v2;
+        v2 = firstVertex;
 
         const int vecBase = face * 9;
         const int edgeBase = face * 3;
@@ -836,6 +876,8 @@ CKERROR RCKPatchMesh::FromMesh(CKMesh *m) {
         tvPatch.tv[2] = (short)v2;
         tvPatch.tv[3] = -1;
         SetTVPatch(face, &tvPatch, -1);
+        for (int channel = 0; channel < channelCount; ++channel)
+            SetTVPatch(face, &tvPatch, channel);
 
         ComputePatchInteriors(face);
     }
@@ -858,19 +900,21 @@ CKERROR RCKPatchMesh::ToMesh(CKMesh *m, int stepcount) {
 
     const int oldIterationCount = m_IterationCount;
     if (stepcount >= 0 && stepcount != m_IterationCount) {
-        m_IterationCount = stepcount;
-        m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
+        SetIterationCount(stepcount);
     }
 
     BuildRenderMesh();
-    CopyMeshGeometry(m, this);
+    const CKBOOL built = (m_PatchFlags & CK_PATCHMESH_UPTODATE) != 0 ||
+                         m_Patches.Size() == 0;
+    if (built)
+        CopyMeshGeometry(m, this);
 
     if (stepcount >= 0 && stepcount != oldIterationCount) {
         m_IterationCount = oldIterationCount;
         m_PatchFlags &= ~CK_PATCHMESH_UPTODATE;
     }
 
-    return CK_OK;
+    return built ? CK_OK : CKERR_INVALIDPARAMETER;
 }
 
 /**

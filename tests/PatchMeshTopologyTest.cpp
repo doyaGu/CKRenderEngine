@@ -239,11 +239,34 @@ TEST_F(PatchMeshTopologyTest, GrowingPatchStorageDropsDerivedAuxWithoutAliasingI
     mesh.SetPatchCount(1); mesh.BuildRenderMesh(); EXPECT_EQ(1,mesh.GetFaceCount()); EXPECT_NEAR(-4.5f,OrientedArea(mesh),.0001f);
 }
 
+TEST_F(PatchMeshTopologyTest, ConversionPreservesWindingMaterialsAndAdditionalChannelState) {
+    RCKMaterial base(Context), overlay(Context); RCKMesh source(Context), target(Context); SourceTriangle(source);
+    source.SetFaceMaterial(0,&base); ASSERT_EQ(0,source.AddChannel(&overlay,FALSE));
+    source.SetChannelSourceBlend(0,VXBLEND_SRCALPHA); source.SetChannelDestBlend(0,VXBLEND_INVSRCALPHA); source.SetChannelFlags(0,0x120u);
+    for(int i=0;i<3;++i) source.SetVertexTextureCoordinates(i,.25f+i,.75f-i,0);
+    TopologyPatch patch(Context); ASSERT_EQ(CK_OK,patch.FromMesh(&source)); ASSERT_EQ(CK_OK,patch.ToMesh(&target,1));
+    EXPECT_EQ(0,patch.GetIterationCount()); EXPECT_EQ(4,target.GetFaceCount()); EXPECT_NEAR(4.5f,OrientedArea(target),.0001f);
+    ASSERT_EQ(1,target.GetChannelCount()); EXPECT_EQ(&overlay,target.GetChannelMaterial(0));
+    EXPECT_EQ(VXBLEND_SRCALPHA,target.GetChannelSourceBlend(0)); EXPECT_EQ(VXBLEND_INVSRCALPHA,target.GetChannelDestBlend(0)); EXPECT_EQ(0x120u,target.GetChannelFlags(0));
+    for(int i=0;i<target.GetFaceCount();++i) EXPECT_EQ(&base,target.GetFaceMaterial(i));
+    UV(target,VxVector(0,0,0),0,0); UV(target,VxVector(3,0,0),1,0);
+    UV(target,VxVector(0,0,0),.25f,.75f,0); UV(target,VxVector(3,0,0),1.25f,-.25f,0);
+    ASSERT_EQ(CK_OK,patch.ToMesh(&target,-1)); EXPECT_EQ(1,target.GetFaceCount()); EXPECT_NEAR(4.5f,OrientedArea(target),.0001f);
+}
 
+TEST_F(PatchMeshTopologyTest, SelfConversionSnapshotsTheActualMeshInsteadOfCleaningItsSource) {
+    TopologyPatch mesh(Context); SourceTriangle(mesh); ASSERT_EQ(CK_OK,mesh.FromMesh(&mesh));
+    mesh.BuildRenderMesh(); EXPECT_EQ(1,mesh.GetFaceCount()); EXPECT_NEAR(4.5f,OrientedArea(mesh),.0001f);
+    EXPECT_EQ(CK_OK,mesh.ToMesh(&mesh,2)); EXPECT_EQ(0,mesh.GetIterationCount());
+}
 
-
-
-
+TEST_F(PatchMeshTopologyTest, ConversionRejectsUnrepresentableControlIndicesBeforeMutation) {
+    TopologyPatch patch(Context); Quad(patch); patch.BuildRenderMesh();
+    RCKMesh source(Context); SourceTriangle(source); ASSERT_TRUE(source.SetFaceCount(3641));
+    for(int i=0;i<source.GetFaceCount();++i) source.SetFaceVertexIndex(i,0,1,2);
+    EXPECT_EQ(CKERR_INVALIDPARAMETER,patch.FromMesh(&source)); EXPECT_EQ(4,patch.GetVertCount()); EXPECT_EQ(1,patch.GetPatchCount());
+    EXPECT_NEAR(-9.0f,OrientedArea(patch),.0001f);
+}
 
 TEST_F(PatchMeshTopologyTest, InvalidConversionTargetsAndMissingTextureReadsHaveDefinedResults) {
     TopologyPatch mesh(Context); EXPECT_EQ(CKERR_INVALIDPARAMETER,mesh.FromMesh(nullptr)); EXPECT_EQ(CKERR_INVALIDPARAMETER,mesh.ToMesh(nullptr,0));
@@ -253,5 +276,12 @@ TEST_F(PatchMeshTopologyTest, InvalidConversionTargetsAndMissingTextureReadsHave
     RCKMesh output(Context); EXPECT_EQ(CK_OK,mesh.ToMesh(&output,0)); EXPECT_EQ(0,output.GetFaceCount());
 }
 
-
+TEST_F(PatchMeshTopologyTest, FailedConversionPreservesTheExistingTargetGeometry) {
+    TopologyPatch patch(Context); Quad(patch); patch.BuildRenderMesh(); ASSERT_EQ(2,patch.GetFaceCount());
+    RCKMesh target(Context); SourceTriangle(target); EXPECT_NEAR(4.5f,OrientedArea(target),.0001f);
+    patch.SetEdgeCount(0);
+    EXPECT_EQ(CKERR_INVALIDPARAMETER,patch.ToMesh(&target,1));
+    EXPECT_EQ(0,patch.GetIterationCount()); EXPECT_EQ(1,target.GetFaceCount()); EXPECT_EQ(3,target.GetVertexCount());
+    EXPECT_NEAR(4.5f,OrientedArea(target),.0001f); UV(target,VxVector(3,0,0),1,0);
+}
 }
