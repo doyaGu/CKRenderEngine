@@ -148,7 +148,7 @@ public:
     virtual CKBOOL Clone(CKAnimController *control);
 
     // Computes tangents for spline interpolation
-    void ComputeTangents();
+    virtual void ComputeTangents();
 
 protected:
     CKTCBPositionKey *m_Keys;
