@@ -243,6 +243,13 @@ int g_FogProjectionMode = 0;
 
 #define CKRE_MATERIAL_EFFECT_FAILED 0x80000000u
 
+// Failure recovery follows texture binding failure: invalidate the affected
+// stage without pretending to restore an arbitrary earlier pipeline state.
+static CKDWORD CKMaterialEffectStageFailed(RCKRenderContext *dev, int stage) {
+    dev->ResetTextureStage(stage);
+    return CKRE_MATERIAL_EFFECT_FAILED;
+}
+
 //=============================================================================
 // Construction/Destruction
 //=============================================================================
@@ -1564,15 +1571,17 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     if (skipTextureMatrix) {
         // The callback owns the texture matrix and transform flags: read them
         // back before the stage reset and re-apply them afterwards.
-        rst->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage), callbackTextureMatrix);
-        rst->GetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, &callbackTextureTransformFlags);
-        rst->GetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX, &callbackTextureCoordinates);
+        if (!rst->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage), callbackTextureMatrix) ||
+            !rst->GetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, &callbackTextureTransformFlags) ||
+            !rst->GetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX, &callbackTextureCoordinates))
+            return FALSE;
     }
 
     if (skipAllTextures) {
         bindingCall.OwnTextureStages();
     } else if (TextureStage == 0) {
-        dev->DisableTextureStagesFrom(TextureStage);
+        if (!rst->ResetTextureStages(TextureStage, CKRST_MAX_TEXTURE_STAGES - TextureStage))
+            return FALSE;
         bindingCall.ResetTextureStages();
     } else {
         // Additional stages retain the primary stage and preceding channels.
@@ -1615,7 +1624,6 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
 
 
     // --- Texture ---
-    CKBOOL textureStatesAccepted = TRUE;
     CKBOOL textureOwnsAlphaTest = FALSE;
     if (!skipAllTextures && !(effectResult & 2)) {
         CKTexture *tex = m_Textures[0];
@@ -1628,36 +1636,81 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
             }
             textureOwnsAlphaTest = (textureResult == 2);
 
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESW, m_TextureAddressMode) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode) != FALSE) && textureStatesAccepted;
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_MAGFILTER, m_TextureMagMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_MINFILTER, m_TextureMinMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESS, m_TextureAddressMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_ADDRESW, m_TextureAddressMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
             rst->SetRenderState(VXRENDERSTATE_TEXTUREPERSPECTIVE, PerspectiveCorrectionEnabled());
         } else {
-            textureStatesAccepted = (rst->SetTexture(0, TextureStage) != FALSE) && textureStatesAccepted;
+            if (!rst->SetTexture(0, TextureStage)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
         }
 
         if (!skipTextureMatrix && !(effectResult & 1)) {
-            textureStatesAccepted = (rst->SetTransformMatrix(
-                (VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage), VxMatrix::Identity()) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
-                                     CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU)) != FALSE) && textureStatesAccepted;
-            textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE) != FALSE) && textureStatesAccepted;
+            if (!rst->SetTransformMatrix(
+                (VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage), VxMatrix::Identity())) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                                     CKRSTPackTexcoordIndex((CKDWORD)TextureStage, CKRST_TEXGEN_PASSTHRU))) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
+            if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE)) {
+                dev->ResetTextureStage(TextureStage);
+                return FALSE;
+            }
         }
     }
 
     if (skipTextureMatrix) {
-        textureStatesAccepted = (rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage),
-                         callbackTextureMatrix) != FALSE) && textureStatesAccepted;
-        textureStatesAccepted = (rst->SetTextureStageState(TextureStage,
+        if (!rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + TextureStage),
+                         callbackTextureMatrix)) {
+            dev->ResetTextureStage(TextureStage);
+            return FALSE;
+        }
+        if (!rst->SetTextureStageState(TextureStage,
                                  CKRST_TSS_TEXTURETRANSFORMFLAGS,
-                                 callbackTextureTransformFlags) != FALSE) && textureStatesAccepted;
-        textureStatesAccepted = (rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
-                                 callbackTextureCoordinates) != FALSE) && textureStatesAccepted;
+                                 callbackTextureTransformFlags)) {
+            dev->ResetTextureStage(TextureStage);
+            return FALSE;
+        }
+        if (!rst->SetTextureStageState(TextureStage, CKRST_TSS_TEXCOORDINDEX,
+                                 callbackTextureCoordinates)) {
+            dev->ResetTextureStage(TextureStage);
+            return FALSE;
+        }
     }
 
 
@@ -1678,10 +1731,6 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         }
     }
 
-    if (!textureStatesAccepted) {
-        dev->ResetTextureStage(TextureStage);
-        return FALSE;
-    }
     CK_RENDER_PERF_ADD(renderStats, MaterialSetUs, CKRenderPerfElapsedUs(perfStart));
     return TRUE;
 }
@@ -1839,10 +1888,13 @@ CKDWORD RCKMaterial::TexGenEffect(RCKRenderContext *dev, VX_EFFECTTEXGEN texGen,
     }
 
     CKRasterizerContext *rst = dev->m_RasterizerContext;
-    rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), texMatrix);
-    rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
-                             CKRSTPackTexcoordIndex((CKDWORD)stage, generation));
-    rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, transformFlags);
+    if (!rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), texMatrix))
+        return CKMaterialEffectStageFailed(dev, stage);
+    if (!rst->SetTextureStageState(stage, CKRST_TSS_TEXCOORDINDEX,
+                             CKRSTPackTexcoordIndex((CKDWORD)stage, generation)))
+        return CKMaterialEffectStageFailed(dev, stage);
+    if (!rst->SetTextureStageState(stage, CKRST_TSS_TEXTURETRANSFORMFLAGS, transformFlags))
+        return CKMaterialEffectStageFailed(dev, stage);
     return 1;
 }
 
@@ -1873,18 +1925,29 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
         dev->ResetTextureStage(0);
         return CKRE_MATERIAL_EFFECT_FAILED;
     }
-    rst->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode);
-    rst->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-    rst->SetTextureStageState(0, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-    rst->SetTextureStageState(0, CKRST_TSS_MINFILTER, m_TextureMinMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-    rst->SetTextureStageState(0, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-    rst->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX,
-                             CKRSTPackTexcoordIndex(0, CKRST_TEXGEN_PASSTHRU));
-    rst->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-    rst->SetTransformMatrix(VXMATRIX_TEXTURE0, VxMatrix::Identity());
+    if (!rst->SetTextureStageState(0, CKRST_TSS_TEXTUREMAPBLEND, m_TextureBlendMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_MAGFILTER, m_TextureMagMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_MINFILTER, m_TextureMinMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_ADDRESS, m_TextureAddressMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_ADDRESSU, m_TextureAddressMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_ADDRESSV, m_TextureAddressMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_ADDRESW, m_TextureAddressMode))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_TEXCOORDINDEX,
+                             CKRSTPackTexcoordIndex(0, CKRST_TEXGEN_PASSTHRU)))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTextureStageState(0, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE))
+        return CKMaterialEffectStageFailed(dev, 0);
+    if (!rst->SetTransformMatrix(VXMATRIX_TEXTURE0, VxMatrix::Identity()))
+        return CKMaterialEffectStageFailed(dev, 0);
 
     int envStage = 1;
     if (m_Textures[1]) {
@@ -1892,28 +1955,49 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
             dev->ResetTextureStage(1);
             return CKRE_MATERIAL_EFFECT_FAILED;
         }
-        rst->SetTextureStageState(1, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
-        rst->SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-        rst->SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX,
-                                 CKRSTPackTexcoordIndex(0, CKRST_TEXGEN_PASSTHRU));
-        rst->SetTextureStageState(1, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-        rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + 1), VxMatrix::Identity());
-        rst->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP);
-        rst->SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
-        rst->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2);
-        rst->SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(1, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT00, FloatStageState(params.Amplitude));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT01, FloatStageState(0.0f));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT10, FloatStageState(0.0f));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT11, FloatStageState(params.Amplitude));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVLSCALE, FloatStageState(0.0f));
-        rst->SetTextureStageState(1, CKRST_TSS_BUMPENVLOFFSET, FloatStageState(0.0f));
+        if (!rst->SetTextureStageState(1, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_LINEAR))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_ADDRESS, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_ADDRESSU, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_ADDRESSV, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_ADDRESW, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_TEXCOORDINDEX,
+                                 CKRSTPackTexcoordIndex(0, CKRST_TEXGEN_PASSTHRU)))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + 1), VxMatrix::Identity()))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_OP, CKRST_TOP_BUMPENVMAP))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_ARG2, CKRST_TA_CURRENT))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_AARG1, CKRST_TA_TEXTURE))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_AARG2, CKRST_TA_CURRENT))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT00, FloatStageState(params.Amplitude)))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT01, FloatStageState(0.0f)))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT10, FloatStageState(0.0f)))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_BUMPENVMAT11, FloatStageState(params.Amplitude)))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_BUMPENVLSCALE, FloatStageState(0.0f)))
+            return CKMaterialEffectStageFailed(dev, 1);
+        if (!rst->SetTextureStageState(1, CKRST_TSS_BUMPENVLOFFSET, FloatStageState(0.0f)))
+            return CKMaterialEffectStageFailed(dev, 1);
         envStage = 2;
     }
 
@@ -1922,13 +2006,20 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
             dev->ResetTextureStage(envStage);
             return CKRE_MATERIAL_EFFECT_FAILED;
         }
-        rst->SetTextureStageState(envStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
-        rst->SetTextureStageState(envStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        rst->SetTextureStageState(envStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-        rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESW, m_TextureAddressMode);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_MAGFILTER, m_TextureMagMode))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_MINFILTER, m_TextureMinMode))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESS, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_ADDRESW, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, envStage);
 
         RCK3dEntity *refEntity = reinterpret_cast<RCK3dEntity *>(dev->m_RenderedScene ? dev->m_RenderedScene->GetRootEntity() : nullptr);
         if (params.Referential != 0) {
@@ -1937,15 +2028,23 @@ CKDWORD RCKMaterial::BumpMapEnvEffect(RCKRenderContext *dev) {
                 refEntity = explicitRef;
         }
 
-        TexGenEffect(dev, (VX_EFFECTTEXGEN)params.TexGen, refEntity, envStage);
-        rst->SetTextureStageState(envStage, CKRST_TSS_OP, SanitizeTextureCombineOp(params.Combine));
-        rst->SetTextureStageState(envStage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(envStage, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
-        rst->SetTextureStageState(envStage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2);
-        rst->SetTextureStageState(envStage, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(envStage, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
+        if ((TexGenEffect(dev, (VX_EFFECTTEXGEN)params.TexGen, refEntity, envStage) & CKRE_MATERIAL_EFFECT_FAILED) != 0)
+            return CKRE_MATERIAL_EFFECT_FAILED;
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_OP, SanitizeTextureCombineOp(params.Combine)))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_ARG2, CKRST_TA_CURRENT))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_AOP, CKRST_TOP_SELECTARG2))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_AARG1, CKRST_TA_TEXTURE))
+            return CKMaterialEffectStageFailed(dev, envStage);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_AARG2, CKRST_TA_CURRENT))
+            return CKMaterialEffectStageFailed(dev, envStage);
     } else if (envStage < CKMaterialStageCapacity(dev)) {
-        rst->SetTextureStageState(envStage, CKRST_TSS_OP, CKRST_TOP_DISABLE);
+        if (!rst->SetTextureStageState(envStage, CKRST_TSS_OP, CKRST_TOP_DISABLE))
+            return CKMaterialEffectStageFailed(dev, envStage);
     }
 
     return 2;
@@ -1974,21 +2073,30 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
             return CKRE_MATERIAL_EFFECT_FAILED;
         }
     } else {
-        dev->ResetTextureStage(stage);
+        if (!rst->ResetTextureStages(stage, 1))
+            return CKRE_MATERIAL_EFFECT_FAILED;
     }
     if (!m_Textures[0]->SetAsCurrent(dev, FALSE, stage + 1)) {
         dev->ResetTextureStage(stage + 1);
         return CKRE_MATERIAL_EFFECT_FAILED;
     }
     for (int currentStage = stage; currentStage <= stage + 1; ++currentStage) {
-        rst->SetTextureStageState(currentStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE);
-        rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + currentStage), VxMatrix::Identity());
-        rst->SetTextureStageState(currentStage, CKRST_TSS_TEXCOORDINDEX, (CKDWORD)stage);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_TEXTURETRANSFORMFLAGS, CKRST_TTF_NONE))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + currentStage), VxMatrix::Identity()))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_TEXCOORDINDEX, (CKDWORD)stage))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_MAGFILTER, m_TextureMagMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_MINFILTER, m_TextureMinMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESS, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
     }
 
     RCK3dEntity *reference = nullptr;
@@ -2021,13 +2129,20 @@ CKDWORD RCKMaterial::DP3Effect(RCKRenderContext *dev, int stage) {
         | ((CKDWORD)(127.0f * direction.x + 128.0f) << 16)
         | ((CKDWORD)(127.0f * direction.y + 128.0f) << 8)
         | (CKDWORD)(127.0f * direction.z + 128.0f);
-    rst->SetRenderState(VXRENDERSTATE_TEXTUREFACTOR, factor);
-    rst->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3);
-    rst->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    rst->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TFACTOR);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, CKRST_TOP_MODULATE);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-    rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
+    if (!rst->SetRenderState(VXRENDERSTATE_TEXTUREFACTOR, factor))
+        return CKMaterialEffectStageFailed(dev, stage);
+    if (!rst->SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_DOTPRODUCT3))
+        return CKMaterialEffectStageFailed(dev, stage);
+    if (!rst->SetTextureStageState(stage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE))
+        return CKMaterialEffectStageFailed(dev, stage);
+    if (!rst->SetTextureStageState(stage, CKRST_TSS_ARG2, CKRST_TA_TFACTOR))
+        return CKMaterialEffectStageFailed(dev, stage);
+    if (!rst->SetTextureStageState(stage + 1, CKRST_TSS_OP, CKRST_TOP_MODULATE))
+        return CKMaterialEffectStageFailed(dev, stage + 1);
+    if (!rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG1, CKRST_TA_TEXTURE))
+        return CKMaterialEffectStageFailed(dev, stage + 1);
+    if (!rst->SetTextureStageState(stage + 1, CKRST_TSS_ARG2, CKRST_TA_CURRENT))
+        return CKMaterialEffectStageFailed(dev, stage + 1);
     return 2;
 }
 
@@ -2083,22 +2198,36 @@ CKDWORD RCKMaterial::BlendTexturesEffect(RCKRenderContext *dev, int stage) {
             dev->ResetTextureStage(currentStage);
             return CKRE_MATERIAL_EFFECT_FAILED;
         }
-        rst->SetTextureStageState(currentStage, CKRST_TSS_OP, SanitizeTextureCombineOp(combine));
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ARG2, CKRST_TA_CURRENT);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_AOP, SanitizeTextureCombineOp(combine));
-        rst->SetTextureStageState(currentStage, CKRST_TSS_AARG1, CKRST_TA_TEXTURE);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_AARG2, CKRST_TA_CURRENT);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_MAGFILTER, m_TextureMagMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_MINFILTER, m_TextureMinMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESS, m_TextureAddressMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESW, m_TextureAddressMode);
-        rst->SetTextureStageState(currentStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_OP, SanitizeTextureCombineOp(combine)))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ARG1, CKRST_TA_TEXTURE))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ARG2, CKRST_TA_CURRENT))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_AOP, SanitizeTextureCombineOp(combine)))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_AARG1, CKRST_TA_TEXTURE))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_AARG2, CKRST_TA_CURRENT))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_MAGFILTER, m_TextureMagMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_MINFILTER, m_TextureMinMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESS, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSU, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESSV, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_ADDRESW, m_TextureAddressMode))
+            return CKMaterialEffectStageFailed(dev, currentStage);
+        if (!rst->SetTextureStageState(currentStage, CKRST_TSS_BORDERCOLOR, m_TextureBorderColor))
+            return CKMaterialEffectStageFailed(dev, currentStage);
 
         RCK3dEntity *refEntity = static_cast<RCK3dEntity *>(m_Context ? m_Context->GetObject(refId) : nullptr);
-        TexGenEffect(dev, (VX_EFFECTTEXGEN)texGen, refEntity, currentStage);
+        if ((TexGenEffect(dev, (VX_EFFECTTEXGEN)texGen, refEntity, currentStage) & CKRE_MATERIAL_EFFECT_FAILED) != 0)
+            return CKRE_MATERIAL_EFFECT_FAILED;
         result |= 2;
     }
 
