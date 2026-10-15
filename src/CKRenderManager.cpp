@@ -1002,7 +1002,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectTexGenRef.NeededTextureCoordsCount = 0;
     effectTexGenRef.ParameterType = CKPGUID_TEXGENREFEFFECT;
     effectTexGenRef.ParameterDescription = "TexGen Params";
-    effectTexGenRef.ParameterDefaultValue = "Reflect,NULL";
+    effectTexGenRef.ParameterDefaultValue = "Reflect;NULL";
     AddEffect(effectTexGenRef);
 
     // Effect 3: Environment Bump Map
@@ -1020,7 +1020,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectBumpEnv.Tex2Description = "Env. Texture";
     effectBumpEnv.ParameterType = CKPGUID_BUMPMAPPARAM;
     effectBumpEnv.ParameterDescription = "Params";
-    effectBumpEnv.ParameterDefaultValue = "0,Add,Reflect,NULL";
+    effectBumpEnv.ParameterDefaultValue = "0;Add;Reflect;NULL";
     AddEffect(effectBumpEnv);
 
     // Effect 4: Floor DotProduct3 Lighting
@@ -1049,7 +1049,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectCombine2.NeededTextureCoordsCount = 0;
     effectCombine2.ParameterType = CKPGUID_COMBINE2TEX;
     effectCombine2.ParameterDescription = "Params";
-    effectCombine2.ParameterDefaultValue = "Modulate,None,NULL";
+    effectCombine2.ParameterDefaultValue = "Modulate;None;NULL";
     AddEffect(effectCombine2);
 
     // Effect 6: Combine 3 Textures
@@ -1061,7 +1061,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectCombine3.NeededTextureCoordsCount = 0;
     effectCombine3.ParameterType = CKPGUID_COMBINE3TEX;
     effectCombine3.ParameterDescription = "Params";
-    effectCombine3.ParameterDefaultValue = "Modulate,None,NULL,Modulate,None,NULL";
+    effectCombine3.ParameterDefaultValue = "Modulate;None;NULL;Modulate;None;NULL";
     AddEffect(effectCombine3);
 
     // Build enumeration string for Material Effect
