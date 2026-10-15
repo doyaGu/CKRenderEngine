@@ -453,7 +453,7 @@ if (TARGET gtest_main)
             VertexBufferStagingTest VertexBufferUploadTest VertexBufferDrawTest
             PatchMeshLifecycleTest PatchMeshSerializationTest PatchMeshTessellationTest PatchMeshTopologyTest PatchMeshDependenciesTest
             PatchMeshModifierTest PatchMeshMaterialTest PatchMeshChannelsTest
-            MorphEvaluationTest
+            MorphLifecycleTest MorphEvaluationTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
