@@ -2,6 +2,7 @@
 #include "CKMeshDrawScope.h"
 #include "CKMeshRenderScope.h"
 #include "CKMeshChannelScope.h"
+#include "CKMeshContextScope.h"
 #include "RCKMesh.h"
 
 #include "CKMemoryPool.h"
@@ -4341,6 +4342,7 @@ CKBOOL RCKMesh::IsPM() {
 // DefaultRender - Main mesh rendering function
 //--------------------------------------------
 int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
+    CKMeshContextScope contextScope(rc);
     CKMeshRenderScope renderScope(this, m_ActiveTextureChannels, m_MaterialChannels, m_DrawFlags);
     int renderResult = 1;
     XArray<CKMaterialGroup *> completedGroups;
@@ -4380,7 +4382,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
     const int renderVertexCount = m_ProgressiveMesh ? m_ProgressiveMesh->m_Reserved : vertexCount;
     VxVertex *renderVertices = m_Vertices.Begin();
     if (m_ProgressiveMesh && m_ProgressiveMesh->m_MorphEnabled) {
-        m_Valid = 0;
+        if (!renderScope.IsNested())
+            m_Valid = 0;
         renderVertices = reinterpret_cast<VxVertex *>(m_ProgressiveMesh->m_EdgeCollapseData.Begin());
     }
 
@@ -4692,11 +4695,13 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                 VXMESH_NORMAL_CHANGED |
                 VXMESH_COLOR_CHANGED |
                 VXMESH_POS_CHANGED;
-            if ((m_Flags & meshGeometryChangedFlags) != 0)
+            if (!renderScope.IsNested() && (m_Flags & meshGeometryChangedFlags) != 0)
                 rc->m_RenderManager->MeshVerticesChanged(this);
-            m_Valid++;
-            const CKBOOL canUseVertexBuffers = rstContext != nullptr && !groupLocalChannels;
-            if (groupLocalChannels)
+            if (!renderScope.IsNested())
+                m_Valid++;
+            const CKBOOL canUseVertexBuffers = rstContext != nullptr && !groupLocalChannels &&
+                !renderScope.IsNested();
+            if (groupLocalChannels && !renderScope.IsNested())
                 InvalidateHardwareBuffers();
             if (m_Valid > 3 && canUseVertexBuffers) {
                 CK_RENDER_PERF_INC(renderStats, VertexBufferChecks);
@@ -4708,7 +4713,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
                     m_VertexBufferReady = 1;
                     CK_RENDER_PERF_INC(renderStats, VertexBufferReady);
                 }
-            } else {
+            } else if (!renderScope.IsNested()) {
                 m_VertexBufferReady = 0;
             }
 
@@ -4764,7 +4769,8 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
             }
 
             // Clear mesh geometry changed flags
-            m_Flags &= ~meshGeometryChangedFlags;
+            if (!renderScope.IsNested())
+                m_Flags &= ~meshGeometryChangedFlags;
 
             // Wireframe overlay
             if (rc->m_DisplayWireframe) {
@@ -4845,6 +4851,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
 // IDA: 0x10022829 (1864 bytes)
 //--------------------------------------------
 int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEntity *ent, VxDrawPrimitiveData *data) {
+    CKMeshContextScope contextScope(dev);
     CKMeshRenderScope renderScope(this, m_ActiveTextureChannels, m_MaterialChannels, m_DrawFlags);
     renderScope.KeepActiveChannels();
     return RenderGroupWithChannels(dev, group, ent, data, FALSE);
@@ -5033,6 +5040,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
                 ? mat->GetSpecular() : VxColor(0.0f, 0.0f, 0.0f, 0.0f);
             if (!dev->m_RasterizerContext->SetMaterial(&baseMaterial))
                 return 0;
+            CKMeshContextScope::RecordMaterial(dev, baseMaterial);
         }
         if (twoSidedTransparent &&
             !dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_CULLMODE,

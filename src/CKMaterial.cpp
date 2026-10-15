@@ -1,4 +1,5 @@
 #include "CKMaterialBindingScope.h"
+#include "CKMeshContextScope.h"
 #include "CKRenderProfile.h"
 /**
  * @file CKMaterial.cpp
@@ -72,6 +73,29 @@ static CKBOOL CKMaterialStageRangeFits(RCKRenderContext *dev, int firstStage,
             return FALSE;
     }
     return TRUE;
+}
+
+// A single-slot update preserves both sides of its destination. Count the
+// configured bindings after replacement, including suffixes past empty gaps.
+static CKBOOL CKMaterialSlotRangeFits(RCKRenderContext *dev, int stage, CKBOOL hasTexture) {
+    if (hasTexture && stage >= CKMaterialStageCapacity(dev))
+        return FALSE;
+    VxDriverDescEx *driver = dev->m_RenderManager
+        ? dev->m_RenderManager->GetDriverDescription(dev->m_DriverIndex) : nullptr;
+    const CKDWORD textureCapacity = driver ? driver->Caps3D.MaxNumberTextureStage : 0;
+    if (!textureCapacity)
+        return TRUE;
+    int textureCount = hasTexture ? 1 : 0;
+    for (int retainedStage = 0; retainedStage < CKRST_MAX_TEXTURE_STAGES; ++retainedStage) {
+        if (retainedStage == stage)
+            continue;
+        CKDWORD texture = 0;
+        if (!dev->m_RasterizerContext->GetTexture(retainedStage, &texture))
+            return FALSE;
+        if (texture)
+            ++textureCount;
+    }
+    return (CKDWORD)textureCount <= textureCapacity;
 }
 
 static int CKMaterialConfiguredStageCount(CKMaterial *material) {
@@ -1595,6 +1619,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     if (Lit) {
         if (!rst->SetMaterial(&m_MaterialData))
             return FALSE;
+        CKMeshContextScope::RecordMaterial(dev, m_MaterialData);
         if (!rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE,
                             m_MaterialData.SpecularPower > 0.05f))
             return FALSE;
@@ -1763,7 +1788,7 @@ CKBOOL RCKMaterial::BindTextureSlotToStage(CKRenderContext *context, int Texture
     RCKRenderContext *dev = static_cast<RCKRenderContext *>(context);
     CKRasterizerContext *rst = dev->m_RasterizerContext;
     CKTexture *tex = m_Textures[TextureSlot];
-    if (!CKMaterialStageRangeFits(dev, TextureStage, 1, tex ? 1 : 0))
+    if (!CKMaterialSlotRangeFits(dev, TextureStage, tex != nullptr))
         return FALSE;
     if (!rst->ResetTextureStages(TextureStage, 1))
         return FALSE;

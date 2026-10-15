@@ -32,6 +32,7 @@ public:
         if (m_Nested)
             m_ActiveChannels = m_SavedActive;
     }
+    CKBOOL IsNested() const { return m_Nested; }
     ~CKMeshRenderScope() {
         if (m_Nested) {
             m_ActiveChannels.Swap(m_SavedActive);
