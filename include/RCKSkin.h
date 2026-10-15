@@ -69,6 +69,8 @@ protected:
 class RCKSkinVertexData : public CKSkinVertexData {
 public:
     RCKSkinVertexData();
+    RCKSkinVertexData(const RCKSkinVertexData &other);
+    RCKSkinVertexData &operator=(const RCKSkinVertexData &other);
     ~RCKSkinVertexData();
 
     // CKSkinVertexData interface

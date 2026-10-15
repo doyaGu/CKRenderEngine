@@ -32,6 +32,33 @@ void RCKSkinBoneData::SetBoneInitialInverseMatrix(const VxMatrix &M) {
 RCKSkinVertexData::RCKSkinVertexData()
     : m_BoneCount(0), m_Bones(nullptr), m_Weights(nullptr), m_InitialPos(0.0f, 0.0f, 0.0f) {}
 
+RCKSkinVertexData::RCKSkinVertexData(const RCKSkinVertexData &other)
+    : RCKSkinVertexData() {
+    *this = other;
+}
+
+RCKSkinVertexData &RCKSkinVertexData::operator=(const RCKSkinVertexData &other) {
+    if (this == &other)
+        return *this;
+
+    int *bones = nullptr;
+    float *weights = nullptr;
+    if (other.m_BoneCount > 0) {
+        bones = new int[other.m_BoneCount];
+        weights = new float[other.m_BoneCount];
+        memcpy(bones, other.m_Bones, other.m_BoneCount * sizeof(int));
+        memcpy(weights, other.m_Weights, other.m_BoneCount * sizeof(float));
+    }
+
+    delete[] m_Bones;
+    delete[] m_Weights;
+    m_BoneCount = other.m_BoneCount;
+    m_Bones = bones;
+    m_Weights = weights;
+    m_InitialPos = other.m_InitialPos;
+    return *this;
+}
+
 RCKSkinVertexData::~RCKSkinVertexData() {
     RCKSkinVertexData::SetBoneCount(0);
 }
