@@ -455,6 +455,7 @@ if (TARGET gtest_main)
             PatchMeshModifierTest PatchMeshMaterialTest PatchMeshChannelsTest
             MorphLifecycleTest MorphEvaluationTest MorphStorageTest MorphPackedAngleTest
             LinearPositionLifecycleTest LinearPositionEvaluationTest LinearPositionStorageTest
+            LinearRotationEvaluationTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
