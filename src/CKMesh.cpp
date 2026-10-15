@@ -4182,10 +4182,18 @@ CKERROR RCKMesh::CreatePM() {
         return CKERR_INVALIDPARAMETER;
 
     // Match IDA at 0x100247df: Consolidate geometry first
+    // Freshly authored geometry may not have cached face normals yet.
+    BuildFaceNormals();
     Consolidate();
 
     int vertexCount = GetVertexCount();
     int faceCount = GetFaceCount();
+    XArray<float> originalWeights;
+    if (m_VertexWeights) {
+        originalWeights.Resize(vertexCount);
+        for (int i = 0; i < vertexCount; ++i)
+            originalWeights[i] = GetVertexWeight(i);
+    }
 
     // Match IDA at 0x100247ef: Create CKProgressiveMesh (44 bytes)
     // Constructor sets m_VertexCount = -1, m_MorphEnabled = 0, m_MorphStep = 0
@@ -4320,6 +4328,16 @@ CKERROR RCKMesh::CreatePM() {
         SetVertexSpecularColor(newPos, originalColors[i * 2 + 1]);
     }
 
+    // Explicit weights and authored lines belong to the same permutation as
+    // positions, colors and UVs. Native omitted these two streams.
+    if (m_VertexWeights) {
+        m_VertexWeights->Resize(vertexCount);
+        for (int i = 0; i < vertexCount; ++i)
+            (*m_VertexWeights)[collapseOrder[i]] = originalWeights[i];
+    }
+    for (int i = 0; i < m_LineIndices.Size(); ++i)
+        m_LineIndices[i] = static_cast<CKWORD>(collapseOrder[m_LineIndices[i]]);
+
     // Match IDA at 0x10024fda-0x1002505a: Update face vertex indices
     int finalFaceCount = GetFaceCount();
     for (int f = 0; f < finalFaceCount; f++) {
@@ -4392,53 +4410,11 @@ CKERROR RCKMesh::CreatePM() {
         }
     }
 
-    // Match IDA at 0x100252c2-0x100255bb: Update morph controllers
-    {
-        CK_ID *ids = m_Context->GetObjectsListByClassID(CKCID_OBJECTANIMATION);
-        const int count = m_Context->GetObjectsCountByClassID(CKCID_OBJECTANIMATION);
-        for (int i = 0; i < count; ++i) {
-            CKObjectAnimation *oa = (CKObjectAnimation *) m_Context->GetObject(ids[i]);
-            if (!oa)
-                continue;
-
-            CKMorphController *mc = oa->GetMorphController();
-            if (!mc)
-                continue;
-
-            CK3dEntity *ent = oa->Get3dEntity();
-            if (!ent)
-                continue;
-            if (ent->GetCurrentMesh() != this)
-                continue;
-
-            const int keyCount = mc->GetKeyCount();
-            for (int k = 0; k < keyCount; ++k) {
-                CKMorphKey *key = (CKMorphKey *) mc->GetKey(k);
-                if (!key)
-                    continue;
-
-                VxVector *newPos = nullptr;
-                VxCompressedVector *newNorm = nullptr;
-                if (key->PosArray)
-                    newPos = new VxVector[vertexCount];
-                if (key->NormArray)
-                    newNorm = new VxCompressedVector[vertexCount];
-
-                for (int n = 0; n < vertexCount; ++n) {
-                    const int mapped = collapseOrder[n];
-                    if (newPos)
-                        newPos[mapped] = key->PosArray[n];
-                    if (newNorm)
-                        newNorm[mapped] = key->NormArray[n];
-                }
-
-                delete[] key->PosArray;
-                key->PosArray = newPos;
-                delete[] key->NormArray;
-                key->NormArray = newNorm;
-            }
-        }
-    }
+    XArray<int> sources;
+    sources.Resize(vertexCount);
+    for (int i = 0; i < vertexCount; ++i)
+        sources[collapseOrder[i]] = i;
+    MeshRemapMorphVertices(m_Context, this, sources, vertexCount);
 
     return CK_OK;
 }

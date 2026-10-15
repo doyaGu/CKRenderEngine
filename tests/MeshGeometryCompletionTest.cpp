@@ -163,9 +163,39 @@ protected:
     }
 };
 
+TEST_F(MeshGeometryCompletionTest, FreshCreatePMBuildsFaceCacheWithoutDiscardingAuthoredTriangleOrInventingUVs) {
+    CompletionMesh mesh(Context); RCKMaterial material(Context);
+    ASSERT_TRUE(mesh.SetVertexCount(3)); ASSERT_TRUE(mesh.SetFaceCount(1));
+    for (int i = 0; i < 3; ++i) { VxVector p = Point(i); mesh.SetVertexPosition(i, &p); }
+    mesh.SetFaceVertexIndex(0, 0, 1, 2); mesh.SetFaceMaterial(0, &material);
+    mesh.SetFlags(mesh.GetFlags() & ~VXMESH_STRIPIFY);
+    ASSERT_EQ(CK_OK, mesh.CreatePM()); ASSERT_EQ(3, mesh.GetVertexCount()); ASSERT_EQ(1, mesh.GetFaceCount());
+    mesh.BuildRenderMesh(); ASSERT_EQ(1, mesh.DefaultRender(Device, nullptr)); ASSERT_EQ(1, Target.Count);
+    EXPECT_EQ(3, Target.Draws[0].Count); EXPECT_EQ(3, Target.Draws[0].VertexCount);
+    for (int i = 0; i < 3; ++i) { EXPECT_FLOAT_EQ(0.0f, Target.Draws[0].UV[i].x); EXPECT_FLOAT_EQ(0.0f, Target.Draws[0].UV[i].y); }
+}
 
 // Old weighted RemapVertices aliases owned influence arrays and can crash at
 // destruction. These two WeightedSkin cases are current-only, not safe baselines.
+TEST_F(MeshGeometryCompletionTest, CreatePMPermutationPreservesWeightedSkinMorphWeightsUVAndLineConsumers) {
+    CompletionMesh mesh(Context); RCKMaterial base(Context), layer(Context);
+    Payload(mesh, 4); mesh.SetFaceCount(2); mesh.SetFaceVertexIndex(0, 0, 1, 2); mesh.SetFaceVertexIndex(1, 0, 2, 3);
+    mesh.SetFaceMaterial(0, &base); mesh.SetFaceMaterial(1, &base); mesh.SetLineCount(1); mesh.SetLine(0, 0, 3);
+    ASSERT_EQ(0, mesh.AddChannel(&layer, FALSE)); mesh.ActivateChannel(0, FALSE);
+    for (int i = 0; i < 4; ++i) mesh.SetVertexTextureCoordinates(i, .5f + i * .0625f, .75f, 0);
+    RCK3dEntity a(Context), b(Context);
+    RegisteredGeometryConsumers consumers(Context); ASSERT_NE(nullptr, consumers.Entity); ASSERT_NE(nullptr, consumers.Animation);
+    CKSkin *skin = Skin(*consumers.Entity, mesh, a, b); ASSERT_NE(nullptr, skin);
+    RCKMorphController *morph = Morph(*consumers.Animation, *consumers.Entity, 4); ASSERT_NE(nullptr, morph);
+    mesh.BuildFaceNormals(); ASSERT_EQ(CK_OK, mesh.CreatePM()); ASSERT_EQ(4, mesh.GetVertexCount());
+    int sources[4]; CKBOOL reordered = FALSE;
+    for (int i = 0; i < 4; ++i) { sources[i] = Source(mesh, i); reordered |= sources[i] != i; ExpectedPayload(mesh, i, sources[i]); ExpectedPayload(mesh, i, sources[i], 0); }
+    EXPECT_TRUE(reordered); Consumers(*skin, *morph, sources, 4);
+    int first = 0, last = 0; mesh.GetLine(0, &first, &last); VxVector p;
+    mesh.GetVertexPosition(first, &p); Vec(p, Point(0)); mesh.GetVertexPosition(last, &p); Vec(p, Point(3));
+    mesh.BuildRenderMesh(); ASSERT_EQ(1, mesh.DefaultRender(Device, nullptr)); ASSERT_EQ(2, Target.Count);
+    EXPECT_EQ(VX_LINELIST, Target.Draws[1].Type); Vec(Target.Draws[1].Positions[0], Point(0)); Vec(Target.Draws[1].Positions[1], Point(3));
+}
 
 TEST_F(MeshGeometryCompletionTest, ConsolidatePreservesWeightedSkinAndBothMorphKeysAcrossUnusedVertexHoles) {
     CompletionMesh mesh(Context); Payload(mesh, 6); mesh.SetFaceCount(1); mesh.SetFaceVertexIndex(0, 2, 4, 5); mesh.BuildFaceNormals();
@@ -231,6 +261,21 @@ TEST_F(MeshGeometryCompletionTest, DissociationOverWordBudgetLeavesGeometryAndPr
 }
 
 
+TEST_F(MeshGeometryCompletionTest, CreateDestroyRecreateKeepsSingleProgressiveCallbackAndRebuildsCurrentLod) {
+    CompletionMesh mesh(Context); RCKMaterial material(Context); Payload(mesh, 4);
+    mesh.SetFaceCount(2); mesh.SetFaceVertexIndex(0, 0, 1, 2); mesh.SetFaceVertexIndex(1, 0, 2, 3);
+    mesh.SetFaceMaterial(0, &material); mesh.SetFaceMaterial(1, &material); mesh.BuildFaceNormals();
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        ASSERT_EQ(CK_OK, mesh.CreatePM()); EXPECT_EQ(CKERR_INVALIDPARAMETER, mesh.CreatePM());
+        ASSERT_EQ(4, mesh.ParentCount());
+        for (int i = 1; i < 4; ++i) EXPECT_LT(mesh.Parent(i), i);
+        const int before = Target.Count; ASSERT_EQ(CK_OK, mesh.Render(Device, nullptr));
+        EXPECT_EQ(before + 1, Target.Count); EXPECT_EQ(6, Target.Draws[before].Count);
+        mesh.SetVerticesRendered(1); mesh.BuildRenderMesh(); EXPECT_EQ(1, mesh.DeclaredPMCount());
+        ASSERT_EQ(1, mesh.DefaultRender(Device, nullptr)); EXPECT_EQ(before + 1, Target.Count);
+        mesh.DestroyPM(); EXPECT_FALSE(mesh.IsPM());
+    }
+}
 
 
 } // namespace
