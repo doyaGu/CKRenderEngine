@@ -120,10 +120,12 @@ struct TCBTimeWeights {
 };
 
 static TCBTimeWeights ComputeTCBTimeWeights(float previousTime, float time, float nextTime, float continuity) {
-    const float scale = 2.0f / (nextTime - previousTime);
+    // Form finite time ratios before narrowing; the reciprocal alone may
+    // overflow on short intervals or underflow after a wide subtraction.
+    const double duration = static_cast<double>(nextTime) - previousTime;
     TCBTimeWeights weights;
-    weights.previous = (time - previousTime) * scale;
-    weights.next = (nextTime - time) * scale;
+    weights.previous = static_cast<float>((static_cast<double>(time) - previousTime) * 2.0 / duration);
+    weights.next = static_cast<float>((static_cast<double>(nextTime) - time) * 2.0 / duration);
     const float magnitude = std::fabs(continuity);
     weights.previous = weights.previous + magnitude - magnitude * weights.previous;
     weights.next = weights.next + magnitude - magnitude * weights.next;
