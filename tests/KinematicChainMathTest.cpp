@@ -199,9 +199,27 @@ TEST_F(KinematicChainJointTest, RotatedWorldBasisUsesRowsForActualLocalAxes) {
     EXPECT_NEAR(std::sin(.1), actual.z, .0001);
 }
 
+TEST_F(KinematicChainJointTest, RejectedLimitedAxisRetainsTheOriginalPose) {
+    Axes(CK_IKJOINT_ACTIVE_Z | CK_IKJOINT_LIMIT_Z);
+    Data(*Chain)[0].m_RotationJoint.m_Min.Set(-.05f, -.05f, -.05f);
+    Data(*Chain)[0].m_RotationJoint.m_Max.Set(.05f, .05f, .05f);
+    const VxMatrix before = Root->GetLocalMatrix(); VxVector delta(0, .4f, 0);
+    EXPECT_EQ(CKERR_INVALIDOPERATION, Rotate(*Chain, &delta, nullptr));
+    MatrixEqual(before, Root->GetLocalMatrix());
+    VxVector actual; End->GetPosition(&actual);
+    EXPECT_NEAR(1, actual.x, .0001); EXPECT_NEAR(0, actual.y, .0001); EXPECT_NEAR(0, actual.z, .0001);
+}
 
-
-
+TEST_F(KinematicChainJointTest, ViolatedZAxisStaysLockedWhileValidYAxisStillMoves) {
+    Axes(CK_IKJOINT_ACTIVE_Y | CK_IKJOINT_ACTIVE_Z | CK_IKJOINT_LIMIT_Y | CK_IKJOINT_LIMIT_Z);
+    Data(*Chain)[0].m_RotationJoint.m_Min.Set(0, -.5f, -.05f);
+    Data(*Chain)[0].m_RotationJoint.m_Max.Set(0, .5f, .05f);
+    VxVector delta(0, .2f, -.1f);
+    ASSERT_EQ(CK_OK, Rotate(*Chain, &delta, nullptr));
+    VxVector actual; End->GetPosition(&actual);
+    EXPECT_NEAR(std::cos(.1), actual.x, .0001); EXPECT_NEAR(0, actual.y, .0001);
+    EXPECT_NEAR(-std::sin(.1), actual.z, .0001);
+}
 
 TEST_F(KinematicChainJointTest, NoEnabledAxesReturnsFailureWithoutChangingHierarchy) {
     Axes(0); const VxMatrix before = Root->GetLocalMatrix(); VxVector delta(0, .4f, 0);

@@ -692,15 +692,10 @@ CKERROR RCKKinematicChain::IKRotateToward(VxVector *targetDelta, CKBodyPart *end
         SVDDecompose(jacobianAxes, dofType, dofCount, singularValues, vMatrix);
 
         // Check and handle near-zero singular values
-        limitViolated = 0;
-        memset(lockedAxes, 0, sizeof(float) * dofCount);
-
+        // Singular modes are not physical joint axes. Preserve axis locks across retries.
         for (int i = 0; i < dofCount; ++i) {
-            if (fabsf(singularValues[i]) < 0.00001f) {
+            if (fabsf(singularValues[i]) < 0.00001f)
                 singularValues[i] = 0.0f;
-                lockedAxes[i] = 1.0f;
-                ++limitViolated;
-            }
         }
 
         // Solve using SVD
@@ -769,8 +764,6 @@ CKERROR RCKKinematicChain::IKRotateToward(VxVector *targetDelta, CKBodyPart *end
 
         // Lock most constrained axis
         ++iterationCount;
-        if (iterationCount >= chainBodyCount + 1)
-            break;
 
         int mostConstrainedDof = -1;
         float largestViolation = -10000.0f;
@@ -790,12 +783,20 @@ CKERROR RCKKinematicChain::IKRotateToward(VxVector *targetDelta, CKBodyPart *end
                     if (m_ChainData[jointIdx].m_RotationJoint.m_Flags & limitBit) {
                         float minAngle = (&m_ChainData[jointIdx].m_RotationJoint.m_Min.x)[axisIdx];
                         float maxAngle = (&m_ChainData[jointIdx].m_RotationJoint.m_Max.x)[axisIdx];
-                        float midAngle = (minAngle + maxAngle) / 2.0f;
-                        float distFromMid = fabsf((&eulerAngles.x)[axisIdx] - midAngle);
+                        float angle = (&eulerAngles.x)[axisIdx] + computedAngleDeltas[dofIdx + axisIdx];
+                        while (angle > PI)
+                            angle -= 2 * PI;
+                        while (angle < -PI)
+                            angle += 2 * PI;
+                        float violation = 0.0f;
+                        if (angle < minAngle)
+                            violation = minAngle - angle;
+                        if (angle > maxAngle)
+                            violation = angle - maxAngle;
 
-                        if (distFromMid > largestViolation) {
+                        if (violation > 0.0f && violation > largestViolation) {
                             mostConstrainedDof = dofIdx + axisIdx;
-                            largestViolation = distFromMid;
+                            largestViolation = violation;
                         }
                     }
                 }
@@ -805,9 +806,11 @@ CKERROR RCKKinematicChain::IKRotateToward(VxVector *targetDelta, CKBodyPart *end
             dofIdx += 3;
         }
 
-        if (mostConstrainedDof >= 0) {
-            lockedAxes[mostConstrainedDof] = 1.0f;
+        if (mostConstrainedDof < 0 || iterationCount > dofCount) {
+            result = CKERR_INVALIDOPERATION;
+            break;
         }
+        lockedAxes[mostConstrainedDof] = 1.0f;
     }
 
 CLEANUP_AND_RETURN:
