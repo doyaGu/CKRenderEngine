@@ -230,6 +230,12 @@ public:
     static CK_CLASSID m_ClassID;
 
 protected:
+    int RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *group,
+                                RCK3dEntity *ent, VxDrawPrimitiveData *data,
+                                CKBOOL localChannels);
+    int RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
+                               VxDrawPrimitiveData *data, int fogEnable,
+                               CKMaterialGroup *group, int providerPrefix);
     CKWORD BindMonoPassTextureChannelsChecked(RCKRenderContext *dev, int effectStagePrefix = 0);
     int RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *group,
                               RCK3dEntity *ent, VxDrawPrimitiveData *baseData,
