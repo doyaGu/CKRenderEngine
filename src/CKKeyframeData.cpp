@@ -316,17 +316,22 @@ CKBOOL RCKLinearPositionController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    // Linear interpolation between keys[low] and keys[high]
-    float t1 = m_Keys[low].TimeStep;
-    float t2 = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2 - t1);
+    // Independent weights retain both endpoints across wide finite ranges.
+    const double t1 = m_Keys[low].TimeStep;
+    const double t2 = m_Keys[high].TimeStep;
+    const double duration = t2 - t1;
+    const double leftWeight = (t2 - TimeStep) / duration;
+    const double rightWeight = (TimeStep - t1) / duration;
 
-    VxVector &p1 = m_Keys[low].Pos;
-    VxVector &p2 = m_Keys[high].Pos;
+    const VxVector &p1 = m_Keys[low].Pos;
+    const VxVector &p2 = m_Keys[high].Pos;
 
-    result->x = p1.x + (p2.x - p1.x) * t;
-    result->y = p1.y + (p2.y - p1.y) * t;
-    result->z = p1.z + (p2.z - p1.z) * t;
+    result->x = static_cast<float>(static_cast<double>(p1.x) * leftWeight +
+                                   static_cast<double>(p2.x) * rightWeight);
+    result->y = static_cast<float>(static_cast<double>(p1.y) * leftWeight +
+                                   static_cast<double>(p2.y) * rightWeight);
+    result->z = static_cast<float>(static_cast<double>(p1.z) * leftWeight +
+                                   static_cast<double>(p2.z) * rightWeight);
 
     return TRUE;
 }
