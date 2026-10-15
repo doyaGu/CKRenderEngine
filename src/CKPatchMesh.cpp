@@ -1536,10 +1536,10 @@ void RCKPatchMesh::BuildRenderMesh() {
                     int v10 = ComputeQuadVertexIndex(p, steps, i + 1, j, interiorBase, edgeTess);
                     int v01 = ComputeQuadVertexIndex(p, steps, i, j + 1, interiorBase, edgeTess);
                     int v11 = ComputeQuadVertexIndex(p, steps, i + 1, j + 1, interiorBase, edgeTess);
-                    SetFaceVertexIndex(face, v00, v10, v01);
+                    SetFaceVertexIndex(face, v00, v01, v10);
                     SetFaceMaterial(face, patchMat);
                     face++;
-                    SetFaceVertexIndex(face, v10, v11, v01);
+                    SetFaceVertexIndex(face, v10, v01, v11);
                     SetFaceMaterial(face, patchMat);
                     face++;
                 }
@@ -1557,15 +1557,15 @@ void RCKPatchMesh::BuildRenderMesh() {
                     int a = ComputeTriVertexIndex(p, steps, u0, v0, interiorBase, edgeTess);
                     int b = ComputeTriVertexIndex(p, steps, u1, v1, interiorBase, edgeTess);
                     int c = ComputeTriVertexIndex(p, steps, u2, v2, interiorBase, edgeTess);
-                    SetFaceVertexIndex(face, a, b, c);
+                    SetFaceVertexIndex(face, a, c, b);
                     SetFaceMaterial(face, patchMat);
                     face++;
 
-                    if (ucol + vrow < steps - 2) {
+                    if (ucol + vrow < steps - 1) {
                         int u3 = ucol + 1;
                         int v3 = vrow + 1;
                         int d = ComputeTriVertexIndex(p, steps, u3, v3, interiorBase, edgeTess);
-                        SetFaceVertexIndex(face, b, d, c);
+                        SetFaceVertexIndex(face, b, c, d);
                         SetFaceMaterial(face, patchMat);
                         face++;
                     }
@@ -1811,7 +1811,8 @@ int RCKPatchMesh::ComputeTriVertexIndex(int patchIndex, int steps, int uSteps, i
     if (uSteps == 0 && vSteps == steps)
         return (int)m_CornerVertexMap[cornerBase + 2];
 
-    if (wSteps == 0) {
+    // Grid coordinates run A + u * (B - A) + v * (C - A).
+    if (vSteps == 0) {
         int eidx = patch.edge[0];
         if (eidx < 0 || eidx >= m_PatchEdges.Size() || eidx >= edgeTess.Size())
             return -1;
@@ -1830,7 +1831,7 @@ int RCKPatchMesh::ComputeTriVertexIndex(int patchIndex, int steps, int uSteps, i
             return (int)m_CornerVertexMap[cornerBase + 1];
         return base + (k - 1);
     }
-    if (uSteps == 0) {
+    if (wSteps == 0) {
         int eidx = patch.edge[1];
         if (eidx < 0 || eidx >= m_PatchEdges.Size() || eidx >= edgeTess.Size())
             return -1;
@@ -1849,7 +1850,7 @@ int RCKPatchMesh::ComputeTriVertexIndex(int patchIndex, int steps, int uSteps, i
             return (int)m_CornerVertexMap[cornerBase + 2];
         return base + (k - 1);
     }
-    if (vSteps == 0) {
+    if (uSteps == 0) {
         int eidx = patch.edge[2];
         if (eidx < 0 || eidx >= m_PatchEdges.Size() || eidx >= edgeTess.Size())
             return -1;
@@ -1872,7 +1873,7 @@ int RCKPatchMesh::ComputeTriVertexIndex(int patchIndex, int steps, int uSteps, i
     int base = (patchIndex < interiorBase.Size()) ? interiorBase[patchIndex] : -1;
     if (base < 0 || wSteps <= 0 || uSteps <= 0)
         return -1;
-    int offset = TriInteriorOffset(steps, wSteps, uSteps);
+    int offset = TriInteriorOffset(steps, vSteps, wSteps);
     return base + offset;
 }
 
