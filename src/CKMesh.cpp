@@ -1,6 +1,7 @@
 #include "CKMaterialBindingScope.h"
 #include "CKMeshDrawScope.h"
 #include "CKMeshRenderScope.h"
+#include "CKMeshChannelScope.h"
 #include "RCKMesh.h"
 
 #include "CKMemoryPool.h"
@@ -5293,20 +5294,14 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
     void *colors = data.ColorPtr;
     void *specular = data.SpecularColorPtr;
     const CKDWORD fogEnable = dev->GetRasterizerRenderState(VXRENDERSTATE_FOGENABLE);
-    VxMatrix projection = dev->GetProjectionTransformationMatrix();
-    VxMatrix biased = projection;
-    biased[3][2] *= 1.001f;
-    dev->SetProjectionTransformationMatrix(biased);
+    CKMeshChannelProjectionScope projection(dev);
     int result = 1;
     for (int c = 0; c < m_MaterialChannels.Size(); ++c) {
         if (!(failedChannels & static_cast<CKWORD>(1u << c)))
             continue;
         VxMaterialChannel &channel = m_MaterialChannels[c];
         RCKMaterial *material = static_cast<RCKMaterial *>(channel.m_Material);
-        VXBLEND_MODE savedSource, savedDest;
-        CKDWORD savedFlags;
-        material->PatchForChannelRender(channel.m_SourceBlend, channel.m_DestBlend,
-                                        savedSource, savedDest, savedFlags);
+        CKMeshChannelMaterialScope materialPatch(material, channel.m_SourceBlend, channel.m_DestBlend);
         const CKBOOL unlit = (channel.m_Flags & VXCHANNEL_NOTLIT) ||
             CKMeshMonoPassStageBlend(STAGEBLEND(channel.m_SourceBlend, channel.m_DestBlend));
         CKBOOL lit = !(m_Flags & VXMESH_PRELITMODE) && !unlit;
@@ -5315,7 +5310,6 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
         dev->DisableTextureStagesFrom(1);
         CKMaterialBindingScope binding(material, dev, 0);
         if (!material->SetAsCurrent(dev, lit, 0)) {
-            material->RestoreAfterChannelRender(savedSource, savedDest, savedFlags);
             result = 0;
             continue;
         }
@@ -5362,9 +5356,7 @@ int RCKMesh::RenderMonoPassFallback(RCKRenderContext *dev, CKMaterialGroup *grou
                                      primitive.m_Indices.Size(), &data))
                 result = 0;
         }
-        material->RestoreAfterChannelRender(savedSource, savedDest, savedFlags);
     }
-    dev->SetProjectionTransformationMatrix(projection);
     return result;
 }
 
@@ -5383,10 +5375,8 @@ int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
     // Group passes use authored face indices, hence all streams retain source
     // indexing rather than the base group's compact vertex remap.
     VxDrawPrimitiveData sourceData;
-    if (group) {
-        UserDrawPrimitiveDataClass::CopySubmissionData(sourceData, data);
-        data = &sourceData;
-    }
+    UserDrawPrimitiveDataClass::CopySubmissionData(sourceData, data);
+    data = &sourceData;
     const CKDWORD sideCull = group ? dev->GetRasterizerRenderState(VXRENDERSTATE_CULLMODE) : 0;
     const CKDWORD sideFill = group ? dev->GetRasterizerRenderState(VXRENDERSTATE_FILLMODE) : 0;
     XArray<CKWORD> groupIndices;
@@ -5403,11 +5393,7 @@ int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
     CKDWORD origTexCoordStride = data->TexCoordStride;
 
     // Get and modify projection matrix for Z offset
-    VxMatrix projMat = dev->GetProjectionTransformationMatrix();
-    float origZ = projMat[3][2];
-    float newZ = origZ * 1.001f;
-    projMat[3][2] = newZ;
-    dev->SetProjectionTransformationMatrix(projMat);
+    CKMeshChannelProjectionScope projection(dev);
 
     // Iterate through material channels
     for (int c = 0; c < m_MaterialChannels.Size(); ++c) {
@@ -5453,10 +5439,7 @@ int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
         }
 
         // Match original binary: patch blend/flags without side effects
-        VXBLEND_MODE savedSourceBlend = (VXBLEND_MODE) 0;
-        VXBLEND_MODE savedDestBlend = (VXBLEND_MODE) 0;
-        CKDWORD savedFlags = 0;
-        mat->PatchForChannelRender(channel.m_SourceBlend, channel.m_DestBlend, savedSourceBlend, savedDestBlend, savedFlags);
+        CKMeshChannelMaterialScope materialPatch(mat, channel.m_SourceBlend, channel.m_DestBlend);
 
         if (channel.m_SourceBlend == VXBLEND_SRCALPHA && channel.m_DestBlend == VXBLEND_INVSRCALPHA) {
             dev->m_RasterizerContext->SetRenderState(VXRENDERSTATE_FOGENABLE, fogEnable);
@@ -5478,7 +5461,6 @@ int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
         CKMaterialBindingScope binding(mat, dev, 0);
         const CKBOOL accepted = mat->SetAsCurrent((CKRenderContext *) dev, useLighting, 0);
         if (!accepted) {
-            mat->RestoreAfterChannelRender(savedSourceBlend, savedDestBlend, savedFlags);
             result = 0;
             continue;
         }
@@ -5588,19 +5570,7 @@ int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
                 result = 0;
         }
 
-        // Restore material state exactly
-        mat->RestoreAfterChannelRender(savedSourceBlend, savedDestBlend, savedFlags);
     }
-
-    // Restore the caller's actual coordinate stream.
-    data->TexCoordPtr = origTexCoordPtr;
-    data->TexCoordStride = origTexCoordStride;
-    data->ColorPtr = origColorPtr;
-    data->SpecularColorPtr = origSpecularPtr;
-
-    // Restore projection matrix
-    projMat[3][2] = origZ;
-    dev->SetProjectionTransformationMatrix(projMat);
 
     CK_RENDER_PERF_ADD(renderStats, MeshChannelsUs, CKRenderPerfElapsedUs(perfStart));
     return result;
