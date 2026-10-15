@@ -115,6 +115,142 @@ void operator delete[](void *pointer) noexcept {
 
 void operator delete[](void *pointer, size_t) noexcept { ::operator delete[](pointer); }
 
+TEST_F(TCBPositionLifecycleTest, ConstructorCreatesEmptyUsableControllerWithoutKeysOrCache) {
+    InspectTCBPosition controller;
+    EXPECT_EQ(CKANIMATION_TCBPOS_CONTROL, controller.GetType()); EXPECT_EQ(0, controller.GetKeyCount());
+    EXPECT_FLOAT_EQ(0.0f, controller.GetLength()); EXPECT_EQ(nullptr, controller.GetKey(0)); EXPECT_EQ(nullptr, controller.Tangents());
+    VxVector untouched(70.0f, 80.0f, 90.0f); EXPECT_FALSE(controller.Evaluate(0.0f, &untouched)); Vec(untouched, VxVector(70.0f, 80.0f, 90.0f));
+    int empty = 123; ASSERT_EQ(4, controller.DumpKeysTo(&empty)); EXPECT_EQ(0, empty);
+    controller.ComputeTangents(); EXPECT_EQ(nullptr, controller.Tangents()); Author(controller); Consume(controller);
+}
+
+TEST_F(TCBPositionLifecycleTest, PortableLayoutReportsOwnedKeyAndTangentPointersAndAllWireFields) {
+    InspectTCBPosition controller; controller.RecordLayout();
+    EXPECT_EQ(sizeof(void *) == 8 ? 40u : 24u, sizeof(RCKTCBPositionController));
+    EXPECT_EQ(sizeof(void *), alignof(RCKTCBPositionController));
+    EXPECT_EQ(sizeof(void *) == 8 ? 24u : 16u, sizeof(CKAnimController));
+    EXPECT_EQ(36u, sizeof(CKTCBPositionKey)); EXPECT_EQ(4u, alignof(CKTCBPositionKey));
+    Author(controller); Consume(controller);
+}
+
+TEST_F(TCBPositionLifecycleTest, FactorySuppliesTCBTypeAndOwnerLength) {
+    CKKeyframeData owner; owner.m_Length = 48.0f;
+    owner.m_PositionController = owner.CreateController(CKANIMATION_TCBPOS_CONTROL);
+    ASSERT_NE(nullptr, owner.m_PositionController);
+    EXPECT_EQ(CKANIMATION_TCBPOS_CONTROL, owner.m_PositionController->GetType());
+    EXPECT_FLOAT_EQ(48.0f, owner.m_PositionController->GetLength());
+    EXPECT_EQ(0, owner.m_PositionController->GetKeyCount()); Author(*owner.m_PositionController); Consume(*owner.m_PositionController);
+}
+
+TEST_F(TCBPositionLifecycleTest, GetKeyBorrowsWritablePayloadAndExplicitRecomputeRefreshesInterior) {
+    InspectTCBPosition controller; Author(controller); Consume(controller);
+    CKTCBPositionKey *first = static_cast<CKTCBPositionKey *>(controller.GetKey(0));
+    CKTCBPositionKey *last = static_cast<CKTCBPositionKey *>(controller.GetKey(1));
+    ASSERT_NE(nullptr, first); ASSERT_NE(nullptr, last);
+    EXPECT_EQ(sizeof(CKTCBPositionKey), reinterpret_cast<const char *>(last) - reinterpret_cast<const char *>(first));
+    VxVector *cache = controller.Tangents(); ASSERT_NE(nullptr, cache);
+    last->Pos.Set(18.0f, 12.0f, -2.0f);
+    EXPECT_EQ(cache, controller.Tangents());
+    VxVector output; ASSERT_TRUE(controller.Evaluate(6.0f, &output)); Vec(output, last->Pos);
+    float wire[19] = {}; ASSERT_EQ(76, controller.DumpKeysTo(wire));
+    EXPECT_FLOAT_EQ(18.0f, wire[11]); EXPECT_FLOAT_EQ(12.0f, wire[12]); EXPECT_FLOAT_EQ(-2.0f, wire[13]);
+    // Native GetKey is a borrowed pointer: authoring clients explicitly refresh
+    // tangents after direct writes. Reading a key is not an invalidation event.
+    controller.ComputeTangents(); ASSERT_TRUE(controller.Evaluate(3.0f, &output)); Vec(output, VxVector(6.0f, 6.0f, 4.0f));
+}
+
+TEST_F(TCBPositionLifecycleTest, GetKeyOutsideBorrowedRangeRetainsCacheAndUsableKeys) {
+    InspectTCBPosition controller; Author(controller); Consume(controller);
+    CKKey *key = controller.GetKey(0); VxVector *cache = controller.Tangents();
+    EXPECT_EQ(nullptr, controller.GetKey(-1)); EXPECT_EQ(nullptr, controller.GetKey(2)); EXPECT_EQ(nullptr, controller.GetKey(INT_MAX));
+    EXPECT_EQ(key, controller.GetKey(0)); EXPECT_EQ(cache, controller.Tangents()); Consume(controller);
+}
+
+TEST_F(TCBPositionLifecycleTest, CloneCopiesAllTCBFieldsAndRebuildsIndependentCache) {
+    InspectTCBPosition source, destination; Author(source); Author(destination); Consume(source); Consume(destination);
+    CKTCBPositionKey *first = static_cast<CKTCBPositionKey *>(source.GetKey(0));
+    first->tension = 1.0f; first->continuity = -0.25f; first->bias = 0.75f; first->easeto = 0.125f; first->easefrom = 0.0f;
+    source.ComputeTangents(); CKKey *sourceKey = source.GetKey(0); VxVector *sourceCache = source.Tangents();
+    Observe(destination); ASSERT_TRUE(destination.Clone(&source));
+    EXPECT_EQ(1, KeyReleases); EXPECT_EQ(1, TangentReleases); ObservedKeys = nullptr; ObservedTangents = nullptr;
+    EXPECT_EQ(nullptr, destination.Tangents()); EXPECT_NE(sourceKey, destination.GetKey(0));
+    CKTCBPositionKey *copy = static_cast<CKTCBPositionKey *>(destination.GetKey(0));
+    EXPECT_FLOAT_EQ(1.0f, copy->tension); EXPECT_FLOAT_EQ(-0.25f, copy->continuity); EXPECT_FLOAT_EQ(0.75f, copy->bias);
+    EXPECT_FLOAT_EQ(0.125f, copy->easeto); EXPECT_FLOAT_EQ(0.0f, copy->easefrom);
+    VxVector sample; ASSERT_TRUE(destination.Evaluate(3.0f, &sample));
+    // Two-key incoming tangent is delta, outgoing is zero when tension=1.
+    Vec(sample, VxVector(2.875f, 4.4375f, 5.5625f));
+    ASSERT_NE(nullptr, destination.Tangents()); EXPECT_NE(sourceCache, destination.Tangents());
+    first->Pos.Set(50.0f, 60.0f, 70.0f); source.RemoveKey(1); source.SetLength(99.0f);
+    ASSERT_TRUE(destination.Evaluate(3.0f, &sample)); Vec(sample, VxVector(2.875f, 4.4375f, 5.5625f));
+    EXPECT_FLOAT_EQ(12.0f, destination.GetLength()); EXPECT_EQ(2, destination.GetKeyCount());
+}
+
+TEST_F(TCBPositionLifecycleTest, CloneOwnsKeysAfterPopulatedSourceCacheAndSourceDestruction) {
+    InspectTCBPosition destination; Author(destination); Consume(destination);
+    { InspectTCBPosition source; Author(source); Consume(source); ASSERT_TRUE(destination.Clone(&source));
+      ASSERT_NE(source.GetKey(0), destination.GetKey(0)); EXPECT_EQ(nullptr, destination.Tangents()); }
+    Consume(destination);
+}
+
+TEST_F(TCBPositionLifecycleTest, CloneEmptySourceReleasesBothArraysAndCopiesLength) {
+    InspectTCBPosition destination; Author(destination); Consume(destination);
+    InspectTCBPosition source; source.SetLength(37.0f); Observe(destination);
+    ASSERT_TRUE(destination.Clone(&source)); EXPECT_EQ(1, KeyReleases); EXPECT_EQ(1, TangentReleases);
+    ObservedKeys = nullptr; ObservedTangents = nullptr;
+    EXPECT_EQ(0, destination.GetKeyCount()); EXPECT_EQ(nullptr, destination.GetKey(0)); EXPECT_EQ(nullptr, destination.Tangents());
+    EXPECT_FLOAT_EQ(37.0f, destination.GetLength()); Author(destination); Consume(destination);
+}
+
+TEST_F(TCBPositionLifecycleTest, SelfClonePreservesKeysAndExistingCacheWithoutAllocating) {
+    InspectTCBPosition controller; Author(controller); Consume(controller);
+    CKKey *key = controller.GetKey(0); VxVector *cache = controller.Tangents(); Observe(controller);
+    FailNextKeyArray = true; const CKBOOL cloned = controller.Clone(&controller);
+    const bool allocated = !FailNextKeyArray; FailNextKeyArray = false;
+    EXPECT_TRUE(cloned); EXPECT_FALSE(allocated); EXPECT_EQ(key, controller.GetKey(0)); EXPECT_EQ(cache, controller.Tangents());
+    EXPECT_EQ(0, KeyReleases); EXPECT_EQ(0, TangentReleases); Consume(controller);
+}
+
+TEST_F(TCBPositionLifecycleTest, CloneRejectsNullAndSameSizeDifferentCategoryWithoutChangingCache) {
+    InspectTCBPosition controller; Author(controller); Consume(controller);
+    RCKTCBScaleController scale; Author(scale);
+    CKKey *key = controller.GetKey(0); VxVector *cache = controller.Tangents(); Observe(controller);
+    EXPECT_FALSE(controller.Clone(nullptr)); EXPECT_FALSE(controller.Clone(&scale));
+    EXPECT_EQ(key, controller.GetKey(0)); EXPECT_EQ(cache, controller.Tangents());
+    EXPECT_EQ(0, KeyReleases); EXPECT_EQ(0, TangentReleases); Consume(controller);
+}
+
+TEST_F(TCBPositionLifecycleTest, CloneAllocationFailureRetainsDestinationKeysCacheAndLength) {
+    InspectTCBPosition destination, source; Author(destination); Consume(destination);
+    VxVector position(99.0f, 88.0f, 77.0f); CKTCBPositionKey key(7.0f, position, 0.5f, -0.5f, 0.25f, 0.125f, 0.75f);
+    ASSERT_EQ(0, source.AddKey(&key)); source.SetLength(123.0f);
+    CKKey *borrowed = destination.GetKey(0); VxVector *cache = destination.Tangents(); Observe(destination);
+    FailNextKeyArray = true; const CKBOOL cloned = destination.Clone(&source);
+    const bool failureReached = !FailNextKeyArray; FailNextKeyArray = false;
+    ASSERT_TRUE(failureReached); EXPECT_FALSE(cloned); EXPECT_EQ(borrowed, destination.GetKey(0)); EXPECT_EQ(cache, destination.Tangents());
+    EXPECT_EQ(0, KeyReleases); EXPECT_EQ(0, TangentReleases); Consume(destination);
+    EXPECT_EQ(1, source.GetKeyCount()); EXPECT_FLOAT_EQ(123.0f, source.GetLength());
+    VxVector output; ASSERT_TRUE(source.Evaluate(7.0f, &output)); Vec(output, position);
+    ASSERT_TRUE(destination.Clone(&source)); EXPECT_FLOAT_EQ(123.0f, destination.GetLength());
+    EXPECT_EQ(nullptr, destination.Tangents()); ASSERT_TRUE(destination.Evaluate(0.0f, &output)); Vec(output, position);
+}
+
+TEST_F(TCBPositionLifecycleTest, VirtualDeletionReleasesOwnedKeysAndTangentsExactlyOnce) {
+    int destroyed = 0; DeletedTCBPosition *source = new DeletedTCBPosition(&destroyed); Author(*source); Consume(*source);
+    InspectTCBPosition destination; ASSERT_TRUE(destination.Clone(source)); Observe(*source);
+    CKAnimController *api = source; delete api;
+    EXPECT_EQ(1, destroyed); EXPECT_EQ(1, KeyReleases); EXPECT_EQ(1, TangentReleases);
+    ObservedKeys = nullptr; ObservedTangents = nullptr; Consume(destination);
+}
+
+TEST_F(TCBPositionLifecycleTest, BaseNineVirtualEntriesComposeThroughTheBaseInterface) {
+    CKAnimController *api = new RCKTCBPositionController; Author(*api);
+    RCKTCBPositionController copy; EXPECT_TRUE(copy.Clone(api)); EXPECT_TRUE(api->Compare(&copy, 0.0f));
+    unsigned char wire[76]; ASSERT_EQ(76, api->DumpKeysTo(wire)); api->RemoveKey(0);
+    EXPECT_EQ(1, api->GetKeyCount()); ASSERT_EQ(76, api->ReadKeysFrom(wire));
+    EXPECT_FLOAT_EQ(2.0f, api->GetKey(0)->GetTime()); Consume(*api); delete api;
+}
+
 TEST_F(TCBPositionLifecycleTest, TenthVirtualSlotCustomizesTangentsThroughEvaluateAndConcreteBase) {
     CustomTCBPosition controller; CKAnimController *api = &controller; Author(*api);
     VxVector output; ASSERT_TRUE(api->Evaluate(3.0f, &output));
@@ -123,4 +259,29 @@ TEST_F(TCBPositionLifecycleTest, TenthVirtualSlotCustomizesTangentsThroughEvalua
     RCKTCBPositionController *concreteBase = &controller;
     concreteBase->ComputeTangents(); EXPECT_EQ(2, controller.Calls);
     ASSERT_TRUE(api->Evaluate(3.0f, &output)); Vec(output, VxVector(2.875f, 4.4375f, 5.5625f));
+}
+
+TEST_F(TCBPositionLifecycleTest, ClonedTCBControllerDrivesEntityAfterOriginalOwnerAndCacheDie) {
+    ASSERT_EQ(CK_OK, CKStartUp());
+    CKCLASSREGISTERCID(RCKRenderObject, CKCID_BEOBJECT);
+    CKCLASSREGISTERCID(RCK3dEntity, CKCID_RENDEROBJECT);
+    CKCLASSREGISTERCID(RCKObjectAnimation, CKCID_ANIMATION);
+    CKBuildClassHierarchyTable();
+    CKContext *context = nullptr; ASSERT_EQ(CK_OK, CKCreateContext(&context, nullptr, 0, 0));
+    {
+        RCK3dEntity entity(context); RCKObjectAnimation animation(context);
+        animation.Set3dEntity(reinterpret_cast<CK3dEntity *>(&entity)); animation.SetLength(12.0f);
+        CKAnimController *destination = animation.CreateController(CKANIMATION_TCBPOS_CONTROL); ASSERT_NE(nullptr, destination);
+        { CKKeyframeData owner; owner.m_PositionController = owner.CreateController(CKANIMATION_TCBPOS_CONTROL);
+          ASSERT_NE(nullptr, owner.m_PositionController); Author(*owner.m_PositionController); Consume(*owner.m_PositionController);
+          ASSERT_TRUE(destination->Clone(owner.m_PositionController)); }
+        ASSERT_EQ(CK_OK, animation.SetFrame(3.0f));
+        const VxMatrix &first = entity.GetLocalMatrix(); Vec(VxVector(first[3][0], first[3][1], first[3][2]), VxVector(4.0f, 5.0f, 5.0f));
+        static_cast<CKTCBPositionKey *>(destination->GetKey(1))->Pos.Set(18.0f, 12.0f, -2.0f);
+        static_cast<RCKTCBPositionController *>(destination)->ComputeTangents();
+        ASSERT_EQ(CK_OK, animation.SetFrame(3.0f));
+        const VxMatrix &updated = entity.GetLocalMatrix(); Vec(VxVector(updated[3][0], updated[3][1], updated[3][2]), VxVector(6.0f, 6.0f, 4.0f));
+        animation.Set3dEntity(nullptr);
+    }
+    CKCloseContext(context); CKShutdown();
 }
