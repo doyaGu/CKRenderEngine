@@ -51,7 +51,7 @@ static int CKMaterialStageCapacity(RCKRenderContext *dev) {
 }
 
 static CKBOOL CKMaterialStageRangeFits(RCKRenderContext *dev, int firstStage,
-                                        int stageCount, int textureCount) {
+                                        int stageCount, int textureCount, CKBOOL preserveSuffix = TRUE) {
     const int capacity = CKMaterialStageCapacity(dev);
     if (firstStage < 0 || stageCount <= 0 || stageCount > capacity ||
         firstStage > capacity - stageCount)
@@ -60,9 +60,12 @@ static CKBOOL CKMaterialStageRangeFits(RCKRenderContext *dev, int firstStage,
         ? dev->m_RenderManager->GetDriverDescription(dev->m_DriverIndex) : nullptr;
     const CKDWORD textureCapacity = driver ? driver->Caps3D.MaxNumberTextureStage : 0;
     if (textureCapacity) {
-        // Positive-stage submissions retain the preceding bindings. Texture
-        // capacity limits simultaneous non-null bindings, not stage ordinals.
-        for (int stage = 0; stage < firstStage; ++stage) {
+        // Count every binding which survives this chain replacement, including
+        // unrelated suffix stages past gaps. Primary SetAsCurrent clears its
+        // tail before binding, so those soon-to-be-reset values are excluded.
+        for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
+            if (stage >= firstStage && (stage < firstStage + stageCount || !preserveSuffix))
+                continue;
             CKDWORD texture = 0;
             if (!dev->m_RasterizerContext->GetTexture(stage, &texture))
                 return FALSE;
@@ -1603,7 +1606,7 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
         const int stageCount = applyEffect ? CKMaterialConfiguredStageCount(this) : 1;
         const int textureCount = applyEffect ? CKMaterialConfiguredTextureCount(this) :
             (m_Textures[0] ? 1 : 0);
-        if (!CKMaterialStageRangeFits(dev, firstStage, stageCount, textureCount))
+        if (!CKMaterialStageRangeFits(dev, firstStage, stageCount, textureCount, TextureStage != 0))
             return FALSE;
     }
     const CKBOOL preserveTextureMatrix = skipTextureMatrix && !skipAllTextures;
