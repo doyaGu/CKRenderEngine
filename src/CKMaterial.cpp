@@ -1555,8 +1555,14 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     if (!dev || TextureStage < 0 || TextureStage >= CKRST_MAX_TEXTURE_STAGES)
         return FALSE;
 
+    CKRasterizerObservation observation(dev);
     if (m_Callback) {
-        if (m_Callback(dev, this, m_CallbackArgument)) {
+        CKBOOL ownsState;
+        {
+            CKRasterizerCallbackScope callbackScope(dev);
+            ownsState = m_Callback(dev, this, m_CallbackArgument);
+        }
+        if (ownsState) {
             bindingCall.OwnAllState();
             return TRUE;
         }
@@ -1574,7 +1580,10 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
     }
     CKDWORD effectCallbackResult = VXEFFECTRETVAL_SKIPNONE;
     if (effectDesc && effectDesc->SetCallback) {
-        effectCallbackResult = effectDesc->SetCallback(context, this, TextureStage, effectDesc->CallbackArg);
+        {
+            CKRasterizerCallbackScope callbackScope(dev);
+            effectCallbackResult = effectDesc->SetCallback(context, this, TextureStage, effectDesc->CallbackArg);
+        }
         if (effectCallbackResult == VXEFFECTRETVAL_SKIPALL) {
             bindingCall.OwnAllState();
             return TRUE;

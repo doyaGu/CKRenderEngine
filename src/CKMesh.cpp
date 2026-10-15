@@ -3747,6 +3747,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
     // Check rasterizer context
     if (!rc->m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
+    CKRasterizerObservation observation(rc);
 
     // Compute box visibility if entity is different from current
     if (ent != rc->m_Current3dEntity) {
@@ -3771,6 +3772,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
                  it != m_RenderCallbacks->m_PreCallBacks.End(); it++) {
                 CK_MESHRENDERCALLBACK callback = (CK_MESHRENDERCALLBACK) it->callback;
                 void *argument = it->argument;
+                CKRasterizerCallbackScope callbackScope(rc);
                 callback(Dev, Mov, this, argument);
             }
 
@@ -3780,6 +3782,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
 
         // Main callback or default render
         if (m_RenderCallbacks->m_Callback) {
+            CKRasterizerCallbackScope callbackScope(rc);
             ((CK_MESHRENDERCALLBACK) m_RenderCallbacks->m_Callback->callback)(
                 Dev, Mov, this, m_RenderCallbacks->m_Callback->argument);
         } else {
@@ -3795,6 +3798,7 @@ CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
                  it != m_RenderCallbacks->m_PostCallBacks.End(); it++) {
                 CK_MESHRENDERCALLBACK callback = (CK_MESHRENDERCALLBACK) it->callback;
                 void *argument = it->argument;
+                CKRasterizerCallbackScope callbackScope(rc);
                 callback(Dev, Mov, this, argument);
             }
 
@@ -4914,6 +4918,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
                 // Call: func(dev, ent, this, mat, argument)
                 typedef void (*MeshRenderCallback)(RCKRenderContext *, RCK3dEntity *, RCKMesh *, RCKMaterial *, void *);
                 MeshRenderCallback func = (MeshRenderCallback) cb->callback;
+                CKRasterizerCallbackScope callbackScope(dev);
                 func(dev, ent, this, mat, cb->argument);
             }
 
@@ -5269,6 +5274,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
              cb < m_SubMeshCallbacks->m_PostCallBacks.End(); ++cb) {
             typedef void (*MeshRenderCallback)(RCKRenderContext *, RCK3dEntity *, RCKMesh *, RCKMaterial *, void *);
             MeshRenderCallback func = (MeshRenderCallback) cb->callback;
+            CKRasterizerCallbackScope callbackScope(dev);
             func(dev, ent, this, mat, cb->argument);
         }
 

@@ -38,6 +38,7 @@
 #include "RCKSprite3D.h"
 #include "CKRenderDrawAnnotation.h"
 #include "CKMeshDrawScope.h"
+#include "CKRasterizerObservation.h"
 
 
 #include <stdio.h>
@@ -1048,7 +1049,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
     }
 
     // Destroy old context
-    CKRasterizerContext *oldContext = m_RasterizerContext;
+    CKRasterizerContext *oldContext = CKRasterizerObservation::Identity(m_RasterizerContext);
     const int oldDriverIndex = m_DriverIndex;
     if (m_RasterizerDriver && oldContext) {
         if (!m_RasterizerDriver->DestroyContext(oldContext)) {
@@ -1057,6 +1058,7 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         }
     }
     m_RenderManager->ForgetRasterizerContext(oldContext);
+    CKRasterizerObservation::Forget(this, oldContext);
     m_TargetTexture = nullptr;
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;
@@ -1233,6 +1235,7 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
     // with the existing native targets (for example during a window change).
     if (!m_RasterizerContext->Resize(PosX, PosY, SizeX, SizeY, Flags))
         return CKERR_INVALIDOPERATION;
+    CKRasterizerObservation::Invalidate(this, m_RasterizerContext);
     if ((Flags & VX_RESIZE_NOMOVE) == 0) {
         m_WindowSettings.m_Rect.left = PosX;
         m_WindowSettings.m_Rect.top = PosY;
@@ -3046,11 +3049,13 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
 
 RCKRenderContext::~RCKRenderContext() {
     // Based on IDA at 0x10066ebb
-    if (!DestroyDevice() && m_RenderManager) {
+    const CKBOOL destroyed = DestroyDevice();
+    if (!destroyed && m_RenderManager) {
         m_RenderManager->ForgetRasterizerContext(m_RasterizerContext);
         m_RasterizerContext = nullptr;
         m_RasterizerDriver = nullptr;
     }
+    CKRasterizerObservation::ForgetOwner(this);
     DetachAll();
     ClearCallbacks();
 
@@ -3105,7 +3110,7 @@ CKBOOL RCKRenderContext::DestroyDevice() {
     }
 
     // Destroy the rasterizer context
-    CKRasterizerContext *destroyedContext = m_RasterizerContext;
+    CKRasterizerContext *destroyedContext = CKRasterizerObservation::Identity(m_RasterizerContext);
     if (m_RasterizerDriver && destroyedContext &&
         !m_RasterizerDriver->DestroyContext(destroyedContext)) {
         m_DeviceDestroying = FALSE;
@@ -3114,6 +3119,7 @@ CKBOOL RCKRenderContext::DestroyDevice() {
 
     if (m_RenderManager)
         m_RenderManager->ForgetRasterizerContext(destroyedContext);
+    CKRasterizerObservation::Forget(this, destroyedContext);
 
     m_RasterizerContext = nullptr;
     m_RasterizerDriver = nullptr;

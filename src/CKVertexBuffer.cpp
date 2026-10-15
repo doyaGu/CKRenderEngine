@@ -1,6 +1,7 @@
 #include "RCKVertexBuffer.h"
 
 #include "CKRasterizer.h"
+#include "CKRasterizerObservation.h"
 #include "CKVertexPacking.h"
 #include "RCKRenderManager.h"
 #include "RCKRenderContext.h"
@@ -315,7 +316,7 @@ CKBOOL RCKVertexBuffer::Upload(CKRenderContext *Ctx, CKDWORD StartVertex,
     if (m_ObjectIndex && m_FormatFlags != vertexFormat) {
         if (!rm->DeleteVertexBufferObjects(this))
             return FALSE;
-        m_RasterizerContext = rst;
+        m_RasterizerContext = CKRasterizerObservation::Identity(rst);
     }
 
     const CKBOOL create = m_ObjectIndex == 0;
@@ -332,7 +333,7 @@ CKBOOL RCKVertexBuffer::Upload(CKRenderContext *Ctx, CKDWORD StartVertex,
             return FALSE;
         }
 
-        m_RasterizerContext = rst;
+        m_RasterizerContext = CKRasterizerObservation::Identity(rst);
         m_FormatFlags = vertexFormat;
         m_HardwareVersion = 0;
         m_HardwareValid = FALSE;
@@ -409,7 +410,7 @@ CKBOOL RCKVertexBuffer::Draw(CKRenderContext *Ctx, VXPRIMITIVETYPE pType, CKWORD
         pType != VX_POINTLIST) {
         Upload(Ctx, 0, m_Desc.m_CurrentVCount, CKRST_LOCK_DEFAULT);
         if (m_HardwareValid && m_ObjectIndex &&
-            m_RasterizerContext == rctx->m_RasterizerContext &&
+            m_RasterizerContext == CKRasterizerObservation::Identity(rctx->m_RasterizerContext) &&
             m_HardwareVersion == m_ContentVersion) {
             return rctx->m_RasterizerContext->DrawPrimitiveVB(
                 pType, m_ObjectIndex, StartVertex, VertexCount, nullptr, 0);

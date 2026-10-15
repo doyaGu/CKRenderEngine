@@ -2,6 +2,7 @@
 
 #include "CKRasterizerRegistration.h"
 #include "CKRasterizerCapsBaseline.h"
+#include "CKRasterizerObservation.h"
 
 #include "CKLevel.h"
 #include "CKMaterial.h"
@@ -840,6 +841,7 @@ void RCKRenderManager::DetachAllObjects() {
 
 CKBOOL RCKRenderManager::RegisterRasterizerContext(
     CKRasterizerContext *Context, int DriverIndex) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Context || DriverIndex < 0 || DriverIndex >= m_DriverCount)
         return FALSE;
 
@@ -852,6 +854,7 @@ CKBOOL RCKRenderManager::RegisterRasterizerContext(
 
 void RCKRenderManager::ForgetRasterizerContext(
     CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Context)
         return;
 
@@ -1188,6 +1191,7 @@ VxDriverDescEx *RCKRenderManager::GetDriverDescription(int DriverIndex) {
 }
 
 VxDriverDescEx *RCKRenderManager::GetDriverDescription(CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Context)
         return nullptr;
 
@@ -1268,6 +1272,7 @@ void RCKRenderManager::FindNearestTextureFormatWithAlpha(
 
 RCKRenderManager::VertexBufferEntry *RCKRenderManager::FindVertexBufferEntry(
     RCKVertexBuffer *Buffer, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     VertexBufferEntryArray *entries = Buffer
         ? m_VertexBufferEntries.FindPtr(Buffer)
         : nullptr;
@@ -1284,6 +1289,7 @@ RCKRenderManager::VertexBufferEntry *RCKRenderManager::FindVertexBufferEntry(
 
 RCKRenderManager::VertexBufferEntry *RCKRenderManager::AddVertexBufferEntry(
     RCKVertexBuffer *Buffer, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Buffer || !Context)
         return nullptr;
 
@@ -1309,6 +1315,7 @@ RCKRenderManager::VertexBufferEntry *RCKRenderManager::AddVertexBufferEntry(
 
 CKBOOL RCKRenderManager::SelectVertexBufferObject(
     RCKVertexBuffer *Buffer, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Buffer || !Context)
         return FALSE;
 
@@ -1327,6 +1334,8 @@ CKBOOL RCKRenderManager::VertexBufferObjectUpdated(RCKVertexBuffer *Buffer) {
 
     VertexBufferEntry state = {};
     Buffer->GetRasterizerObjectState(state);
+    state.Context = CKRasterizerObservation::Identity(state.Context);
+    Buffer->SetRasterizerObjectState(state);
     if (!state.Context || !state.ObjectIndex)
         return FALSE;
 
@@ -1344,6 +1353,8 @@ CKBOOL RCKRenderManager::DeleteVertexBufferObjects(RCKVertexBuffer *Buffer, CKBO
 
     VertexBufferEntry selected = {};
     Buffer->GetRasterizerObjectState(selected);
+    selected.Context = CKRasterizerObservation::Identity(selected.Context);
+    Buffer->SetRasterizerObjectState(selected);
     VertexBufferEntryArray *entries = m_VertexBufferEntries.FindPtr(Buffer);
     CKBOOL result = TRUE;
     if (entries) {
@@ -1387,6 +1398,7 @@ CKBOOL RCKRenderManager::DeleteVertexBufferObjects(RCKVertexBuffer *Buffer, CKBO
 
 void RCKRenderManager::ForgetVertexBufferObjects(
     CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Context)
         return;
 
@@ -1420,6 +1432,7 @@ void RCKRenderManager::ForgetVertexBufferObjects(
 
 RCKRenderManager::MeshBufferEntry *RCKRenderManager::FindMeshBufferEntry(
     RCKMesh *Mesh, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     MeshBufferEntryArray *entries = Mesh
         ? m_MeshBufferEntries.FindPtr(Mesh->GetID())
         : nullptr;
@@ -1436,6 +1449,7 @@ RCKRenderManager::MeshBufferEntry *RCKRenderManager::FindMeshBufferEntry(
 
 RCKRenderManager::MeshBufferEntry *RCKRenderManager::AddMeshBufferEntry(
     RCKMesh *Mesh, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Mesh || !Context)
         return nullptr;
 
@@ -1462,6 +1476,7 @@ RCKRenderManager::MeshBufferEntry *RCKRenderManager::AddMeshBufferEntry(
 
 void RCKRenderManager::ResetMeshBufferState(
     RCKMesh *Mesh, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Mesh)
         return;
 
@@ -1472,12 +1487,16 @@ void RCKRenderManager::ResetMeshBufferState(
 
 void RCKRenderManager::RestoreMeshBufferState(
     RCKMesh *Mesh, const MeshBufferEntry &Entry) {
-    if (Mesh)
-        Mesh->SetRasterizerBufferState(Entry);
+    if (Mesh) {
+        MeshBufferEntry state = Entry;
+        state.Context = CKRasterizerObservation::Identity(state.Context);
+        Mesh->SetRasterizerBufferState(state);
+    }
 }
 
 CKBOOL RCKRenderManager::SelectMeshBuffers(
     RCKMesh *Mesh, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Mesh || !Context)
         return FALSE;
 
@@ -1497,6 +1516,8 @@ CKBOOL RCKRenderManager::StoreMeshBuffers(RCKMesh *Mesh) {
 
     MeshBufferEntry state = {};
     Mesh->GetRasterizerBufferState(state);
+    state.Context = CKRasterizerObservation::Identity(state.Context);
+    Mesh->SetRasterizerBufferState(state);
     if (!state.Context)
         return FALSE;
 
@@ -1545,6 +1566,8 @@ CKBOOL RCKRenderManager::DeleteMeshBuffers(RCKMesh *Mesh, CKBOOL PreserveOnFailu
     const CK_ID meshId = Mesh->GetID();
     MeshBufferEntry selected = {};
     Mesh->GetRasterizerBufferState(selected);
+    selected.Context = CKRasterizerObservation::Identity(selected.Context);
+    Mesh->SetRasterizerBufferState(selected);
     MeshBufferEntryArray *entries = m_MeshBufferEntries.FindPtr(meshId);
     CKBOOL found = FALSE;
     CKBOOL result = TRUE;
@@ -1614,6 +1637,7 @@ CKBOOL RCKRenderManager::DeleteMeshBuffers(RCKMesh *Mesh, CKBOOL PreserveOnFailu
 }
 
 void RCKRenderManager::ForgetMeshBuffers(CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Context)
         return;
 
@@ -1653,6 +1677,7 @@ void RCKRenderManager::ForgetMeshBuffers(CKRasterizerContext *Context) {
 
 RCKRenderManager::TextureEntry *RCKRenderManager::FindTextureEntry(
     CKObject *Object, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     TextureEntryArray *entries = Object
         ? m_TextureEntries.FindPtr(Object->GetID())
         : nullptr;
@@ -1668,6 +1693,7 @@ RCKRenderManager::TextureEntry *RCKRenderManager::FindTextureEntry(
 
 RCKRenderManager::TextureEntry *RCKRenderManager::AddTextureEntry(
     CKObject *Object, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Object || !Context)
         return nullptr;
 
@@ -1695,6 +1721,7 @@ RCKRenderManager::TextureEntry *RCKRenderManager::AddTextureEntry(
 
 CKBOOL RCKRenderManager::DeleteTextureEntry(
     CKObject *Object, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Object || !Context)
         return FALSE;
 
@@ -1753,6 +1780,7 @@ CKBOOL RCKRenderManager::DeleteTextureEntries(CKObject *Object, CKBOOL PreserveO
 
 void RCKRenderManager::ResetTextureObjectState(
     RCKTexture *Texture, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     Texture->m_RasterizerContext = Context;
     Texture->m_ObjectIndex = 0;
     Texture->m_InVideoMemory = FALSE;
@@ -1763,7 +1791,7 @@ void RCKRenderManager::ResetTextureObjectState(
 
 void RCKRenderManager::RestoreTextureObjectState(
     RCKTexture *Texture, const TextureEntry &Entry) {
-    Texture->m_RasterizerContext = Entry.Context;
+    Texture->m_RasterizerContext = CKRasterizerObservation::Identity(Entry.Context);
     Texture->m_ObjectIndex = Entry.ObjectIndex;
     Texture->m_InVideoMemory = Entry.ObjectIndex != 0;
     Texture->m_TextureFlags = Entry.Flags;
@@ -1773,6 +1801,7 @@ void RCKRenderManager::RestoreTextureObjectState(
 
 void RCKRenderManager::ResetTextureObjectState(
     RCKSprite *Sprite, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     Sprite->m_RasterizerContext = Context;
     Sprite->m_ObjectIndex = 0;
     Sprite->m_InVideoMemory = FALSE;
@@ -1781,7 +1810,7 @@ void RCKRenderManager::ResetTextureObjectState(
 
 void RCKRenderManager::RestoreTextureObjectState(
     RCKSprite *Sprite, const TextureEntry &Entry) {
-    Sprite->m_RasterizerContext = Entry.Context;
+    Sprite->m_RasterizerContext = CKRasterizerObservation::Identity(Entry.Context);
     Sprite->m_ObjectIndex = Entry.ObjectIndex;
     Sprite->m_InVideoMemory = Entry.ObjectIndex != 0;
     Sprite->m_VideoFormatDesc = Entry.Format;
@@ -1789,6 +1818,7 @@ void RCKRenderManager::RestoreTextureObjectState(
 
 CKBOOL RCKRenderManager::SelectTextureObject(
     RCKTexture *Texture, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Texture || !Context)
         return FALSE;
 
@@ -1806,6 +1836,8 @@ CKBOOL RCKRenderManager::SelectTextureObject(
 }
 
 CKBOOL RCKRenderManager::TextureObjectNeedsUpdate(RCKTexture *Texture) {
+    if (Texture)
+        Texture->m_RasterizerContext = CKRasterizerObservation::Identity(Texture->m_RasterizerContext);
     if (!Texture || !Texture->m_RasterizerContext || !Texture->m_InVideoMemory)
         return FALSE;
 
@@ -1828,6 +1860,8 @@ void RCKRenderManager::TextureObjectChanged(RCKTexture *Texture) {
 }
 
 void RCKRenderManager::TextureObjectUpdated(RCKTexture *Texture, CKBOOL Dirty) {
+    if (Texture)
+        Texture->m_RasterizerContext = CKRasterizerObservation::Identity(Texture->m_RasterizerContext);
     if (!Texture || !Texture->m_RasterizerContext || !Texture->m_InVideoMemory ||
         Texture->m_ObjectIndex == 0)
         return;
@@ -1845,6 +1879,9 @@ void RCKRenderManager::TextureObjectUpdated(RCKTexture *Texture, CKBOOL Dirty) {
 
 CKBOOL RCKRenderManager::DeleteTextureObject(
     RCKTexture *Texture, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
+    if (Texture)
+        Texture->m_RasterizerContext = CKRasterizerObservation::Identity(Texture->m_RasterizerContext);
     if (!Texture || !Context)
         return FALSE;
 
@@ -1860,6 +1897,8 @@ CKBOOL RCKRenderManager::DeleteTextureObject(
 }
 
 CKBOOL RCKRenderManager::DeleteTextureObjects(RCKTexture *Texture, CKBOOL PreserveOnFailure) {
+    if (Texture)
+        Texture->m_RasterizerContext = CKRasterizerObservation::Identity(Texture->m_RasterizerContext);
     if (!Texture)
         return FALSE;
 
@@ -1887,6 +1926,7 @@ CKBOOL RCKRenderManager::DeleteTextureObjects(RCKTexture *Texture, CKBOOL Preser
 
 CKBOOL RCKRenderManager::SelectSpriteObject(
     RCKSprite *Sprite, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Sprite || !Context)
         return FALSE;
 
@@ -1904,6 +1944,8 @@ CKBOOL RCKRenderManager::SelectSpriteObject(
 }
 
 CKBOOL RCKRenderManager::SpriteObjectNeedsUpdate(RCKSprite *Sprite) {
+    if (Sprite)
+        Sprite->m_RasterizerContext = CKRasterizerObservation::Identity(Sprite->m_RasterizerContext);
     if (!Sprite || !Sprite->m_RasterizerContext || !Sprite->m_InVideoMemory)
         return FALSE;
 
@@ -1926,6 +1968,8 @@ void RCKRenderManager::SpriteObjectChanged(RCKSprite *Sprite) {
 }
 
 void RCKRenderManager::SpriteObjectUpdated(RCKSprite *Sprite, CKBOOL Dirty) {
+    if (Sprite)
+        Sprite->m_RasterizerContext = CKRasterizerObservation::Identity(Sprite->m_RasterizerContext);
     if (!Sprite || !Sprite->m_RasterizerContext || !Sprite->m_InVideoMemory ||
         Sprite->m_ObjectIndex == 0)
         return;
@@ -1943,6 +1987,9 @@ void RCKRenderManager::SpriteObjectUpdated(RCKSprite *Sprite, CKBOOL Dirty) {
 
 CKBOOL RCKRenderManager::DeleteSpriteObject(
     RCKSprite *Sprite, CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
+    if (Sprite)
+        Sprite->m_RasterizerContext = CKRasterizerObservation::Identity(Sprite->m_RasterizerContext);
     if (!Sprite || !Context)
         return FALSE;
 
@@ -1958,6 +2005,8 @@ CKBOOL RCKRenderManager::DeleteSpriteObject(
 }
 
 CKBOOL RCKRenderManager::DeleteSpriteObjects(RCKSprite *Sprite, CKBOOL PreserveOnFailure) {
+    if (Sprite)
+        Sprite->m_RasterizerContext = CKRasterizerObservation::Identity(Sprite->m_RasterizerContext);
     if (!Sprite)
         return FALSE;
 
@@ -1986,6 +2035,7 @@ CKBOOL RCKRenderManager::DeleteSpriteObjects(RCKSprite *Sprite, CKBOOL PreserveO
 }
 
 void RCKRenderManager::ForgetTextureObjects(CKRasterizerContext *Context) {
+    Context = CKRasterizerObservation::Identity(Context);
     if (!Context)
         return;
 
