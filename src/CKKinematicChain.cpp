@@ -637,9 +637,9 @@ CKERROR RCKKinematicChain::IKRotateToward(VxVector *targetDelta, CKBodyPart *end
         while (jointIdx < chainBodyCount - 1) {
             jointWorldMatrix = m_ChainData[jointIdx].m_BodyPart->GetWorldMatrix();
 
-            VxVector colX(jointWorldMatrix[0][0], jointWorldMatrix[1][0], jointWorldMatrix[2][0]);
-            VxVector colY(jointWorldMatrix[0][1], jointWorldMatrix[1][1], jointWorldMatrix[2][1]);
-            VxVector colZ(jointWorldMatrix[0][2], jointWorldMatrix[1][2], jointWorldMatrix[2][2]);
+            VxVector colX(jointWorldMatrix[0][0], jointWorldMatrix[0][1], jointWorldMatrix[0][2]);
+            VxVector colY(jointWorldMatrix[1][0], jointWorldMatrix[1][1], jointWorldMatrix[1][2]);
+            VxVector colZ(jointWorldMatrix[2][0], jointWorldMatrix[2][1], jointWorldMatrix[2][2]);
             VxVector bodyPosition(jointWorldMatrix[3][0], jointWorldMatrix[3][1], jointWorldMatrix[3][2]);
 
             VxVector leverArm = endEffectorPosition - bodyPosition;
