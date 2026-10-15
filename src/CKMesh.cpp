@@ -4935,7 +4935,7 @@ int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
         lineDp.Flags = (m_DrawFlags | CKRST_DP_TRANSFORM | CKRST_DP_DIFFUSE);
         rc->DrawPrimitive(VX_LINELIST, m_LineIndices.Begin(), m_LineIndices.Size(), &lineDp);
 
-        rc->m_Stats.NbLinesDrawn += lineCount;
+        // DrawPrimitive already accounts for accepted line submissions.
     }
 
     rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, 0);
