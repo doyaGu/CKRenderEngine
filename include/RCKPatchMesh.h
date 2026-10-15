@@ -92,6 +92,10 @@ public:
     CKERROR PrepareDependencies(CKDependenciesContext &context) override;
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
 
+    void CheckPostDeletion() override;
+    void ReplaceMaterial(CKMaterial *oldMat, CKMaterial *newMat) override;
+    void ApplyGlobalMaterial(CKMaterial *material) override;
+
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
     static CKSTRING GetClassName();

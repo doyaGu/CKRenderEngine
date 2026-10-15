@@ -452,7 +452,7 @@ if (TARGET gtest_main)
             KinematicChainLifecycleTest KinematicChainSolveTest KinematicChainMathTest
             VertexBufferStagingTest VertexBufferUploadTest VertexBufferDrawTest
             PatchMeshLifecycleTest PatchMeshTessellationTest PatchMeshTopologyTest PatchMeshDependenciesTest
-            PatchMeshModifierTest PatchMeshChannelsTest
+            PatchMeshModifierTest PatchMeshMaterialTest PatchMeshChannelsTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

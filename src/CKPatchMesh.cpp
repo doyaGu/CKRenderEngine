@@ -825,6 +825,47 @@ void RCKPatchMesh::ModifierUVMove() {
     m_PatchChanged = TRUE;
 }
 
+// 0x1003AAB5: authored material IDs outlive the derived render mesh.
+void RCKPatchMesh::CheckPostDeletion() {
+    CKObject::CheckPostDeletion();
+    for (int i = 0; i < m_Patches.Size(); ++i) {
+        if (!m_Context->GetObject(m_Patches[i].Material)) {
+            m_Patches[i].Material = 0;
+            m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+        }
+    }
+    for (int i = 1; i < m_TexturePatches.Size(); ++i) {
+        if (!m_Context->GetObject(m_TexturePatches[i].Material)) {
+            m_TexturePatches[i].Material = 0;
+            m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+        }
+    }
+}
+
+// 0x10030F65: replace authored patch materials as well as live mesh faces.
+void RCKPatchMesh::ReplaceMaterial(CKMaterial *oldMat, CKMaterial *newMat) {
+    if (oldMat == newMat)
+        return;
+
+    RCKMesh::ReplaceMaterial(oldMat, newMat);
+    const CK_ID oldID = oldMat ? oldMat->GetID() : 0;
+    const CK_ID newID = newMat ? newMat->GetID() : 0;
+    for (int i = 0; i < m_Patches.Size(); ++i) {
+        if (m_Patches[i].Material == oldID)
+            m_Patches[i].Material = newID;
+    }
+    m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+}
+
+// Native 0x1003CDC1 is CKMesh::ApplyGlobalMaterial in the public SDK.
+void RCKPatchMesh::ApplyGlobalMaterial(CKMaterial *material) {
+    RCKMesh::ApplyGlobalMaterial(material);
+    const CK_ID materialID = material ? material->GetID() : 0;
+    for (int i = 0; i < m_Patches.Size(); ++i)
+        m_Patches[i].Material = materialID;
+    m_PatchFlags &= ~(CK_PATCHMESH_UPTODATE | CK_PATCHMESH_MATERIALSUPTODATE);
+}
+
 //=============================================================================
 // CKPatchMesh Virtual Methods Implementation
 //=============================================================================
