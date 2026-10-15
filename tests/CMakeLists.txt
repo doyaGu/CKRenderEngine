@@ -447,7 +447,7 @@ if (TARGET gtest_main)
             MaterialSlotBudgetTest MeshSameContextReentryTest
             MeshCallbackStateReentryTest RasterizerCallbackIdentityTest CallbackEntryObservationTest
             CallbackObservationLifetimeTest CallbackObservationDeviceTest
-            MeshGeometryCompletionTest
+            MeshSerializationCompletionTest MeshGeometryCompletionTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

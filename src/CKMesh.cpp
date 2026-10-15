@@ -1608,6 +1608,17 @@ int RCKMesh::ILoadVertices(CKStateChunk *chunk, CKDWORD *loadFlags) {
     // Restore endianness for buffer and return
     CKConvertEndianArray32(buffer, bufferSize);
 
+    // Bulk loading can replace same-sized arrays without SetVertexCount
+    // invalidating their cached bounds or uploaded vertex streams.
+    if (!(*loadFlags & 0x10)) {
+        m_Flags &= ~VXMESH_BOUNDINGUPTODATE;
+        m_Flags |= VXMESH_POS_CHANGED;
+    }
+    if (!(*loadFlags & 0x04))
+        m_Flags |= VXMESH_NORMAL_CHANGED;
+    m_Flags |= VXMESH_COLOR_CHANGED | VXMESH_UV_CHANGED;
+    m_Valid = FALSE;
+
     return 0;
 }
 
