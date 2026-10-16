@@ -1,5 +1,7 @@
 #include "RCKAnimation.h"
 
+#include <cmath>
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
@@ -193,15 +195,18 @@ float RCKAnimation::GetFrame() {
 
 // 0x10047745 - Complex calculation with frame rate
 float RCKAnimation::GetNextFrame(float delta_t) {
-    float currentFrame = m_Step * m_Length;
-
+    const float currentFrame = m_Step * m_Length;
     if ((m_Flags & CKANIMATION_LINKTOFRAMERATE) != 0) {
-        // Frame rate linked: advance by delta_t * frameRate * 0.001
-        return currentFrame + delta_t * m_FrameRate * 0.001f;
-    } else {
-        // Not frame rate linked: advance by 1 frame
-        return currentFrame + 1.0f;
+        // Native first stores the current frame as float; preserve its normal
+        // rounding because exact frame boundaries affect animation switching.
+        // Recover the wide product only when it can cancel an overflowed frame.
+        const double frame = std::isfinite(currentFrame)
+            ? currentFrame : static_cast<double>(m_Step) * m_Length;
+        return static_cast<float>(frame + static_cast<double>(delta_t) * m_FrameRate * 0.001f);
     }
+
+    // Not frame rate linked: advance by 1 frame.
+    return currentFrame + 1.0f;
 }
 
 // 0x10047ED0

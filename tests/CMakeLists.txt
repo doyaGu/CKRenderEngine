@@ -465,6 +465,7 @@ if (TARGET gtest_main)
               BezierPositionLifecycleTest BezierPositionEvaluationTest
               BezierScaleLifecycleTest BezierScaleEvaluationTest BezierStorageTest
               ControllerContractsTest ControllerQuaternionEvaluationTest
+            AnimationClockCompletionTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
