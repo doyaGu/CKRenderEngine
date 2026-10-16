@@ -1906,9 +1906,9 @@ static bool RemoveBezierKey(CKBezierPositionKey *&keys, int &count, int index) {
 }
 
 // 0x1004DFE5 measures time, including the wrap interval at either endpoint.
-static float BezierKeyTimeSpan(const CKBezierPositionKey *keys, float length, int first, int second) {
-    return second <= first ? keys[second].TimeStep + length - keys[first].TimeStep
-                           : keys[second].TimeStep - keys[first].TimeStep;
+static double BezierKeyTimeSpan(const CKBezierPositionKey *keys, float length, int first, int second) {
+    return second <= first ? static_cast<double>(keys[second].TimeStep) + length - keys[first].TimeStep
+                           : static_cast<double>(keys[second].TimeStep) - keys[first].TimeStep;
 }
 
 // 0x1004E300 and 0x1004E5BD extrapolate endpoint derivatives. These helpers
@@ -1919,17 +1919,23 @@ static void ComputeBezierForward(CKBezierPositionKey *keys, int count, float len
         key.In = key.Out = VxVector(0, 0, 0);
         return;
     }
-    float span = BezierKeyTimeSpan(keys, length, index, index + 1);
-    if (span == 0.0f) span = 1.0f;
-    const VxVector delta = keys[index + 1].Pos - key.Pos;
-    if (index == count - 2) {
-        key.Out = delta / span;
-    } else {
-        float nextSpan = BezierKeyTimeSpan(keys, length, index + 1, index + 2);
-        if (nextSpan == 0.0f) nextSpan = 1.0f;
-        const float ratio = span / (span + nextSpan);
-        key.Out = ((ratio + 1.0f) / span) * delta -
-                  (ratio / nextSpan) * (keys[index + 2].Pos - keys[index + 1].Pos);
+    double span = BezierKeyTimeSpan(keys, length, index, index + 1);
+    if (span == 0.0) span = 1.0;
+    double nextSpan = 1.0;
+    double ratio = 0.0;
+    if (index != count - 2) {
+        nextSpan = BezierKeyTimeSpan(keys, length, index + 1, index + 2);
+        if (nextSpan == 0.0) nextSpan = 1.0;
+        ratio = span / (span + nextSpan);
+    }
+    for (int component = 0; component < 3; ++component) {
+        const double delta = static_cast<double>(keys[index + 1].Pos[component]) - key.Pos[component];
+        double derivative = delta / span;
+        if (index != count - 2) {
+            const double nextDelta = static_cast<double>(keys[index + 2].Pos[component]) - keys[index + 1].Pos[component];
+            derivative = ((ratio + 1.0) / span) * delta - (ratio / nextSpan) * nextDelta;
+        }
+        key.Out[component] = static_cast<float>(derivative);
     }
     if (index == 0) key.In = VxVector(0, 0, 0);
 }
@@ -1940,17 +1946,23 @@ static void ComputeBezierBackward(CKBezierPositionKey *keys, int count, float le
         key.In = key.Out = VxVector(0, 0, 0);
         return;
     }
-    float span = BezierKeyTimeSpan(keys, length, index - 1, index);
-    if (span == 0.0f) span = 1.0f;
-    const VxVector delta = key.Pos - keys[index - 1].Pos;
-    if (index == 1) {
-        key.In = -delta / span;
-    } else {
-        float previousSpan = BezierKeyTimeSpan(keys, length, index - 2, index - 1);
-        if (previousSpan == 0.0f) previousSpan = 1.0f;
-        const float ratio = previousSpan / (previousSpan + span);
-        key.In = -(((ratio - 1.0f) / previousSpan) * (keys[index - 1].Pos - keys[index - 2].Pos) +
-                   ((2.0f - ratio) / span) * delta);
+    double span = BezierKeyTimeSpan(keys, length, index - 1, index);
+    if (span == 0.0) span = 1.0;
+    double previousSpan = 1.0;
+    double ratio = 0.0;
+    if (index != 1) {
+        previousSpan = BezierKeyTimeSpan(keys, length, index - 2, index - 1);
+        if (previousSpan == 0.0) previousSpan = 1.0;
+        ratio = previousSpan / (previousSpan + span);
+    }
+    for (int component = 0; component < 3; ++component) {
+        const double delta = static_cast<double>(key.Pos[component]) - keys[index - 1].Pos[component];
+        double derivative = -delta / span;
+        if (index != 1) {
+            const double previousDelta = static_cast<double>(keys[index - 1].Pos[component]) - keys[index - 2].Pos[component];
+            derivative = -(((ratio - 1.0) / previousSpan) * previousDelta + ((2.0 - ratio) / span) * delta);
+        }
+        key.In[component] = static_cast<float>(derivative);
     }
     if (index == count - 1) key.Out = VxVector(0, 0, 0);
 }
@@ -1964,10 +1976,10 @@ static void ComputeBezierSmooth(CKBezierPositionKey *keys, int count, float leng
     const bool smoothIn = inMode == BEZIER_KEY_AUTOSMOOTH;
     const bool smoothOut = outMode == BEZIER_KEY_AUTOSMOOTH;
     if (!smoothIn && !smoothOut) return;
-    const int previous = (index + count - 1) % count;
-    const int next = (index + 1) % count;
-    const float previousSpan = BezierKeyTimeSpan(keys, length, previous, index);
-    const float nextSpan = BezierKeyTimeSpan(keys, length, index, next);
+    const int previous = index == 0 ? count - 1 : index - 1;
+    const int next = index == count - 1 ? 0 : index + 1;
+    const double previousSpan = BezierKeyTimeSpan(keys, length, previous, index);
+    const double nextSpan = BezierKeyTimeSpan(keys, length, index, next);
     if (previousSpan == 0.0f || nextSpan == 0.0f || index == 0 || index == count - 1) {
         if (smoothOut) {
             if (index == 0) ComputeBezierForward(keys, count, length, index);
@@ -1978,11 +1990,14 @@ static void ComputeBezierSmooth(CKBezierPositionKey *keys, int count, float leng
             else key.In = VxVector(0, 0, 0);
         }
     } else if (smoothIn && smoothOut) {
-        const float ratio = previousSpan / (previousSpan + nextSpan);
-        const VxVector tangent = ((1.0f - ratio) / previousSpan) * (key.Pos - keys[previous].Pos) +
-                                 (ratio / nextSpan) * (keys[next].Pos - key.Pos);
-        key.In = -tangent;
-        key.Out = tangent;
+        const double ratio = previousSpan / (previousSpan + nextSpan);
+        for (int component = 0; component < 3; ++component) {
+            const double previousDelta = static_cast<double>(key.Pos[component]) - keys[previous].Pos[component];
+            const double nextDelta = static_cast<double>(keys[next].Pos[component]) - key.Pos[component];
+            const double tangent = ((1.0 - ratio) / previousSpan) * previousDelta + (ratio / nextSpan) * nextDelta;
+            key.In[component] = static_cast<float>(-tangent);
+            key.Out[component] = static_cast<float>(tangent);
+        }
     } else {
         const auto otherMode = smoothIn ? outMode : inMode;
         VxVector &tangent = smoothIn ? key.In : key.Out;
@@ -2004,21 +2019,23 @@ static void ComputeBezierSmooth(CKBezierPositionKey *keys, int count, float leng
 
 // 0x1004ED59 is shared by position and scale. Mode dispatch precedes the
 // AutoSmooth pass for each key, preserving the original endpoint side effects.
-static void ComputeBezierTangents(CKBezierPositionKey *keys, int count, float length) {
+template <class Controller>
+static void ComputeBezierTangents(Controller &controller, CKBezierPositionKey *&keys, int &count, float &length) {
     for (int i = 0; i < count; ++i) {
         auto &key = keys[i];
         const auto inMode = key.Flags.GetInTangentMode();
         const auto outMode = key.Flags.GetOutTangentMode();
-        const int previous = (i + count - 1) % count;
-        const int next = (i + 1) % count;
+        const int previous = i == 0 ? count - 1 : i - 1;
+        const int next = i == count - 1 ? 0 : i + 1;
         switch (inMode) {
         case BEZIER_KEY_LINEAR:
         case BEZIER_KEY_FAST:
             if (inMode == BEZIER_KEY_FAST || i == 0 || keys[previous].Flags.GetOutTangentMode() == BEZIER_KEY_LINEAR) {
-                float span = BezierKeyTimeSpan(keys, length, previous, i);
+                double span = BezierKeyTimeSpan(keys, length, previous, i);
                 if (span == 0.0f) span = 1.0f;
-                const float scale = (inMode == BEZIER_KEY_FAST ? 2.0f : 1.0f) / span;
-                key.In = scale * (keys[previous].Pos - key.Pos);
+                const double scale = (inMode == BEZIER_KEY_FAST ? 2.0 : 1.0) / span;
+                for (int component = 0; component < 3; ++component)
+                    key.In[component] = static_cast<float>(scale * (static_cast<double>(keys[previous].Pos[component]) - key.Pos[component]));
             } else {
                 ComputeBezierBackward(keys, count, length, i);
             }
@@ -2034,10 +2051,11 @@ static void ComputeBezierTangents(CKBezierPositionKey *keys, int count, float le
         case BEZIER_KEY_LINEAR:
         case BEZIER_KEY_FAST:
             if (outMode == BEZIER_KEY_FAST || i == count - 1 || keys[next].Flags.GetInTangentMode() == BEZIER_KEY_LINEAR) {
-                float span = BezierKeyTimeSpan(keys, length, i, next);
+                double span = BezierKeyTimeSpan(keys, length, i, next);
                 if (span == 0.0f) span = 1.0f;
-                const float scale = (outMode == BEZIER_KEY_FAST ? 2.0f : 1.0f) / span;
-                key.Out = scale * (keys[next].Pos - key.Pos);
+                const double scale = (outMode == BEZIER_KEY_FAST ? 2.0 : 1.0) / span;
+                for (int component = 0; component < 3; ++component)
+                    key.Out[component] = static_cast<float>(scale * (static_cast<double>(keys[next].Pos[component]) - key.Pos[component]));
             } else {
                 ComputeBezierForward(keys, count, length, i);
             }
@@ -2050,7 +2068,7 @@ static void ComputeBezierTangents(CKBezierPositionKey *keys, int count, float le
             break;
         }
         if (inMode == BEZIER_KEY_AUTOSMOOTH || outMode == BEZIER_KEY_AUTOSMOOTH)
-            ComputeBezierSmooth(keys, count, length, i);
+            controller.ComputeBezierPts(i);
     }
 }
 
@@ -2070,7 +2088,7 @@ float RCKBezierPositionController::ComputeKeyDistance(int key1, int key2) {
 }
 
 void RCKBezierPositionController::ComputeBezierPts() {
-    ComputeBezierTangents(m_Keys, m_NbKeys, m_Length);
+    ComputeBezierTangents(*this, m_Keys, m_NbKeys, m_Length);
     m_TangentsComputed = TRUE;
 }
 
@@ -2339,7 +2357,7 @@ float RCKBezierScaleController::ComputeKeyDistance(int key1, int key2) {
 }
 
 void RCKBezierScaleController::ComputeBezierPts() {
-    ComputeBezierTangents(m_Keys, m_NbKeys, m_Length);
+    ComputeBezierTangents(*this, m_Keys, m_NbKeys, m_Length);
     m_TangentsComputed = TRUE;
 }
 
