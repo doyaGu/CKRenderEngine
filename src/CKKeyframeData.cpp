@@ -2107,6 +2107,10 @@ CKBOOL RCKBezierPositionController::Evaluate(float TimeStep, void *res) {
     if (!m_TangentsComputed)
         ComputeBezierPts();
 
+    // A virtual tangent callback can remove the controller's last key.
+    if (m_NbKeys <= 0)
+        return FALSE;
+
     if (TimeStep <= m_Keys[0].TimeStep) {
         *result = m_Keys[0].Pos;
         return TRUE;
@@ -2375,6 +2379,10 @@ CKBOOL RCKBezierScaleController::Evaluate(float TimeStep, void *res) {
 
     if (!m_TangentsComputed)
         ComputeBezierPts();
+
+    // A virtual tangent callback can remove the controller's last key.
+    if (m_NbKeys <= 0)
+        return FALSE;
 
     if (TimeStep <= m_Keys[0].TimeStep) {
         *result = m_Keys[0].Pos;

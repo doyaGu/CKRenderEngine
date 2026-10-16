@@ -268,8 +268,8 @@ public:
     virtual CKBOOL Clone(CKAnimController *control);
 
     // Compute tangent points for Bezier interpolation
-    void ComputeBezierPts();
-    void ComputeBezierPts(int index);
+    virtual void ComputeBezierPts();
+    virtual void ComputeBezierPts(int index);
 
 protected:
     // Time separation between keys, including a wrap through m_Length.
@@ -301,8 +301,8 @@ public:
     virtual CKBOOL Compare(CKAnimController *control, float Threshold = 0.0f);
     virtual CKBOOL Clone(CKAnimController *control);
 
-    void ComputeBezierPts();
-    void ComputeBezierPts(int index);
+    virtual void ComputeBezierPts();
+    virtual void ComputeBezierPts(int index);
 
 protected:
     float ComputeKeyDistance(int key1, int key2);
