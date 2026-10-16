@@ -39,8 +39,12 @@ CK_CLASSID RCKKeyedAnimation::GetClassID() {
 void RCKKeyedAnimation::CheckPreDeletion() {
     RCKAnimation::CheckPreDeletion();
 
-    // Check if any animations were deleted
-    if (m_Animations.Check()) {
+    // A dependency remap can retain empty slots. The array's deletion check
+    // expects object pointers, so remove those slots before checking targets.
+    CKBOOL removedEmpty = FALSE;
+    while (m_Animations.RemoveObject(nullptr))
+        removedEmpty = TRUE;
+    if (m_Animations.Check() || removedEmpty) {
         ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
         UpdateRootEntity();
     }
@@ -178,6 +182,8 @@ CKERROR RCKKeyedAnimation::Load(CKStateChunk *chunk, CKFile *file) {
     // Process each animation and set up parent references
     for (CKObject **it = m_Animations.Begin(); it != m_Animations.End(); ++it) {
         RCKObjectAnimation *anim = (RCKObjectAnimation *) *it;
+        if (!anim)
+            continue;
         SetParentKeyedAnimation(anim, this);
 
         // Check for app data containing vector
