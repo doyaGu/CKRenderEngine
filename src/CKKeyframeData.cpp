@@ -96,22 +96,26 @@ static int ReadFixedControllerKeys(void *buffer, int bufferSize, Key *&copy, int
 // 0x10050AB1 remaps normalized segment time with quadratic ends and a
 // linear middle. Arguments are the left key's easefrom and right key's easeto.
 static float ApplyEaseParameters(float t, float easeFrom, float easeTo) {
-    const float easeTotal = easeFrom + easeTo;
-    if (t == 0.0f || t == 1.0f || easeTotal == 0.0f)
+    // Normalize finite ease ends before narrowing; their sum can exceed
+    // float even though both normalized ends and the result are representable.
+    double from = easeFrom;
+    double to = easeTo;
+    const double easeTotal = from + to;
+    if (t == 0.0f || t == 1.0f || easeTotal == 0.0)
         return t;
-    if (easeTotal > 1.0f) {
-        const float inverseTotal = 1.0f / easeTotal;
-        easeFrom *= inverseTotal;
-        easeTo *= inverseTotal;
+    if (easeTotal > 1.0) {
+        const double inverseTotal = 1.0 / easeTotal;
+        from *= inverseTotal;
+        to *= inverseTotal;
     }
 
-    const float scale = 1.0f / (2.0f - easeFrom - easeTo);
-    if (t < easeFrom)
-        return (scale / easeFrom) * t * t;
-    if (t < 1.0f - easeTo)
-        return (2.0f * t - easeFrom) * scale;
-    const float remaining = 1.0f - t;
-    return 1.0f - (scale / easeTo) * remaining * remaining;
+    const double scale = 1.0 / (2.0 - from - to);
+    if (t < from)
+        return static_cast<float>((scale / from) * t * t);
+    if (t < 1.0 - to)
+        return static_cast<float>((2.0 * t - from) * scale);
+    const double remaining = 1.0 - t;
+    return static_cast<float>(1.0 - (scale / to) * remaining * remaining);
 }
 
 struct TCBTimeWeights {
@@ -1357,23 +1361,29 @@ CKBOOL RCKTCBRotationController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    float t1 = m_Keys[low].TimeStep;
-    float t2 = m_Keys[high].TimeStep;
-    const float interval = t2 - t1;
-    const float elapsed = TimeStep - t1;
-    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
-        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
-        : elapsed / interval;
+    // Measure phase from the nearer endpoint; a tiny remaining angle can
+    // produce a visible shear when the principal scales are large.
+    const double t1 = m_Keys[low].TimeStep;
+    const double t2 = m_Keys[high].TimeStep;
+    const double elapsed = static_cast<double>(TimeStep) - t1;
+    const double remaining = t2 - TimeStep;
+    const bool reversed = elapsed > remaining;
+    float t = static_cast<float>((reversed ? remaining : elapsed) / (t2 - t1));
+    t = reversed
+        ? ApplyEaseParameters(t, m_Keys[high].easeto, m_Keys[low].easefrom)
+        : ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
-    // Apply ease parameters
-    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
-
-    // Use Squad (spherical quadrangle) interpolation for smooth rotation
     VxQuaternion &q1 = m_Keys[low].Rot;
     VxQuaternion &q2 = m_Keys[high].Rot;
 
-    // Squad interpolation
-    *result = Squad(t, q1, m_Tangents[low * 2 + 1], m_Tangents[high * 2], q2);
+    if (reversed) {
+        *result = Squad(t, q2, m_Tangents[high * 2], m_Tangents[low * 2 + 1], q1);
+        // Reversal must retain the original segment's shortest-arc sign.
+        if (DotProduct(q1, q2) < 0.0f)
+            *result = -*result;
+    } else {
+        *result = Squad(t, q1, m_Tangents[low * 2 + 1], m_Tangents[high * 2], q2);
+    }
 
     return TRUE;
 }
