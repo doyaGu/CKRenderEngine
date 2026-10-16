@@ -519,12 +519,24 @@ CKBOOL RCKLinearRotationController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    // Keep finite time differences wide until the Slerp parameter is stored.
+    // A small remaining angle is representable even when the phase measured
+    // from the opposite endpoint would round to one.
     const double t1 = m_Keys[low].TimeStep;
     const double t2 = m_Keys[high].TimeStep;
-    const float t = static_cast<float>((TimeStep - t1) / (t2 - t1));
-
-    *result = Slerp(t, m_Keys[low].Rot, m_Keys[high].Rot);
+    const double elapsed = static_cast<double>(TimeStep) - t1;
+    const double remaining = t2 - TimeStep;
+    const bool reversed = elapsed > remaining;
+    const float t = static_cast<float>((reversed ? remaining : elapsed) / (t2 - t1));
+    VxQuaternion &q1 = m_Keys[low].Rot;
+    VxQuaternion &q2 = m_Keys[high].Rot;
+    if (reversed) {
+        *result = Slerp(t, q2, q1);
+        // Keep the hemisphere chosen by the original left endpoint.
+        if (DotProduct(q1, q2) < 0.0f)
+            *result = -*result;
+    } else {
+        *result = Slerp(t, q1, q2);
+    }
 
     return TRUE;
 }
@@ -875,12 +887,24 @@ CKBOOL RCKLinearScaleAxisController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    // Keep finite time differences wide until the Slerp parameter is stored.
+    // A small remaining angle is representable even when the phase measured
+    // from the opposite endpoint would round to one.
     const double t1 = m_Keys[low].TimeStep;
     const double t2 = m_Keys[high].TimeStep;
-    const float t = static_cast<float>((TimeStep - t1) / (t2 - t1));
-
-    *result = Slerp(t, m_Keys[low].Rot, m_Keys[high].Rot);
+    const double elapsed = static_cast<double>(TimeStep) - t1;
+    const double remaining = t2 - TimeStep;
+    const bool reversed = elapsed > remaining;
+    const float t = static_cast<float>((reversed ? remaining : elapsed) / (t2 - t1));
+    VxQuaternion &q1 = m_Keys[low].Rot;
+    VxQuaternion &q2 = m_Keys[high].Rot;
+    if (reversed) {
+        *result = Slerp(t, q2, q1);
+        // Keep the hemisphere chosen by the original left endpoint.
+        if (DotProduct(q1, q2) < 0.0f)
+            *result = -*result;
+    } else {
+        *result = Slerp(t, q1, q2);
+    }
 
     return TRUE;
 }
