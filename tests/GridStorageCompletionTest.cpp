@@ -118,4 +118,63 @@ TEST_F(GridStorageCompletionTest, MissingLayerSnapshotRetainsNullFrameAndRestore
     DeleteCKStateChunk(saved);
 }
 
+TEST_F(GridStorageCompletionTest, CopyReleasesOnlyDestinationGeneratedDisplayAfterReplacingPublicState) {
+    RCKGrid *source = Grid("CopySource", 3, 2), *target = Grid("CopyTarget", 1, 1);
+    ASSERT_NE(nullptr, source);
+    ASSERT_NE(nullptr, target);
+    CK_ID sourceIDs[4] = {}, targetIDs[4] = {};
+    DisplayIDs(*source, sourceIDs);
+    DisplayIDs(*target, targetIDs);
+    ASSERT_NE(0u, sourceIDs[0]);
+    ASSERT_NE(0u, targetIDs[0]);
+    RCKMesh *caller = static_cast<RCKMesh *>(Context->CreateObject(CKCID_MESH, "CallerMesh"));
+    ASSERT_NE(nullptr, caller);
+    const CK_ID callerID = caller->GetID();
+    target->AddMesh(caller);
+    CKDependencies options;
+    options.m_Flags = CK_DEPENDENCIES_NONE;
+    CKDependenciesContext dependencies(Context);
+    dependencies.SetOperationMode(CK_DEPENDENCIES_BUILD);
+    dependencies.StartDependencies(&options);
+    ASSERT_EQ(CK_OK, target->Copy(*source, dependencies));
+    dependencies.StopDependencies();
+    EXPECT_EQ(3, target->GetWidth());
+    EXPECT_EQ(2, target->GetLength());
+    for (int i = 0; i < 4; ++i) {
+        EXPECT_EQ(nullptr, Context->GetObject(targetIDs[i]));
+        EXPECT_NE(nullptr, Context->GetObject(sourceIDs[i]));
+    }
+    EXPECT_EQ(caller, Context->GetObject(callerID));
+    EXPECT_EQ(Context->GetObject(sourceIDs[0]), reinterpret_cast<CKObject *>(source->GetCurrentMesh()));
+    source->DestroyMeshTexture();
+    target->ConstructMeshTexture(0.5f);
+    CKMesh *newDisplay = target->GetCurrentMesh();
+    ASSERT_NE(nullptr, newDisplay);
+    VxVector corner;
+    newDisplay->GetVertexPosition(2, &corner);
+    EXPECT_FLOAT_EQ(3, corner.x);
+    EXPECT_FLOAT_EQ(1, corner.y);
+    EXPECT_FLOAT_EQ(2, corner.z);
+    EXPECT_EQ(caller, Context->GetObject(callerID));
+}
+
+TEST_F(GridStorageCompletionTest, SelfCopyKeepsGeneratedCacheIdentityAndNormalDisplayCleanup) {
+    RCKGrid *grid = Grid("SelfCopyGrid", 2, 3);
+    ASSERT_NE(nullptr, grid);
+    CK_ID ids[4] = {};
+    DisplayIDs(*grid, ids);
+    ASSERT_NE(0u, ids[0]);
+    grid->SetGridPriority(17);
+    CKDependenciesContext dependencies(Context);
+    ASSERT_EQ(CK_OK, grid->Copy(*grid, dependencies));
+    EXPECT_EQ(17, grid->GetGridPriority());
+    grid->ConstructMeshTexture(0.5f);
+    ASSERT_NE(nullptr, grid->GetCurrentMesh());
+    EXPECT_EQ(ids[0], grid->GetCurrentMesh()->GetID());
+    grid->DestroyMeshTexture();
+    for (int i = 0; i < 4; ++i)
+        EXPECT_EQ(nullptr, Context->GetObject(ids[i]));
+    EXPECT_EQ(nullptr, grid->GetCurrentMesh());
+}
+
 } // namespace

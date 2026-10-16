@@ -333,11 +333,18 @@ CKERROR RCKGrid::RemapDependencies(CKDependenciesContext &context) {
  * IDA: 0x10019e7f
  */
 CKERROR RCKGrid::Copy(CKObject &o, CKDependenciesContext &context) {
+    if (&o == this)
+        return CK_OK;
+
     // Virtools convention: Copy is called on the destination object, and 'o' is the source.
     // Base class copy first.
     CKERROR err = RCK3dEntity::Copy(o, context);
     if (err != CK_OK)
         return err;
+
+    // Entity copying replaces the public mesh references, but the old private
+    // Grid display is still ours to release after the base copy succeeds.
+    DestroyMeshTexture();
 
     RCKGrid &src = static_cast<RCKGrid &>(o);
 
