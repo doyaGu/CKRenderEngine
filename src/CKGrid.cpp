@@ -148,15 +148,14 @@ CKStateChunk *RCKGrid::Save(CKFile *file, CKDWORD flags) {
     if (!file) {
         for (int i = 0; i < m_Layers.Size(); ++i) {
             CKObject *layerObject = m_Context->GetObject(m_Layers[i]);
-            if (layerObject) {
-                CKStateChunk *layerChunk = layerObject->Save(nullptr, flags);
-                if (!layerChunk) {
-                    DeleteCKStateChunk(chunk);
-                    return nullptr;
-                }
-                chunk->WriteSubChunk(layerChunk);
-                DeleteCKStateChunk(layerChunk);
+            CKStateChunk *layerChunk = layerObject ? layerObject->Save(nullptr, flags) : nullptr;
+            if (layerObject && !layerChunk) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
             }
+            // Load consumes one subchunk for every ID, including missing ones.
+            chunk->WriteSubChunk(layerChunk);
+            DeleteCKStateChunk(layerChunk);
         }
     }
 
