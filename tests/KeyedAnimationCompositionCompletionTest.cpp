@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include "CKAll.h"
+#include "CKDependencies.h"
 #include "RCKRenderObject.h"
 #include "RCK3dEntity.h"
 #include "RCKCharacter.h"
@@ -21,6 +24,12 @@ public:
     static float Contribution(CKObjectAnimation *animation) {
         return ComputeAnimationContribution(static_cast<RCKObjectAnimation *>(animation));
     }
+};
+
+class CompletionRemap : public CKDependenciesContext {
+public:
+    explicit CompletionRemap(CKContext *context) : CKDependenciesContext(context) {}
+    void Forget(CKObject &object) { m_MapID.Insert(object.GetID(), 0); }
 };
 
 class KeyedAnimationCompositionCompletionTest : public ::testing::Test {
@@ -79,7 +88,45 @@ protected:
         EXPECT_FLOAT_EQ(expected.z, actual.z);
     }
 
-
+    int TransitionAfterNullRemap() {
+        RCK3dEntity entity(Context);
+        RCKKeyedAnimation input(Context), output(Context), result(Context);
+        RCKObjectAnimation *a = Channel(&entity, VxVector(0, 0, 0), VxVector(10, 0, 0));
+        RCKObjectAnimation *b = Channel(&entity, VxVector(20, 0, 0), VxVector(30, 0, 0));
+        RCKObjectAnimation *removed = Channel(&entity, VxVector(99, 0, 0), VxVector(99, 0, 0));
+        RCKObjectAnimation *reuse = Channel(&entity, VxVector(88, 0, 0), VxVector(88, 0, 0));
+        if (!a || !b || !removed || !reuse)
+            return 11;
+        if (input.AddAnimation(a) != CK_OK || output.AddAnimation(b) != CK_OK ||
+            result.AddAnimation(removed) != CK_OK || result.AddAnimation(reuse) != CK_OK)
+            return 12;
+        input.SetLength(10); output.SetLength(10); result.SetLength(10);
+        input.SetCurrentStep(.25f); output.UpdateRootEntity(); result.UpdateRootEntity();
+        if (result.GetAnimation(reinterpret_cast<CK3dEntity *>(&entity)) != removed)
+            return 13;
+        CompletionRemap remap(Context);
+        remap.Forget(*removed);
+        if (remap.Remap(removed) != nullptr || result.RemapDependencies(remap) != CK_OK ||
+            result.GetAnimationCount() != 2 || result.GetAnimation(0) != nullptr || result.GetAnimation(1) != reuse)
+            return 14;
+        CKAnimation *api = &result;
+        if (api->CreateTransition(&input, &output, 0, 2, 5) != 5 || result.GetLength() != 2 ||
+            result.GetAnimationCount() != 1 || result.GetAnimation(0) != reuse)
+            return 15;
+        if (Context->GetObject(removed->GetID()) != removed ||
+            reuse->Get3dEntity() != reinterpret_cast<CK3dEntity *>(&entity) ||
+            (reuse->GetFlags() & CK_OBJECTANIMATION_WARPER) != 0)
+            return 16;
+        VxVector sample;
+        if (!reuse->EvaluatePosition(0, sample) || sample.x != 2.5f)
+            return 17;
+        if (!reuse->EvaluatePosition(2, sample) || sample.x != 25)
+            return 18;
+        api->SetFrame(1);
+        if (api->GetStep() != .5f || X(&entity) != 13.75f)
+            return 19;
+        return 0;
+    }
 };
 
 TEST_F(KeyedAnimationCompositionCompletionTest, UnionRetimesAllFiveChannelsWithoutOverflowingTheDurationRatio) {
@@ -282,5 +329,43 @@ TEST_F(KeyedAnimationCompositionCompletionTest, SmallQuaternionMotionRetainsItsN
     EXPECT_EQ(0.0f, X(plain));
 }
 
+TEST_F(KeyedAnimationCompositionCompletionTest, BestTransitionDistinguishesSmallRotationScoresAndSelectsTheActualPose) {
+    RCK3dEntity *entity = Entity(); ASSERT_NE(nullptr, entity);
+    RCKKeyedAnimation input(Context), output(Context), result(Context);
+    RCKObjectAnimation *a = static_cast<RCKObjectAnimation *>(Context->CreateObject(CKCID_OBJECTANIMATION));
+    RCKObjectAnimation *b = static_cast<RCKObjectAnimation *>(Context->CreateObject(CKCID_OBJECTANIMATION));
+    ASSERT_NE(nullptr, a); ASSERT_NE(nullptr, b);
+    a->Set3dEntity(reinterpret_cast<CK3dEntity *>(entity));
+    b->Set3dEntity(reinterpret_cast<CK3dEntity *>(entity));
+    const float small = std::ldexp(1.0f, -13);
+    VxQuaternion positive(small, 0, 0, 1), negative(-small, 0, 0, 1);
+    a->AddRotationKey(0, &positive); a->AddRotationKey(4, &positive);
+    b->AddRotationKey(0, &negative); b->AddRotationKey(1, &positive); b->AddRotationKey(4, &positive);
+    ASSERT_EQ(CK_OK, input.AddAnimation(a)); ASSERT_EQ(CK_OK, output.AddAnimation(b));
+    input.SetLength(4); output.SetLength(4); input.SetCurrentStep(.25f);
+    CKAnimation *api = &result;
+    // The two native candidate errors are +10*2^-26 and -10*2^-26.
+    // Rounding both dots to float first incorrectly ties them at zero.
+    EXPECT_EQ(1.0f, api->CreateTransition(&input, &output, CK_TRANSITION_WARPTOBEST, 2, 0));
+    ASSERT_EQ(1, result.GetAnimationCount());
+    VxQuaternion endpoint;
+    ASSERT_TRUE(result.GetAnimation(0)->EvaluateRotation(2, endpoint));
+    EXPECT_NEAR(small, endpoint.x * endpoint.w, 0.0000001f);
+    api->SetFrame(2);
+    VxQuaternion actual; entity->GetQuaternion(&actual);
+    EXPECT_NEAR(small, actual.x * actual.w, 0.0000001f);
+}
+
+TEST_F(KeyedAnimationCompositionCompletionTest, TransitionPrunesAnActualNullRemapBeforeReusingTheLiveChannelAndPose) {
+    // The old SDK deletion check faults on the legitimately remapped null.
+    // A subprocess makes that before failure reportable without replacing
+    // the real transition, its reuse/lifetime checks, or its pose consumer.
+    ASSERT_EXIT({
+        const int result = TransitionAfterNullRemap();
+        if (result)
+            std::fprintf(stderr, "transition scenario failed at %d\n", result);
+        std::exit(result);
+    }, ::testing::ExitedWithCode(0), "");
+}
 
 } // namespace

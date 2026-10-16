@@ -693,9 +693,12 @@ float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out, CKD
                     error += fabsf(value.x - start.m_Pos.x) + fabsf(value.y - start.m_Pos.y) + fabsf(value.z - start.m_Pos.z);
                 if (destination->HasScaleInfo() && destination->EvaluateScale(static_cast<float>(frame), value))
                     error += fabsf(value.x - start.m_Scl.x) + fabsf(value.y - start.m_Scl.y) + fabsf(value.z - start.m_Scl.z);
-                if (destination->HasRotationInfo() && destination->EvaluateRotation(static_cast<float>(frame), rotation))
-                    error += 10.0f * (1.0f - fabsf(rotation.x * start.m_Rot.x + rotation.y * start.m_Rot.y +
-                        rotation.z * start.m_Rot.z + rotation.w * start.m_Rot.w));
+                if (destination->HasRotationInfo() && destination->EvaluateRotation(static_cast<float>(frame), rotation)) {
+                    const double dot = static_cast<double>(rotation.x) * start.m_Rot.x +
+                        static_cast<double>(rotation.y) * start.m_Rot.y + static_cast<double>(rotation.z) * start.m_Rot.z +
+                        static_cast<double>(rotation.w) * start.m_Rot.w;
+                    error += static_cast<float>(10.0 * (1.0 - std::fabs(dot)));
+                }
             }
             // Sum all channels; the original overwrites each category's score
             // with its last channel. Keep the earliest frame on equal scores.
@@ -704,6 +707,10 @@ float RCKKeyedAnimation::CreateTransition(CKAnimation *in, CKAnimation *out, CKD
         stepTo = outLength != 0.0f ? bestFrame / outLength : 0.0f;
     }
 
+    // Dependency remapping may leave empty slots; the legacy deletion check
+    // requires object pointers before preparing the transition result list.
+    while (m_Animations.RemoveObject(nullptr)) {
+    }
     m_Animations.Check();
     int previousCount = m_Animations.Size();
     while (m_Animations.Size() < outCount) {
