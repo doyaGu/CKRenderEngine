@@ -1,5 +1,7 @@
 #include "RCKKeyedAnimation.h"
 
+#include <cmath>
+
 #include "CKStateChunk.h"
 #include "CKFile.h"
 #include "CKContext.h"
@@ -384,7 +386,7 @@ void RCKKeyedAnimation::SetStep(float step) {
         float lod = (m_Character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED)
             ? m_Character->GetAnimationLevelOfDetail() : 0.0f;
         if (count > required && lod < 1.0f)
-            count = static_cast<int>((count - required) * lod) + required;
+            count = static_cast<int>(static_cast<double>(count - required) * lod) + required;
     }
     for (int i = 0; i < count; ++i) {
         RCKObjectAnimation *animation = static_cast<RCKObjectAnimation *>(m_Animations[i]);
@@ -402,8 +404,9 @@ float RCKKeyedAnimation::ComputeAnimationContribution(RCKObjectAnimation *animat
         return 0.0f;
     float contribution = 0.0f;
     if (animation->IsMerged()) {
-        contribution = (ComputeAnimationContribution(animation->m_Anim1) +
-            ComputeAnimationContribution(animation->m_Anim2)) * 0.5f;
+        const float first = ComputeAnimationContribution(animation->m_Anim1);
+        const float second = ComputeAnimationContribution(animation->m_Anim2);
+        contribution = static_cast<float>((static_cast<double>(first) + second) * 0.5);
     } else if (animation->m_KeyframeData) {
         CKKeyframeData *data = animation->m_KeyframeData;
         CKAnimController *vectors[] = {data->m_PositionController, data->m_ScaleController};
@@ -415,7 +418,9 @@ float RCKKeyedAnimation::ComputeAnimationContribution(RCKObjectAnimation *animat
             float extent = 0.0f;
             for (int i = 1; i < controller->GetKeyCount(); ++i) {
                 const VxVector &value = static_cast<CKPositionKey *>(controller->GetKey(i))->Pos;
-                float difference = fabsf(first.x - value.x + first.y - value.y + first.z - value.z);
+                const double differenceSum = (static_cast<double>(first.x) - value.x) +
+                    (static_cast<double>(first.y) - value.y) + (static_cast<double>(first.z) - value.z);
+                float difference = static_cast<float>(std::fabs(differenceSum));
                 if (difference > extent) extent = difference;
             }
             contribution += extent;
@@ -427,8 +432,10 @@ float RCKKeyedAnimation::ComputeAnimationContribution(RCKObjectAnimation *animat
                 const VxQuaternion &first = static_cast<CKRotationKey *>(rotations->GetKey(i))->Rot;
                 for (int j = i + 1; j < rotations->GetKeyCount(); ++j) {
                     const VxQuaternion &second = static_cast<CKRotationKey *>(rotations->GetKey(j))->Rot;
-                    float difference = (1.0f - fabsf(first.x * second.x + first.y * second.y +
-                        first.z * second.z + first.w * second.w)) * 1000.0f;
+                    const double dot = static_cast<double>(first.x) * second.x +
+                        static_cast<double>(first.y) * second.y + static_cast<double>(first.z) * second.z +
+                        static_cast<double>(first.w) * second.w;
+                    float difference = static_cast<float>((1.0 - std::fabs(dot)) * 1000.0);
                     if (difference > rotationExtent) rotationExtent = difference;
                 }
             }
