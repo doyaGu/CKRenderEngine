@@ -460,7 +460,7 @@ if (TARGET gtest_main)
             LinearScaleAxisLifecycleTest LinearScaleAxisEvaluationTest LinearScaleAxisStorageTest
             TCBPositionLifecycleTest TCBPositionEvaluationTest TCBPositionStorageTest
             TCBRotationLifecycleTest TCBRotationEvaluationTest TCBRotationStorageTest
-            TCBScaleLifecycleTest
+            TCBScaleLifecycleTest TCBScaleEvaluationTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

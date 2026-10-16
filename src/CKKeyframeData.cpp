@@ -1503,16 +1503,19 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
 
     VxVector *result = static_cast<VxVector *>(res);
 
+    // Before first key
     if (TimeStep <= m_Keys[0].TimeStep) {
         *result = m_Keys[0].Pos;
         return TRUE;
     }
 
+    // After last key
     if (TimeStep >= m_Keys[m_NbKeys - 1].TimeStep) {
         *result = m_Keys[m_NbKeys - 1].Pos;
         return TRUE;
     }
 
+    // Binary search for interval
     // Endpoint copies need no tangent allocation. Interior interpolation
     // must not proceed if lazy cache construction fails.
     if (!m_Tangents)
@@ -1530,32 +1533,58 @@ CKBOOL RCKTCBScaleController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    float t1 = m_Keys[low].TimeStep;
-    float t2 = m_Keys[high].TimeStep;
-    const float interval = t2 - t1;
-    const float elapsed = TimeStep - t1;
-    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
-        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
-        : elapsed / interval;
+    // Evaluate from the nearer endpoint so its small time contribution is
+    // retained even when the opposite normalized time rounds to one.
+    const double t1 = m_Keys[low].TimeStep;
+    const double t2 = m_Keys[high].TimeStep;
+    const double elapsed = static_cast<double>(TimeStep) - t1;
+    const double remaining = t2 - TimeStep;
+    const bool reversed = elapsed > remaining;
+    double t = (reversed ? remaining : elapsed) / (t2 - t1);
 
-    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
+    // Mirroring swaps the two ease ends. Keep the quadratic remapping wide:
+    // a tiny parameter can still contribute a representable scale.
+    double easeFrom = reversed ? m_Keys[high].easeto : m_Keys[low].easefrom;
+    double easeTo = reversed ? m_Keys[low].easefrom : m_Keys[high].easeto;
+    const double easeTotal = easeFrom + easeTo;
+    if (t != 0.0 && t != 1.0 && easeTotal != 0.0) {
+        if (easeTotal > 1.0) {
+            easeFrom /= easeTotal;
+            easeTo /= easeTotal;
+        }
+        const double scale = 1.0 / (2.0 - easeFrom - easeTo);
+        if (t < easeFrom) {
+            t = (scale / easeFrom) * t * t;
+        } else if (t < 1.0 - easeTo) {
+            t = (2.0 * t - easeFrom) * scale;
+        } else {
+            const double tail = 1.0 - t;
+            t = 1.0 - (scale / easeTo) * tail * tail;
+        }
+    }
 
-    float t2_val = t * t;
-    float t3 = t2_val * t;
-
-    float h1 = 2.0f * t3 - 3.0f * t2_val + 1.0f;
-    float h2 = -2.0f * t3 + 3.0f * t2_val;
-    float h3 = t3 - 2.0f * t2_val + t;
-    float h4 = t3 - t2_val;
+    const double squared = t * t;
+    const double nearValue = (2.0 * t - 3.0) * squared + 1.0;
+    const double farValue = (3.0 - 2.0 * t) * squared;
+    const double nearTangent = ((t - 2.0) * t + 1.0) * t;
+    const double farTangent = (t - 1.0) * squared;
+    const double h1 = reversed ? farValue : nearValue;
+    const double h2 = reversed ? nearValue : farValue;
+    const double h3 = reversed ? -farTangent : nearTangent;
+    const double h4 = reversed ? -nearTangent : farTangent;
 
     VxVector &p1 = m_Keys[low].Pos;
     VxVector &p2 = m_Keys[high].Pos;
-    VxVector &m1 = m_Tangents[low * 2 + 1];
-    VxVector &m2 = m_Tangents[high * 2];
+    VxVector &m1 = m_Tangents[low * 2 + 1]; // outgoing tangent of low key
+    VxVector &m2 = m_Tangents[high * 2];    // incoming tangent of high key
 
-    result->x = h1 * p1.x + h2 * p2.x + h3 * m1.x + h4 * m2.x;
-    result->y = h1 * p1.y + h2 * p2.y + h3 * m1.y + h4 * m2.y;
-    result->z = h1 * p1.z + h2 * p2.z + h3 * m1.z + h4 * m2.z;
+    // Keep the Hermite sum wide until opposing tangent terms cancel.
+    result->x = static_cast<float>(static_cast<double>(h1) * p1.x + static_cast<double>(h2) * p2.x +
+                                   static_cast<double>(h3) * m1.x + static_cast<double>(h4) * m2.x);
+    result->y = static_cast<float>(static_cast<double>(h1) * p1.y + static_cast<double>(h2) * p2.y +
+                                   static_cast<double>(h3) * m1.y + static_cast<double>(h4) * m2.y);
+    result->z = static_cast<float>(static_cast<double>(h1) * p1.z + static_cast<double>(h2) * p2.z +
+                                   static_cast<double>(h3) * m1.z + static_cast<double>(h4) * m2.z);
 
     return TRUE;
 }
