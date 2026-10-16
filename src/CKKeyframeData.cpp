@@ -2399,39 +2399,41 @@ CKBOOL RCKBezierScaleController::Evaluate(float TimeStep, void *res) {
     int low = 0;
     int high = m_NbKeys - 1;
     while (low < high - 1) {
-        int mid = (low + high) >> 1;
+        int mid = low + ((high - low) >> 1);
         if (m_Keys[mid].TimeStep < TimeStep)
             low = mid;
         else
             high = mid;
     }
 
-    float t1 = m_Keys[low].TimeStep;
-    float t2_time = m_Keys[high].TimeStep;
-    float t = (TimeStep - t1) / (t2_time - t1);
-
+    const double t1 = m_Keys[low].TimeStep;
+    const double t2 = m_Keys[high].TimeStep;
     if (m_Keys[low].Flags.GetOutTangentMode() == BEZIER_KEY_STEP ||
         m_Keys[high].Flags.GetInTangentMode() == BEZIER_KEY_STEP) {
-        *result = t == 1.0f ? m_Keys[high].Pos : m_Keys[low].Pos;
+        // A rounded normalized phase must not advance a step before its key.
+        *result = TimeStep == m_Keys[high].TimeStep ? m_Keys[high].Pos : m_Keys[low].Pos;
         return TRUE;
     }
 
-    // Stored tangents are derivatives. The original constant is 0x3EAAAAAA.
-    const float handleScale = (t2_time - t1) * 0.33333331f;
-    VxVector &p0 = m_Keys[low].Pos;
-    VxVector &p3 = m_Keys[high].Pos;
-    VxVector p1 = p0 + m_Keys[low].Out * handleScale;
-    VxVector p2 = p3 + m_Keys[high].In * handleScale;
-
-    float omt = 1.0f - t;
-    float omt2 = omt * omt;
-    float omt3 = omt2 * omt;
-    float t2 = t * t;
-    float t3 = t2 * t;
-
-    result->x = omt3 * p0.x + 3.0f * omt2 * t * p1.x + 3.0f * omt * t2 * p2.x + t3 * p3.x;
-    result->y = omt3 * p0.y + 3.0f * omt2 * t * p1.y + 3.0f * omt * t2 * p2.y + t3 * p3.y;
-    result->z = omt3 * p0.z + 3.0f * omt2 * t * p1.z + 3.0f * omt * t2 * p2.z + t3 * p3.z;
+    const double elapsed = static_cast<double>(TimeStep) - t1;
+    const double remaining = t2 - TimeStep;
+    const bool reversed = elapsed > remaining;
+    const double t = (reversed ? remaining : elapsed) / (t2 - t1);
+    const double squared = t * t;
+    const double omt = 1.0 - t;
+    const double nearWeight = (2.0 * t - 3.0) * squared + 1.0;
+    const double farWeight = (3.0 - 2.0 * t) * squared;
+    const double outWeight = 3.0 * (reversed ? omt * squared : omt * omt * t);
+    const double inWeight = 3.0 * (reversed ? omt * omt * t : omt * squared);
+    // Retain the original 0x3EAAAAAA constant, but accumulate derivative
+    // contributions before narrowing rather than materializing float handles.
+    const double handleScale = (t2 - t1) * static_cast<double>(0.33333331f);
+    const VxVector &nearValue = m_Keys[reversed ? high : low].Pos;
+    const VxVector &farValue = m_Keys[reversed ? low : high].Pos;
+    for (int component = 0; component < 3; ++component) {
+        const double derivative = outWeight * m_Keys[low].Out[component] + inWeight * m_Keys[high].In[component];
+        (*result)[component] = static_cast<float>(nearWeight * nearValue[component] + farWeight * farValue[component] + handleScale * derivative);
+    }
 
     return TRUE;
 }

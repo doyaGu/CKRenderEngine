@@ -463,6 +463,7 @@ if (TARGET gtest_main)
             TCBScaleLifecycleTest TCBScaleEvaluationTest TCBScaleStorageTest
             TCBScaleAxisLifecycleTest TCBScaleAxisEvaluationTest TCBScaleAxisStorageTest
               BezierPositionEvaluationTest
+              BezierScaleEvaluationTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
