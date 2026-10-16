@@ -623,7 +623,7 @@ void RCKGrid::ConstructMeshTexture(float scale) {
             for (CKDWORD y = 0; y < cellsLong; ++y) {
                 CKBYTE *pixelPtr = rowPtr;
                 for (CKDWORD x = 0; x < cellsWide; ++x) {
-                    int r = 0, g = 0, b = 0;
+                    long long r = 0, g = 0, b = 0;
 
                     // Accumulate color from all layers at this cell
                     for (int j = 0; j < layerCount; ++j) {
@@ -634,13 +634,14 @@ void RCKGrid::ConstructMeshTexture(float scale) {
                                 value *= 85;
                             // The Win32 DLL truncates each layer's contribution
                             // before adding it, using the x87 product precision.
-                            r += static_cast<int>(static_cast<double>(value) * layerColors[j].r);
-                            g += static_cast<int>(static_cast<double>(value) * layerColors[j].g);
-                            b += static_cast<int>(static_cast<double>(value) * layerColors[j].b);
+                            r += static_cast<long long>(static_cast<double>(value) * layerColors[j].r);
+                            g += static_cast<long long>(static_cast<double>(value) * layerColors[j].g);
+                            b += static_cast<long long>(static_cast<double>(value) * layerColors[j].b);
                         }
                     }
 
-                    // Clamp values
+                    // Saturate the final sum after all layers can cancel;
+                    // positive contributions must not wrap before this clamp.
                     if (r > 255) r = 255;
                     if (g > 255) g = 255;
                     if (b > 255) b = 255;
