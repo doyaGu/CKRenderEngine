@@ -576,7 +576,12 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
                 child = static_cast<RCKObjectAnimation *>(m_Context->CopyObject(animation, &dependencies, nullptr, options));
                 if (child && child->m_KeyframeData && child->GetLength() > 0.0f) {
                     // Original 0x1004A64D scales key times, not the duration.
-                    float factor = length / child->GetLength();
+                    const float sourceLength = child->GetLength();
+                    const float nativeFactor = length / sourceLength;
+                    // Preserve normal native ratio rounding, but recover a
+                    // finite time map when the ratio itself exceeds float.
+                    const double factor = std::isfinite(nativeFactor) && nativeFactor != 0.0f
+                        ? nativeFactor : static_cast<double>(length) / sourceLength;
                     CKKeyframeData *data = child->m_KeyframeData;
                     CKAnimController *controllers[] = {data->m_PositionController, data->m_ScaleController,
                         data->m_RotationController, data->m_ScaleAxisController, data->m_MorphController};
@@ -587,7 +592,7 @@ CKAnimation *RCKKeyedAnimation::CreateMergedAnimation(CKAnimation *anim2, CKBOOL
                                 continue;
                             for (int key = 0; key < controller->GetKeyCount(); ++key) {
                                 CKKey *value = controller->GetKey(key);
-                                value->SetTime(value->GetTime() * factor);
+                                value->SetTime(static_cast<float>(static_cast<double>(value->GetTime()) * factor));
                             }
                         }
                     }

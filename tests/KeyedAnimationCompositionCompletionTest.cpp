@@ -82,6 +82,102 @@ protected:
 
 };
 
+TEST_F(KeyedAnimationCompositionCompletionTest, UnionRetimesAllFiveChannelsWithoutOverflowingTheDurationRatio) {
+    for (int side = 0; side < 2; ++side) {
+        SCOPED_TRACE(side);
+        RCKCharacter *character = Character();
+        RCK3dEntity *entity = Entity();
+        ASSERT_NE(nullptr, character);
+        ASSERT_NE(nullptr, entity);
+        ChildOf(entity, character);
+        CompletionKeyed first(Context), second(Context);
+        first.Character(character);
+        second.Character(character);
+        const float shortLength = std::ldexp(1.0f, -120);
+        const float longLength = std::ldexp(1.0f, 120);
+        RCKObjectAnimation *source = Channel(entity, VxVector(0, 0, 0), VxVector(8, 4, -2), shortLength);
+        ASSERT_NE(nullptr, source);
+        VxVector unit(1, 1, 1), large(3, 5, 7);
+        VxQuaternion identity(0, 0, 0, 1), turn(0, .70710678118f, 0, .70710678118f);
+        source->AddScaleKey(0, &unit); source->AddScaleKey(shortLength, &large);
+        source->AddRotationKey(0, &identity); source->AddRotationKey(shortLength, &turn);
+        source->AddScaleAxisKey(0, &identity); source->AddScaleAxisKey(shortLength, &identity);
+        CKMorphController *morph = static_cast<CKMorphController *>(source->CreateController(CKANIMATION_CONTROLLER_MORPH));
+        ASSERT_NE(nullptr, morph);
+        morph->SetMorphVertexCount(1);
+        ASSERT_EQ(0, morph->AddKey(0.0f, FALSE));
+        ASSERT_EQ(1, morph->AddKey(shortLength, FALSE));
+        CKMorphKey *m0 = static_cast<CKMorphKey *>(morph->GetKey(0));
+        CKMorphKey *m1 = static_cast<CKMorphKey *>(morph->GetKey(1));
+        ASSERT_NE(nullptr, m0->PosArray); ASSERT_NE(nullptr, m1->PosArray);
+        m0->PosArray[0].Set(0, 0, 0); m1->PosArray[0].Set(8, 4, -2);
+        CompletionKeyed &shortGroup = side ? second : first;
+        CompletionKeyed &longGroup = side ? first : second;
+        ASSERT_EQ(CK_OK, shortGroup.AddAnimation(source));
+        shortGroup.SetLength(shortLength);
+        longGroup.SetLength(longLength);
+        CKAnimation *api = &first;
+        CKKeyedAnimation *merged = CKKeyedAnimation::Cast(api->CreateMergedAnimation(&second, FALSE));
+        ASSERT_NE(nullptr, merged);
+        ASSERT_EQ(1, merged->GetAnimationCount());
+        CKObjectAnimation *copy = merged->GetAnimation(0);
+        ASSERT_NE(nullptr, copy);
+        EXPECT_NE(source, copy);
+        CKAnimController *controllers[] = {copy->GetPositionController(), copy->GetScaleController(),
+            copy->GetRotationController(), copy->GetScaleAxisController(), copy->GetMorphController()};
+        for (int i = 0; i < 5; ++i) {
+            SCOPED_TRACE(i);
+            ASSERT_NE(nullptr, controllers[i]);
+            ASSERT_EQ(2, controllers[i]->GetKeyCount());
+            // The ratio is 2^240; the authored key times are 0 and2^-120.
+            // Their mapped times are exactly0 and2^120, both finite floats.
+            EXPECT_EQ(0.0f, controllers[i]->GetKey(0)->GetTime());
+            EXPECT_EQ(longLength, controllers[i]->GetKey(1)->GetTime());
+            EXPECT_EQ(longLength, controllers[i]->GetLength());
+        }
+        VxVector value;
+        ASSERT_TRUE(copy->EvaluatePosition(longLength * .5f, value));
+        Vec(value, VxVector(4, 2, -1));
+        ASSERT_TRUE(copy->EvaluateScale(longLength * .5f, value));
+        Vec(value, VxVector(2, 3, 4));
+        merged->SetStep(.5f);
+        entity->GetPosition(&value);
+        Vec(value, VxVector(4, 2, -1));
+        EXPECT_EQ(shortLength, source->GetPositionController()->GetKey(1)->GetTime());
+        EXPECT_EQ(shortLength, source->GetLength());
+    }
+}
+
+TEST_F(KeyedAnimationCompositionCompletionTest, UnionRetimingPreservesNativeFiniteRatioAtAStepBoundary) {
+    RCKCharacter *character = Character();
+    RCK3dEntity *entity = Entity();
+    ASSERT_NE(nullptr, character); ASSERT_NE(nullptr, entity);
+    ChildOf(entity, character);
+    CompletionKeyed first(Context), second(Context);
+    first.Character(character);
+    RCKObjectAnimation *source = static_cast<RCKObjectAnimation *>(Context->CreateObject(CKCID_OBJECTANIMATION));
+    ASSERT_NE(nullptr, source);
+    source->Set3dEntity(reinterpret_cast<CK3dEntity *>(entity));
+    CKAnimController *controller = source->CreateController(CKANIMATION_BEZIERPOS_CONTROL);
+    ASSERT_NE(nullptr, controller);
+    CKBezierKeyFlags flags;
+    flags.SetInTangentMode(BEZIER_KEY_STEP); flags.SetOutTangentMode(BEZIER_KEY_STEP);
+    VxVector zero(0, 0, 0), end(8, 0, 0);
+    CKBezierPositionKey a(0, zero, flags), b(.6f, end, flags);
+    ASSERT_EQ(0, controller->AddKey(&a)); ASSERT_EQ(1, controller->AddKey(&b));
+    ASSERT_EQ(CK_OK, first.AddAnimation(source)); first.SetLength(3); second.SetLength(7);
+    CKAnimation *api = &first;
+    CKKeyedAnimation *merged = CKKeyedAnimation::Cast(api->CreateMergedAnimation(&second, FALSE));
+    ASSERT_NE(nullptr, merged); ASSERT_EQ(1, merged->GetAnimationCount());
+    CKObjectAnimation *copy = merged->GetAnimation(0);
+    ASSERT_NE(nullptr, copy);
+    // Native f32(7/3)*f32(.6) rounds to1.4f; an unconditionally double
+    // ratio produces the next float above1.4f and delays the STEP transition.
+    EXPECT_EQ(1.4f, copy->GetPositionController()->GetKey(1)->GetTime());
+    merged->SetFrame(1.4f);
+    EXPECT_EQ(8.0f, X(entity));
+}
+
 TEST_F(KeyedAnimationCompositionCompletionTest, LodTruncatesTheNativeWideProductBeforeSelectingAdditionalChannels) {
     for (int floorPresent = 0; floorPresent < 2; ++floorPresent) {
         SCOPED_TRACE(floorPresent);
