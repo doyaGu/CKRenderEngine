@@ -461,6 +461,7 @@ if (TARGET gtest_main)
             TCBPositionLifecycleTest TCBPositionEvaluationTest TCBPositionStorageTest
             TCBRotationLifecycleTest TCBRotationEvaluationTest TCBRotationStorageTest
             TCBScaleLifecycleTest TCBScaleEvaluationTest TCBScaleStorageTest
+            TCBScaleAxisLifecycleTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

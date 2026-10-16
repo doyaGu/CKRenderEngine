@@ -238,7 +238,7 @@ public:
     virtual CKBOOL Compare(CKAnimController *control, float Threshold = 0.0f);
     virtual CKBOOL Clone(CKAnimController *control);
 
-    void ComputeTangents();
+    virtual void ComputeTangents();
 
 protected:
     CKTCBScaleAxisKey *m_Keys;
