@@ -768,9 +768,9 @@ void RCKGrid::SetDimensions(int width, int length, float cellWidth, float cellLe
     VxVector s;
     GetScale(&s, TRUE);
     if (width > 0)
-        s.x = cellWidth / static_cast<float>(width);
+        s.x = static_cast<float>(cellWidth / static_cast<double>(width));
     if (length > 0)
-        s.z = cellLength / static_cast<float>(length);
+        s.z = static_cast<float>(cellLength / static_cast<double>(length));
     SetScale(&s, FALSE, TRUE);
 }
 
@@ -790,7 +790,8 @@ void RCKGrid::Get3dPosFrom2dCoords(VxVector *pos, int x, int y) {
     if (!pos)
         return;
 
-    VxVector local(static_cast<float>(x) + 0.5f, 0.0f, static_cast<float>(y) + 0.5f);
+    VxVector local(static_cast<float>(static_cast<double>(x) + 0.5), 0.0f,
+        static_cast<float>(static_cast<double>(y) + 0.5));
     Transform(pos, &local, nullptr);
 }
 

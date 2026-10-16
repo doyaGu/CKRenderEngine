@@ -467,6 +467,7 @@ if (TARGET gtest_main)
               ControllerContractsTest ControllerQuaternionEvaluationTest
             AnimationAbiCompletionTest AnimationClockCompletionTest
             KeyedAnimationAbiCompletionTest KeyedAnimationCompositionCompletionTest KeyedAnimationLifetimeCompletionTest
+            GridGeometryCompletionTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
