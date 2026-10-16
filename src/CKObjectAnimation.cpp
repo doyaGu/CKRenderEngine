@@ -2115,8 +2115,10 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
             localMatrix[3][1] = pos.y;
             localMatrix[3][2] = pos.z;
         } else {
+            // A small axis rotation can have w rounded to one while its
+            // vector part still contributes to nonuniform stretch.
             const CKBOOL hasScaleAxis = (transformFlags & 2) &&
-                std::fabs(scaleAxis.w - 1.0f) >= FLT_EPSILON;
+                (scaleAxis.x != 0.0f || scaleAxis.y != 0.0f || scaleAxis.z != 0.0f);
             // Preserve channels that this animation does not supply. A
             // nonidentity scale-axis channel needs the total decomposition.
             if (hasScaleAxis && (transformFlags & 0xF) != 0xF) {

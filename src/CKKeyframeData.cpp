@@ -1733,20 +1733,29 @@ CKBOOL RCKTCBScaleAxisController::Evaluate(float TimeStep, void *res) {
             high = mid;
     }
 
-    float t1 = m_Keys[low].TimeStep;
-    float t2 = m_Keys[high].TimeStep;
-    const float interval = t2 - t1;
-    const float elapsed = TimeStep - t1;
-    float t = (!std::isfinite(interval) || !std::isfinite(elapsed))
-        ? static_cast<float>((static_cast<double>(TimeStep) - t1) / (static_cast<double>(t2) - t1))
-        : elapsed / interval;
-
-    t = ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
+    // Measure phase from the nearer endpoint; a tiny remaining angle can
+    // produce a visible shear when the principal scales are large.
+    const double t1 = m_Keys[low].TimeStep;
+    const double t2 = m_Keys[high].TimeStep;
+    const double elapsed = static_cast<double>(TimeStep) - t1;
+    const double remaining = t2 - TimeStep;
+    const bool reversed = elapsed > remaining;
+    float t = static_cast<float>((reversed ? remaining : elapsed) / (t2 - t1));
+    t = reversed
+        ? ApplyEaseParameters(t, m_Keys[high].easeto, m_Keys[low].easefrom)
+        : ApplyEaseParameters(t, m_Keys[low].easefrom, m_Keys[high].easeto);
 
     VxQuaternion &q1 = m_Keys[low].Rot;
     VxQuaternion &q2 = m_Keys[high].Rot;
 
-    *result = Squad(t, q1, m_Tangents[low * 2 + 1], m_Tangents[high * 2], q2);
+    if (reversed) {
+        *result = Squad(t, q2, m_Tangents[high * 2], m_Tangents[low * 2 + 1], q1);
+        // Reversal must retain the original segment's shortest-arc sign.
+        if (DotProduct(q1, q2) < 0.0f)
+            *result = -*result;
+    } else {
+        *result = Squad(t, q1, m_Tangents[low * 2 + 1], m_Tangents[high * 2], q2);
+    }
 
     return TRUE;
 }
