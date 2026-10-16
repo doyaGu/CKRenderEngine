@@ -48,6 +48,11 @@ protected:
     CKDWORD m_Priority;
     CKDWORD m_OrientationMode;
     RCKMesh *m_Mesh;
+
+private:
+    // Registered identity and owned base resources are copied by the context.
+    RCKGrid(const RCKGrid &) = delete;
+    RCKGrid &operator=(const RCKGrid &) = delete;
 };
 
 #endif // RCKGRID_H
