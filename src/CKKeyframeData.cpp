@@ -2925,7 +2925,7 @@ CKBOOL RCKMorphController::Compare(CKAnimController *control, float Threshold) {
         return FALSE;
 
     for (int i = 0; i < m_NbKeys; ++i) {
-        // The SDK key helper only checks arrays present on its left side.
+        // The original SDK key helper only checks arrays present on its left side.
         // Payload presence is observable even for zero vertices, so controller
         // equality must compare it in both directions.
         if ((m_Keys[i].PosArray != nullptr) != (other->m_Keys[i].PosArray != nullptr) ||
