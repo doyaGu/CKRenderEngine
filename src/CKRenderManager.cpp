@@ -67,6 +67,8 @@ static void UpdateDriverDescCaps(VxDriverDescEx *drvDesc) {
     CKRasterizerDriverDesc rasterizerDesc = {};
     if (!rstDriver->GetDesc(&rasterizerDesc))
         return;
+    if (!rasterizerDesc.CapsFinal && drvDesc->TextureFormats.Size() > 0)
+        return;
 
     drvDesc->CapsUpToDate = rasterizerDesc.CapsFinal;
     strncpy(drvDesc->DriverDesc, rasterizerDesc.Description.CStr(), sizeof(drvDesc->DriverDesc) - 1);
@@ -154,12 +156,6 @@ static void ApplyIniRenderOptions(RCKRenderManager *manager) {
         settings.GetPixelFormat(manager->m_SpriteVideoFormat.Key.CStr(), manager->m_SpriteVideoFormat.Value);
 }
 
-static void ApplyRenderOptionChange(RCKRenderManager *manager, CKSTRING RenderOptionString, CKDWORD oldValue, CKDWORD newValue);
-static void ApplyRenderOptionsToContexts(RCKRenderManager *manager);
-static void InvalidateTextureVideoMemory(RCKRenderManager *manager);
-static void ApplyTextureVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format);
-static void ApplySpriteVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format);
-
 RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _32_ARGB8888);
@@ -218,9 +214,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     WIN_HANDLE mainWindow = m_Context->GetMainWindow();
 
     // Start rasterizers and count available drivers
-    int rstInfoCount = g_RasterizersInfo.Size();
-
-    for (CKRasterizerInfo *rstInfo = g_RasterizersInfo.Begin(); rstInfo != g_RasterizersInfo.End();) {
+    for (CKRasterizerInfo *rstInfo = g_RasterizersInfo.Begin(); rstInfo != g_RasterizersInfo.End(); ++rstInfo) {
         CKRasterizer *rasterizer = nullptr;
 
         if (rstInfo->StartFct) {
@@ -231,17 +225,7 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
             int driverCount = rasterizer->GetDriverCount();
             m_DriverCount += driverCount;
             m_Rasterizers.PushBack(rasterizer);
-            ++rstInfo;
-        } else {
-            if (rstInfo->DllInstance) {
-                VxSharedLibrary sl;
-                sl.Attach(rstInfo->DllInstance);
-                sl.ReleaseLibrary();
-                rstInfo->DllInstance = nullptr;
-            }
-
-            // Remove failed rasterizer info - move to next without incrementing
-            rstInfo = g_RasterizersInfo.Remove(rstInfo);
+            m_RasterizerClosers.PushBack(rstInfo->CloseFct);
         }
     }
 
@@ -263,12 +247,8 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
         CKNullRasterizerGetInfo(&info);
         CKRasterizer *fallback = info.StartFct(mainWindow);
         if (fallback && fallback->GetDriverCount() > 0) {
-            info.DllInstance = nullptr;
-            info.DllName = "";
-            info.Desc = "NULL Rasterizer";
-            info.InterfaceRevision = CKRST_INTERFACE_REVISION;
-            g_RasterizersInfo.PushBack(info);
             m_Rasterizers.PushBack(fallback);
+            m_RasterizerClosers.PushBack(info.CloseFct);
             m_DriverCount += fallback->GetDriverCount();
         } else if (fallback) {
             info.CloseFct(fallback);
@@ -380,11 +360,9 @@ RCKRenderManager::~RCKRenderManager() {
     m_Drivers = nullptr;
 
     // Close rasterizers
-    int rstInfoCount = g_RasterizersInfo.Size();
-    for (int i = 0; i < rstInfoCount; ++i) {
-        CKRasterizerInfo &info = g_RasterizersInfo[i];
-        if (info.CloseFct && m_Rasterizers[i]) {
-            info.CloseFct(m_Rasterizers[i]);
+    for (int i = 0; i < m_Rasterizers.Size(); ++i) {
+        if (m_RasterizerClosers[i]) {
+            m_RasterizerClosers[i](m_Rasterizers[i]);
         }
     }
 }
@@ -561,26 +539,7 @@ int RCKRenderManager::GetRenderDriverCount() {
     return m_DriverCount;
 }
 
-// Cache public driver descriptors to keep returned pointers valid between calls.
-static XClassArray<VxDriverDesc> s_DriverDescCache;
-
-VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
-    if (Driver < 0 || Driver >= m_DriverCount) {
-        return nullptr;
-    }
-
-    VxDriverDescEx *drv = &m_Drivers[Driver];
-
-    if (!drv->CapsUpToDate) {
-        UpdateDriverDescCaps(drv);
-    }
-
-    if (s_DriverDescCache.Size() < m_DriverCount) {
-        s_DriverDescCache.Resize(m_DriverCount);
-    }
-
-    VxDriverDesc *desc = &s_DriverDescCache[Driver];
-
+static void CopyPublicDriverDesc(VxDriverDesc *desc, const VxDriverDescEx *drv) {
     strncpy(desc->DriverDesc, drv->DriverDesc, sizeof(desc->DriverDesc) - 1);
     desc->DriverDesc[sizeof(desc->DriverDesc) - 1] = '\0';
     strncpy(desc->DriverName, drv->DriverDesc2, sizeof(desc->DriverName) - 1);
@@ -596,6 +555,18 @@ VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
 
     desc->Caps2D = drv->Caps2D;
     desc->Caps3D = drv->Caps3D;
+}
+
+VxDriverDesc *RCKRenderManager::GetRenderDriverDescription(int Driver) {
+    if (Driver < 0 || Driver >= m_DriverCount)
+        return nullptr;
+
+    VxDriverDescEx *drv = GetDriverDescription(Driver);
+    if (m_DriverDescCache.Size() < m_DriverCount)
+        m_DriverDescCache.Resize(m_DriverCount);
+
+    VxDriverDesc *desc = &m_DriverDescCache[Driver];
+    CopyPublicDriverDesc(desc, drv);
 
     return desc;
 }
@@ -605,12 +576,7 @@ void RCKRenderManager::GetDesiredTexturesVideoFormat(VxImageDescEx &VideoFormat)
 }
 
 void RCKRenderManager::SetDesiredTexturesVideoFormat(VxImageDescEx &VideoFormat) {
-    const CKDWORD oldValue = m_TextureVideoFormat.Value;
-    const CKDWORD newValue = VxImageDesc2PixelFormat(VideoFormat);
-    if (oldValue == newValue)
-        return;
-    m_TextureVideoFormat.Value = newValue;
-    ApplyTextureVideoFormat(this, (VX_PIXELFORMAT)newValue);
+    m_TextureVideoFormat.Value = VxImageDesc2PixelFormat(VideoFormat);
 }
 
 CKRenderContext *RCKRenderManager::GetRenderContext(int pos) {
@@ -725,79 +691,9 @@ void RCKRenderManager::SetRenderOptions(CKSTRING RenderOptionString, CKDWORD Val
     for (int i = 0; i < m_Options.Size(); ++i) {
         VxOption *option = m_Options[i];
         if (stricmp(option->Key.CStr(), RenderOptionString) == 0) {
-            const CKDWORD oldValue = option->Value;
-            if (oldValue == Value)
-                return;
             option->Value = Value;
-            ApplyRenderOptionChange(this, RenderOptionString, oldValue, Value);
             return;
         }
-    }
-}
-
-static void ApplyRenderOptionChange(RCKRenderManager *manager, CKSTRING RenderOptionString, CKDWORD oldValue, CKDWORD newValue) {
-    (void)oldValue;
-
-    if (stricmp(RenderOptionString, manager->m_TextureVideoFormat.Key.CStr()) == 0) {
-        ApplyTextureVideoFormat(manager, (VX_PIXELFORMAT)newValue);
-        return;
-    }
-
-    if (stricmp(RenderOptionString, manager->m_SpriteVideoFormat.Key.CStr()) == 0) {
-        ApplySpriteVideoFormat(manager, (VX_PIXELFORMAT)newValue);
-        return;
-    }
-
-    if (stricmp(RenderOptionString, manager->m_DisableMipmap.Key.CStr()) == 0) {
-        InvalidateTextureVideoMemory(manager);
-    }
-
-    ApplyRenderOptionsToContexts(manager);
-}
-
-static void ApplyRenderOptionsToContexts(RCKRenderManager *manager) {
-    for (CK_ID *it = manager->m_RenderContexts.Begin(); it != manager->m_RenderContexts.End(); ++it) {
-        RCKRenderContext *context = (RCKRenderContext *) manager->m_Context->GetObject(*it);
-        if (context)
-            context->ApplyRenderOptions();
-    }
-}
-
-static void InvalidateTextureVideoMemory(RCKRenderManager *manager) {
-    int textureCount = manager->m_Context->GetObjectsCountByClassID(CKCID_TEXTURE);
-    CK_ID *textureIds = manager->m_Context->GetObjectsListByClassID(CKCID_TEXTURE);
-    for (int i = 0; i < textureCount; ++i) {
-        CKTexture *texture = (CKTexture *) manager->m_Context->GetObject(textureIds[i]);
-        if (texture)
-            texture->FreeVideoMemory();
-    }
-}
-
-static void ApplyTextureVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format) {
-    int textureCount = manager->m_Context->GetObjectsCountByClassID(CKCID_TEXTURE);
-    CK_ID *textureIds = manager->m_Context->GetObjectsListByClassID(CKCID_TEXTURE);
-    for (int i = 0; i < textureCount; ++i) {
-        CKTexture *texture = (CKTexture *) manager->m_Context->GetObject(textureIds[i]);
-        if (texture)
-            texture->SetDesiredVideoFormat(format);
-    }
-}
-
-static void ApplySpriteVideoFormat(RCKRenderManager *manager, VX_PIXELFORMAT format) {
-    int spriteCount = manager->m_Context->GetObjectsCountByClassID(CKCID_SPRITE);
-    CK_ID *spriteIds = manager->m_Context->GetObjectsListByClassID(CKCID_SPRITE);
-    for (int i = 0; i < spriteCount; ++i) {
-        CKSprite *sprite = (CKSprite *) manager->m_Context->GetObject(spriteIds[i]);
-        if (sprite)
-            sprite->SetDesiredVideoFormat(format);
-    }
-
-    int spriteTextCount = manager->m_Context->GetObjectsCountByClassID(CKCID_SPRITETEXT);
-    CK_ID *spriteTextIds = manager->m_Context->GetObjectsListByClassID(CKCID_SPRITETEXT);
-    for (int i = 0; i < spriteTextCount; ++i) {
-        RCKSpriteText *spriteText = (RCKSpriteText *) manager->m_Context->GetObject(spriteTextIds[i]);
-        if (spriteText)
-            spriteText->SetDesiredVideoFormat(format);
     }
 }
 
@@ -967,6 +863,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     // Effect 0: None
     VxEffectDescription effectNone;
     effectNone.Summary = "None";
+    effectNone.NeededTextureCoordsCount = 0;
     AddEffect(effectNone);
 
     // Effect 1: TexGen
@@ -1035,7 +932,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     effectDP3.MaxTextureCount = 1;
     effectDP3.NeededTextureCoordsCount = 1;
     effectDP3.Tex1Description = "Bump Texture (Normals)";
-    effectDP3.ParameterType = CKPGUID_3DENTITY;
+    effectDP3.ParameterType = CKPGUID_LIGHT;
     effectDP3.ParameterDescription = "Light";
     effectDP3.ParameterDefaultValue = "NULL";
     AddEffect(effectDP3);
@@ -1108,7 +1005,7 @@ void RCKRenderManager::RegisterDefaultEffects() {
     XArray<CKGUID> texgenRefGuids;
     texgenRefGuids.PushBack(CKPGUID_TEXGENEFFECT);
     texgenRefGuids.PushBack(CKPGUID_3DENTITY);
-    pm->RegisterNewStructure(CKPGUID_TEXGENREFEFFECT, "TexgenReferential",
+    pm->RegisterNewStructure(CKPGUID_TEXGENREFEFFECT, "Tex coords gen+Referential",
                              "TexGen,Referential",
                              texgenRefGuids);
 
@@ -1185,8 +1082,11 @@ VxDriverDescEx *RCKRenderManager::GetDriverDescription(int DriverIndex) {
         return nullptr;
 
     VxDriverDescEx *driver = &m_Drivers[DriverIndex];
-    if (!driver->CapsUpToDate)
+    if (!driver->CapsUpToDate) {
         UpdateDriverDescCaps(driver);
+        if (DriverIndex < m_DriverDescCache.Size())
+            CopyPublicDriverDesc(&m_DriverDescCache[DriverIndex], driver);
+    }
     return driver;
 }
 
@@ -1220,6 +1120,8 @@ void RCKRenderManager::RefreshDriverCaps(int DriverIndex) {
     // Keep the engine on the driver interface instead of reaching into a
     // concrete rasterizer implementation.
     UpdateDriverDescCaps(&m_Drivers[DriverIndex]);
+    if (DriverIndex < m_DriverDescCache.Size())
+        CopyPublicDriverDesc(&m_DriverDescCache[DriverIndex], &m_Drivers[DriverIndex]);
 }
 
 int RCKRenderManager::GetPreferredSoftwareDriver() {
@@ -1581,18 +1483,20 @@ CKBOOL RCKRenderManager::DeleteMeshBuffers(RCKMesh *Mesh, CKBOOL PreserveOnFailu
             if (entry.VertexBuffer) {
                 found = TRUE;
                 entry.VertexBufferReady = 0;
-                if (entry.Context->DeleteObject(entry.VertexBuffer, CKRST_OBJ_VERTEXBUFFER) || !PreserveOnFailure)
-                    ClearMeshVertexBufferState(entry);
-                else
+                const CKBOOL deleted = entry.Context->DeleteObject(entry.VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
+                if (!deleted)
                     result = FALSE;
+                if (deleted || !PreserveOnFailure)
+                    ClearMeshVertexBufferState(entry);
             }
             if (entry.IndexBuffer) {
                 found = TRUE;
                 entry.IndexBufferReady = FALSE;
-                if (entry.Context->DeleteObject(entry.IndexBuffer, CKRST_OBJ_INDEXBUFFER) || !PreserveOnFailure)
-                    ClearMeshIndexBufferState(entry);
-                else
+                const CKBOOL deleted = entry.Context->DeleteObject(entry.IndexBuffer, CKRST_OBJ_INDEXBUFFER);
+                if (!deleted)
                     result = FALSE;
+                if (deleted || !PreserveOnFailure)
+                    ClearMeshIndexBufferState(entry);
             }
             if (!entry.VertexBuffer && !entry.IndexBuffer)
                 entries->RemoveAt(i);
@@ -1615,18 +1519,20 @@ CKBOOL RCKRenderManager::DeleteMeshBuffers(RCKMesh *Mesh, CKBOOL PreserveOnFailu
         if (state.Context && state.VertexBuffer) {
             found = TRUE;
             state.VertexBufferReady = 0;
-            if (state.Context->DeleteObject(state.VertexBuffer, CKRST_OBJ_VERTEXBUFFER) || !PreserveOnFailure)
-                ClearMeshVertexBufferState(state);
-            else
+            const CKBOOL deleted = state.Context->DeleteObject(state.VertexBuffer, CKRST_OBJ_VERTEXBUFFER);
+            if (!deleted)
                 result = FALSE;
+            if (deleted || !PreserveOnFailure)
+                ClearMeshVertexBufferState(state);
         }
         if (state.Context && state.IndexBuffer) {
             found = TRUE;
             state.IndexBufferReady = FALSE;
-            if (state.Context->DeleteObject(state.IndexBuffer, CKRST_OBJ_INDEXBUFFER) || !PreserveOnFailure)
-                ClearMeshIndexBufferState(state);
-            else
+            const CKBOOL deleted = state.Context->DeleteObject(state.IndexBuffer, CKRST_OBJ_INDEXBUFFER);
+            if (!deleted)
                 result = FALSE;
+            if (deleted || !PreserveOnFailure)
+                ClearMeshIndexBufferState(state);
         }
         if (state.VertexBuffer || state.IndexBuffer)
             RestoreMeshBufferState(Mesh, state);

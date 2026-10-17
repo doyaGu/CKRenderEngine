@@ -2999,7 +2999,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_ViewportData.ViewZMin = 0.0f;
     m_ViewportData.ViewZMax = 1.0f;
 
-    m_ObjectExtents.Resize(500);
+    m_ObjectExtents.Reserve(500);
 
     // Clear stats
     memset(&m_Stats, 0, sizeof(m_Stats));

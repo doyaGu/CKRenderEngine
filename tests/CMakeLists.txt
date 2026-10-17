@@ -498,6 +498,8 @@ if (TARGET gtest_main)
         Entity3dFrustumTest Entity3dHierFrustumTest Entity3dRenderTest
             Entity3dLifecycleTest Entity3dHierarchyTest
             Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest Entity3dScalePrecisionTest
+            RenderManagerLifecycleTest RenderManagerContextTest RenderManagerOptionsTest
+            RenderManagerSceneTest RenderManagerCallbacksTest RenderManagerResourcesTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

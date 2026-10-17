@@ -224,6 +224,12 @@ private:
     void ForgetMeshBuffers(CKRasterizerContext *Context);
 
     MeshBufferEntryTable m_MeshBufferEntries;
+
+    XClassArray<VxDriverDesc> m_DriverDescCache;
+    XArray<CKRST_CLOSEFUNCTION> m_RasterizerClosers;
+
+    RCKRenderManager(const RCKRenderManager &) = delete;
+    RCKRenderManager &operator=(const RCKRenderManager &) = delete;
 };
 
 #endif // RCKRENDERMANAGER_H
