@@ -234,6 +234,43 @@ TEST_F(MeshRayIntersectionTest, PublicEntityConsumerPreservesLocalDescriptionAnd
     Vector(hit.IntersectionPoint, 1, 1, 0); EXPECT_NEAR(2, hit.Distance, 0.00001f);
 }
 
+TEST_F(MeshRayIntersectionTest, FirstContactChoosesFaceOrderInsteadOfNearestAndReturnsOne) {
+    RCKMesh *mesh = Mesh(3); ASSERT_NE(nullptr, mesh);
+    Triangle(*mesh, 1, VxVector(0, 0, 2), VxVector(4, 0, 2), VxVector(0, 4, 2));
+    mesh->BuildFaceNormals();
+    VxIntersectionDesc hit = {};
+    const CK_RAYINTERSECTION mode = static_cast<CK_RAYINTERSECTION>(CKRAYINTERSECTION_SEGMENT | CKRAYINTERSECTION_FIRSTCONTACT);
+    ASSERT_EQ(1, Intersect(*mesh, VxVector(1, 1, 5), VxVector(0, 0, -10), &hit, mode));
+    EXPECT_EQ(0, hit.FaceIndex);
+    EXPECT_FLOAT_EQ(0.5f, hit.Distance);
+    Vector(hit.IntersectionPoint, 1, 1, 0);
+}
+
+TEST_F(MeshRayIntersectionTest, NonSegmentOptionBitsDoNotShortenAnInfiniteRay) {
+    RCKMesh *mesh = Mesh(); ASSERT_NE(nullptr, mesh);
+    VxIntersectionDesc hit = {};
+    const CK_RAYINTERSECTION options[] = {
+        CKRAYINTERSECTION_IGNOREALPHA, CKRAYINTERSECTION_FIRSTCONTACT,
+        static_cast<CK_RAYINTERSECTION>(CKRAYINTERSECTION_IGNOREALPHA | CKRAYINTERSECTION_FIRSTCONTACT)
+    };
+    for (int i = 0; i < 3; ++i) {
+        SCOPED_TRACE(i);
+        ASSERT_EQ(1, Intersect(*mesh, VxVector(1, 1, 4), VxVector(0, 0, -2), &hit, options[i]));
+        EXPECT_FLOAT_EQ(2.0f, hit.Distance);
+        const CK_RAYINTERSECTION segment = static_cast<CK_RAYINTERSECTION>(options[i] | CKRAYINTERSECTION_SEGMENT);
+        EXPECT_EQ(0, Intersect(*mesh, VxVector(1, 1, 4), VxVector(0, 0, -2), &hit, segment));
+    }
+}
+
+TEST_F(MeshRayIntersectionTest, NullDescriptionReportsGeometricOcclusionOnceWithoutTextureSampling) {
+    RCKMesh *mesh = Mesh(3); ASSERT_NE(nullptr, mesh);
+    RCKMaterial *material = AlphaMaterial(); ASSERT_NE(nullptr, material);
+    for (int face = 0; face < 3; ++face) mesh->SetFaceMaterial(face, reinterpret_cast<CKMaterial *>(material));
+    for (int i = 0; i < 9; ++i) mesh->SetVertexTextureCoordinates(i, 0, 0, -1);
+    EXPECT_EQ(1, Intersect(*mesh, VxVector(1, 1, 2), VxVector(0, 0, -4), nullptr, CKRAYINTERSECTION_SEGMENT));
+    EXPECT_EQ(0, Intersect(*mesh, VxVector(3, 3, 2), VxVector(0, 0, -4), nullptr, CKRAYINTERSECTION_SEGMENT));
+}
+
 TEST_F(MeshRayIntersectionTest, NearestTransparentPixelRejectsTheQueryWithoutSearchingTheFartherOpaqueFace) {
     RCKMesh *mesh = Mesh(2); ASSERT_NE(nullptr, mesh);
     Triangle(*mesh, 1, VxVector(0, 0, 2), VxVector(4, 0, 2), VxVector(0, 4, 2));
@@ -248,4 +285,17 @@ TEST_F(MeshRayIntersectionTest, NearestTransparentPixelRejectsTheQueryWithoutSea
     ASSERT_EQ(2, Intersect(*mesh, VxVector(1, 1, 4), VxVector(0, 0, -8), &hit, CKRAYINTERSECTION_SEGMENT));
     EXPECT_EQ(1, hit.FaceIndex);
     EXPECT_FLOAT_EQ(0.25f, hit.Distance);
+}
+
+TEST_F(MeshRayIntersectionTest, IgnoreAlphaAcceptsTheSameActualTransparentNearestPixel) {
+    RCKMesh *mesh = Mesh(); ASSERT_NE(nullptr, mesh);
+    RCKMaterial *material = AlphaMaterial(); ASSERT_NE(nullptr, material);
+    mesh->SetFaceMaterial(0, reinterpret_cast<CKMaterial *>(material));
+    for (int i = 0; i < 3; ++i) mesh->SetVertexTextureCoordinates(i, 0, 0, -1);
+    VxIntersectionDesc hit = {};
+    EXPECT_EQ(0, Intersect(*mesh, VxVector(1, 1, 2), VxVector(0, 0, -4), &hit, CKRAYINTERSECTION_SEGMENT));
+    const CK_RAYINTERSECTION ignore = static_cast<CK_RAYINTERSECTION>(CKRAYINTERSECTION_SEGMENT | CKRAYINTERSECTION_IGNOREALPHA);
+    ASSERT_EQ(1, Intersect(*mesh, VxVector(1, 1, 2), VxVector(0, 0, -4), &hit, ignore));
+    Vector(hit.IntersectionPoint, 1, 1, 0);
+    EXPECT_FLOAT_EQ(0, hit.TexU);
 }

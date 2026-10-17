@@ -279,8 +279,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
         IntersectFunc culledFunc = (IntersectFunc) VxIntersect::RayFaceCulled; // v61
         IntersectFunc twoSidedFunc = (IntersectFunc) VxIntersect::RayFace;     // v62
 
-        if (mode != 0) {
-            // CKRAYINTERSECTION_SEGMENT or others
+        if ((mode & CKRAYINTERSECTION_SEGMENT) != 0) {
             culledFunc = (IntersectFunc) VxIntersect::SegmentFaceCulled;
             twoSidedFunc = (IntersectFunc) VxIntersect::SegmentFace;
         }
@@ -309,6 +308,11 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                     hit = culledFunc(ray, *v0, *v1, *v2, *faceNormalPtr, intersectPoint, dist, i1, i2);
 
                 if (hit) {
+                    // The public occlusion query returns on its first hit.
+                    if (!desc) {
+                        delete[] vertexFlags;
+                        return 1;
+                    }
                     ++hitCount;
                     if (dist < minDist) {
                         foundHit = TRUE;
@@ -317,6 +321,8 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                         bestI2 = i2;
                         bestFaceIdx = f;
                     }
+                    if ((mode & CKRAYINTERSECTION_FIRSTCONTACT) != 0)
+                        break;
                 }
             }
 
@@ -422,7 +428,8 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                 }
 
                 // Precise texture pick (alpha test) (IDA lines 256-261)
-                if (!PreciseTexturePick(faceMat, desc->TexU, desc->TexV)) {
+                if (!(mode & CKRAYINTERSECTION_IGNOREALPHA) &&
+                    !PreciseTexturePick(faceMat, desc->TexU, desc->TexV)) {
                     delete[] vertexFlags;
                     return 0; // Hit was on transparent pixel
                 }
