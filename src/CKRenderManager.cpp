@@ -838,12 +838,19 @@ void RCKRenderManager::ClearTemporaryCallbacks() {
 }
 
 void RCKRenderManager::RemoveAllTemporaryCallbacks() {
+    // A deferred identity can outlive removal and permanent re-registration.
     // Remove all pre-render callbacks from their containers
     for (VxCallBack *it = m_TemporaryPreRenderCallbacks.Begin();
          it != m_TemporaryPreRenderCallbacks.End(); ++it) {
         CKCallbacksContainer *container = (CKCallbacksContainer *) it->callback;
         if (container) {
-            container->RemovePreCallback(it->argument, it->arg2);
+            for (VxCallBack *callback = container->m_PreCallBacks.Begin();
+                 callback != container->m_PreCallBacks.End(); ++callback) {
+                if (callback->temp && callback->callback == it->argument && callback->argument == it->arg2) {
+                    container->m_PreCallBacks.Remove(callback);
+                    break;
+                }
+            }
         }
     }
 
@@ -852,7 +859,13 @@ void RCKRenderManager::RemoveAllTemporaryCallbacks() {
          it != m_TemporaryPostRenderCallbacks.End(); ++it) {
         CKCallbacksContainer *container = (CKCallbacksContainer *) it->callback;
         if (container) {
-            container->RemovePostCallback(it->argument, it->arg2);
+            for (VxCallBack *callback = container->m_PostCallBacks.Begin();
+                 callback != container->m_PostCallBacks.End(); ++callback) {
+                if (callback->temp && callback->callback == it->argument && callback->argument == it->arg2) {
+                    container->m_PostCallBacks.Remove(callback);
+                    break;
+                }
+            }
         }
     }
 

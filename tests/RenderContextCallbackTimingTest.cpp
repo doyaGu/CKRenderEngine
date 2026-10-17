@@ -133,6 +133,8 @@ protected:
         Context->m_BehaviorContext.CurrentRenderContext = Device;
     }
     void TearDown() override {
+        // Release manager borrows before deleting the fixture-owned skin probes.
+        if (Manager) Manager->DetachAllObjects();
         delete SkinEntity; delete SkinMesh;
         if (Context) Context->m_BehaviorContext.CurrentRenderContext = nullptr;
         if (Device) { Device->m_RasterizerContext = nullptr; delete Device; }
