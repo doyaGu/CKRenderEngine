@@ -40,8 +40,8 @@ static bool ShouldSwapTransparentTieFallback(const CKTransparentObject &current,
 }
 
 static float PlaneCameraDot(const VxPlane &plane, const VxVector &cameraPos) {
-    // CK2_3D.dll sub_10009BB9 uses DotProduct(normal,camera), not plane.Classify(camera).
-    return DotProduct(plane.m_Normal, cameraPos);
+    // CK2_3D.dll sub_1000CB00 adds plane.D to the normal/camera dot product.
+    return plane.Classify(cameraPos);
 }
 
 // IDA sub_10009BB9: tie-breaker used by SortTransparentObjects when projected Z extents overlap.

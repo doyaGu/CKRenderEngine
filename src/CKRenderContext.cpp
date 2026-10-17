@@ -915,20 +915,14 @@ void RCKRenderContext::RemovePostSpriteRenderCallBack(CK_RENDERCALLBACK Function
 
 VxDrawPrimitiveData *RCKRenderContext::GetDrawPrimitiveStructure(CKRST_DPFLAGS Flags, int VertexCount) {
     // IDA: 0x1006bc74
-    if (Flags & CKRST_DP_VBUFFER) {
-        m_DpFlags = Flags;
-        m_VertexBufferIndex = 0;
-        m_StartIndex = 0;
-        m_VertexBufferCount = VertexCount;
-    } else {
-        m_DpFlags = 0;
-        m_VertexBufferIndex = 0;
-        m_StartIndex = -1;
-        m_VertexBufferCount = 0;
-    }
-
-    // IDA: 0x1006bdb1 - call UserDrawPrimitiveDataClass::GetStructure
-    return m_UserDrawPrimitiveData->GetStructure(Flags, VertexCount);
+    // The portable interface supplies CPU streams. Do not advertise a native
+    // vertex-buffer lock when no vertex buffer has actually been acquired.
+    m_DpFlags = 0;
+    m_VertexBufferIndex = 0;
+    m_StartIndex = -1;
+    m_VertexBufferCount = 0;
+    return m_UserDrawPrimitiveData->GetStructure(
+        static_cast<CKRST_DPFLAGS>(Flags & ~CKRST_DP_VBUFFER), VertexCount);
 }
 
 CKWORD *RCKRenderContext::GetDrawPrimitiveIndices(int IndicesCount) {
@@ -1198,10 +1192,10 @@ void RCKRenderContext::ScreenToClient(Vx2DVector *ioPoint) {
     if (!ioPoint)
         return;
 
-    CKPOINT point = {static_cast<int>(ioPoint->x), static_cast<int>(ioPoint->y)};
-    if (VxScreenToClient(m_WinHandle, &point)) {
-        ioPoint->x = static_cast<float>(point.x);
-        ioPoint->y = static_cast<float>(point.y);
+    CKPOINT origin = {0, 0};
+    if (VxScreenToClient(m_WinHandle, &origin)) {
+        ioPoint->x += static_cast<float>(origin.x);
+        ioPoint->y += static_cast<float>(origin.y);
     }
 }
 
@@ -1210,10 +1204,10 @@ void RCKRenderContext::ClientToScreen(Vx2DVector *ioPoint) {
     if (!ioPoint)
         return;
 
-    CKPOINT point = {static_cast<int>(ioPoint->x), static_cast<int>(ioPoint->y)};
-    if (VxClientToScreen(m_WinHandle, &point)) {
-        ioPoint->x = static_cast<float>(point.x);
-        ioPoint->y = static_cast<float>(point.y);
+    CKPOINT origin = {0, 0};
+    if (VxClientToScreen(m_WinHandle, &origin)) {
+        ioPoint->x += static_cast<float>(origin.x);
+        ioPoint->y += static_cast<float>(origin.y);
     }
 }
 
@@ -1677,6 +1671,7 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
             drawData.Flags |= CKRST_DP_DIFFUSE;
     }
     CKMeshDrawCall meshDraw(this, data);
+    CKBOOL prepared = TRUE;
     if (meshDraw.PreservesLighting()) {
         // Read the effective stages after virtual delegation: an override may
         // have changed them. Generated normals/reflection need a normal stream
@@ -1701,15 +1696,18 @@ CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, i
         }
     } else if ((drawData.Flags & CKRST_DP_LIGHT) != 0 && drawData.NormalPtr) {
         // Ordinary public calls retain the original automatic lighting rule.
-        m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
+        prepared = m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 1);
     } else {
-        m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 0);
+        prepared = m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, 0);
     }
 
     if (!indices)
         indexcount = data->VertexCount;
 
-    m_RasterizerContext->SetViewport(&m_ViewportData);
+    if (!prepared || !m_RasterizerContext->SetViewport(&m_ViewportData)) {
+        RecordFrameRenderError(CKERR_INVALIDOPERATION);
+        return FALSE;
+    }
     CK_FRAME_COST_ADD_DRAW_PRIMITIVE();
 
     CK_FRAME_COST_ADD_DRAW_PRIMITIVE_SANITIZE();
@@ -2554,7 +2552,7 @@ void RCKRenderContext::Activate(CKBOOL active) {
 }
 
 int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
-    if (!m_RasterizerContext || buffer != VXBUFFER_BACKBUFFER || !m_RasterizerContext->IsIdle())
+    if (!m_RasterizerContext || !m_RasterizerContext->IsIdle())
         return FALSE;
     CKRECT region;
     const CKRECT *regionPtr = VxRectToRegion(iRect, region);
@@ -2562,47 +2560,11 @@ int RCKRenderContext::DumpToMemory(const VxRect *iRect, VXBUFFER_TYPE buffer, Vx
 }
 
 int RCKRenderContext::CopyToVideo(const VxRect *iRect, VXBUFFER_TYPE buffer, VxImageDescEx &desc) {
-    if (!m_RasterizerContext || buffer != VXBUFFER_BACKBUFFER)
+    if (!m_RasterizerContext)
         return FALSE;
-
-    const int fbWidth = m_Settings.m_Rect.right;
-    const int fbHeight = m_Settings.m_Rect.bottom;
-    if (fbWidth <= 0 || fbHeight <= 0)
-        return FALSE;
-
-    VxRect rect;
-    if (iRect) {
-        rect = *iRect;
-    } else {
-        rect.left = 0.0f;
-        rect.top = 0.0f;
-        rect.right = (float) fbWidth;
-        rect.bottom = (float) fbHeight;
-    }
-
     CKRECT region;
-    region.left = (int) rect.left;
-    region.top = (int) rect.top;
-    region.right = (int) rect.right;
-    region.bottom = (int) rect.bottom;
-    if (region.left < 0) region.left = 0;
-    if (region.top < 0) region.top = 0;
-    if (region.right > fbWidth) region.right = fbWidth;
-    if (region.bottom > fbHeight) region.bottom = fbHeight;
-    if (region.right <= region.left || region.bottom <= region.top)
-        return FALSE;
-
-    const int width = region.right - region.left;
-    const int height = region.bottom - region.top;
-    if (desc.Width != width || desc.Height != height || desc.BitsPerPixel <= 0)
-        return FALSE;
-
-    // Two-call protocol: without pixels only the 32-bit ARGB size is reported.
-    const int videoImageSize = width * height * 4;
-    if (!desc.Image)
-        return videoImageSize;
-
-    return m_RasterizerContext->CopyFromMemoryBuffer(&region, buffer, desc);
+    const CKRECT *regionPtr = VxRectToRegion(iRect, region);
+    return m_RasterizerContext->CopyFromMemoryBuffer(regionPtr, buffer, desc);
 }
 
 CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBUFFER_TYPE buffer) {
@@ -2610,21 +2572,18 @@ CKERROR RCKRenderContext::DumpToFile(CKSTRING filename, const VxRect *rect, VXBU
         return CKERR_INVALIDPARAMETER;
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
-    if (buffer != VXBUFFER_BACKBUFFER)
-        return CKERR_NOTIMPLEMENTED;
-
     VxImageDescEx image = {};
     image.Size = sizeof(image);
     const int imageSize = DumpToMemory(rect, buffer, image);
     if (imageSize <= 0)
-        return CKERR_INVALIDOPERATION;
+        return CKERR_INVALIDPARAMETER;
 
     XArray<CKBYTE> pixels(imageSize);
     image.Image = pixels.Begin();
     if (DumpToMemory(rect, buffer, image) <= 0)
-        return CKERR_INVALIDOPERATION;
+        return CKERR_INVALIDPARAMETER;
 
-    return CKSaveBitmap(filename, image) ? CK_OK : CKERR_INVALIDOPERATION;
+    return CKSaveBitmap(filename, image) ? CK_OK : CKERR_NOSAVEPLUGINS;
 }
 
 CKBOOL RCKRenderContext::QueueTextureCopy(RCKTexture *texture,
@@ -3456,7 +3415,7 @@ int RCKRenderContext::ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3d
     const float dz = localBox.Max.z - localBox.Min.z;
     if (dz < EPSILON) {
         const VxPlane plane(a->m_WorldMatrix[2], a->m_WorldMatrix[3]);
-        const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
+        const float prod = plane.Classify(cam) * plane.Classify(b->m_WorldBoundingBox);
         if (prod != 0.0f)
             return (prod >= 0.0f) ? 1 : -1;
         return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
@@ -3469,14 +3428,14 @@ int RCKRenderContext::ClassifyTransparentOrder(const RCK3dEntity *a, const RCK3d
             return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
 
         const VxPlane plane(a->m_WorldMatrix[0], a->m_WorldMatrix[3]);
-        const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
+        const float prod = plane.Classify(cam) * plane.Classify(b->m_WorldBoundingBox);
         if (prod == 0.0f)
             return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
         return (prod >= 0.0f) ? 1 : -1;
     }
 
     const VxPlane plane(a->m_WorldMatrix[1], a->m_WorldMatrix[3]);
-    const float prod = DotProduct(plane.m_Normal, cam) * plane.Classify(b->m_WorldBoundingBox);
+    const float prod = plane.Classify(cam) * plane.Classify(b->m_WorldBoundingBox);
     if (prod == 0.0f)
         return a->m_WorldBoundingBox.Classify(b->m_WorldBoundingBox, cam);
     return (prod >= 0.0f) ? 1 : -1;
@@ -3498,8 +3457,16 @@ void RCKRenderContext::RenderTransparents(CKDWORD flags) {
 
         m_TransparentObjectsSortTimeProfiler.Reset();
 
+        VxMatrix view = m_ViewMatrix, projection = m_ProjectionMatrix;
+        if (m_RasterizerContext) {
+            VxMatrix current;
+            if (m_RasterizerContext->GetTransformMatrix(VXMATRIX_VIEW, current))
+                view = current;
+            if (m_RasterizerContext->GetTransformMatrix(VXMATRIX_PROJECTION, current))
+                projection = current;
+        }
         VxMatrix viewProj;
-        Vx3DMultiplyMatrix(viewProj, m_ViewMatrix, m_ProjectionMatrix);
+        Vx3DMultiplyMatrix4(viewProj, projection, view);
 
         struct TransparentItem {
             RCK3dEntity *entity;
@@ -3706,8 +3673,8 @@ VxDrawPrimitiveData *UserDrawPrimitiveDataClass::GetStructure(CKRST_DPFLAGS DpFl
     // IDA: 0x1006e27e
     // If requested vertex count is larger than current allocation, reallocate
     if (VertexCount > m_MaxVertexCount) {
-        m_MaxVertexCount = VertexCount;
         ClearStructure();
+        m_MaxVertexCount = VertexCount;
         AllocateStructure();
     }
 
@@ -3760,6 +3727,8 @@ void UserDrawPrimitiveDataClass::ClearStructure() {
 
     // Re-initialize the base structure
     memset((VxDrawPrimitiveData *) this, 0, sizeof(VxDrawPrimitiveData));
+    memset(m_CachedDP, 0, sizeof(m_CachedDP));
+    m_MaxVertexCount = 0;
 }
 
 void UserDrawPrimitiveDataClass::AllocateStructure() {
