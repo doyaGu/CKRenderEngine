@@ -342,3 +342,45 @@ TEST_F(MeshRayIntersectionTest, ClassificationPreservesTheSameRayAtOrdinaryAndLa
         EXPECT_NEAR(0.5f / scales[i], hit.Distance, 0.00001f / scales[i]);
     }
 }
+
+TEST_F(MeshRayIntersectionTest, AffineTexturePickingUsesTheLiveProjectionAndLeavesLocalNormalInterpolationIntact) {
+    RCKMesh *mesh = Mesh(); ASSERT_NE(nullptr, mesh);
+    Triangle(*mesh, 0, VxVector(0, 0, 1), VxVector(4, 0, 2), VxVector(0, 4, 4));
+    mesh->BuildFaceNormals();
+    VxVector normals[] = {VxVector(1, 0, 0), VxVector(0, 2, 0), VxVector(0, 0, 3)};
+    for (int i = 0; i < 3; ++i) mesh->SetVertexNormal(i, &normals[i]);
+    mesh->SetVertexTextureCoordinates(0, 0, 0, -1);
+    mesh->SetVertexTextureCoordinates(1, 1, 0, -1);
+    mesh->SetVertexTextureCoordinates(2, 0, 1, -1);
+    RCKMaterial *material = static_cast<RCKMaterial *>(Context->CreateObject(CKCID_MATERIAL));
+    ASSERT_NE(nullptr, material);
+    material->EnablePerspectiveCorrection(FALSE);
+    mesh->SetFaceMaterial(0, reinterpret_cast<CKMaterial *>(material));
+
+    Device = new RCKRenderContext(Context);
+    Device->m_RasterizerContext = &Projection;
+    Context->m_BehaviorContext.CurrentRenderContext = Device;
+    ASSERT_NE(nullptr, Device->m_RenderedScene);
+    CK3dEntity *root = Device->m_RenderedScene->GetRootEntity(); ASSERT_NE(nullptr, root);
+    root->SetWorldMatrix(VxMatrix::Identity());
+    Device->SetProjectionTransformationMatrix(VxMatrix::Identity());
+    // A backend callback may change the projection without updating the CPU cache.
+    // This matrix maps screen XY to (x/z,y/z), so the projected coefficients are 1:2:8.
+    Projection.Matrices[VXMATRIX_PROJECTION][2][3] = 1;
+    Projection.Matrices[VXMATRIX_PROJECTION][3][3] = 0;
+    VxIntersectionDesc hit = {};
+    hit.Object = reinterpret_cast<CKRenderObject *>(root);
+    ASSERT_EQ(1, Intersect(*mesh, VxVector(1, 2, 4.75f), VxVector(0, 0, -4), &hit, CKRAYINTERSECTION_SEGMENT));
+    Vector(hit.IntersectionPoint, 1, 2, 2.75f);
+    Vector(hit.IntersectionNormal, 0.25f, 0.5f, 1.5f);
+    EXPECT_NEAR(2.0f / 11.0f, hit.TexU, 0.00001f);
+    EXPECT_NEAR(8.0f / 11.0f, hit.TexV, 0.00001f);
+    EXPECT_GT(Projection.ProjectionReads, 0);
+
+    Projection.ProjectionReads = 0;
+    material->EnablePerspectiveCorrection(TRUE);
+    ASSERT_EQ(1, Intersect(*mesh, VxVector(1, 2, 4.75f), VxVector(0, 0, -4), &hit, CKRAYINTERSECTION_SEGMENT));
+    EXPECT_NEAR(0.25f, hit.TexU, 0.00001f);
+    EXPECT_NEAR(0.5f, hit.TexV, 0.00001f);
+    EXPECT_EQ(0, Projection.ProjectionReads);
+}

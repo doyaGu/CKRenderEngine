@@ -409,7 +409,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                     if (dev) {
                         CK3dEntity *rootEntity = dev->m_RenderedScene->GetRootEntity();
                         if (desc->Object == (CKRenderObject *) rootEntity) {
-                            // Perform perspective-correct UV interpolation
+                            // Affine materials interpolate UVs in screen space.
                             VxMatrix invWorld;
                             Vx3DMatrixIdentity(invWorld);
                             VxMatrix combined;
@@ -419,7 +419,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                             Vx3DMultiplyMatrix(combined, invWorldMat, worldMatrix);
 
                             VxMatrix projCombined;
-                            Vx3DMultiplyMatrix4(projCombined, dev->m_ProjectionMatrix, combined);
+                            Vx3DMultiplyMatrix4(projCombined, dev->GetProjectionTransformationMatrix(), combined);
 
                             // Transform points to clip space
                             VxVector4 clipIntersect, clipV0, clipV1, clipV2;
