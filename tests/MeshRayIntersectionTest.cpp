@@ -197,6 +197,25 @@ TEST_F(MeshRayIntersectionTest, SixteenFaceClassificationPreservesInteriorHitsFo
     }
 }
 
+TEST_F(MeshRayIntersectionTest, ClassificationThresholdDoesNotDiscardExactEdgeAndVertexContacts) {
+    const VxVector origins[] = {VxVector(0, 1, -2), VxVector(0, 0, -2)};
+    for (int faceCount = 15; faceCount <= 16; ++faceCount) {
+        SCOPED_TRACE(faceCount);
+        RCKMesh *mesh = Mesh(faceCount); ASSERT_NE(nullptr, mesh);
+        for (int face = 0; face < faceCount; ++face)
+            Triangle(*mesh, face, VxVector(0, 0, 0), VxVector(0, 4, 0), VxVector(4, 0, 0));
+        mesh->BuildFaceNormals();
+        for (int contact = 0; contact < 2; ++contact) {
+            SCOPED_TRACE(contact);
+            VxIntersectionDesc hit = {};
+            ASSERT_EQ(faceCount, Intersect(*mesh, origins[contact], VxVector(0, 0, 4), &hit, CKRAYINTERSECTION_SEGMENT));
+            EXPECT_EQ(0, hit.FaceIndex);
+            EXPECT_FLOAT_EQ(0.5f, hit.Distance);
+            Vector(hit.IntersectionPoint, origins[contact].x, origins[contact].y, 0);
+        }
+    }
+}
+
 TEST_F(MeshRayIntersectionTest, UnsignedWordTopologyReadsVerticesAboveTheSignedWordRange) {
     RCKMesh *mesh = Mesh(); ASSERT_NE(nullptr, mesh);
     ASSERT_TRUE(mesh->SetVertexCount(32771));

@@ -238,15 +238,15 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
         CKDWORD *flagPtr = vertexFlags;
         for (int v = 0; v < vertexCount; ++v) {
             float proj1 = DotProduct(*(VxVector *) vPtr, axis1);
-            if (proj1 >= originProj1)
+            if (proj1 > originProj1)
                 *flagPtr |= 2;
-            else
+            else if (proj1 < originProj1)
                 *flagPtr |= 1;
 
             float proj2 = DotProduct(*(VxVector *) vPtr, axis2);
-            if (proj2 >= originProj2)
+            if (proj2 > originProj2)
                 *flagPtr |= 8;
-            else
+            else if (proj2 < originProj2)
                 *flagPtr |= 4;
 
             earlyOutMask &= *flagPtr;
@@ -274,14 +274,13 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
         int i2 = 2; // v55
 
         // Select intersection function based on mode (IDA lines 153-158)
-        typedef XBOOL (*IntersectFunc)(const VxRay &, const VxVector &, const VxVector &,
-                                       const VxVector &, const VxVector &, VxVector &, float &, int &, int &);
-        IntersectFunc culledFunc = (IntersectFunc) VxIntersect::RayFaceCulled; // v61
-        IntersectFunc twoSidedFunc = (IntersectFunc) VxIntersect::RayFace;     // v62
+        typedef XBOOL (*IntersectFunc)(const VxRay &, const VxPlane &, VxVector &, float &);
+        IntersectFunc culledFunc = VxIntersect::RayPlaneCulled;
+        IntersectFunc twoSidedFunc = VxIntersect::RayPlane;
 
         if ((mode & CKRAYINTERSECTION_SEGMENT) != 0) {
-            culledFunc = (IntersectFunc) VxIntersect::SegmentFaceCulled;
-            twoSidedFunc = (IntersectFunc) VxIntersect::SegmentFace;
+            culledFunc = VxIntersect::SegmentPlaneCulled;
+            twoSidedFunc = VxIntersect::SegmentPlane;
         }
 
         VxVector intersectPoint; // v60
@@ -300,12 +299,44 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                 CKMaterial *mat = mesh->GetFaceMaterial(f);
                 CKBOOL twoSided = mat && mat->IsTwoSided();
 
-                // Call appropriate intersection function (IDA line 171)
+                // Keep the SDK plane/culling contract, but include triangle
+                // boundaries for both windings rather than its SIMD face test.
+                VxPlane plane;
+                plane.Create(*faceNormalPtr, *v0);
                 CKBOOL hit;
                 if (twoSided)
-                    hit = twoSidedFunc(ray, *v0, *v1, *v2, *faceNormalPtr, intersectPoint, dist, i1, i2);
+                    hit = twoSidedFunc(ray, plane, intersectPoint, dist);
                 else
-                    hit = culledFunc(ray, *v0, *v1, *v2, *faceNormalPtr, intersectPoint, dist, i1, i2);
+                    hit = culledFunc(ray, plane, intersectPoint, dist);
+
+                if (hit) {
+                    float dominant = fabsf(faceNormalPtr->x);
+                    i1 = 1;
+                    i2 = 2;
+                    if (dominant < fabsf(faceNormalPtr->y)) {
+                        dominant = fabsf(faceNormalPtr->y);
+                        i1 = 0;
+                        i2 = 2;
+                    }
+                    if (dominant < fabsf(faceNormalPtr->z)) {
+                        i1 = 0;
+                        i2 = 1;
+                    }
+                    const VxVector *corners[3] = {v0, v1, v2};
+                    CKBOOL nonnegative = TRUE, nonpositive = TRUE;
+                    for (int edge = 0; edge < 3; ++edge) {
+                        const VxVector &a = *corners[edge];
+                        const VxVector &b = *corners[(edge + 1) % 3];
+                        const double side =
+                            (static_cast<double>(intersectPoint[i1]) - a[i1]) *
+                                (static_cast<double>(b[i2]) - a[i2]) -
+                            (static_cast<double>(intersectPoint[i2]) - a[i2]) *
+                                (static_cast<double>(b[i1]) - a[i1]);
+                        if (side < 0.0) nonnegative = FALSE;
+                        if (side > 0.0) nonpositive = FALSE;
+                    }
+                    hit = nonnegative || nonpositive;
+                }
 
                 if (hit) {
                     // The public occlusion query returns on its first hit.
