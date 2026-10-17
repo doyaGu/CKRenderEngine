@@ -521,6 +521,7 @@ if (TARGET gtest_main)
             NearestPointGridSearchTest NearestPointGridLifecycleTest
             PlaceFitterMatchingTest PlaceFitterHierarchyTest
             RadixSorterIntegerTest RadixSorterFloatTest
+            VertexCacheBehaviorTest VertexCacheLifecycleTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
