@@ -584,7 +584,7 @@ struct VxMaterialChannel {
     VXBLEND_MODE m_SourceBlend;    // 0x08
     VXBLEND_MODE m_DestBlend;      // 0x0C
     CKDWORD m_Flags;               // 0x10
-    XArray<CKWORD> *m_FaceIndices; // 0x14 - Per-channel face indices (nullptr if channel applies to all faces)
+    XArray<CKWORD> *m_FaceIndices; // 0x14 - Triangle vertex indices (nullptr when all faces use the channel)
 
     VxMaterialChannel()
         : m_UVs(nullptr),
