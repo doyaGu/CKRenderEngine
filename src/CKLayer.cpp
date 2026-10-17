@@ -8,6 +8,7 @@
 #include "CKGridManager.h"
 
 #include <climits>
+#include <cstring>
 #include <new>
 
 static CKBOOL LayerCellCount(CKGrid *grid, int &count) {
@@ -87,14 +88,14 @@ void RCKLayer::SetValue(int x, int y, void *val) {
     // Original directly accesses array without null checks
     const int width = m_Grid->GetWidth();
     const int idx = y * width + x;
-    m_SquareArray[idx].ival = *static_cast<CKDWORD *>(val);
+    memmove(&m_SquareArray[idx].ival, val, sizeof(CKDWORD));
 }
 
 void RCKLayer::GetValue(int x, int y, void *val) {
     // Original directly accesses array without null checks
     const int width = m_Grid->GetWidth();
     const int idx = y * width + x;
-    *static_cast<CKDWORD *>(val) = m_SquareArray[idx].ival;
+    memmove(val, &m_SquareArray[idx].ival, sizeof(CKDWORD));
 }
 
 CKBOOL RCKLayer::SetValue2(int x, int y, void *val) {
@@ -103,7 +104,7 @@ CKBOOL RCKLayer::SetValue2(int x, int y, void *val) {
     // Original checks bounds: x >= width || x < 0 || y >= length || y < 0
     if (x >= width || x < 0 || y >= length || y < 0)
         return FALSE;
-    m_SquareArray[y * width + x].ival = *static_cast<CKDWORD *>(val);
+    memmove(&m_SquareArray[y * width + x].ival, val, sizeof(CKDWORD));
     return TRUE;
 }
 
@@ -112,10 +113,11 @@ CKBOOL RCKLayer::GetValue2(int x, int y, void *val) {
     const int length = m_Grid->GetLength();
     // Original checks bounds: x >= width || x < 0 || y >= length || y < 0
     if (x >= width || x < 0 || y >= length || y < 0) {
-        *static_cast<CKDWORD *>(val) = 0;
+        const CKDWORD zero = 0;
+        memcpy(val, &zero, sizeof(zero));
         return FALSE;
     }
-    *static_cast<CKDWORD *>(val) = m_SquareArray[y * width + x].ival;
+    memmove(val, &m_SquareArray[y * width + x].ival, sizeof(CKDWORD));
     return TRUE;
 }
 
@@ -255,7 +257,14 @@ CKStateChunk *RCKLayer::Save(CKFile *file, CKDWORD flags) {
         // Write square array data if format is 0 and grid exists
         if (m_Format == 0 && m_Grid) {
             int count;
-            if (!LayerCellCount(m_Grid, count) || count > INT_MAX / static_cast<int>(sizeof(CKDWORD)) - 1) {
+            if (!LayerCellCount(m_Grid, count)) {
+                DeleteCKStateChunk(chunk);
+                return nullptr;
+            }
+            // Layer-first Load retains cells until the owner dimensions arrive.
+            if (count == 0 && m_SquareCount > 0)
+                count = m_SquareCount;
+            if (count > INT_MAX / static_cast<int>(sizeof(CKDWORD)) - 1) {
                 DeleteCKStateChunk(chunk);
                 return nullptr;
             }
@@ -435,6 +444,9 @@ CKERROR RCKLayer::Copy(CKObject &o, CKDependenciesContext &context) {
     int count;
     if (!LayerCellCount(src->m_Grid, count))
         return CKERR_INVALIDPARAMETER;
+    // Preserve the known loaded prefix while its owner's size is pending.
+    if (src->m_Grid && count == 0 && src->m_SquareCount > 0)
+        count = src->m_SquareCount;
     CKSquare *squares = count > 0 ? new(std::nothrow) CKSquare[count]() : nullptr;
     if (count > 0 && !squares)
         return CKERR_OUTOFMEMORY;

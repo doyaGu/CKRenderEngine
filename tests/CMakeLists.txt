@@ -468,6 +468,7 @@ if (TARGET gtest_main)
             AnimationAbiCompletionTest AnimationClockCompletionTest
             KeyedAnimationAbiCompletionTest KeyedAnimationCompositionCompletionTest KeyedAnimationLifetimeCompletionTest
             GridAbiCompletionTest GridGeometryCompletionTest GridStorageCompletionTest GridDisplayCompletionTest
+            LayerAbiCompletionTest LayerCellCompletionTest LayerStorageCompletionTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
             MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest

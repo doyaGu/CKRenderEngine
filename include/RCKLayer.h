@@ -60,6 +60,10 @@ public:
     void FitSquareArray();
 
 private:
+    // Registered identity, owned name and cells are copied by the context.
+    RCKLayer(const RCKLayer &) = delete;
+    RCKLayer &operator=(const RCKLayer &) = delete;
+
     friend class RCKGrid;
     CKERROR FitSquareArrayForLoad();
 
