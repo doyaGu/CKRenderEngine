@@ -180,7 +180,7 @@ TEST_F(RenderContextStateCompletionTest, ExtentsAndStatsReturnCurrentValuesWitho
     VxStats stats = {}; Device->GetStats(&stats); EXPECT_EQ(31, stats.NbTrianglesDrawn);
     stats.NbTrianglesDrawn = 0; EXPECT_EQ(31, Device->GetStats().NbTrianglesDrawn);
     int bpp = 0, depth = 0, stencil = 0;
-    EXPECT_EQ(_32_ARGB8888, Device->GetPixelFormat(&bpp, &depth, &stencil));
+    EXPECT_EQ(UNKNOWN_PF, Device->GetPixelFormat(&bpp, &depth, &stencil));
     EXPECT_EQ(32, bpp); EXPECT_EQ(24, depth); EXPECT_EQ(8, stencil);
 }
 } // namespace

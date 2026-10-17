@@ -115,9 +115,8 @@ public:
     void DisableTextureStagesFrom(int FirstStage);
     CKDWORD GetRasterizerRenderState(VXRENDERSTATETYPE State) const {
         CKDWORD value = 0;
-        if (m_RasterizerContext)
-            m_RasterizerContext->GetRenderState(State, &value);
-        return value;
+        return m_RasterizerContext && m_RasterizerContext->GetRenderState(State, &value)
+                   ? value : 0;
     }
     void ApplyRenderOptions();
     void SetClearBackground(CKBOOL ClearBack = TRUE) override;
@@ -370,6 +369,11 @@ public:
     CKRenderContextSettings m_WindowSettings;
     int m_WindowDriverIndex;
     CKRenderContextReadback *m_Readbacks;
+    // Backend queries use separate snapshots so temporary draw transforms do
+    // not overwrite the full camera matrices used for CPU traversal/picking.
+    VxMatrix m_QueriedWorldMatrix;
+    VxMatrix m_QueriedViewMatrix;
+    VxMatrix m_QueriedProjectionMatrix;
 };
 
 // Saves the fixed-function state the engine changes around a special draw
@@ -382,7 +386,7 @@ public:
     CKRenderContextStateGuard(const CKRenderContextStateGuard &) = delete;
     CKRenderContextStateGuard &operator=(const CKRenderContextStateGuard &) = delete;
 
-    void Restore();
+    CKBOOL Restore();
     void Dismiss() { m_Rst = NULL; }
 
 private:
@@ -394,6 +398,11 @@ private:
     VxMatrix m_World;
     VxMatrix m_View;
     VxMatrix m_Projection;
+    CKBOOL m_RenderStateValid[VXRENDERSTATE_MAXSTATE];
+    CKBOOL m_StageStateValid[CKRST_MAX_TEXTURE_STAGES][CKRST_TSS_MAXSTATE];
+    CKBOOL m_TextureValid[CKRST_MAX_TEXTURE_STAGES];
+    CKBOOL m_TextureMatrixValid[CKRST_MAX_TEXTURE_STAGES];
+    CKBOOL m_TransformValid[3];
 };
 
 // Saves one render state and restores it on destruction.
@@ -404,7 +413,7 @@ public:
     CKRenderStateGuard(const CKRenderStateGuard &) = delete;
     CKRenderStateGuard &operator=(const CKRenderStateGuard &) = delete;
 
-    void Restore();
+    CKBOOL Restore();
     void Dismiss() { m_Rst = NULL; }
 
 private:

@@ -506,6 +506,8 @@ if (TARGET gtest_main)
             RenderContextGeometryCompletionTest RenderContextPickingCompletionTest
             RenderContextTransparencyCompletionTest RenderContextTransferCompletionTest
             RenderContextInterfaceCompletionTest RenderContextSubmissionCompletionTest
+            RenderContextGuardCompletionTest RenderContextPlatformCompletionTest
+            RenderContextVertexContractTest RenderContextQueryCompletionTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

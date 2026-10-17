@@ -252,9 +252,10 @@ protected:
         Manager->m_Drivers[0].CapsUpToDate = TRUE; Manager->m_Drivers[0].RasterizerDriver = &Driver;
         Manager->m_Drivers[0].Caps3D.MaxNumberTextureStage = 2;
         ASSERT_TRUE(Manager->RegisterRasterizerContext(&FallbackState, 0));
+        const VxMatrix projection = Device->GetProjectionTransformationMatrix();
         Device->m_RasterizerContext = &FallbackState; Device->m_RasterizerDriver = &Driver; Device->m_DriverIndex = 0;
         Device->m_Current3dEntity = nullptr; FallbackState.Trace = &Trace;
-        Device->SetProjectionTransformationMatrix(Device->GetProjectionTransformationMatrix());
+        Device->SetProjectionTransformationMatrix(projection);
     }
     void TearDown() override {
         if (Device) Device->m_RasterizerDriver = nullptr;

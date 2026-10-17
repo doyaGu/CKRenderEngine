@@ -12,7 +12,7 @@
 extern void SetProcessorSpecific_FunctionsPtr();
 
 namespace {
-// Consumer seam only: every operation other than matrix delivery is rejected.
+// Consumer seam only: every operation other than world matrix delivery/query is rejected.
 // Culling and projection execute the actual engine and VxMath code.
 class FrustumWorldSink final : public CKRasterizerContext {
 public:
@@ -38,7 +38,7 @@ public:
     CKBOOL SetTexture(CKDWORD Texture, int Stage) override { ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }
     CKBOOL GetTexture(int Stage, CKDWORD *Texture) override { ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }
     CKBOOL SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) override { if (Type == VXMATRIX_WORLD) { ++WorldCalls; LastWorld = Mat; } return TRUE; }
-    CKBOOL GetTransformMatrix(VXMATRIX_TYPE Type, VxMatrix &Mat) override { ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }
+    CKBOOL GetTransformMatrix(VXMATRIX_TYPE Type, VxMatrix &Mat) override { if (Type == VXMATRIX_WORLD) { Mat = LastWorld; return TRUE; } ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }
     CKBOOL SetLight(CKDWORD Index, const CKLightData *Data) override { ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }
     CKBOOL EnableLight(CKDWORD Index, CKBOOL Enable) override { ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }
     CKBOOL SetMaterial(const CKMaterialData *Data) override { ADD_FAILURE() << "Unexpected rasterizer operation"; return FALSE; }

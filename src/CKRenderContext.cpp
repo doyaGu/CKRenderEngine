@@ -669,10 +669,10 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
         data.ColorPtr = const_cast<CKDWORD *>(colors); data.ColorStride = sizeof(CKDWORD);
         data.TexCoordPtr = const_cast<Vx2DVector *>(coordinates); data.TexCoordStride = sizeof(Vx2DVector);
         const CKBOOL submitted = ready && m_RasterizerContext->DrawPrimitive(VX_TRIANGLEFAN, nullptr, 4, &data);
-        state.Restore();
+        const CKBOOL stateRestored = state.Restore();
         const CKBOOL restored = viewportOnly || m_RasterizerContext->SetViewport(&m_ViewportData);
         const CKBOOL ended = !ownScene || m_RasterizerContext->EndScene();
-        if (!submitted || !restored || !ended)
+        if (!submitted || !stateRestored || !restored || !ended)
             return CKERR_INVALIDOPERATION;
     }
 
@@ -827,6 +827,9 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
         }
     }
 
+    // Native stereo requires an eye-buffer selector and a driver capability.
+    // The portable interface supplies neither, so this context renders one
+    // mono view; drawing twice into the same target would not provide stereo.
     CKERROR err = CK_OK;
 
     const bool frameLog = FrameLogEnabled();
@@ -1335,11 +1338,27 @@ void RCKRenderContext::GetViewRect(VxRect &rect) {
 
 VX_PIXELFORMAT RCKRenderContext::GetPixelFormat(int *Bpp, int *Zbpp, int *StencilBpp) {
     // IDA: 0x100675f2
-    if (Bpp) *Bpp = m_Settings.m_Bpp;
+    VX_PIXELFORMAT format = UNKNOWN_PF;
+    int colorBits = m_Settings.m_Bpp;
+    if (m_TargetTexture) {
+        // A texture can have a different resident object in each context.
+        // Query this target's owner rather than its last selected device.
+        colorBits = 0;
+        if (m_RasterizerContext &&
+            m_RenderManager->SelectTextureObject(m_TargetTexture, m_RasterizerContext)) {
+            CKTextureDesc desc;
+            if (m_RasterizerContext->GetTextureDesc(m_TargetTexture->GetRstTextureIndex(), &desc)) {
+                colorBits = desc.Format.BitsPerPixel;
+                format = VxImageDesc2PixelFormat(desc.Format);
+            }
+        }
+    }
+    // The window descriptor exposes Bpp but no channel masks. Neither 16 nor
+    // 32 bits identifies a pixel format; do not invent one from the bit count.
+    if (Bpp) *Bpp = colorBits;
     if (Zbpp) *Zbpp = m_Settings.m_Zbpp;
     if (StencilBpp) *StencilBpp = m_Settings.m_StencilBpp;
-
-    return _32_ARGB8888;
+    return format;
 }
 
 void RCKRenderContext::SetState(VXRENDERSTATETYPE State, CKDWORD Value) {
@@ -1378,73 +1397,94 @@ void RCKRenderContext::DisableTextureStagesFrom(int FirstStage) {
 // State guards
 // ---------------------------------------------------------------------------
 
-CKRenderContextStateGuard::CKRenderContextStateGuard(CKRasterizerContext *Rst) : m_Rst(Rst) {
+CKRenderContextStateGuard::CKRenderContextStateGuard(CKRasterizerContext *Rst)
+    : m_Rst(Rst), m_RenderStateValid{}, m_StageStateValid{}, m_TextureValid{},
+      m_TextureMatrixValid{}, m_TransformValid{} {
     if (!m_Rst)
         return;
     for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state)
-        m_Rst->GetRenderState((VXRENDERSTATETYPE)state, &m_RenderStates[state]);
+        m_RenderStateValid[state] = m_Rst->GetRenderState((VXRENDERSTATETYPE)state, &m_RenderStates[state]);
     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
-        m_Textures[stage] = 0;
-        m_Rst->GetTexture(stage, &m_Textures[stage]);
-        m_StageStates[stage][0] = 0;
+        m_TextureValid[stage] = m_Rst->GetTexture(stage, &m_Textures[stage]);
         for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss)
-            m_Rst->GetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &m_StageStates[stage][tss]);
-        m_Rst->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), m_TextureMatrices[stage]);
+            m_StageStateValid[stage][tss] = m_Rst->GetTextureStageState(
+                stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &m_StageStates[stage][tss]);
+        m_TextureMatrixValid[stage] = m_Rst->GetTransformMatrix(
+            (VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), m_TextureMatrices[stage]);
     }
-    m_Rst->GetTransformMatrix(VXMATRIX_WORLD, m_World);
-    m_Rst->GetTransformMatrix(VXMATRIX_VIEW, m_View);
-    m_Rst->GetTransformMatrix(VXMATRIX_PROJECTION, m_Projection);
+    m_TransformValid[0] = m_Rst->GetTransformMatrix(VXMATRIX_WORLD, m_World);
+    m_TransformValid[1] = m_Rst->GetTransformMatrix(VXMATRIX_VIEW, m_View);
+    m_TransformValid[2] = m_Rst->GetTransformMatrix(VXMATRIX_PROJECTION, m_Projection);
 }
 
-void CKRenderContextStateGuard::Restore() {
+CKBOOL CKRenderContextStateGuard::Restore() {
     if (!m_Rst)
-        return;
+        return TRUE;
     CKRasterizerContext *rst = m_Rst;
     m_Rst = NULL;
 
-    rst->SetTransformMatrix(VXMATRIX_WORLD, m_World);
-    rst->SetTransformMatrix(VXMATRIX_VIEW, m_View);
-    rst->SetTransformMatrix(VXMATRIX_PROJECTION, m_Projection);
+    CKBOOL restored = TRUE;
+    if (m_TransformValid[0] && !rst->SetTransformMatrix(VXMATRIX_WORLD, m_World))
+        restored = FALSE;
+    if (m_TransformValid[1] && !rst->SetTransformMatrix(VXMATRIX_VIEW, m_View))
+        restored = FALSE;
+    if (m_TransformValid[2] && !rst->SetTransformMatrix(VXMATRIX_PROJECTION, m_Projection))
+        restored = FALSE;
     for (CKDWORD state = 0; state < (CKDWORD)VXRENDERSTATE_MAXSTATE; ++state) {
         CKDWORD current = 0;
-        if (rst->GetRenderState((VXRENDERSTATETYPE)state, &current) && current != m_RenderStates[state])
-            rst->SetRenderState((VXRENDERSTATETYPE)state, m_RenderStates[state]);
+        if (m_RenderStateValid[state] &&
+            (!rst->GetRenderState((VXRENDERSTATETYPE)state, &current) || current != m_RenderStates[state]) &&
+            !rst->SetRenderState((VXRENDERSTATETYPE)state, m_RenderStates[state]))
+            restored = FALSE;
     }
     for (int stage = 0; stage < CKRST_MAX_TEXTURE_STAGES; ++stage) {
         CKDWORD texture = 0;
-        if (rst->GetTexture(stage, &texture) && texture != m_Textures[stage])
-            rst->SetTexture(m_Textures[stage], stage);
-        // TEXTUREMAPBLEND first: it resets the combine states, which are
-        // replayed afterwards.
+        if (m_TextureValid[stage] &&
+            (!rst->GetTexture(stage, &texture) || texture != m_Textures[stage]) &&
+            !rst->SetTexture(m_Textures[stage], stage))
+            restored = FALSE;
+        // Both legacy blend setters change the combine states. Replay them
+        // before the captured explicit OP/ARG values, including manual overrides.
         CKDWORD current = 0;
-        if (rst->GetTextureStageState(stage, CKRST_TSS_TEXTUREMAPBLEND, &current) &&
-            current != m_StageStates[stage][CKRST_TSS_TEXTUREMAPBLEND])
-            rst->SetTextureStageState(stage, CKRST_TSS_TEXTUREMAPBLEND, m_StageStates[stage][CKRST_TSS_TEXTUREMAPBLEND]);
-        for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
-            if (tss == (CKDWORD)CKRST_TSS_TEXTUREMAPBLEND || tss == (CKDWORD)CKRST_TSS_ADDRESS)
-                continue;
-            if (rst->GetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &current) &&
-                current != m_StageStates[stage][tss])
-                rst->SetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, m_StageStates[stage][tss]);
+        const CKRST_TEXTURESTAGESTATETYPE blends[] = {CKRST_TSS_TEXTUREMAPBLEND, CKRST_TSS_STAGEBLEND};
+        for (int i = 0; i < 2; ++i) {
+            const CKRST_TEXTURESTAGESTATETYPE blend = blends[i];
+            if (m_StageStateValid[stage][blend] &&
+                (!rst->GetTextureStageState(stage, blend, &current) || current != m_StageStates[stage][blend]) &&
+                !rst->SetTextureStageState(stage, blend, m_StageStates[stage][blend]))
+                restored = FALSE;
         }
-        rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), m_TextureMatrices[stage]);
+        for (CKDWORD tss = CKRST_TSS_OP; tss < (CKDWORD)CKRST_TSS_MAXSTATE; ++tss) {
+            if (tss == (CKDWORD)CKRST_TSS_TEXTUREMAPBLEND || tss == (CKDWORD)CKRST_TSS_STAGEBLEND)
+                continue;
+            if (m_StageStateValid[stage][tss] &&
+                (!rst->GetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, &current) ||
+                 current != m_StageStates[stage][tss]) &&
+                !rst->SetTextureStageState(stage, (CKRST_TEXTURESTAGESTATETYPE)tss, m_StageStates[stage][tss]))
+                restored = FALSE;
+        }
+        if (m_TextureMatrixValid[stage] &&
+            !rst->SetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + stage), m_TextureMatrices[stage]))
+            restored = FALSE;
     }
+    return restored;
 }
 
 CKRenderStateGuard::CKRenderStateGuard(CKRasterizerContext *Rst, VXRENDERSTATETYPE State, CKBOOL Active)
     : m_Rst(Active ? Rst : NULL), m_State(State), m_Value(0) {
-    if (m_Rst)
-        m_Rst->GetRenderState(m_State, &m_Value);
+    if (m_Rst && !m_Rst->GetRenderState(m_State, &m_Value))
+        m_Rst = NULL;
 }
 
-void CKRenderStateGuard::Restore() {
+CKBOOL CKRenderStateGuard::Restore() {
     if (!m_Rst)
-        return;
+        return TRUE;
     CKRasterizerContext *rst = m_Rst;
     m_Rst = NULL;
     CKDWORD current = 0;
-    if (rst->GetRenderState(m_State, &current) && current != m_Value)
-        rst->SetRenderState(m_State, m_Value);
+    if (!rst->GetRenderState(m_State, &current) || current != m_Value)
+        return rst->SetRenderState(m_State, m_Value);
+    return TRUE;
 }
 
 CKBOOL RCKRenderContext::SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage) {
@@ -1952,14 +1992,35 @@ void RCKRenderContext::SetViewTransformationMatrix(const VxMatrix &M) {
 }
 
 const VxMatrix &RCKRenderContext::GetWorldTransformationMatrix() {
+    if (m_RasterizerContext) {
+        VxMatrix current;
+        if (m_RasterizerContext->GetTransformMatrix(VXMATRIX_WORLD, current)) {
+            m_QueriedWorldMatrix = current;
+            return m_QueriedWorldMatrix;
+        }
+    }
     return m_WorldMatrix;
 }
 
 const VxMatrix &RCKRenderContext::GetProjectionTransformationMatrix() {
+    if (m_RasterizerContext) {
+        VxMatrix current;
+        if (m_RasterizerContext->GetTransformMatrix(VXMATRIX_PROJECTION, current)) {
+            m_QueriedProjectionMatrix = current;
+            return m_QueriedProjectionMatrix;
+        }
+    }
     return m_ProjectionMatrix;
 }
 
 const VxMatrix &RCKRenderContext::GetViewTransformationMatrix() {
+    if (m_RasterizerContext) {
+        VxMatrix current;
+        if (m_RasterizerContext->GetTransformMatrix(VXMATRIX_VIEW, current)) {
+            m_QueriedViewMatrix = current;
+            return m_QueriedViewMatrix;
+        }
+    }
     return m_ViewMatrix;
 }
 
@@ -2666,20 +2727,17 @@ void RCKRenderContext::ReadbackCallback(void *user, const CKRECT *rect, VXBUFFER
 
 VxDirectXData *RCKRenderContext::GetDirectXInfo() {
     // IDA: 0x1006bb75
-    // Only return DirectX info if Family is 0 (DirectX family)
-    VxDriverDescEx *driverDesc = m_RenderManager->GetDriverDescription(m_DriverIndex);
-    if (driverDesc && driverDesc->Caps2D.Family == 0) {
-        return (VxDirectXData *) nullptr;
-    }
+    // No native DirectDraw/Direct3D objects are exposed by the SDL interface.
     return nullptr;
 }
 
 void RCKRenderContext::WarnEnterThread() {
-    // WarnThread removed in rasterizer v2
+    // Legacy API-context thread migration is not supported. The portable
+    // rasterizer contract requires engine calls on its render thread.
 }
 
 void RCKRenderContext::WarnExitThread() {
-    // WarnThread removed in rasterizer v2
+    // See WarnEnterThread; this does not release or migrate a graphics context.
 }
 
 // IDA: 0x10068220
@@ -2754,15 +2812,16 @@ void RCKRenderContext::AddRemoveSequence(CKBOOL Start) {
 
 void RCKRenderContext::SetTransparentMode(CKBOOL Trans) {
     m_TransparentMode = Trans;
-    // SetTransparentMode removed in rasterizer v2
+    // Legacy window-background backup/compositing has no portable hook.
 }
 
 void RCKRenderContext::AddDirtyRect(CKRECT *Rect) {
-    // AddDirtyRect removed in rasterizer v2
+    // Applies only to the unsupported legacy window-background backup path.
+    (void)Rect;
 }
 
 void RCKRenderContext::RestoreScreenBackup() {
-    // RestoreScreenBackup removed in rasterizer v2
+    // Applies only to the unsupported legacy window-background backup path.
 }
 
 CKDWORD RCKRenderContext::GetStencilFreeMask() {
@@ -2784,19 +2843,15 @@ int RCKRenderContext::GetFirstFreeStencilBits() {
 }
 
 VxDrawPrimitiveData *RCKRenderContext::LockCurrentVB(CKDWORD VertexCount) {
-    if (!m_DpFlags || !(m_DpFlags & CKRST_DP_VBUFFER))
-        return nullptr;
-    if (VertexCount > m_VertexBufferCount)
-        m_VertexBufferCount = VertexCount;
-    return m_UserDrawPrimitiveData->GetStructure((CKRST_DPFLAGS)m_DpFlags, VertexCount);
+    // GetDrawPrimitiveStructure supplies CPU streams and does not acquire a
+    // hardware buffer. Its storage must not masquerade as a current VB lock.
+    (void) VertexCount;
+    return nullptr;
 }
 
 CKBOOL RCKRenderContext::ReleaseCurrentVB() {
-    m_DpFlags = 0;
-    m_VertexBufferIndex = 0;
-    m_StartIndex = -1;
-    m_VertexBufferCount = 0;
-    return TRUE;
+    // There is no current hardware lock to release on the CPU stream path.
+    return FALSE;
 }
 
 void RCKRenderContext::SetTextureMatrix(const VxMatrix &M, int Stage) {
@@ -3314,11 +3369,13 @@ void RCKRenderContext::CallSprite3DBatches() {
     // Use original literals (do not define new constants)
     CKRenderContextStateGuard ffpState(m_RasterizerContext);
 
-    m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-    m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
+    CKBOOL ready = m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+    ready = m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE) && ready;
     VxMatrix identity;
     Vx3DMatrixIdentity(identity);
-    if (m_RasterizerContext) m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, identity);
+    ready = m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, identity) && ready;
+    if (!ready)
+        RecordFrameRenderError(CKERR_INVALIDOPERATION);
 
     VxDrawPrimitiveData dpData{};
     dpData.TexCoordStride = sizeof(CKVertex);
@@ -3341,14 +3398,19 @@ void RCKRenderContext::CallSprite3DBatches() {
             colors[1] = RGBAFTOCOLOR(&material->m_SpecularColor) | 0xFF000000;
 
             const int spriteCount = batch->m_Vertices.Size() >> 2;
-            if (spriteCount) {
+            if (spriteCount && ready) {
                 if (!material->SetAsCurrent(this, FALSE, 0)) {
                     RecordFrameRenderError(CKERR_INVALIDOPERATION);
                     material->FlushSprite3DBatch();
                     continue;
                 }
-                m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
-                m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
+                const CKBOOL unlit = m_RasterizerContext->SetRenderState(VXRENDERSTATE_LIGHTING, FALSE);
+                const CKBOOL unwrapped = m_RasterizerContext->SetRenderState(VXRENDERSTATE_WRAP0, FALSE);
+                if (!unlit || !unwrapped) {
+                    RecordFrameRenderError(CKERR_INVALIDOPERATION);
+                    material->FlushSprite3DBatch();
+                    continue;
+                }
 
                 CKVertex *vertices = batch->m_Vertices.Begin();
                 VxFillStructure(4 * spriteCount, &vertices->Diffuse, sizeof(CKVertex), 8, colors);
@@ -3395,6 +3457,8 @@ void RCKRenderContext::CallSprite3DBatches() {
     }
 
     m_Sprite3DBatches.Resize(0);
+    if (!ffpState.Restore())
+        RecordFrameRenderError(CKERR_INVALIDOPERATION);
 }
 
 void RCKRenderContext::CheckObjectExtents() {

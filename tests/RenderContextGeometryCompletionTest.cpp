@@ -145,7 +145,8 @@ TEST_F(RenderContextGeometryCompletionTest, ClipRectSubmitsMatchingViewportAndPr
     EXPECT_NEAR(135, Observer.Viewport.ViewX + (clipX / clipW + 1) * Observer.Viewport.ViewWidth * .5f, 1e-4f);
     EXPECT_NEAR(82.5f, Observer.Viewport.ViewY + (1 - clipY / clipW) * Observer.Viewport.ViewHeight * .5f, 1e-4f);
     EXPECT_EQ(10, Device->m_ViewportData.ViewX); EXPECT_EQ(200, Device->m_ViewportData.ViewWidth);
-    Matrix(Device->GetProjectionTransformationMatrix(), full);
+    Matrix(Device->GetProjectionTransformationMatrix(), cropped);
+    Matrix(Device->m_ProjectionMatrix, full);
     // The saved full projection and viewport remain usable by scene traversal.
     Device->UpdateProjection(TRUE);
     EXPECT_EQ(10, Observer.Viewport.ViewX); EXPECT_EQ(20, Observer.Viewport.ViewY);
