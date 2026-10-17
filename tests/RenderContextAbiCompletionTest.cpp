@@ -365,6 +365,8 @@ TEST_F(RenderContextAbiCompletionTest, MasterCameraAttributeSelectsTheActualView
     attached->SetPosition3f(1,2,3); attached->SetFov(PI/2);
     attached->SetFrontPlane(2); attached->SetBackPlane(300);
     master->SetPosition3f(25,6,7);
+    VxBbox planeBox; planeBox.Min.Set(-2,-1,0); planeBox.Max.Set(2,1,0);
+    master->SetBoundingBox(&planeBox, TRUE);
     const CKAttributeType attribute=Context->GetAttributeManager()->RegisterNewAttributeType(
         "1CamPl8ne4SterCube2Rend",CKPGUID_CAMERA,CKCID_CAMERA);
     ASSERT_GE(attribute,0); ASSERT_TRUE(attached->SetAttribute(attribute));
@@ -374,14 +376,14 @@ TEST_F(RenderContextAbiCompletionTest, MasterCameraAttributeSelectsTheActualView
     Sdk->Activate(TRUE); Context->GetTimeManager()->ChangeLimitOptions(CK_FRAMERATE_FREE);
     ASSERT_EQ(CK_OK,Sdk->Render(CK_RENDER_DONOTUPDATEEXTENTS));
     EXPECT_EQ(master,Device->m_Camera);
-    EXPECT_FLOAT_EQ(25,Sdk->GetViewpoint()->GetWorldMatrix()[3].x);
-    EXPECT_FLOAT_EQ(-25,Boundary.Matrices[VXMATRIX_VIEW][3].x);
-    EXPECT_FLOAT_EQ(25,Device->m_Frustum.GetOrigin().x);
-    EXPECT_FLOAT_EQ(6,Device->m_Frustum.GetOrigin().y);
-    EXPECT_FLOAT_EQ(7,Device->m_Frustum.GetOrigin().z);
+    EXPECT_FLOAT_EQ(1,Sdk->GetViewpoint()->GetWorldMatrix()[3].x);
+    EXPECT_FLOAT_EQ(-1,Boundary.Matrices[VXMATRIX_VIEW][3].x);
+    EXPECT_FLOAT_EQ(1,Device->m_Frustum.GetOrigin().x);
+    EXPECT_FLOAT_EQ(2,Device->m_Frustum.GetOrigin().y);
+    EXPECT_FLOAT_EQ(3,Device->m_Frustum.GetOrigin().z);
     EXPECT_FLOAT_EQ(2,Device->m_Frustum.GetDMin()); EXPECT_FLOAT_EQ(300,Device->m_Frustum.GetDMax());
-    EXPECT_EQ(0u,Device->m_Frustum.Classify(VxVector(25,6,12)));
-    EXPECT_NE(0u,Device->m_Frustum.Classify(VxVector(25,6,5)));
+    EXPECT_EQ(0u,Device->m_Frustum.Classify(VxVector(1,2,8)));
+    EXPECT_NE(0u,Device->m_Frustum.Classify(VxVector(1,2,1)));
     ASSERT_TRUE(attached->RemoveAttribute(attribute));
     ASSERT_EQ(CK_OK,Sdk->Render(CK_RENDER_DONOTUPDATEEXTENTS));
     EXPECT_EQ(nullptr,Device->m_Camera);
@@ -397,6 +399,8 @@ TEST_F(RenderContextAbiCompletionTest, DeletingTheCachedMasterCameraLetsDirectDr
     RCKCamera *master=static_cast<RCKCamera *>(Context->CreateObject(CKCID_CAMERA));
     ASSERT_NE(nullptr,attached); ASSERT_NE(nullptr,master);
     attached->SetPosition3f(1,2,3); master->SetPosition3f(25,6,7);
+    VxBbox planeBox; planeBox.Min.Set(-2,-1,0); planeBox.Max.Set(2,1,0);
+    master->SetBoundingBox(&planeBox, TRUE);
     const CKAttributeType attribute=Context->GetAttributeManager()->RegisterNewAttributeType(
         "1CamPl8ne4SterCube2Rend",CKPGUID_CAMERA,CKCID_CAMERA);
     ASSERT_GE(attribute,0); ASSERT_TRUE(attached->SetAttribute(attribute));

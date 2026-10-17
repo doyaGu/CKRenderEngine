@@ -1636,14 +1636,14 @@ CKBOOL RCKMaterial::SetAsCurrent(CKRenderContext *context, CKBOOL Lit, int Textu
             return FALSE;
         CKMeshContextScope::RecordMaterial(dev, m_MaterialData);
         if (!rst->SetRenderState(VXRENDERSTATE_SPECULARENABLE,
-                            m_MaterialData.SpecularPower > 0.05f))
+                            m_MaterialData.SpecularPower > 0.05f && !(dev->m_RenderManager && dev->m_RenderManager->m_DisableSpecular.Value)))
             return FALSE;
     }
     if (!rst->SetRenderState(VXRENDERSTATE_CULLMODE, IsTwoSided() ? VXCULL_NONE : VXCULL_CCW))
         return FALSE;
-    if (!rst->SetRenderState(VXRENDERSTATE_FILLMODE, m_FillMode))
+    if (!rst->SetRenderState(VXRENDERSTATE_FILLMODE, dev->m_Shading == 0 ? VXFILL_WIREFRAME : m_FillMode))
         return FALSE;
-    if (!rst->SetRenderState(VXRENDERSTATE_SHADEMODE, m_ShadeMode))
+    if (!rst->SetRenderState(VXRENDERSTATE_SHADEMODE, dev->m_Shading == 1 ? VXSHADE_FLAT : m_ShadeMode))
         return FALSE;
     if (!rst->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, ZWriteEnabled()))
         return FALSE;

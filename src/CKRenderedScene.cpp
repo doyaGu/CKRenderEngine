@@ -209,13 +209,29 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     // --- Phase 1: camera setup ---
     RCKCamera *camera = nullptr;
     if (!(Flags & CK_RENDER_SKIP3D)) {
-        camera = rc->m_Camera;
-        if (!camera)
-            camera = (RCKCamera *)m_AttachedCamera;
+        camera = (RCKCamera *)m_AttachedCamera;
+        if (rc->m_Camera) {
+            // A master plane changes the eye's orientation, not its position.
+            VxMatrix viewWorld = rootEntity->GetWorldMatrix();
+            const VxMatrix &planeWorld = rc->m_Camera->GetWorldMatrix();
+            memcpy(&viewWorld[0], &planeWorld[0], 3 * sizeof(VxVector4));
+            rootEntity->SetWorldMatrix(viewWorld, FALSE);
 
-        if (camera) {
-            rootEntity->SetWorldMatrix(camera->GetWorldMatrix(), FALSE);
+            VxVector eye;
+            rc->m_Camera->InverseTransform(&eye, (const VxVector *)&viewWorld[3]);
+            const VxBbox &planeBox = rc->m_Camera->GetBoundingBox(TRUE);
+            const float scale = rc->m_NearPlane / fabsf(eye.z);
+            rc->m_ProjectionMatrix.PerspectiveRect(
+                (planeBox.Min.x - eye.x) * scale, (planeBox.Max.x - eye.x) * scale,
+                (planeBox.Max.y - eye.y) * scale, (planeBox.Min.y - eye.y) * scale,
+                rc->m_NearPlane, rc->m_FarPlane);
+            rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
+            rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, rc->m_ProjectionMatrix);
+            // The next ordinary view must rebuild its symmetric projection.
+            rc->m_ProjectionUpdated = FALSE;
         } else {
+            if (camera)
+                rootEntity->SetWorldMatrix(camera->GetWorldMatrix(), FALSE);
             rc->UpdateProjection(FALSE);
         }
 
@@ -547,13 +563,15 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     return CK_OK;
 }
 
-void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
+void CKRenderedScene::SetupLights(CKRasterizerContext *rst) {
     // IDA: 0x1006fea0
     // Phase 1: disable all lights that were active during the previous frame.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
+    if (!rst)
+        rst = rc->m_RasterizerContext;
 
     for (CKDWORD i = 0; i < m_LightCount; ++i) {
-        rc->m_RasterizerContext->EnableLight(i, FALSE);
+        rst->EnableLight(i, FALSE);
     }
     m_LightCount = 0;
 
@@ -568,12 +586,12 @@ void CKRenderedScene::SetupLights(CKRasterizerContext * /*rst*/) {
             continue;
         if (m_LightCount >= CKRST_MAX_LIGHTS)
             break;
-        if (light->Setup(rc->m_RasterizerContext, static_cast<int>(m_LightCount))) {
+        if (light->Setup(rst, static_cast<int>(m_LightCount))) {
             ++m_LightCount;
         }
     }
 
-    rc->m_RasterizerContext->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
+    rst->SetRenderState(VXRENDERSTATE_AMBIENT, m_AmbientLight);
 }
 
 void CKRenderedScene::ResizeViewport(const VxRect &rect) {
@@ -588,11 +606,11 @@ void CKRenderedScene::ResizeViewport(const VxRect &rect) {
         rc->m_RasterizerContext->SetViewport(&rc->m_ViewportData);
 }
 
-void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
+void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst) {
     // Route all render state changes through the FF pipeline.
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
     RCKRenderManager *rm = rc->m_RenderManager;
-    CKRasterizerContext *rst = rc->m_RasterizerContext;
+    if (!rst) rst = rc->m_RasterizerContext;
 
     CKDWORD fogMode = m_FogMode;
     if (fogMode != VXFOG_NONE && rm->m_ForceLinearFog.Value != 0) {
@@ -664,63 +682,6 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext * /*rst*/) {
 
 void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS flags) {
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
-
-    if (!m_AttachedCamera) {
-        CKScene *currentScene = m_Context ? m_Context->GetCurrentScene() : nullptr;
-        CKCamera *fallbackCamera = currentScene ? currentScene->GetStartingCamera() : nullptr;
-        static int s_cameraListLogCount = 0;
-        if (s_cameraListLogCount < 3) {
-            CK_LOG_FMT("RenderedScene", "Camera list #%d: scene=%s starting=%p cameraCount=%d",
-                       s_cameraListLogCount,
-                       currentScene && currentScene->GetName() ? currentScene->GetName() : "",
-                       (void *)fallbackCamera,
-                       m_Cameras.Size());
-            int cameraIndex = 0;
-            for (CKObject **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it, ++cameraIndex) {
-                CKCamera *listedCamera = (CKCamera *) *it;
-                if (!listedCamera)
-                    continue;
-                const VxMatrix &camW = ((RCKCamera *)listedCamera)->GetWorldMatrix();
-                CK3dEntity *target = listedCamera->GetClassID() == CKCID_TARGETCAMERA ? listedCamera->GetTarget() : nullptr;
-                CK_LOG_FMT("RenderedScene",
-                           "  camera[%d]=%p name=%s class=%d target=%p targetName=%s pos=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f)",
-                           cameraIndex,
-                           (void *)listedCamera,
-                           listedCamera->GetName() ? listedCamera->GetName() : "",
-                           listedCamera->GetClassID(),
-                           (void *)target,
-                           target && target->GetName() ? target->GetName() : "",
-                           camW[3][0], camW[3][1], camW[3][2],
-                           camW[2][0], camW[2][1], camW[2][2]);
-            }
-            ++s_cameraListLogCount;
-        }
-        if (fallbackCamera) {
-            fallbackCamera->ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
-            m_AttachedCamera = fallbackCamera;
-            static int s_fallbackCameraLogCount = 0;
-            if (s_fallbackCameraLogCount < 12) {
-                const VxMatrix &fallbackWorld = ((RCKCamera *)fallbackCamera)->GetWorldMatrix();
-                CK3dEntity *fallbackTarget = fallbackCamera->GetClassID() == CKCID_TARGETCAMERA ? fallbackCamera->GetTarget() : nullptr;
-                CK_LOG_FMT("RenderedScene",
-                           "Resolved fallback camera #%d: camera=%p name=%s class=%d target=%p targetName=%s targetPos=(%.3f %.3f %.3f) scene=%s cameraCount=%d pos=(%.3f %.3f %.3f) dir=(%.3f %.3f %.3f)",
-                           s_fallbackCameraLogCount,
-                           (void *)fallbackCamera,
-                           fallbackCamera->GetName() ? fallbackCamera->GetName() : "",
-                           fallbackCamera->GetClassID(),
-                           (void *)fallbackTarget,
-                           fallbackTarget && fallbackTarget->GetName() ? fallbackTarget->GetName() : "",
-                           fallbackTarget ? ((RCK3dEntity *)fallbackTarget)->GetWorldMatrix()[3][0] : 0.0f,
-                           fallbackTarget ? ((RCK3dEntity *)fallbackTarget)->GetWorldMatrix()[3][1] : 0.0f,
-                           fallbackTarget ? ((RCK3dEntity *)fallbackTarget)->GetWorldMatrix()[3][2] : 0.0f,
-                           currentScene && currentScene->GetName() ? currentScene->GetName() : "",
-                           m_Cameras.Size(),
-                           fallbackWorld[3][0], fallbackWorld[3][1], fallbackWorld[3][2],
-                           fallbackWorld[2][0], fallbackWorld[2][1], fallbackWorld[2][2]);
-                ++s_fallbackCameraLogCount;
-            }
-        }
-    }
 
     for (CKObject **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it) {
         CKCamera *camera = (CKCamera *) *it;
@@ -801,7 +762,7 @@ void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags)
     VxRect windowRect;
     rc->GetWindowRect(windowRect, FALSE);
 
-    if (Flags == 0) {
+    if ((Flags & CK_RENDER_OPTIONSMASK) == 0) {
         Flags = (CK_RENDER_FLAGS) rc->GetCurrentRenderOptions();
     }
 
@@ -848,7 +809,7 @@ void CKRenderedScene::UpdateViewportSize(int forceUpdate, CK_RENDER_FLAGS Flags)
         viewHeight = bottom;
     }
 
-    if ((Flags & CK_RENDER_USECAMERARATIO) != 0) {
+    if ((rc->m_RenderFlags & CK_RENDER_USECAMERARATIO) != 0) {
         if (m_AttachedCamera) {
             if ((m_AttachedCamera->GetFlags() & CK_3DENTITY_CAMERAIGNOREASPECT) != 0) {
                 if (forceUpdate) {
@@ -897,5 +858,5 @@ void CKRenderedScene::ForceCameraSettingsUpdate() {
     rc->m_FarPlane = cam->GetBackPlane();
 
     // Update viewport size
-    UpdateViewportSize(FALSE, CK_RENDER_USECURRENTSETTINGS);
+    UpdateViewportSize(TRUE, CK_RENDER_USECURRENTSETTINGS);
 }
