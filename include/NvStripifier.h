@@ -5,7 +5,7 @@
 #include "CKTypes.h"
 #include "VertexCache.h"
 
-// Binary-faithful NvStripifier reimplementation.
+// Portable strip generation with the original adjacency and cache contracts.
 //
 // Binary API:
 // - Stripify() produces strip objects (NvStripInfo).
@@ -96,8 +96,8 @@ struct NvStripInfo {
 // ============================================================================
 // NvStripifier class layout (from binary analysis):
 // +0x00: XArray<unsigned short> m_Scratch (3 DWORDs: begin, end, capacity)
-// +0x0C: int m_MinStripLength
-// +0x10: int m_CacheSize
+// The portable implementation retains its own private field order. Native
+// Win32 stores the effective cache size at +0x0C and the minimum at +0x10.
 // +0x14: float m_Ratio
 // +0x18: unsigned char m_FirstTime
 // ============================================================================
@@ -109,7 +109,7 @@ public:
     // Allow NvStripInfo to access private static helpers
     friend struct NvStripInfo;
 
-    // Binary API: void __thiscall Stripify(XArray<CKWORD>*, int minStripLen, int cacheSize, CKWORD vertexCount, XArray<NvStripInfo*>*)
+    // Portable argument order: minimum strip faces, then hardware cache size.
     void Stripify(
         const XArray<CKWORD> &inIndices,
         int minStripLength,
@@ -155,19 +155,19 @@ private:
         XArray<NvEdgeInfo *> &outEdgeBuckets,
         XArray<NvEdgeInfo *> &outEdges);
 
-    static bool FindAllStrips(
+    bool FindAllStrips(
         XArray<NvStripInfo *> &outAllStrips,
         XArray<NvFaceInfo *> &allFaces,
         XArray<NvEdgeInfo *> &edgeBuckets,
         int numSamples,
         int minStripLength);
 
-    static void SplitUpStripsAndOptimize(
+    void SplitUpStripsAndOptimize(
         XArray<NvStripInfo *> &allStrips,
         bool joinStrips,
         XArray<NvEdgeInfo *> &edgeBuckets);
 
-    static NvFaceInfo *FindGoodResetPoint(
+    NvFaceInfo *FindGoodResetPoint(
         XArray<NvFaceInfo *> &allFaces,
         XArray<NvEdgeInfo *> &edgeBuckets);
 
@@ -175,7 +175,7 @@ private:
         XArray<NvStripInfo *> &outStrips,
         XArray<NvStripInfo *> *candidateSet);
 
-    static void RemoveSmallStrips(
+    void RemoveSmallStrips(
         XArray<NvStripInfo *> &allStrips,
         XArray<NvFaceInfo *> &allFaces,
         XArray<NvStripInfo *> &outStrips,

@@ -217,8 +217,8 @@ void Test_SingleTriangle_JoinFalse_PreservesTriangles() {
 
 void Test_TwoTriangles_MinLenCommit_JoinFalse() {
     XArray<CKWORD> in = MakeTwoTrianglesSquare();
-    // minStripLen=8 => internalMin=max(1,8-6)=2, so the 2-face strip should be eligible.
-    RunStripifyAndCheck(in, /*vertexCount=*/4, /*minStripLen=*/8, /*joinStrips=*/false);
+    // Minimum length counts faces; cache reservation is a separate setting.
+    RunStripifyAndCheck(in, /*vertexCount=*/4, /*minStripLen=*/2, /*joinStrips=*/false);
 }
 
 void Test_TwoTriangles_MinLenTooHigh_ProducesTwoStrips() {

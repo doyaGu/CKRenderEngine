@@ -523,6 +523,7 @@ if (TARGET gtest_main)
             RadixSorterIntegerTest RadixSorterFloatTest
             VertexCacheBehaviorTest VertexCacheLifecycleTest
             VertexCacheOptimizerTopologyTest VertexCacheOptimizerStateTest
+            NvStripifierTopologyTest NvStripifierLifetimeTest NvStripifierOptimizationTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

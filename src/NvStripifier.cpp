@@ -1,5 +1,5 @@
 // NvStripifier.cpp
-// Binary-faithful NvStripifier reimplementation
+// Portable NvStripifier implementation
 // Based on IDA analysis of NvTriStripObjects.obj (MD5: b2c4553e1045fe3bf3a222aa328bcefc)
 
 #include "NvStripifier.h"
@@ -90,8 +90,8 @@ int NvStripifier::GetUniqueVertexInB(NvFaceInfo *a, NvFaceInfo *b) {
 int NvStripifier::GetSharedVertex(NvFaceInfo *a, NvFaceInfo *b) {
     // Find a vertex that exists in both faces
     for (int i = 0; i < 3; i++) {
-        int v = a->V[i];
-        if (v == b->V[0] || v == b->V[1] || v == b->V[2])
+        int v = b->V[i];
+        if (v == a->V[0] || v == a->V[1] || v == a->V[2])
             return v;
     }
     return -1;
@@ -207,42 +207,39 @@ bool NvStripifier::FindTraversal(
     NvFaceInfo *&outFace,
     NvEdgeInfo *&outEdge,
     bool &outCW) {
-
-    // Get the last face in the strip
-    if (strip->Faces.Size() == 0)
+    outFace = nullptr;
+    outEdge = nullptr;
+    outCW = false;
+    if (!strip->StartEdge)
         return false;
 
-    NvFaceInfo *lastFace = strip->Faces[strip->Faces.Size() - 1];
+    const int vertex = strip->StartCW ? strip->StartEdge->Vertex1 : strip->StartEdge->Vertex0;
+    NvEdgeInfo *edge = edgeBuckets[vertex];
+    while (edge) {
+        NvFaceInfo *a = edge->Face0;
+        NvFaceInfo *b = edge->Face1;
+        const bool aBelongs = a && (strip->ExperimentId < 0 ? a->MarkA : a->MarkB) == strip->StripId;
+        const bool bBelongs = b && (strip->ExperimentId < 0 ? b->MarkA : b->MarkB) == strip->StripId;
+        if (aBelongs && b && b->MarkA < 0 &&
+            (strip->ExperimentId < 0 || b->Experiment != strip->ExperimentId))
+            outFace = b;
+        else if (bBelongs && a && a->MarkA < 0 &&
+                 (strip->ExperimentId < 0 || a->Experiment != strip->ExperimentId))
+            outFace = a;
 
-    // Check each neighbor
-    for (int i = 0; i < 3; i++) {
-        NvFaceInfo *neighbor = lastFace->Neighbor[i];
-        if (!neighbor)
-            continue;
-
-        // Skip if already marked
-        if (neighbor->MarkA >= 0)
-            continue;
-        if (strip->ExperimentId >= 0 && neighbor->Experiment == strip->ExperimentId)
-            continue;
-
-        // Find the edge between lastFace and neighbor
-        int v0, v1;
-        if (i == 0) { v0 = lastFace->V[0]; v1 = lastFace->V[1]; }
-        else if (i == 1) { v0 = lastFace->V[0]; v1 = lastFace->V[2]; }
-        else { v0 = lastFace->V[1]; v1 = lastFace->V[2]; }
-
-        NvEdgeInfo *edge = FindEdgeInfo(edgeBuckets, v0, v1);
-        if (!edge)
-            continue;
-
-        outFace = neighbor;
-        outEdge = edge;
-        // Approximate the expected winding flip based on strip parity.
-        outCW = NextIsCW(strip->Faces.Size() + 2);
-        return true;
+        if (outFace) {
+            outEdge = edge;
+            bool touchesStrip = false;
+            for (int i = 0; i < 3; ++i) {
+                NvFaceInfo *neighbor = FindOtherFace(edgeBuckets, outFace->V[i], outFace->V[(i + 1) % 3], outFace);
+                if (neighbor && (strip->ExperimentId < 0 ? neighbor->MarkA : neighbor->MarkB) == strip->StripId)
+                    touchesStrip = true;
+            }
+            outCW = touchesStrip ? edge->Vertex0 == vertex : edge->Vertex1 == vertex;
+            return true;
+        }
+        edge = edge->Vertex0 == vertex ? edge->NextV0 : edge->NextV1;
     }
-
     return false;
 }
 
@@ -292,96 +289,58 @@ static int FaceSharedVertices(const NvFaceInfo *a, const NvFaceInfo *b, int &out
     return count;
 }
 
+static void AppendJoinedSequence(XArray<CKWORD> &outIndices, const XArray<CKWORD> &seq);
+
+static bool FaceHasWinding(const NvFaceInfo *face, int a, int b, int c) {
+    for (int i = 0; i < 3; ++i) {
+        if (face->V[i] == a && face->V[(i + 1) % 3] == b && face->V[(i + 2) % 3] == c)
+            return true;
+    }
+    return false;
+}
+
 static bool BuildStripIndexSequenceFromFaces(const XArray<NvFaceInfo *> &faces, XArray<CKWORD> &seq) {
     seq.Resize(0);
-    if (faces.Size() <= 0)
+    if (faces.Size() == 0)
         return false;
 
-    // Single triangle strip.
-    if (faces.Size() == 1) {
-        const NvFaceInfo *f0 = faces[0];
-        if (!f0)
-            return false;
-        seq.PushBack((CKWORD)f0->V[0]);
-        seq.PushBack((CKWORD)f0->V[1]);
-        seq.PushBack((CKWORD)f0->V[2]);
-        return true;
-    }
-
-    const NvFaceInfo *f0 = faces[0];
-    const NvFaceInfo *f1 = faces[1];
-    if (!f0 || !f1)
+    const NvFaceInfo *first = faces[0];
+    if (!first)
         return false;
-
-    // Choose initial ordering so that the last two indices are the shared edge with face[1].
-    const int u0 = FaceUniqueVertexNotInOther(f0, f1);
-    if (u0 < 0) {
-        // Fallback: still emit something usable.
-        seq.PushBack((CKWORD)f0->V[0]);
-        seq.PushBack((CKWORD)f0->V[1]);
-        seq.PushBack((CKWORD)f0->V[2]);
-    } else {
-        int sh0 = -1;
-        int sh1 = -1;
-        int shCount = 0;
-        for (int i = 0; i < 3; i++) {
-            const int v = f0->V[i];
-            if (v == u0)
-                continue;
-            if (FaceContainsVertex(f1, v)) {
-                if (shCount == 0)
-                    sh0 = v;
-                else
-                    sh1 = v;
-                shCount++;
+    int firstVertex = 0;
+    if (faces.Size() > 1) {
+        int shared0, shared1;
+        if (FaceSharedVertices(first, faces[1], shared0, shared1) == 2) {
+            const int unique = FaceUniqueVertexNotInOther(first, faces[1]);
+            for (int i = 0; i < 3; ++i) {
+                if (first->V[i] == unique)
+                    firstVertex = i;
             }
         }
+    }
+    // A cyclic rotation preserves the authored winding of the first face.
+    for (int i = 0; i < 3; ++i)
+        seq.PushBack((CKWORD)first->V[(firstVertex + i) % 3]);
 
-        if (shCount != 2) {
-            seq.PushBack((CKWORD)f0->V[0]);
-            seq.PushBack((CKWORD)f0->V[1]);
-            seq.PushBack((CKWORD)f0->V[2]);
+    for (int i = 1; i < faces.Size(); ++i) {
+        const NvFaceInfo *face = faces[i];
+        if (!face)
+            return false;
+        const int a = seq[seq.Size() - 2];
+        const int b = seq[seq.Size() - 1];
+        const int c = FaceUniqueVertexNotEq(face, a, b);
+        if (c >= 0 && FaceContainsVertex(face, a) && FaceContainsVertex(face, b) &&
+            ((seq.Size() % 2) ? FaceHasWinding(face, b, a, c) : FaceHasWinding(face, a, b, c))) {
+            seq.PushBack((CKWORD)c);
         } else {
-            seq.PushBack((CKWORD)u0);
-            seq.PushBack((CKWORD)sh0);
-            seq.PushBack((CKWORD)sh1);
+            // A different edge or winding starts a new strip, joined only by
+            // degenerate triangles. Never turn a real face into a connector.
+            XArray<CKWORD> triangle;
+            for (int v = 0; v < 3; ++v)
+                triangle.PushBack((CKWORD)face->V[v]);
+            AppendJoinedSequence(seq, triangle);
         }
     }
-
-    for (int i = 1; i < faces.Size(); i++) {
-        const NvFaceInfo *cur = faces[i];
-        if (!cur)
-            return false;
-
-        int lastA = (int)seq[seq.Size() - 2];
-        int lastB = (int)seq[seq.Size() - 1];
-
-        // If the current face doesn't share the last edge, try to realign using the shared edge with the previous face.
-        if (!FaceContainsVertex(cur, lastA) || !FaceContainsVertex(cur, lastB)) {
-            const NvFaceInfo *prev = faces[i - 1];
-            int s0 = -1;
-            int s1 = -1;
-            const int shared = FaceSharedVertices(prev, cur, s0, s1);
-            if (shared != 2)
-                return false;
-
-            const CKWORD last = seq[seq.Size() - 1];
-            seq.PushBack(last); // degenerate
-            seq.PushBack((CKWORD)s0);
-            seq.PushBack((CKWORD)s1);
-
-            lastA = (int)seq[seq.Size() - 2];
-            lastB = (int)seq[seq.Size() - 1];
-            if (!FaceContainsVertex(cur, lastA) || !FaceContainsVertex(cur, lastB))
-                return false;
-        }
-
-        const int nextV = FaceUniqueVertexNotEq(cur, lastA, lastB);
-        if (nextV < 0)
-            return false;
-        seq.PushBack((CKWORD)nextV);
-    }
-
     return true;
 }
 
@@ -494,17 +453,9 @@ void NvStripInfo::Build(XArray<NvEdgeInfo *> &edgeBuckets, XArray<NvFaceInfo *> 
 
     // Build backward direction (reverse winding from start)
     scratchIndices.Resize(0);
-    int bv0, bv1;
-    if (StartCW) {
-        bv0 = StartEdge->Vertex1;
-        bv1 = StartEdge->Vertex0;
-    } else {
-        bv0 = StartEdge->Vertex0;
-        bv1 = StartEdge->Vertex1;
-    }
-    scratchIndices.PushBack((CKWORD)bv0);
-    scratchIndices.PushBack((CKWORD)bv1);
     scratchIndices.PushBack((CKWORD)v2);
+    scratchIndices.PushBack((CKWORD)v1);
+    scratchIndices.PushBack((CKWORD)v0);
 
     curFace = StartFace;
     while (true) {
@@ -564,13 +515,21 @@ void NvStripInfo::Combine(XArray<NvFaceInfo *> &forward, XArray<NvFaceInfo *> &b
 // NvStripifier::FindGoodResetPoint
 // ============================================================================
 NvFaceInfo *NvStripifier::FindGoodResetPoint(XArray<NvFaceInfo *> &allFaces, XArray<NvEdgeInfo *> &edgeBuckets) {
-    int faceCount = allFaces.Size();
-    if (faceCount == 0)
+    const int count = allFaces.Size();
+    if (count == 0)
         return nullptr;
-
-    // Find first unmarked face
-    for (int i = 0; i < faceCount; i++) {
-        NvFaceInfo *face = allFaces[i];
+    int start = -1;
+    if (m_FirstTime) {
+        start = FindStartPoint(allFaces, edgeBuckets);
+        m_FirstTime = 0;
+    }
+    if (start < 0)
+        start = (int)((count - 1) * m_Ratio);
+    m_Ratio += 0.1f;
+    if (m_Ratio > 1.0f)
+        m_Ratio = 0.05f;
+    for (int n = 0; n < count; ++n) {
+        NvFaceInfo *face = allFaces[(start + n) % count];
         if (face->MarkA < 0)
             return face;
     }
@@ -603,21 +562,40 @@ void NvStripifier::RemoveSmallStrips(
     XArray<NvFaceInfo *> &allFaces,
     XArray<NvStripInfo *> &outStrips,
     XArray<NvEdgeInfo *> &edgeBuckets) {
-
-    // Move valid strips to output, collect orphan faces
-    XArray<NvFaceInfo *> orphanFaces;
-
-    for (int i = 0; i < allStrips.Size(); i++) {
+    allFaces.Resize(0);
+    outStrips.Resize(0);
+    for (int i = 0; i < allStrips.Size(); ++i) {
         NvStripInfo *strip = allStrips[i];
-        if (strip->Faces.Size() < 1) {
-            // Collect orphan faces
-            for (int j = 0; j < strip->Faces.Size(); j++) {
-                orphanFaces.PushBack(strip->Faces[j]);
-            }
+        if (strip->Faces.Size() < m_MinStripLength) {
+            for (int j = 0; j < strip->Faces.Size(); ++j)
+                allFaces.PushBack(strip->Faces[j]);
             delete strip;
         } else {
             outStrips.PushBack(strip);
         }
+    }
+    allStrips.Resize(0);
+
+    // This API has no separate triangle-list output. Retain short faces as
+    // singleton strips, ordered with the same FIFO cache metric as native.
+    VertexCache cache(m_CacheSize);
+    while (allFaces.Size() > 0) {
+        int best = 0;
+        int bestHits = -1;
+        for (int i = 0; i < allFaces.Size(); ++i) {
+            const int hits = CalcNumHitsFace(&cache, allFaces[i]);
+            if (hits > bestHits) {
+                bestHits = hits;
+                best = i;
+            }
+        }
+        NvFaceInfo *face = allFaces[best];
+        UpdateCacheFace(&cache, face);
+        NvStripInfo *strip = new NvStripInfo();
+        strip->StartFace = face;
+        strip->Faces.PushBack(face);
+        outStrips.PushBack(strip);
+        allFaces.RemoveAt(best);
     }
 }
 
@@ -719,87 +697,71 @@ bool NvStripifier::FindAllStrips(
     XArray<NvEdgeInfo *> &edgeBuckets,
     int numSamples,
     int minStripLength) {
-
-    // For each sample, find candidate strips
     int stripId = 0;
     int experimentId = 0;
-
-    XArray<NvFaceInfo *> usedResetPoints;
-
-    for (int sample = 0; sample < numSamples; sample++) {
-        // Find a good reset point
-        NvFaceInfo *resetPoint = FindGoodResetPoint(allFaces, edgeBuckets);
-        if (!resetPoint)
-            return true;  // All faces used
-
-        // Check if already used
-        bool alreadyUsed = false;
-        for (int i = 0; i < usedResetPoints.Size(); i++) {
-            if (usedResetPoints[i] == resetPoint) {
-                alreadyUsed = true;
-                break;
-            }
-        }
-        if (alreadyUsed)
-            continue;
-        usedResetPoints.PushBack(resetPoint);
-
-        // Generate 6 candidate strips (3 edges x 2 directions)
-        XArray<NvStripInfo *> candidates;
-
-        int edges[3][2] = {
-            {resetPoint->V[0], resetPoint->V[1]},
-            {resetPoint->V[1], resetPoint->V[2]},
-            {resetPoint->V[2], resetPoint->V[0]}
-        };
-
-        for (int e = 0; e < 3; e++) {
-            NvEdgeInfo *edge = FindEdgeInfo(edgeBuckets, edges[e][0], edges[e][1]);
-            if (!edge)
+    NvFaceInfo *resetPoint;
+    // numSamples limits a selection round, not the number of output strips.
+    // Minimum length is applied after splitting against the cache budget.
+    while ((resetPoint = FindGoodResetPoint(allFaces, edgeBuckets)) != nullptr) {
+        XClassArray<XArray<NvStripInfo *> > experiments;
+        XArray<NvFaceInfo *> usedResetPoints;
+        for (int sample = 0; sample < numSamples; ++sample) {
+            if (sample > 0)
+                resetPoint = FindGoodResetPoint(allFaces, edgeBuckets);
+            if (!resetPoint || usedResetPoints.Find(resetPoint) != usedResetPoints.End())
                 continue;
-
-            for (int cw = 0; cw < 2; cw++) {
-                NvStripInfo *strip = new NvStripInfo();
-                strip->StartFace = resetPoint;
-                strip->StartEdge = edge;
-                strip->StartCW = (unsigned char)cw;
-                strip->StripId = stripId++;
-                strip->ExperimentId = experimentId++;
-
-                strip->Build(edgeBuckets, allFaces);
-
-                candidates.PushBack(strip);
+            usedResetPoints.PushBack(resetPoint);
+            for (int e = 0; e < 3; ++e) {
+                NvEdgeInfo *edge = FindEdgeInfo(edgeBuckets, resetPoint->V[e], resetPoint->V[(e + 1) % 3]);
+                if (!edge)
+                    continue;
+                for (int cw = 0; cw < 2; ++cw) {
+                    XArray<NvStripInfo *> candidate;
+                    NvStripInfo *strip = new NvStripInfo();
+                    strip->StartFace = resetPoint;
+                    strip->StartEdge = edge;
+                    strip->StartCW = (unsigned char)cw;
+                    strip->StripId = stripId++;
+                    strip->ExperimentId = experimentId++;
+                    while (true) {
+                        strip->Build(edgeBuckets, allFaces);
+                        candidate.PushBack(strip);
+                        NvFaceInfo *nextFace;
+                        NvEdgeInfo *nextEdge;
+                        bool nextCW;
+                        if (!FindTraversal(allFaces, edgeBuckets, strip, nextFace, nextEdge, nextCW))
+                            break;
+                        NvStripInfo *next = new NvStripInfo();
+                        next->StartFace = nextFace;
+                        next->StartEdge = nextEdge;
+                        next->StartCW = (unsigned char)nextCW;
+                        next->StripId = stripId++;
+                        next->ExperimentId = strip->ExperimentId;
+                        strip = next;
+                    }
+                    experiments.PushBack(candidate);
+                }
             }
         }
-
-        // Find the best candidate
-        int bestIdx = -1;
-        int bestSize = 0;
-        for (int i = 0; i < candidates.Size(); i++) {
-            int size = candidates[i]->Faces.Size();
-            if (size > bestSize) {
-                bestSize = size;
-                bestIdx = i;
+        int best = -1;
+        float bestScore = -1.0f;
+        for (int i = 0; i < experiments.Size(); ++i) {
+            const float score = AvgStripSize(experiments[i]) * (1.0f + experiments[i].Size());
+            if (score > bestScore) {
+                bestScore = score;
+                best = i;
             }
         }
-
-        // Commit the best, delete others
-        if (bestIdx >= 0 && bestSize >= minStripLength) {
-            NvStripInfo *best = candidates[bestIdx];
-            best->ExperimentId = -1;  // Commit
-            for (int j = 0; j < best->Faces.Size(); j++)
-                best->MarkTriangle(best->Faces[j]);
-            outAllStrips.PushBack(best);
-        }
-
-        for (int i = 0; i < candidates.Size(); i++) {
-            if (i != bestIdx)
-                delete candidates[i];
-            else if (!(bestIdx >= 0 && bestSize >= minStripLength))
-                delete candidates[i];
+        if (best < 0)
+            return false;
+        CommitStrips(outAllStrips, &experiments[best]);
+        for (int i = 0; i < experiments.Size(); ++i) {
+            if (i != best) {
+                for (int j = 0; j < experiments[i].Size(); ++j)
+                    delete experiments[i][j];
+            }
         }
     }
-
     return true;
 }
 
@@ -810,9 +772,52 @@ void NvStripifier::SplitUpStripsAndOptimize(
     XArray<NvStripInfo *> &allStrips,
     bool joinStrips,
     XArray<NvEdgeInfo *> &edgeBuckets) {
-
-    // The binary implementation does complex strip splitting and cache-aware reordering
-    // For now, we just keep strips as-is since we already have good strips from FindAllStrips
+    XArray<NvStripInfo *> pieces;
+    for (int i = 0; i < allStrips.Size(); ++i) {
+        NvStripInfo *source = allStrips[i];
+        for (int start = 0; start < source->Faces.Size();) {
+            NvStripInfo *piece = new NvStripInfo();
+            for (int n = 0; n < m_CacheSize && start < source->Faces.Size(); ++n, ++start)
+                piece->Faces.PushBack(source->Faces[start]);
+            piece->StartFace = piece->Faces[0];
+            pieces.PushBack(piece);
+        }
+        delete source;
+    }
+    allStrips.Resize(0);
+    XArray<NvFaceInfo *> shortFaces;
+    XArray<NvStripInfo *> retained;
+    RemoveSmallStrips(pieces, shortFaces, retained, edgeBuckets);
+    VertexCache cache(m_CacheSize);
+    while (allStrips.Size() < retained.Size()) {
+        int best = -1;
+        float bestScore = -1.0f;
+        for (int i = 0; i < retained.Size(); ++i) {
+            NvStripInfo *strip = retained[i];
+            if (strip->field_20)
+                continue;
+            float score;
+            if (allStrips.Size() == 0) {
+                int neighbors = 0;
+                for (int j = 0; j < strip->Faces.Size(); ++j)
+                    neighbors += NumNeighbors(strip->Faces[j], edgeBuckets);
+                score = 3.0f - (float)neighbors / strip->Faces.Size();
+            } else {
+                score = CalcNumHitsStrip(&cache, strip);
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = i;
+            }
+        }
+        NvStripInfo *strip = retained[best];
+        strip->field_20 = 1;
+        strip->StripId = allStrips.Size();
+        for (int i = 0; i < strip->Faces.Size(); ++i)
+            strip->MarkTriangle(strip->Faces[i]);
+        UpdateCacheStrip(&cache, strip);
+        allStrips.PushBack(strip);
+    }
 }
 
 // ============================================================================
@@ -918,13 +923,10 @@ void NvStripifier::Stripify(
     if (inIndices.Size() < 3 || vertexCount == 0)
         return;
 
-    // Binary: internalMin = max(1, minStripLength - 6)
-    int internalMin = minStripLength - 6;
-    if (internalMin < 1)
-        internalMin = 1;
-
-    m_MinStripLength = internalMin;
-    m_CacheSize = cacheSize;
+    // Native reserves six entries from the hardware cache. Minimum length
+    // is a separate face threshold, evaluated after cache-sized splitting.
+    m_CacheSize = cacheSize > 6 ? cacheSize - 6 : 1;
+    m_MinStripLength = minStripLength;
     m_Ratio = 0.0f;
     m_FirstTime = 1;
 
@@ -943,7 +945,7 @@ void NvStripifier::Stripify(
     // Find all strips (10 samples as in binary)
     FindAllStrips(outStrips, faces, edgeBuckets, 10, m_MinStripLength);
 
-    // SplitUpStripsAndOptimize is called but does minimal work for now
+    // Split into cache-sized pieces and order them against the vertex FIFO.
     SplitUpStripsAndOptimize(outStrips, false, edgeBuckets);
 
     // Add remaining unmarked faces as single-triangle strips
@@ -962,6 +964,8 @@ void NvStripifier::Stripify(
         }
     }
 
+    for (int i = 0; i < outStrips.Size(); ++i)
+        outStrips[i]->StartEdge = nullptr; // Build-only edge storage ends here.
     for (int i = 0; i < edges.Size(); ++i)
         delete edges[i];
 }
