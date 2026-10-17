@@ -101,8 +101,8 @@ public:
  * 0x1C: XArray<PMFace*> faces (12 bytes)
  * 0x28: PMVertexEx* collapseTarget (4 bytes)
  * 0x2C: float collapseCost (4 bytes)
- * 0x30: int heapIndex (4 bytes)
- * 0x34: int flags (4 bytes) - set to -1 when removed
+ * 0x30: int arrayIndex (4 bytes)
+ * 0x34: int heapIndex (4 bytes) - set to -1 when extracted
  */
 struct PMVertexEx;
 struct PMFace;
@@ -182,6 +182,12 @@ struct PMFace {
         vertices[0] = v0;
         vertices[1] = v1;
         vertices[2] = v2;
+        ComputeNormal();
+        for (int i = 0; i < 3; ++i) {
+            vertices[i]->faces.PushBack(this);
+            vertices[i]->AddNeighbor(vertices[(i + 1) % 3]);
+            vertices[i]->AddNeighbor(vertices[(i + 2) % 3]);
+        }
     }
 
     // IDA: sub_1002364A + scalar deleting destructor
@@ -220,6 +226,17 @@ struct PMFace {
         for (int i = 0; i < 3; ++i) {
             if (vertices[i] == oldV) {
                 vertices[i] = newV;
+                oldV->faces.Remove(this);
+                newV->faces.PushBack(this);
+                for (int j = 0; j < 3; ++j) {
+                    PMVertexEx::RemoveIfNonNeighbor(oldV, vertices[j]);
+                    PMVertexEx::RemoveIfNonNeighbor(vertices[j], oldV);
+                }
+                for (int j = 0; j < 3; ++j) {
+                    vertices[j]->AddNeighbor(vertices[(j + 1) % 3]);
+                    vertices[j]->AddNeighbor(vertices[(j + 2) % 3]);
+                }
+                ComputeNormal();
                 return;
             }
         }
@@ -234,16 +251,16 @@ struct PMFace {
         e2.x = vertices[2]->position.x - vertices[0]->position.x;
         e2.y = vertices[2]->position.y - vertices[0]->position.y;
         e2.z = vertices[2]->position.z - vertices[0]->position.z;
-        // Cross product
-        normal.x = e1.y * e2.z - e1.z * e2.y;
-        normal.y = e1.z * e2.x - e1.x * e2.z;
-        normal.z = e1.x * e2.y - e1.y * e2.x;
-        // Normalize
-        float len = sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+        VxVector cross;
+        cross.x = e1.y * e2.z - e1.z * e2.y;
+        cross.y = e1.z * e2.x - e1.x * e2.z;
+        cross.z = e1.x * e2.y - e1.y * e2.x;
+        // Retain the previous normal when the face has insufficient area.
+        float len = sqrtf(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z);
         if (len >= EPSILON) {
-            normal.x /= len;
-            normal.y /= len;
-            normal.z /= len;
+            normal.x = cross.x / len;
+            normal.y = cross.y / len;
+            normal.z = cross.z / len;
         }
     }
 };
@@ -301,7 +318,7 @@ struct PMEdgeCollapseData {
     void HeapifyUp(int index) {
         while (index > 0) {
             int parent = (index - 1) / 2;
-            if (GetCost(index) >= GetCost(parent)) break;
+            if (!heap[index] || (heap[parent] && GetCost(index) >= GetCost(parent))) break;
 
             // Swap
             PMVertexEx *tmp = heap[index];
@@ -317,17 +334,18 @@ struct PMEdgeCollapseData {
     }
 
     void HeapifyDown(int index) {
-        while (true) {
+        while (index < heap.Size()) {
             int left = 2 * index + 1;
             int right = 2 * index + 2;
 
-            float costSelf = GetCost(index);
-            float costLeft = GetCost(left);
-            float costRight = GetCost(right);
-
-            if (costLeft >= costSelf && costRight >= costSelf) break;
-
-            int smallest = (costLeft < costRight) ? left : right;
+            int smallest = -1;
+            if (left < heap.Size() && heap[left])
+                smallest = left;
+            if (right < heap.Size() && heap[right] &&
+                (smallest < 0 || GetCost(right) <= GetCost(smallest)))
+                smallest = right;
+            if (smallest < 0 || (heap[index] && GetCost(index) <= GetCost(smallest)))
+                break;
 
             // Swap
             PMVertexEx *tmp = heap[index];
@@ -451,18 +469,18 @@ struct PMEdgeCollapseData {
  * 0x00: field_0 (m_VertexCount) - vertex count for LOD
  * 0x04: m_MorphEnabled - morph enabled flag
  * 0x08: m_MorphStep - morph step value
- * 0x0C: field_C (XVoidArray, 12 bytes) - internal edge collapse data (runtime only)
- * 0x18: field_18 (int, 4 bytes) - reserved/unused
- * 0x1C: field_1C (int/ptr, 4 bytes) - edge collapse structure pointer (runtime only)
+ * 0x0C: field_C (XVoidArray, 12 bytes) - interpolated vertex buffer
+ * 0x18: field_18 (int, 4 bytes) - prepared draw vertex count
+ * 0x1C: field_1C (int/ptr, 4 bytes) - construction graph (owned in SDL)
  * 0x20: field_20 (XVoidArray/m_Data, 12 bytes) - parent vertex mapping for file I/O
  */
 struct CKProgressiveMesh {
     int m_VertexCount;                        // 0x00: Vertex Count for LOD rendering
     int m_MorphEnabled;                       // 0x04: Morph enabled flag
     int m_MorphStep;                          // 0x08: Morph step value
-    XArray<CKDWORD> m_EdgeCollapseData;       // 0x0C: Internal edge collapse data (runtime)
-    int m_Reserved;                           // 0x18: Reserved field
-    PMEdgeCollapseData *m_EdgeCollapseStruct; // 0x1C: Edge collapse structure pointer (runtime)
+    XArray<CKDWORD> m_EdgeCollapseData;       // 0x0C: Interpolated VxVertex bytes for morph rendering
+    int m_Reserved;                           // 0x18: Prepared draw vertex count
+    PMEdgeCollapseData *m_EdgeCollapseStruct; // 0x1C: Owned construction graph (SDL policy)
     XArray<CKDWORD> m_Data;                   // 0x20: Parent vertex mapping (file I/O)
 
     CKProgressiveMesh() : m_VertexCount(-1),
@@ -471,8 +489,8 @@ struct CKProgressiveMesh {
                           m_Reserved(0),
                           m_EdgeCollapseStruct(nullptr) {}
 
-    // Copy constructor - matches IDA sub_100298F0
-    // Note: Does NOT deep copy m_EdgeCollapseStruct (runtime data only)
+    // Copy the render snapshot without sharing the owned construction graph.
+    // Native sub_100298F0 copies its borrowed pointer; SDL owns that storage.
     CKProgressiveMesh(const CKProgressiveMesh &other)
         : m_VertexCount(other.m_VertexCount),
           m_MorphEnabled(other.m_MorphEnabled),
@@ -485,6 +503,8 @@ struct CKProgressiveMesh {
     // Copy assignment operator
     CKProgressiveMesh &operator=(const CKProgressiveMesh &other) {
         if (this != &other) {
+            delete m_EdgeCollapseStruct;
+            m_EdgeCollapseStruct = nullptr;
             m_VertexCount = other.m_VertexCount;
             m_MorphEnabled = other.m_MorphEnabled;
             m_MorphStep = other.m_MorphStep;

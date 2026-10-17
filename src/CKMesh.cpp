@@ -4063,31 +4063,6 @@ static void ProgressiveMeshReplaceVertexInFace(PMFace *face, PMVertexEx *oldV, P
         return;
 
     face->ReplaceVertex(oldV, newV);
-
-    // Remove face from old vertex, add to new vertex
-    RemoveFaceFromVertex(oldV, face);
-    newV->faces.PushBack(face);
-
-    // Clean neighbor links involving oldV
-    for (int i = 0; i < 3; ++i) {
-        PMVertexEx *v = face->vertices[i];
-        PMVertexEx::RemoveIfNonNeighbor(oldV, v);
-        PMVertexEx::RemoveIfNonNeighbor(v, oldV);
-    }
-
-    // Ensure triangle vertices are all mutual neighbors
-    for (int i = 0; i < 3; ++i) {
-        for (int j = 0; j < 3; ++j) {
-            if (i == j)
-                continue;
-            PMVertexEx *a = face->vertices[i];
-            PMVertexEx *b = face->vertices[j];
-            if (a && b && !a->HasNeighbor(b))
-                a->neighbors.PushBack(b);
-        }
-    }
-
-    face->ComputeNormal();
 }
 
 // IDA: sub_10023BE7 (collapse vertex oldV to targetV; if targetV==nullptr just delete oldV)
@@ -4260,22 +4235,7 @@ CKERROR RCKMesh::CreatePM() {
         f->arrayIndex = pmData->faces.Size();
         pmData->faces.PushBack(f);
 
-        // Link vertices to face and establish neighbor relationships
-        // Based on IDA at sub_10023577
-        PMVertexEx *pv0 = pmData->vertices[v0];
-        PMVertexEx *pv1 = pmData->vertices[v1];
-        PMVertexEx *pv2 = pmData->vertices[v2];
 
-        pv0->faces.PushBack(f);
-        pv1->faces.PushBack(f);
-        pv2->faces.PushBack(f);
-
-        pv0->AddNeighbor(pv1);
-        pv0->AddNeighbor(pv2);
-        pv1->AddNeighbor(pv0);
-        pv1->AddNeighbor(pv2);
-        pv2->AddNeighbor(pv0);
-        pv2->AddNeighbor(pv1);
     }
 
     // Match IDA at 0x10024ba6: Calculate initial collapse costs for all vertices
