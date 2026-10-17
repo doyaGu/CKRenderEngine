@@ -527,7 +527,7 @@ if (TARGET gtest_main)
             ProgressiveMeshTopologyTest ProgressiveMeshHeapTest ProgressiveMeshOwnershipTest
             MaterialGroupStorageTest VertexBufferRemapTest MaterialChannelStorageTest
             MeshDrawScopeTest MeshDrawDelegationTest
-            MeshNormalGenerationTest
+            MeshNormalGenerationTest MeshVertexStorageTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
