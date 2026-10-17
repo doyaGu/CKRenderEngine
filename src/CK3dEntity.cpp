@@ -2424,29 +2424,16 @@ void RCK3dEntity::SetScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Lo
 
     VxMatrix &mat = Local ? m_LocalMatrix : m_WorldMatrix;
 
-    {
-        VxVector axis0 = mat[0];
-        axis0.Normalize();
-        axis0 = axis0 * sx;
-        mat[0][0] = axis0.x;
-        mat[0][1] = axis0.y;
-        mat[0][2] = axis0.z;
-    }
-    {
-        VxVector axis1 = mat[1];
-        axis1.Normalize();
-        axis1 = axis1 * sy;
-        mat[1][0] = axis1.x;
-        mat[1][1] = axis1.y;
-        mat[1][2] = axis1.z;
-    }
-    {
-        VxVector axis2 = mat[2];
-        axis2.Normalize();
-        axis2 = axis2 * sz;
-        mat[2][0] = axis2.x;
-        mat[2][1] = axis2.y;
-        mat[2][2] = axis2.z;
+    const float requested[3] = {sx, sy, sz};
+    for (int axis = 0; axis < 3; ++axis) {
+        const double x = mat[axis][0], y = mat[axis][1], z = mat[axis][2];
+        const double length = sqrt(x * x + y * y + z * z);
+        // The native free Normalize has no member Normalize epsilon cutoff.
+        // Double intermediates preserve very small and very large finite axes.
+        if (length > 0.0) {
+            const double factor = requested[axis] / length;
+            for (int component = 0; component < 3; ++component) mat[axis][component] = static_cast<float>(mat[axis][component] * factor);
+        }
     }
 
     if (Local) {
