@@ -108,15 +108,23 @@ void BuildFaceNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, 
         const VxVector &v1 = vertices[indices[indexOffset + 1]].m_Position;
         const VxVector &v2 = vertices[indices[indexOffset + 2]].m_Position;
 
-        // Calculate edge vectors and cross product using SDK functions
-        VxVector edge1 = v1 - v0;
-        VxVector edge2 = v2 - v0;
-        facePtr->m_Normal = CrossProduct(edge1, edge2);
-
-        // Normalize using SDK function (handles zero-length internally)
-        float length = Magnitude(facePtr->m_Normal);
-        if (length > 0.0f) {
-            facePtr->m_Normal *= (1.0f / length);
+        // Keep finite float geometry from overflowing or underflowing the area.
+        const double e1x = static_cast<double>(v1.x) - v0.x;
+        const double e1y = static_cast<double>(v1.y) - v0.y;
+        const double e1z = static_cast<double>(v1.z) - v0.z;
+        const double e2x = static_cast<double>(v2.x) - v0.x;
+        const double e2y = static_cast<double>(v2.y) - v0.y;
+        const double e2z = static_cast<double>(v2.z) - v0.z;
+        const double nx = e1y * e2z - e1z * e2y;
+        const double ny = e1z * e2x - e1x * e2z;
+        const double nz = e1x * e2y - e1y * e2x;
+        const double length = sqrt(nx * nx + ny * ny + nz * nz);
+        if (length > 0.0) {
+            facePtr->m_Normal.Set(static_cast<float>(nx / length),
+                                 static_cast<float>(ny / length),
+                                 static_cast<float>(nz / length));
+        } else {
+            facePtr->m_Normal.Set(0.0f, 0.0f, 0.0f);
         }
 
         // IDA lines 35-36
@@ -157,21 +165,23 @@ void BuildNormalsGenericFunc(CKFace *faces, CKWORD *indices, int faceCount, VxVe
     }
 
     // Normalize all vertex normals (IDA lines 37-43)
-    VxVertex *vn = vertices;
-    for (int k = 0; k < vertexCount; ++k) {
-        vn->m_Normal.Normalize();
-        ++vn;
-    }
+    NormalizeGenericFunc(vertices, vertexCount);
 }
 
 // IDA @ 0x1002e423: Normalize vertex normals
 void NormalizeGenericFunc(VxVertex *vertices, int count) {
-    // IDA: a1 treated as VxVector*, stride is 32 bytes (sizeof(VxVertex))
-    // Normalizes a1+1 which is the Normal field
-    VxVector *ptr = &vertices->m_Position; // Start at Position
     for (int i = 0; i < count; ++i) {
-        (ptr + 1)->Normalize();                 // Normalize the Normal (Position + 1 VxVector)
-        ptr = (VxVector *) ((char *) ptr + 32); // Move to next VxVertex
+        VxVector &normal = vertices[i].m_Normal;
+        // Normalize nonzero directions without the SDK cutoff or float squares.
+        const double x = normal.x;
+        const double y = normal.y;
+        const double z = normal.z;
+        const double length = sqrt(x * x + y * y + z * z);
+        if (length > 0.0) {
+            normal.Set(static_cast<float>(x / length),
+                       static_cast<float>(y / length),
+                       static_cast<float>(z / length));
+        }
     }
 }
 
