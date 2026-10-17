@@ -109,8 +109,8 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
                     expanded.Max *= 2.0f;
                     expanded.Min *= 2.0f;
 
-                    // Character roots keep the legacy rendered marker even when expanded bounds miss.
-                    node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
+                    if (rc->ComputeBoxVisibility(expanded, VxMatrix::Identity(), nullptr) != 0)
+                        node->m_Entity->m_MoveableFlags |= VX_MOVEABLE_CHARACTERRENDERED;
                 }
 
                 node->ClearTransparentFlags();
@@ -192,7 +192,7 @@ static void RenderTransparentObjectsRecursive(CKSceneGraphNode *node, CKSceneGra
         root->AddTransparentObject(node);
     } else {
         rc->m_Stats.SceneTraversalTime += rc->m_SceneTraversalTimeProfiler.Current();
-        // CK2_3D.dll RenderTransparents @ 0x10077c3a forwards opaque entity render flags unchanged.
+        // Keep portable world transforms synchronized; native 0x10077e17 adds an internal 0x100 cache flag.
         node->m_Entity->Render((CKRenderContext *) rc, flags);
         rc->m_SceneTraversalTimeProfiler.Reset();
     }
@@ -622,6 +622,18 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
 }
 
 void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWORD flags) {
+    // FPS counters can coincide across contexts or repeated DrawScene calls.
+    // Collect a fresh visibility sample for this context before deferring draws.
+    CKTransparentObject *it = m_TransparentObjects.Begin();
+    while (it != m_TransparentObjects.End()) {
+        CKSceneGraphNode *node = it->m_Node;
+        if ((node->m_RenderContextMask & rc->m_MaskFree) != 0) {
+            node->ClearInTransparentList();
+            it = m_TransparentObjects.Remove(it);
+        } else {
+            ++it;
+        }
+    }
     RenderTransparentObjectsRecursive(this, this, rc, flags);
 }
 
@@ -635,9 +647,18 @@ void CKSceneGraphRootNode::SortTransparentObjects(RCKRenderContext *dev, CKDWORD
     if (dev->m_RenderManager->m_SortTransparentObjects.Value && count > 1) {
         dev->m_TransparentObjectsSortTimeProfiler.Reset();
 
-        // viewProj from the context's own view / projection matrices
+        // Native sorting uses the current device transforms, including writes
+        // made by callbacks without updating the context's CPU caches.
+        VxMatrix view = dev->m_ViewMatrix, projection = dev->m_ProjectionMatrix;
+        if (dev->m_RasterizerContext) {
+            VxMatrix current;
+            if (dev->m_RasterizerContext->GetTransformMatrix(VXMATRIX_VIEW, current))
+                view = current;
+            if (dev->m_RasterizerContext->GetTransformMatrix(VXMATRIX_PROJECTION, current))
+                projection = current;
+        }
         VxMatrix viewProj;
-        Vx3DMultiplyMatrix4(viewProj, dev->m_ProjectionMatrix, dev->m_ViewMatrix);
+        Vx3DMultiplyMatrix4(viewProj, projection, view);
 
         CKTransparentObject *it = m_TransparentObjects.Begin();
         while (it != m_TransparentObjects.End()) {

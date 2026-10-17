@@ -514,6 +514,7 @@ if (TARGET gtest_main)
             RenderContextCallbackTimingTest RenderContextTraversalTimingTest RenderContextParentWindowTest
             RenderedSceneLifecycleTest RenderedSceneCameraTest RenderedSceneDrawTest
             SceneGraphLifecycleTest SceneGraphVisibilityTest SceneGraphTraversalTest
+            SceneGraphRootLifecycleTest SceneGraphRootSortTest SceneGraphRootTraversalTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
