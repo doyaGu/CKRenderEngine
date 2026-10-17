@@ -47,7 +47,7 @@ struct CKRenderContextSettings
 
 struct CKRenderExtents {
     VxRect m_Rect;      // 0x00 - Screen extent rectangle
-    CKDWORD m_Flags;   // 0x10 - Pointer to entity (stored as CKDWORD)
+    CKDWORD m_Flags;    // 0x10 - Render flags for this camera extent
     CK_ID m_Camera;     // 0x14 - Associated camera
 };
 
@@ -300,7 +300,7 @@ public:
     CKRenderContextSettings m_Settings;     // 0x1D4 (28 bytes)
     CKRenderContextSettings m_FullscreenSettings; // 0x1F0 (28 bytes)
     VxRect m_CurrentExtents;                // 0x20C (16 bytes)
-    int m_FpsFrameCount;                    // 0x21C (4 bytes) - frame counter used for FPS smoothing
+    int m_FpsFrameCount;                    // 0x21C - Legacy reserved counter; Render uses m_TimeFpsCalc
     CKDWORD m_TimeFpsCalc;                  // 0x220 (4 bytes)
     VxTimeProfiler m_RenderTimeProfiler;    // 0x224 (16 bytes)
     float m_SmoothedFps;                    // 0x234 (4 bytes)
@@ -317,8 +317,8 @@ public:
     RCK3dEntity *m_Current3dEntity;         // 0x310 (4 bytes)
     RCKTexture *m_TargetTexture;            // 0x314 (4 bytes)
     CKRST_CUBEFACE m_CubeMapFace;           // 0x318 (4 bytes) - changed type to match IDA
-    float m_FocalLength;                    // 0x31C (4 bytes)
-    float m_EyeSeparation;                  // 0x320 (4 bytes)
+    float m_FocalLength;                    // Original Win32: 0x320 (4 bytes)
+    float m_EyeSeparation;                  // Original Win32: 0x31C (4 bytes)
     CKDWORD m_Flags;                        // 0x324 (4 bytes)
     CKDWORD m_FpsInterval;                  // 0x328 (4 bytes)
     XString m_CurrentObjectDesc;            // 0x32C (8 bytes)

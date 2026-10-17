@@ -30,6 +30,7 @@
 #include "RCKRenderManager.h"
 #include "RCKRenderObject.h"
 #include "RCK3dEntity.h"
+#include "RCKCamera.h"
 #include "RCK2dEntity.h"
 #include "RCKMesh.h"
 #include "RCKSprite.h"
@@ -136,6 +137,13 @@ void RCKRenderContext::CheckPreDeletion() {
     CKCamera *cam = m_RenderedScene->m_AttachedCamera;
     if (cam && cam->IsToBeDeleted()) {
         m_RenderedScene->m_AttachedCamera = nullptr;
+    }
+    if (m_Camera && m_Camera->IsToBeDeleted())
+        m_Camera = nullptr;
+    if (m_TargetTexture && m_TargetTexture->IsToBeDeleted()) {
+        // Release the borrowed object even if restoring the window fails.
+        m_TargetTexture = nullptr;
+        SetRenderTarget(nullptr);
     }
 }
 
@@ -2311,13 +2319,13 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *i
     return bestEntity;
 }
 
-// IDA: 0x1006810c
+// Native int overload: 0x1006810C. SDL delegates to the point implementation.
 CKRenderObject *RCKRenderContext::Pick(int x, int y, CKPICKRESULT *oRes, CKBOOL iIgnoreUnpickable) {
     CKPOINT pt = {x, y};
     return Pick(pt, oRes, iIgnoreUnpickable);
 }
 
-// IDA: 0x1006810c
+// Native CKPOINT wrapper: 0x100680E1; the shared SDL implementation lives here.
 CKRenderObject *RCKRenderContext::Pick(CKPOINT pt, CKPICKRESULT *oRes, CKBOOL iIgnoreUnpickable) {
     // IDA line 14: Initialize VxIntersectionDesc
     VxIntersectionDesc desc;
@@ -3700,6 +3708,7 @@ CKSTRING RCKRenderContext::GetDependencies(int i, int mode) {
 
 void RCKRenderContext::Register() {
     CKCLASSNOTIFYFROMCID(RCKRenderContext, CKCID_RENDEROBJECT);
+    CKCLASSNOTIFYFROMCID(RCKRenderContext, CKCID_TEXTURE);
 }
 
 void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {

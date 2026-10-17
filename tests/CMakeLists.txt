@@ -510,6 +510,7 @@ if (TARGET gtest_main)
             RenderContextVertexContractTest RenderContextQueryCompletionTest
             RenderContextObjectCompletionTest RenderContextOptionsCompletionTest
             RenderContextDispatchCompletionTest RenderContextDiagnosticCompletionTest
+            RenderContextAbiCompletionTest RenderContextStorageCompletionTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
@@ -538,4 +539,22 @@ if (TARGET gtest_main)
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(RenderContextDispatchCompletionTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+
+    # Exercise the enabled Context paths even when the regular engine has its
+    # optional diagnostics disabled. Direct Context objects precede the archive.
+    ckre_add_engine_test(RenderContextLoggingCompletionTest
+        RenderContextLoggingCompletionTest.cpp
+        ../src/CKRenderContext.cpp
+        ../src/CKRasterizer/CKRasterizerLib/CKDebugLogger.cpp)
+    get_target_property(context_logging_definitions RenderContextLoggingCompletionTest COMPILE_DEFINITIONS)
+    list(FILTER context_logging_definitions EXCLUDE
+        REGEX "^CKRE_ENABLE_(DEBUG_LOGGER|FRAME_DIAGNOSTICS)=")
+    set_property(TARGET RenderContextLoggingCompletionTest PROPERTY
+        COMPILE_DEFINITIONS "${context_logging_definitions}")
+    target_compile_definitions(RenderContextLoggingCompletionTest PRIVATE
+        CKRE_ENABLE_DEBUG_LOGGER=1 CKRE_ENABLE_FRAME_DIAGNOSTICS=1)
+    target_include_directories(RenderContextLoggingCompletionTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_link_libraries(RenderContextLoggingCompletionTest PRIVATE gtest_main)
+    target_compile_features(RenderContextLoggingCompletionTest PRIVATE cxx_std_17)
 endif ()
