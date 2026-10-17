@@ -988,10 +988,13 @@ CKERROR RCKRenderContext::GoFullScreen(int Width, int Height, int Bpp, int Drive
     // Save window parent and position
     m_AppHandle = VxGetParent(m_WinHandle);
     VxGetWindowRect(m_WinHandle, &m_WinRect);
+#if !defined(VX_BACKEND_SDL3) || !VX_BACKEND_SDL3
     if (m_AppHandle) {
         VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.left);
         VxScreenToClient(m_AppHandle, (CKPOINT *) &m_WinRect.right);
     }
+#endif
+    // SDL positions remain global even when the window has an owner.
 
     // Keep the current context and its resource mappings intact when the
     // rasterizer cannot complete shutdown yet.
@@ -2929,10 +2932,12 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     if (Fullscreen) {
         oldParent = VxGetParent(m_WinHandle);
         VxGetWindowRect(m_WinHandle, &oldWindowRect);
+#if !defined(VX_BACKEND_SDL3) || !VX_BACKEND_SDL3
         if (oldParent) {
             VxScreenToClient(oldParent, (CKPOINT *) &oldWindowRect.left);
             VxScreenToClient(oldParent, (CKPOINT *) &oldWindowRect.right);
         }
+#endif
         restoreWindowOnFailure = TRUE;
         m_AppHandle = oldParent;
         if (!VxMoveWindow(m_WinHandle, 0, 0, localRect.right, localRect.bottom, FALSE)) {

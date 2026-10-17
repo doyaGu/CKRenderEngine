@@ -373,10 +373,11 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 #endif
         CK_FRAME_COST_ADD_SECTION_FROM_START(CKRFCS_PRE_CALLBACKS, frameCostSectionStart);
 
-        // Compute render flags for scene traversal (matches original CK2_3D.dll behavior)
-        // a3 = CK_RENDER_DEFAULTSETTINGS + ((Flags & CK_RENDER_DONOTUPDATEEXTENTS) ? 1 : 0)
+        // CK2_3D.dll 0x10070A6C: neg/sbb, and al,1, add eax,0xFF
+        // maps DONOTUPDATEEXTENTS to 0 (0xFFFFFF01 + 0xFF), otherwise 0xFF.
+        // Passing 0x100 would also suppress each entity's world transform.
         CKDWORD renderFlags = (Flags & CK_RENDER_DONOTUPDATEEXTENTS)
-                                  ? CK_RENDER_CLEARVIEWPORT
+                                  ? 0
                                   : CK_RENDER_DEFAULTSETTINGS;
 
         rc->m_ObjectsRenderTimeProfiler.Reset();
