@@ -33,8 +33,8 @@ RadixSorter &RadixSorter::Sort(CKDWORD *input, CKDWORD nb, bool signedvalues) {
     if (!input || nb == 0)
         return *this;
 
-    // Resize if needed
-    if (nb > m_CurrentSize) {
+    // A different count needs a permutation of the new index domain.
+    if (nb != m_CurrentSize) {
         delete[] m_Indices2;
         delete[] m_Indices;
         m_Indices = new CKDWORD[nb];
@@ -152,10 +152,10 @@ RadixSorter &RadixSorter::Sort(float *input2, CKDWORD nb) {
     if (!input2 || nb == 0)
         return *this;
 
-    CKDWORD *input = (CKDWORD *) input2;
+    CKBYTE *input = (CKBYTE *) input2;
 
-    // Resize if needed
-    if (nb > m_CurrentSize) {
+    // A different count needs a permutation of the new index domain.
+    if (nb != m_CurrentSize) {
         delete[] m_Indices2;
         delete[] m_Indices;
         m_Indices = new CKDWORD[nb];
@@ -243,7 +243,7 @@ RadixSorter &RadixSorter::Sort(float *input2, CKDWORD nb) {
                     m_Offset[i] += CurCount[i];
 
                 for (i = 0; i < nb; i++) {
-                    CKDWORD Radix = input[m_Indices[i]] >> 24;
+                    CKDWORD Radix = input[(m_Indices[i] << 2) + 3];
                     if (Radix < 128)
                         m_Indices2[m_Offset[Radix]++] = m_Indices[i];
                     else
@@ -252,6 +252,15 @@ RadixSorter &RadixSorter::Sort(float *input2, CKDWORD nb) {
             }
 
             // Swap buffers
+            CKDWORD *Tmp = m_Indices;
+            m_Indices = m_Indices2;
+            m_Indices2 = Tmp;
+        } else if (j == 3 && input[3] >= 128) {
+            // Lower-byte passes order negative representations backwards even
+            // when their common most significant byte needs no bucket pass.
+            for (CKDWORD i = 0; i < nb; ++i)
+                m_Indices2[i] = m_Indices[nb - 1 - i];
+
             CKDWORD *Tmp = m_Indices;
             m_Indices = m_Indices2;
             m_Indices2 = Tmp;

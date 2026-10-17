@@ -520,6 +520,7 @@ if (TARGET gtest_main)
             MeshStriperLifecycleTest MeshStriperTraversalTest MeshStriperConnectionTest
             NearestPointGridSearchTest NearestPointGridLifecycleTest
             PlaceFitterMatchingTest PlaceFitterHierarchyTest
+            RadixSorterIntegerTest RadixSorterFloatTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
