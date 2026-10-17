@@ -517,6 +517,7 @@ if (TARGET gtest_main)
             SceneGraphRootLifecycleTest SceneGraphRootSortTest SceneGraphRootTraversalTest
             CallbacksLifetimeTest CallbacksRegistrationTest CallbacksDispatchTest
             MeshAdjacencyTopologyTest MeshAdjacencyLifetimeTest
+            MeshStriperLifecycleTest MeshStriperTraversalTest MeshStriperConnectionTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

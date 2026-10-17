@@ -156,7 +156,16 @@ int MeshStriper::TrackStrip(
             if (nextFace >= (CKDWORD) faceCount || used[(int) nextFace]) {
                 cont = false;
             } else {
-                faceIndex = nextFace;
+                // A strip alternates winding across shared edges. Keep an
+                // authored same-direction neighbor for a separate strip.
+                const int directedStart[3] = {0, 2, 1};
+                const MeshAdjacency::Face &next = faces[(int) nextFace];
+                if ((m_Flags & CKMESHSTRIPER_PARITYFIX) != 0 &&
+                    face.vertices[directedStart[edge]] == next.vertices[directedStart[link >> 30]]) {
+                    cont = false;
+                } else {
+                    faceIndex = nextFace;
+                }
             }
         }
 
