@@ -1246,6 +1246,9 @@ CKERROR RCKRenderContext::Resize(int PosX, int PosY, int SizeX, int SizeY, CKDWO
         m_WindowSettings.m_Rect.right = SizeX;
         m_WindowSettings.m_Rect.bottom = SizeY;
         if (!m_TargetTexture) {
+            // Viewport fitting reads the active settings, including the new
+            // dimensions, rather than the size of the previous frame.
+            m_Settings = m_WindowSettings;
             SetFullViewport(&m_ViewportData, SizeX, SizeY);
             m_ProjectionUpdated = FALSE;
             m_RenderedScene->UpdateViewportSize(FALSE,
