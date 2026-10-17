@@ -522,6 +522,7 @@ if (TARGET gtest_main)
             PlaceFitterMatchingTest PlaceFitterHierarchyTest
             RadixSorterIntegerTest RadixSorterFloatTest
             VertexCacheBehaviorTest VertexCacheLifecycleTest
+            VertexCacheOptimizerTopologyTest VertexCacheOptimizerStateTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

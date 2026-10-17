@@ -326,7 +326,9 @@ float VertexCacheOptimizer::ComputeCacheMetric(const XArray<CKWORD> &indices, in
     // Binary: sub_1002B150(this, &indices, cacheSize, mode)
     // - clears this->m_CacheEntries (XArray<int>)
     // - sets this->m_CacheSize = cacheSize
-    // - clears a bitset (IDA uses the bit array at +0x20; in our layout that's m_ProcessedFaces)
+    // - clears the vertex cache bitset. Native +0x20 is cache membership;
+    //   its processed-face bitset is +0x18. The SDL members are in the reverse
+    //   order, so follow their roles rather than those private native offsets.
     // - for each index: if already in cache => no miss; else evict oldest if full, insert, return miss.
     // - returns misses / (indexCount - 2) when mode != 0 else misses / (indexCount / 3)
     // The caller stores the float but does not use it.
@@ -340,20 +342,20 @@ float VertexCacheOptimizer::ComputeCacheMetric(const XArray<CKWORD> &indices, in
 
     m_CacheEntries.Resize(0);
     m_CacheSize = cacheSize;
-    m_ProcessedFaces.Clear();
+    m_CacheSet.Clear();
 
     int misses = 0;
     for (const CKWORD *it = indices.Begin(); it < indices.End(); ++it) {
         const int v = (int) (*it);
 
         // In-cache check
-        if (m_ProcessedFaces.IsSet(v))
+        if (m_CacheSet.IsSet(v))
             continue;
 
         // Miss: evict FIFO if full
         if (m_CacheEntries.Size() == m_CacheSize) {
             const int evicted = *m_CacheEntries.Begin();
-            m_ProcessedFaces.Unset(evicted);
+            m_CacheSet.Unset(evicted);
             if (m_CacheEntries.Size() > 1) {
                 memmove(m_CacheEntries.Begin(), m_CacheEntries.Begin() + 1, (m_CacheEntries.Size() - 1) * sizeof(int));
             }
@@ -361,7 +363,7 @@ float VertexCacheOptimizer::ComputeCacheMetric(const XArray<CKWORD> &indices, in
         }
 
         m_CacheEntries.PushBack(v);
-        m_ProcessedFaces.Set(v);
+        m_CacheSet.Set(v);
         ++misses;
     }
 
