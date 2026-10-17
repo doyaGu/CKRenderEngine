@@ -467,9 +467,22 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
     // Scene done: foreground sprites draw over the presented scene image at
     // native resolution. A texture target has no overlay phase (spec 4.3).
-    rc->m_RasterizerContext->EndScene();
-    if (!rc->m_TargetTexture)
-        rc->m_RasterizerContext->BeginOverlayPhase();
+    if (!rc->m_RasterizerContext->EndScene()) {
+        const CKERROR deviceStatus = rc->m_RasterizerContext->GetDeviceStatus();
+        const CKERROR error = deviceStatus != CK_OK ? deviceStatus : CKERR_INVALIDOPERATION;
+        rc->RecordFrameRenderError(error);
+        g_UpdateTransparency = FALSE;
+        CK_FRAME_COST_END_RENDER_FRAME();
+        return error;
+    }
+    if (!rc->m_TargetTexture && !rc->m_RasterizerContext->BeginOverlayPhase()) {
+        const CKERROR deviceStatus = rc->m_RasterizerContext->GetDeviceStatus();
+        const CKERROR error = deviceStatus != CK_OK ? deviceStatus : CKERR_INVALIDOPERATION;
+        rc->RecordFrameRenderError(error);
+        g_UpdateTransparency = FALSE;
+        CK_FRAME_COST_END_RENDER_FRAME();
+        return error;
+    }
 
     // Render foreground 2D sprites
     if ((Flags & CK_RENDER_FOREGROUNDSPRITES) != 0 &&

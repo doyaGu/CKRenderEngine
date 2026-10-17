@@ -500,6 +500,10 @@ if (TARGET gtest_main)
             Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest Entity3dScalePrecisionTest
             RenderManagerLifecycleTest RenderManagerContextTest RenderManagerOptionsTest
             RenderManagerSceneTest RenderManagerCallbacksTest RenderManagerResourcesTest
+            RenderManagerHelpersCompletionTest RenderContextReadbackCompletionTest RenderContextStateCompletionTest
+            RenderContextLifecycleCompletionTest RenderContextDeviceCompletionTest
+            RenderContextFrameCompletionTest RenderContextCallbackCompletionTest
+            RenderContextGeometryCompletionTest RenderContextPickingCompletionTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
@@ -522,4 +526,6 @@ if (TARGET gtest_main)
         target_link_libraries(${animation_test} PRIVATE gtest_main)
         target_compile_features(${animation_test} PRIVATE cxx_std_17)
     endforeach ()
+    target_include_directories(RenderContextFrameCompletionTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
 endif ()

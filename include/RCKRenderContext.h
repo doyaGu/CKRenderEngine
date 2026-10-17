@@ -246,6 +246,7 @@ private:
                             const VxRect *Destination, int CubeMapFace);
     CKBOOL QueueSpriteCopy(RCKSprite *Sprite, const VxRect *Source,
                            const VxRect *Destination);
+    void CancelReadbacks();
     // Delivered by the rasterizer at a frame boundary on the render thread.
     static void ReadbackCallback(void *User, const CKRECT *Rect, VXBUFFER_TYPE Buffer,
                                  const VxImageDescEx *Image, CKBOOL Success);
@@ -367,6 +368,8 @@ public:
     // Current window or fullscreen device. m_Settings may temporarily describe
     // a texture render target instead.
     CKRenderContextSettings m_WindowSettings;
+    int m_WindowDriverIndex;
+    CKRenderContextReadback *m_Readbacks;
 };
 
 // Saves the fixed-function state the engine changes around a special draw
