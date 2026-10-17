@@ -327,3 +327,18 @@ TEST_F(MeshRayIntersectionTest, FiniteRayHitIsNotLimitedByTheOldNearestDistanceS
     EXPECT_NEAR(1.0e36f, hit.Distance, 1.0e30f);
     Vector(hit.IntersectionPoint, 1, 1, 0);
 }
+
+TEST_F(MeshRayIntersectionTest, ClassificationPreservesTheSameRayAtOrdinaryAndLargeFiniteDirectionScales) {
+    RCKMesh *mesh = Mesh(16); ASSERT_NE(nullptr, mesh);
+    for (int face = 0; face < 16; ++face)
+        Triangle(*mesh, face, VxVector(1, 1, 0), VxVector(5, 1, 0), VxVector(1, 5, 0));
+    mesh->BuildFaceNormals();
+    const float scales[] = {1, 1.0e14f};
+    for (int i = 0; i < 2; ++i) {
+        SCOPED_TRACE(i);
+        VxIntersectionDesc hit = {};
+        ASSERT_EQ(16, Intersect(*mesh, VxVector(2, 2, 2), VxVector(0, 0, -4 * scales[i]), &hit));
+        Vector(hit.IntersectionPoint, 2, 2, 0);
+        EXPECT_NEAR(0.5f / scales[i], hit.Distance, 0.00001f / scales[i]);
+    }
+}

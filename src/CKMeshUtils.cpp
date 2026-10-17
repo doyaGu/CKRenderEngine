@@ -212,46 +212,48 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
 
     // Spatial partitioning optimization for large meshes (>= 16 faces)
     if (faceCount >= 16) {
-        VxVector axis1, axis2; // v69, v68
-
-        // Create orthogonal basis from ray direction using SDK functions
-        // Cross with Y axis first (IDA: VxVector::axisY())
-        axis1 = CrossProduct(direction, VxVector::axisY());
-
-        // If direction is parallel to Y, use X axis
-        if (SquareMagnitude(axis1) < 0.00000011920929f) {
-            axis1 = CrossProduct(direction, VxVector::axisX());
+        // Two ray-orthogonal planes suffice for rejection. Double products
+        // keep this optimisation independent of finite direction scales.
+        const double dx = direction.x, dy = direction.y, dz = direction.z;
+        double axis1x = -dz, axis1y = 0.0, axis1z = dx;
+        if (axis1x * axis1x + axis1z * axis1z < FLT_EPSILON) {
+            axis1x = 0.0;
+            axis1y = dz;
+            axis1z = -dy;
         }
-
-        // Create second orthogonal axis, then recompute axis1
-        axis2 = CrossProduct(direction, axis1);
-        axis1 = CrossProduct(direction, axis2);
-
-        // Project ray origin onto both axes using SDK DotProduct
-        float originProj1 = DotProduct(origin, axis1); // v72
-        float originProj2 = DotProduct(origin, axis2); // v71
+        const double axis2x = dy * axis1z - dz * axis1y;
+        const double axis2y = dz * axis1x - dx * axis1z;
+        const double axis2z = dx * axis1y - dy * axis1x;
 
         earlyOutMask = -1; // All bits set
 
         // Classify each vertex relative to the ray
-        float *vPtr = vertexPtr; // v73
         CKDWORD *flagPtr = vertexFlags;
         for (int v = 0; v < vertexCount; ++v) {
-            float proj1 = DotProduct(*(VxVector *) vPtr, axis1);
-            if (proj1 > originProj1)
+            const VxVector &position = mesh->m_Vertices[v].m_Position;
+            const double x = static_cast<double>(position.x) - origin.x;
+            const double y = static_cast<double>(position.y) - origin.y;
+            const double z = static_cast<double>(position.z) - origin.z;
+            const double proj1 = x * axis1x + y * axis1y + z * axis1z;
+            const double proj2 = x * axis2x + y * axis2y + z * axis2z;
+            const double error1 = 8.0 * DBL_EPSILON *
+                (fabs(x * axis1x) + fabs(y * axis1y) + fabs(z * axis1z));
+            const double error2 = 8.0 * DBL_EPSILON *
+                (fabs(x * axis2x) + fabs(y * axis2y) + fabs(z * axis2z));
+
+            // A boundary or roundoff-uncertain point cannot reject a face.
+            if (proj1 > error1)
                 *flagPtr |= 2;
-            else if (proj1 < originProj1)
+            else if (proj1 < -error1)
                 *flagPtr |= 1;
 
-            float proj2 = DotProduct(*(VxVector *) vPtr, axis2);
-            if (proj2 > originProj2)
+            if (proj2 > error2)
                 *flagPtr |= 8;
-            else if (proj2 < originProj2)
+            else if (proj2 < -error2)
                 *flagPtr |= 4;
 
             earlyOutMask &= *flagPtr;
 
-            vPtr += 8; // sizeof(VxVertex) / sizeof(float) = 32/4 = 8
             ++flagPtr;
         }
     }
