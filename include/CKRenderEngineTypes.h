@@ -605,9 +605,9 @@ struct VxMaterialChannel {
 };
 
 struct CKPrimitiveEntry {
-    VXPRIMITIVETYPE m_Type;
+    VXPRIMITIVETYPE m_Type = VX_TRIANGLELIST;
     XArray<CKWORD> m_Indices;
-    int m_IndexBufferOffset;
+    int m_IndexBufferOffset = -1;
 };
 
 // IDA: CKVBuffer (0x30 bytes)
@@ -643,7 +643,7 @@ struct CKMaterialGroup {
           m_MaxVertexIndex(0),
           m_BaseVertex(0),
           m_VertexCount(0),
-          m_RemapData(0) {}
+          m_RemapData(0) { m_Primitives.Resize(1); }
 
     explicit CKMaterialGroup(CKMaterial *mat)
         : m_Material((RCKMaterial *) mat),
@@ -652,7 +652,7 @@ struct CKMaterialGroup {
           m_MaxVertexIndex(0),
           m_BaseVertex(0),
           m_VertexCount(0),
-          m_RemapData(0) {}
+          m_RemapData(0) { m_Primitives.Resize(1); }
 };
 
 struct CKVertex {

@@ -176,12 +176,13 @@ TEST_F(MeshLifetimeMemoryTest, ChannelUVsUseUVElementSizeAndReferencedMaterialsA
 }
 TEST_F(MeshLifetimeMemoryTest, GroupPrimitiveBackingCapacityAndNestedIndexBuffersAreCounted) {
     MeshMemoryProbe mesh(Context); CKMaterialGroup *group = mesh.Group();
+    const int initial = group->m_Primitives.Allocated() * static_cast<int>(sizeof(CKPrimitiveEntry));
     const int before = mesh.GetMemoryOccupation(); group->m_Primitives.Reserve(5);
-    EXPECT_EQ(5 * static_cast<int>(sizeof(CKPrimitiveEntry)), mesh.GetMemoryOccupation() - before);
+    EXPECT_EQ(5 * static_cast<int>(sizeof(CKPrimitiveEntry)) - initial, mesh.GetMemoryOccupation() - before);
     group->m_Primitives.Resize(1); group->m_Primitives[0].m_Indices.Reserve(12);
-    EXPECT_EQ(static_cast<int>(5 * sizeof(CKPrimitiveEntry) + 12 * sizeof(CKWORD)), mesh.GetMemoryOccupation() - before);
+    EXPECT_EQ(static_cast<int>(5 * sizeof(CKPrimitiveEntry) + 12 * sizeof(CKWORD)) - initial, mesh.GetMemoryOccupation() - before);
     group->m_Primitives[0].m_Indices.Resize(0);
-    EXPECT_EQ(static_cast<int>(5 * sizeof(CKPrimitiveEntry) + 12 * sizeof(CKWORD)), mesh.GetMemoryOccupation() - before);
+    EXPECT_EQ(static_cast<int>(5 * sizeof(CKPrimitiveEntry) + 12 * sizeof(CKWORD)) - initial, mesh.GetMemoryOccupation() - before);
 }
 TEST_F(MeshLifetimeMemoryTest, RemappedBuffersCountGeometryColorsRemapAndEachUVChannel) {
     MeshMemoryProbe mesh(Context); CKMaterialGroup *group = mesh.Group();
@@ -224,17 +225,18 @@ TEST_F(MeshLifetimeMemoryTest, ProgressiveRuntimeGraphCountsOwnedVerticesFacesAn
 
 TEST_F(MeshLifetimeMemoryTest, ResetMaterialGroupRetainsNestedPrimitiveStorageUntilCleared) {
     MeshMemoryProbe mesh(Context); CKMaterialGroup *group = mesh.Group();
+    const int initial = group->m_Primitives.Allocated() * static_cast<int>(sizeof(CKPrimitiveEntry));
     const int before = mesh.GetMemoryOccupation();
     group->m_Primitives.Reserve(2); group->m_Primitives.Resize(2);
     group->m_Primitives[0].m_Indices.Reserve(3);
     group->m_Primitives[1].m_Indices.Reserve(9);
-    const int owned = static_cast<int>(2 * sizeof(CKPrimitiveEntry) + 12 * sizeof(CKWORD));
+    const int owned = static_cast<int>(2 * sizeof(CKPrimitiveEntry) + 12 * sizeof(CKWORD)) - initial;
     EXPECT_EQ(owned, mesh.GetMemoryOccupation() - before);
     mesh.ResetMaterialGroup(group, 0);
     EXPECT_EQ(1, group->m_Primitives.Size());
     // Resetting drawable entries does not free either reserved index stream.
     EXPECT_EQ(owned, mesh.GetMemoryOccupation() - before);
-    group->m_Primitives.Clear(); EXPECT_EQ(before, mesh.GetMemoryOccupation());
+    group->m_Primitives.Clear(); EXPECT_EQ(before - initial, mesh.GetMemoryOccupation());
 }
 TEST_F(MeshLifetimeMemoryTest, ShrinkingRemapUVChannelsRetainsInactiveChannelBuffersUntilCleared) {
     MeshMemoryProbe mesh(Context); CKMaterialGroup *group = mesh.Group();

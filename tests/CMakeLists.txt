@@ -525,6 +525,7 @@ if (TARGET gtest_main)
             VertexCacheOptimizerTopologyTest VertexCacheOptimizerStateTest
             NvStripifierTopologyTest NvStripifierLifetimeTest NvStripifierOptimizationTest
             ProgressiveMeshTopologyTest ProgressiveMeshHeapTest ProgressiveMeshOwnershipTest
+            MaterialGroupStorageTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
