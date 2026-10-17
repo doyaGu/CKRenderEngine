@@ -519,6 +519,7 @@ if (TARGET gtest_main)
             MeshAdjacencyTopologyTest MeshAdjacencyLifetimeTest
             MeshStriperLifecycleTest MeshStriperTraversalTest MeshStriperConnectionTest
             NearestPointGridSearchTest NearestPointGridLifecycleTest
+            PlaceFitterMatchingTest PlaceFitterHierarchyTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
