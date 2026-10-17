@@ -262,8 +262,9 @@ private:
 
 public:
     // =====================================================================
-    // Binary-aligned member layout - matches IDA RCKRenderContext (956 bytes)
-    // Base class CKRenderContext at offset 0x00 (20 bytes)
+    // Offsets below describe the original Win32 layout. SDL fields and pointer
+    // widths change the current layout; use the compiler layout audit metadata.
+    // Original CKRenderContext base: offset 0x00, 20 bytes.
     // =====================================================================
     
     WIN_HANDLE m_WinHandle;                    // 0x14 (4 bytes)

@@ -127,6 +127,20 @@ TEST_F(RenderContextPickingCompletionTest, LatestCameraExtentSelectsItsWorldRayA
     EXPECT_EQ(API(second), Device->Pick3D(Vx2DVector(50, 50), &hit, nullptr, FALSE));
 }
 
+TEST_F(RenderContextPickingCompletionTest, EmptyViewportDoesNotGenerateAPickRayOrOverwriteTheHit) {
+    ASSERT_NE(nullptr, Triangle(0, 4));
+    VxIntersectionDesc hit = {};
+    hit.Distance = 123;
+    hit.FaceIndex = 71;
+    Device->m_ViewportData.ViewWidth = 0;
+    EXPECT_EQ(nullptr, Device->Pick3D(Vx2DVector(0, 50), &hit, nullptr, FALSE));
+    Device->m_ViewportData.ViewWidth = 100;
+    Device->m_ViewportData.ViewHeight = 0;
+    EXPECT_EQ(nullptr, Device->Pick3D(Vx2DVector(50, 0), &hit, nullptr, FALSE));
+    EXPECT_FLOAT_EQ(123, hit.Distance);
+    EXPECT_EQ(71, hit.FaceIndex);
+}
+
 TEST_F(RenderContextPickingCompletionTest, ForegroundPickingUsesWindowOffsetAndPublicPickReportsSpriteSeparatelyFrom3dResult) {
     RCK2dEntity *back = Overlay(VxRect(40, 40, 60, 60), TRUE);
     RCK2dEntity *front = Overlay(VxRect(40, 40, 60, 60), FALSE);

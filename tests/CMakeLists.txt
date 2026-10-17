@@ -508,6 +508,8 @@ if (TARGET gtest_main)
             RenderContextInterfaceCompletionTest RenderContextSubmissionCompletionTest
             RenderContextGuardCompletionTest RenderContextPlatformCompletionTest
             RenderContextVertexContractTest RenderContextQueryCompletionTest
+            RenderContextObjectCompletionTest RenderContextOptionsCompletionTest
+            RenderContextDispatchCompletionTest RenderContextDiagnosticCompletionTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
@@ -531,5 +533,9 @@ if (TARGET gtest_main)
         target_compile_features(${animation_test} PRIVATE cxx_std_17)
     endforeach ()
     target_include_directories(RenderContextFrameCompletionTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_include_directories(RenderContextOptionsCompletionTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_include_directories(RenderContextDispatchCompletionTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
 endif ()

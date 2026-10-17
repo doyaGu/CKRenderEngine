@@ -331,9 +331,6 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
     CK_RENDER_FLAGS resolved = Flags;
     if (frameRateMode & CK_FRAMERATE_SYNC) {
         resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
-    } else if (frameRateMode & CK_FRAMERATE_LIMIT) {
-        // Timer-based limiting still requests synchronized presentation.
-        resolved = static_cast<CK_RENDER_FLAGS>(resolved | CK_RENDER_WAITVBL);
     } else if (frameRateMode & CK_FRAMERATE_FREE) {
         resolved = static_cast<CK_RENDER_FLAGS>(resolved & ~CK_RENDER_WAITVBL);
     }
@@ -392,11 +389,14 @@ void RCKRenderContext::ExecutePostSpriteCallbacks() {
 }
 
 void RCKRenderContext::LoadPVInformationTexture() {
-    // IDA: sub_1006A4D4
+    // Native 0x1006A4D4 loads the publisher watermark from Win32 module bitmap
+    // resources. The portable engine has no corresponding evaluation overlay.
     m_PVInformation = m_Context->GetPVInformation();
 }
 
-void RCKRenderContext::DrawPVInformationWatermark() {}
+void RCKRenderContext::DrawPVInformationWatermark() {
+    // Native 0x1006A690 draws the unsupported publisher watermark overlay.
+}
 
 void RCKRenderContext::AppendStateOnOffLine(CKBOOL on) {
     m_StateString += on ? "On\n" : "Off\n";
