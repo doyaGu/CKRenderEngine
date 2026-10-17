@@ -518,6 +518,7 @@ if (TARGET gtest_main)
             CallbacksLifetimeTest CallbacksRegistrationTest CallbacksDispatchTest
             MeshAdjacencyTopologyTest MeshAdjacencyLifetimeTest
             MeshStriperLifecycleTest MeshStriperTraversalTest MeshStriperConnectionTest
+            NearestPointGridSearchTest NearestPointGridLifecycleTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

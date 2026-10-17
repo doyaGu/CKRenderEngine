@@ -76,7 +76,8 @@ int NearestPointGrid::FindNearPoint(const VxVector &p) {
     if (cellMaxZ >= m_SizeZ) cellMaxZ = m_SizeZ - 1;
 
     int bestIndex = -1;
-    float bestDistance2 = m_Threshold2;
+    // Square in double so small finite radii retain their distance ordering.
+    double bestDistance2 = (double) m_Threshold * m_Threshold;
 
     // Search cells in region
     for (int cellZ = cellMinZ; cellZ <= cellMaxZ; ++cellZ) {
@@ -87,14 +88,14 @@ int NearestPointGrid::FindNearPoint(const VxVector &p) {
                     int cellPtCount = cell->Size();
                     for (int a = 0; a < cellPtCount; ++a) {
                         const VxVector &cellPt = (*cell)[a].pt;
-                        const float dx = cellPt.x - p.x;
-                        if (fabsf(dx) > m_Threshold) continue;
-                        const float dy = cellPt.y - p.y;
-                        if (fabsf(dy) > m_Threshold) continue;
-                        const float dz = cellPt.z - p.z;
-                        if (fabsf(dz) > m_Threshold) continue;
+                        const double dx = (double) cellPt.x - p.x;
+                        if (fabs(dx) > m_Threshold) continue;
+                        const double dy = (double) cellPt.y - p.y;
+                        if (fabs(dy) > m_Threshold) continue;
+                        const double dz = (double) cellPt.z - p.z;
+                        if (fabs(dz) > m_Threshold) continue;
 
-                        const float distance2 = dx * dx + dy * dy + dz * dz;
+                        const double distance2 = dx * dx + dy * dy + dz * dz;
                         if (distance2 > bestDistance2)
                             continue;
 
