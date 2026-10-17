@@ -513,6 +513,7 @@ if (TARGET gtest_main)
             RenderContextAbiCompletionTest RenderContextStorageCompletionTest
             RenderContextCallbackTimingTest RenderContextTraversalTimingTest RenderContextParentWindowTest
             RenderedSceneLifecycleTest RenderedSceneCameraTest RenderedSceneDrawTest
+            SceneGraphLifecycleTest SceneGraphVisibilityTest SceneGraphTraversalTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
             Object3dRegistrationTest Object3dLifecycleTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest

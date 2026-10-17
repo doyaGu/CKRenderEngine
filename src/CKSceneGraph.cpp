@@ -310,6 +310,8 @@ void CKSceneGraphNode::RemoveNode(CKSceneGraphNode *node) {
     if (m_Entity)
         mask = m_Entity->m_InRenderContext;
     SetRenderContextMask(mask, TRUE);
+    // Eligibility can change even when the aggregate context mask stays equal.
+    EntityFlagsChanged(TRUE);
 }
 
 void CKSceneGraphNode::PrioritiesChanged() {

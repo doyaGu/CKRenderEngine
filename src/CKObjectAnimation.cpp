@@ -2173,7 +2173,7 @@ CKERROR RCKObjectAnimation::SetStep(float step, CKKeyedAnimation *anim) {
 
         // Notify matrix change if not driven by character animation
         if (!anim || !anim->GetCharacter())
-            m_Entity->LocalMatrixChanged(FALSE, FALSE);
+            m_Entity->LocalMatrixChanged(FALSE, TRUE);
     }
 
     // Morph animation processing
