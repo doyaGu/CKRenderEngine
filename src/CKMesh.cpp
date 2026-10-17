@@ -290,9 +290,16 @@ void CKVBuffer::Update(RCKMesh *mesh, int force) {
             CKDWORD srcStride = 0;
             void *srcPtr = mesh->GetPositionsPtr(&srcStride);
             if (srcPtr && srcStride) {
-                VxStridedData dst(m_Vertices.Begin(), 32);
+                VxStridedData dst(&m_Vertices[0].m_Position, sizeof(VxVertex));
                 VxStridedData src(srcPtr, srcStride);
-                VxIndexedCopy(dst, src, 0x18u, m_VertexRemap.Begin(), vertexCount);
+                VxIndexedCopy(dst, src, sizeof(VxVector), m_VertexRemap.Begin(), vertexCount);
+            }
+            srcStride = 0;
+            srcPtr = mesh->GetNormalsPtr(&srcStride);
+            if (srcPtr && srcStride) {
+                VxStridedData dst(&m_Vertices[0].m_Normal, sizeof(VxVertex));
+                VxStridedData src(srcPtr, srcStride);
+                VxIndexedCopy(dst, src, sizeof(VxVector), m_VertexRemap.Begin(), vertexCount);
             }
         }
 
@@ -300,9 +307,16 @@ void CKVBuffer::Update(RCKMesh *mesh, int force) {
             CKDWORD srcStride = 0;
             void *srcPtr = mesh->GetColorsPtr(&srcStride);
             if (srcPtr && srcStride) {
-                VxStridedData dst(m_Colors.Begin(), 8);
+                VxStridedData dst(&m_Colors[0].Color, sizeof(VxColors));
                 VxStridedData src(srcPtr, srcStride);
-                VxIndexedCopy(dst, src, 8u, m_VertexRemap.Begin(), vertexCount);
+                VxIndexedCopy(dst, src, sizeof(CKDWORD), m_VertexRemap.Begin(), vertexCount);
+            }
+            srcStride = 0;
+            srcPtr = mesh->GetSpecularColorsPtr(&srcStride);
+            if (srcPtr && srcStride) {
+                VxStridedData dst(&m_Colors[0].Specular, sizeof(VxColors));
+                VxStridedData src(srcPtr, srcStride);
+                VxIndexedCopy(dst, src, sizeof(CKDWORD), m_VertexRemap.Begin(), vertexCount);
             }
         }
 
@@ -320,11 +334,6 @@ void CKVBuffer::Update(RCKMesh *mesh, int force) {
             m_UVs.Resize(channelCount);
 
             for (int c = 0; c < channelCount; ++c) {
-                if (!mesh->GetChannelMaterial(c)) {
-                    m_UVs[c].Resize(0);
-                    continue;
-                }
-
                 CKDWORD channelStride = 0;
                 void *channelPtr = mesh->GetTextureCoordinatesPtr(&channelStride, c);
                 if (!channelPtr || !channelStride) {
