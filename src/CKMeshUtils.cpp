@@ -314,7 +314,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                         return 1;
                     }
                     ++hitCount;
-                    if (dist < minDist) {
+                    if (!foundHit || dist < minDist) {
                         foundHit = TRUE;
                         minDist = dist;
                         bestI1 = i1;

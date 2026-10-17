@@ -299,3 +299,12 @@ TEST_F(MeshRayIntersectionTest, IgnoreAlphaAcceptsTheSameActualTransparentNeares
     Vector(hit.IntersectionPoint, 1, 1, 0);
     EXPECT_FLOAT_EQ(0, hit.TexU);
 }
+
+TEST_F(MeshRayIntersectionTest, FiniteRayHitIsNotLimitedByTheOldNearestDistanceSentinel) {
+    RCKMesh *mesh = Mesh(); ASSERT_NE(nullptr, mesh);
+    VxIntersectionDesc hit = {};
+    ASSERT_EQ(1, Intersect(*mesh, VxVector(1, 1, 1.0e36f), VxVector(0, 0, -1), &hit));
+    EXPECT_EQ(0, hit.FaceIndex);
+    EXPECT_NEAR(1.0e36f, hit.Distance, 1.0e30f);
+    Vector(hit.IntersectionPoint, 1, 1, 0);
+}
