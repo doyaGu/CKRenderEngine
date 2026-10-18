@@ -313,4 +313,144 @@ TEST_F(MeshGeometryCompletionTest, ChannelFaceMaskConsumerRebuildsIndicesAfterBo
         }
     }
 }
+const VxVector SortPoints[] = {VxVector(0, 0, 3), VxVector(0, 0, -2), VxVector(4, 0, 0),
+                               VxVector(0, 2, 0), VxVector(-1, 0, 0), VxVector(0, -3, 0)};
+const int SortTriangles[8][3] = {{0, 2, 3}, {0, 3, 4}, {0, 4, 5}, {0, 5, 2},
+                                 {1, 3, 2}, {1, 4, 3}, {1, 5, 4}, {1, 2, 5}};
+const int SortInputOrder[] = {7, 1, 5, 3, 0, 6, 2, 4};
+
+static void SortGeometry(CompletionMesh &mesh, RCKMaterial &first, RCKMaterial &second) {
+    ASSERT_TRUE(mesh.SetVertexCount(6));
+    ASSERT_TRUE(mesh.SetFaceCount(8));
+    for (int i = 0; i < 6; ++i) {
+        VxVector point = SortPoints[i];
+        mesh.SetVertexPosition(i, &point);
+    }
+    for (int i = 0; i < 8; ++i) {
+        const int id = SortInputOrder[i];
+        mesh.SetFaceVertexIndex(i, SortTriangles[id][0], SortTriangles[id][1], SortTriangles[id][2]);
+        mesh.SetFaceMaterial(i, id % 2 ? &second : &first);
+        mesh.SetFaceChannelMask(i, static_cast<CKWORD>(1u << id));
+    }
+    mesh.SetFlags(mesh.GetFlags() & ~VXMESH_STRIPIFY);
+    mesh.BuildFaceNormals();
+}
+
+static int SortFaceIdentity(CKWORD mask, int count) {
+    for (int i = 0; i < count; ++i) if (mask == (1u << i)) return i;
+    return -1;
+}
+
+TEST_F(MeshGeometryCompletionTest, CreatePMSortRetainsEachOrientedTriangleWithItsMaterialMaskAndNormal) {
+    CompletionMesh mesh(Context);
+    RCKMaterial first(Context), second(Context);
+    SortGeometry(mesh, first, second);
+    VxVector normals[8];
+    for (int i = 0; i < 8; ++i) normals[SortInputOrder[i]] = mesh.GetFaceNormal(i);
+    ASSERT_EQ(CK_OK, mesh.CreatePM());
+    ASSERT_EQ(8, mesh.GetFaceCount());
+    ASSERT_EQ(6, mesh.GetVertexCount());
+    CKBOOL seen[8] = {}, reordered = FALSE;
+    for (int i = 0; i < 8; ++i) {
+        const int id = SortFaceIdentity(mesh.GetFaceChannelMask(i), 8);
+        ASSERT_GE(id, 0);
+        EXPECT_FALSE(seen[id]);
+        seen[id] = TRUE;
+        reordered |= id != SortInputOrder[i];
+        EXPECT_EQ(id % 2 ? &second : &first, mesh.GetFaceMaterial(i));
+        Vec(mesh.GetFaceNormal(i), normals[id]);
+        int indices[3];
+        mesh.GetFaceVertexIndex(i, indices[0], indices[1], indices[2]);
+        for (int corner = 0; corner < 3; ++corner) {
+            ASSERT_GE(indices[corner], 0);
+            ASSERT_LT(indices[corner], 6);
+            VxVector position;
+            mesh.GetVertexPosition(indices[corner], &position);
+            Vec(position, SortPoints[SortTriangles[id][corner]]);
+        }
+    }
+    EXPECT_TRUE(reordered) << "This fixture must exercise an actual face permutation";
+    for (int i = 0; i < 8; ++i) EXPECT_TRUE(seen[i]);
+}
+
+TEST_F(MeshGeometryCompletionTest, CreatePMSortPlacesEverySurvivingFaceBeforeEveryCollapsedFaceAtEachLod) {
+    CompletionMesh mesh(Context);
+    RCKMaterial first(Context), second(Context);
+    SortGeometry(mesh, first, second);
+    ASSERT_EQ(CK_OK, mesh.CreatePM());
+    ASSERT_EQ(6, mesh.ParentCount());
+    ASSERT_EQ(8, mesh.GetFaceCount());
+    for (int i = 1; i < 6; ++i) {
+        ASSERT_GE(mesh.Parent(i), 0);
+        ASSERT_LT(mesh.Parent(i), i);
+    }
+    // Independent graph-contraction oracle: merge the removed vertex's whole
+    // equivalence class into its parent, rather than reproducing the comparator.
+    int representative[] = {0, 1, 2, 3, 4, 5};
+    CKBOOL mixedLod = FALSE;
+    for (int lod = 6; lod >= 1; --lod) {
+        if (lod < 6) {
+            const int parent = mesh.Parent(lod);
+            for (int vertex = 0; vertex < 6; ++vertex)
+                if (representative[vertex] == lod) representative[vertex] = parent;
+        }
+        CKBOOL collapsedSeen = FALSE;
+        int surviving = 0;
+        for (int face = 0; face < 8; ++face) {
+            int a, b, c;
+            mesh.GetFaceVertexIndex(face, a, b, c);
+            const CKBOOL alive = representative[a] != representative[b] &&
+                representative[a] != representative[c] && representative[b] != representative[c];
+            EXPECT_FALSE(collapsedSeen && alive) << "LOD " << lod << ", face " << face;
+            if (alive) ++surviving;
+            else collapsedSeen = TRUE;
+        }
+        if (lod == 6) EXPECT_EQ(8, surviving);
+        if (lod < 3) EXPECT_EQ(0, surviving);
+        mixedLod |= surviving > 0 && surviving < 8;
+    }
+    EXPECT_TRUE(mixedLod) << "The fixture needs distinct collapse lifetimes";
+}
+
+TEST_F(MeshGeometryCompletionTest, CreatePMSortKeepsTiedDuplicateAndReversedFacesAsDistinctRecords) {
+    CompletionMesh mesh(Context);
+    RCKMaterial first(Context), second(Context);
+    ASSERT_TRUE(mesh.SetVertexCount(3));
+    ASSERT_TRUE(mesh.SetFaceCount(4));
+    const int sources[] = {0, 2, 3};
+    VxVector normals[4];
+    for (int i = 0; i < 3; ++i) {
+        VxVector point = SortPoints[sources[i]];
+        mesh.SetVertexPosition(i, &point);
+    }
+    for (int i = 0; i < 4; ++i) {
+        mesh.SetFaceVertexIndex(i, 0, i % 2 ? 2 : 1, i % 2 ? 1 : 2);
+        mesh.SetFaceMaterial(i, i < 2 ? &first : &second);
+        mesh.SetFaceChannelMask(i, static_cast<CKWORD>(1u << i));
+    }
+    mesh.BuildFaceNormals();
+    for (int i = 0; i < 4; ++i) normals[i] = mesh.GetFaceNormal(i);
+    ASSERT_EQ(CK_OK, mesh.CreatePM());
+    ASSERT_EQ(3, mesh.GetVertexCount());
+    ASSERT_EQ(4, mesh.GetFaceCount());
+    CKBOOL seen[4] = {};
+    for (int i = 0; i < 4; ++i) {
+        const int id = SortFaceIdentity(mesh.GetFaceChannelMask(i), 4);
+        ASSERT_GE(id, 0);
+        EXPECT_FALSE(seen[id]);
+        seen[id] = TRUE;
+        EXPECT_EQ(id < 2 ? &first : &second, mesh.GetFaceMaterial(i));
+        Vec(mesh.GetFaceNormal(i), normals[id]);
+        int a, b, c;
+        mesh.GetFaceVertexIndex(i, a, b, c);
+        VxVector positions[3];
+        mesh.GetVertexPosition(a, &positions[0]);
+        mesh.GetVertexPosition(b, &positions[1]);
+        mesh.GetVertexPosition(c, &positions[2]);
+        Vec(positions[0], SortPoints[0]);
+        Vec(positions[1], SortPoints[id % 2 ? 3 : 2]);
+        Vec(positions[2], SortPoints[id % 2 ? 2 : 3]);
+    }
+    for (int i = 0; i < 4; ++i) EXPECT_TRUE(seen[i]);
+}
 } // namespace
