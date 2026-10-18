@@ -84,9 +84,9 @@ TEST_F(AnimationClockCompletionTest, LinkedProductKeepsRepresentableFramesBefore
     clock->SetLength(std::ldexp(1.0f, 122));
     clock->SetCurrentStep(0);
     clock->SetFlags(CKANIMATION_CANBEBREAK | 0x80000000u);
-    // Native 0.001f is exactly 8589935 / 2^33. The result below is
-    // 8589935 * 2^97, although the unscaled rate*1024 exceeds FLT_MAX.
-    const float magnitude = static_cast<float>(std::ldexp(8589935.0, 97));
+    // Milliseconds mean 1/1000 second: 1024 * 2^120 / 1000 = 2^127/125.
+    // The scaled prediction is finite although rate*1024 exceeds FLT_MAX.
+    const float magnitude = static_cast<float>(std::ldexp(1.0, 127) / 125.0);
     for (int reverse = 0; reverse < 2; ++reverse) {
         const float fps = reverse ? -rate : rate;
         clock->LinkToFrameRate(TRUE, fps);
@@ -112,9 +112,9 @@ TEST_F(AnimationClockCompletionTest, LinkedAdvanceCanCancelTheCurrentFrameBefore
     ASSERT_NE(nullptr, clock);
     const float power = std::ldexp(1.0f, 127);
     clock->SetLength(power);
-    // A 2048ms advance is 8589935*2^105. The finite current frame is
-    // -7340032*2^105; their representable sum is 1249903*2^105.
-    const float magnitude = static_cast<float>(std::ldexp(1249903.0, 105));
+    // A 2048ms advance is (256/125)*2^127. The finite current frame is
+    // -7*2^125, leaving the representable sum (149/125)*2^125.
+    const float magnitude = static_cast<float>(std::ldexp(149.0, 125) / 125.0);
     for (int reverse = 0; reverse < 2; ++reverse) {
         const float step = reverse ? 1.75f : -1.75f;
         clock->SetCurrentStep(step);
@@ -133,9 +133,9 @@ TEST_F(AnimationClockCompletionTest, FiniteCursorProductCanCancelIntoARepresenta
     ASSERT_NE(nullptr, clock);
     const float power = std::ldexp(1.0f, 127);
     clock->SetLength(power);
-    // 2*2^127 = 8388608*2^105 is just beyond the float range, while
-    // subtracting the finite-input advance leaves -201327*2^105.
-    const float magnitude = static_cast<float>(std::ldexp(201327.0, 105));
+    // 2*2^127 is just beyond the float range. Subtracting the finite-input
+    // advance (256/125)*2^127 leaves -(6/125)*2^127.
+    const float magnitude = static_cast<float>(std::ldexp(6.0, 127) / 125.0);
     for (int reverse = 0; reverse < 2; ++reverse) {
         const float step = reverse ? -2.0f : 2.0f;
         clock->SetCurrentStep(step);
@@ -159,9 +159,9 @@ TEST_F(AnimationClockCompletionTest, ForwardClockPredictionSelectsAnInteriorObje
     EXPECT_TRUE(std::isfinite(next));
     EXPECT_FLOAT_EQ(0, clock->GetStep());
     clock->SetFrame(next);
-    // 8589935*2^97 / 2^122 is the interior phase 8589935/2^25.
-    EXPECT_FLOAT_EQ(static_cast<float>(std::ldexp(8589935.0, -25)), clock->GetStep());
-    ExpectPosition(entity, static_cast<float>(std::ldexp(8589935000.0, -25)));
+    // (1024 * 2^120 / 1000) / 2^122 is the interior phase 32/125.
+    EXPECT_FLOAT_EQ(static_cast<float>(32.0 / 125.0), clock->GetStep());
+    ExpectPosition(entity, 256.0f);
     EXPECT_FLOAT_EQ(1, entity->GetLocalMatrix()[0][0]);
     EXPECT_FLOAT_EQ(1, entity->GetLocalMatrix()[1][1]);
     EXPECT_FLOAT_EQ(1, entity->GetLocalMatrix()[2][2]);
@@ -181,12 +181,12 @@ TEST_F(AnimationClockCompletionTest, SignedReverseClockCanReenterTheCurveAfterTh
     clock->LinkToFrameRate(TRUE, -power);
     const float next = clock->GetNextFrame(2048);
     EXPECT_TRUE(std::isfinite(next));
-    EXPECT_FLOAT_EQ(static_cast<float>(std::ldexp(847249.0, 105)), next);
+    EXPECT_FLOAT_EQ(static_cast<float>(std::ldexp(101.0, 125) / 125.0), next);
     EXPECT_FLOAT_EQ(2.25f, clock->GetStep());
     clock->SetFrame(next);
-    // (9*2^125 - 8589935*2^105) / 2^127 = 847249/2^22.
-    EXPECT_FLOAT_EQ(static_cast<float>(std::ldexp(847249.0, -22)), clock->GetStep());
-    ExpectPosition(entity, static_cast<float>(std::ldexp(847249000.0, -22)));
+    // 9/4 - 2048/1000 = 101/500, which is inside the playable interval.
+    EXPECT_FLOAT_EQ(static_cast<float>(101.0 / 500.0), clock->GetStep());
+    ExpectPosition(entity, 202.0f);
     EXPECT_FLOAT_EQ(-power, clock->GetLinkedFrameRate());
     EXPECT_EQ(TRUE, clock->IsLinkedToFrameRate());
 }

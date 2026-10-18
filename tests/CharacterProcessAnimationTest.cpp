@@ -252,19 +252,22 @@ TEST_F(CharacterProcessAnimationTest, SecondaryFiniteLoopsExactFinalEndSurvivesU
 TEST_F(CharacterProcessAnimationTest, SecondaryLoopUsesActualTinyRemainderStrictlyAboveMultiple) {
     ProcessCharacter c(Context); RCKBodyPart body(Context); ProcessKeyed a(Context); RCKObjectAnimation x(Context);
     Curve(c, body, a, x); c.Secondary(a, CKSECONDARYANIMATIONRUNTIME_PLAYING, CKSECONDARYANIMATION_LOOP);
-    // The public frame-rate path yields 30.000001907, not exactly 30.
-    // Verify its real input to the boundary comparison rather than accepting
-    // an epsilon that could hide a completed loop.
-    const float next = a.GetNextFrame(30); ASSERT_GT(next, 30.0f);
-    c.Tick(30); ASSERT_EQ(1, c.Count()); EXPECT_EQ(next - 30.0f, a.GetFrame());
-    EXPECT_EQ(next - 30.0f, body.GetLocalMatrix()[3][0]); Detach(body);
+    // At 1000 fps each millisecond advances one frame. One float ULP above
+    // 30 ms leaves exactly 1/524288 frame after three 10-frame periods.
+    const float remainder = 1.0f / 524288.0f;
+    const float elapsed = 30.0f + remainder;
+    ASSERT_EQ(elapsed, a.GetNextFrame(elapsed));
+    c.Tick(elapsed); ASSERT_EQ(1, c.Count()); EXPECT_EQ(remainder, a.GetFrame());
+    EXPECT_EQ(remainder, body.GetLocalMatrix()[3][0]); Detach(body);
 }
 
 TEST_F(CharacterProcessAnimationTest, SecondaryFiniteLoopsStrictlyAboveFinalMultipleRemovesWithoutEpsilon) {
     ProcessCharacter c(Context); RCKBodyPart body(Context); ProcessKeyed a(Context); RCKObjectAnimation x(Context);
     Curve(c, body, a, x); c.Secondary(a, CKSECONDARYANIMATIONRUNTIME_PLAYING, CKSECONDARYANIMATION_LOOPNTIMES, 3);
-    ASSERT_GT(a.GetNextFrame(30), 30.0f);
-    c.Tick(30); EXPECT_EQ(0, c.Count()); Detach(body);
+    // This exact one-ULP excess must exhaust the final loop without an epsilon.
+    const float elapsed = 30.0f + 1.0f / 524288.0f;
+    ASSERT_EQ(elapsed, a.GetNextFrame(elapsed));
+    c.Tick(elapsed); EXPECT_EQ(0, c.Count()); Detach(body);
 }
 
 TEST_F(CharacterProcessAnimationTest, SecondaryReverseInsideRangeEvaluatesRealCurve) {

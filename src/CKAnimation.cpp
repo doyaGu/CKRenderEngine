@@ -202,7 +202,7 @@ float RCKAnimation::GetNextFrame(float delta_t) {
         // Recover the wide product only when it can cancel an overflowed frame.
         const double frame = std::isfinite(currentFrame)
             ? currentFrame : static_cast<double>(m_Step) * m_Length;
-        return static_cast<float>(frame + static_cast<double>(delta_t) * m_FrameRate * 0.001f);
+        return static_cast<float>(frame + static_cast<double>(delta_t) * m_FrameRate * 0.001);
     }
 
     // Not frame rate linked: advance by 1 frame.

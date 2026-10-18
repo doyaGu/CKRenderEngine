@@ -535,7 +535,7 @@ if (TARGET gtest_main)
             KeyedAnimationPlaybackTest AnimationClockTest AnimationFlagsTest AnimationLifecycleTest
             AnimationFieldsTest KeyedAnimationFieldsTest AnimationInterfaceTest
             CharacterLoadTest CharacterSaveTest BodyPartSerializationTest BodyPartRegistrationTest BodyPartLoadTest
-            CharacterOwnershipTest CharacterDependenciesTest BodyPartJointTest
+            CharacterOwnershipTest CharacterDependenciesTest AnimationClockBoundaryTest BodyPartJointTest
             CharacterPrimaryPlaybackTest CharacterSecondaryPlaybackTest CharacterProcessAnimationTest
             CharacterPrimaryMotionTest CharacterSecondaryReverseTest CharacterPrimaryReverseTest
             CharacterTerminalRotationTest CharacterPrimaryMixedTimeTest CharacterPrimaryTypesTest CharacterReverseWarpReadinessTest
