@@ -212,4 +212,73 @@ TEST_F(RenderManagerOptionsTest, AddedEffectCopiesDescriptionAssignsIndexAndRuns
     EXPECT_EQ(2, calls.Stage);
     EXPECT_EQ(reinterpret_cast<CKMaterial *>(&material), calls.Material);
 }
+TEST(VxOptionStorageTest, ReferenceSetterCopiesTheKeyAndAllValueBits) {
+    XString key("A separately owned option key");
+    CKDWORD value = 0xfedcba98u;
+    VxOption option;
+    option.Set(key, value);
+    key = "Changed caller key";
+    value = 0;
+    EXPECT_STREQ("A separately owned option key", option.Key.CStr());
+    EXPECT_EQ(0xfedcba98u, option.Value);
+
+    option.Set(option.Key, option.Value);
+    EXPECT_STREQ("A separately owned option key", option.Key.CStr());
+    EXPECT_EQ(0xfedcba98u, option.Value);
+    key = "Replacement";
+    option.Set(key, value);
+    EXPECT_STREQ("Replacement", option.Key.CStr());
+    EXPECT_EQ(0u, option.Value);
+}
+
+TEST(VxOptionStorageTest, CharacterSetterOwnsMutableInputAndReplacesLongAndEmptyKeys) {
+    char key[769];
+    for (int i = 0; i < 768; ++i) key[i] = 'a' + i % 26;
+    key[768] = '\0';
+    VxOption option;
+    option.Set(key, 0xffffffffu);
+    key[0] = 'Z';
+    EXPECT_EQ(768, option.Key.Length());
+    EXPECT_EQ('a', option.Key.CStr()[0]);
+    EXPECT_EQ('n', option.Key.CStr()[767]);
+    EXPECT_EQ(0xffffffffu, option.Value);
+    option.Set("", 0);
+    EXPECT_TRUE(option.Key.Empty());
+    EXPECT_EQ(0u, option.Value);
+    option.Set("Short key", 17);
+    EXPECT_STREQ("Short key", option.Key.CStr());
+    EXPECT_EQ(17u, option.Value);
+}
+
+TEST(VxOptionStorageTest, CopyConstructionAndAssignmentRetainIndependentKeys) {
+    VxOption first;
+    first.Set("Original option", 73);
+    VxOption second = first;
+    VxOption third;
+    third.Set("Old third option", 1);
+    third = first;
+    first.Set("Changed first option", 99);
+    EXPECT_STREQ("Original option", second.Key.CStr());
+    EXPECT_EQ(73u, second.Value);
+    second.Set("Changed second option", 121);
+    EXPECT_STREQ("Original option", third.Key.CStr());
+    EXPECT_EQ(73u, third.Value);
+    EXPECT_STREQ("Changed first option", first.Key.CStr());
+    EXPECT_EQ(99u, first.Value);
+}
+
+TEST_F(RenderManagerOptionsTest, OptionLookupUsesTheStoredKeyAndOnlyChangesItsValue) {
+    XString key("Custom cache option");
+    CKDWORD value = 37;
+    Manager->m_VertexCache.Set(key, value);
+    key = "Caller no longer owns the published key";
+    value = 0;
+    const CKDWORD filter = Manager->m_DisableFilter.Value;
+    Manager->SetRenderOptions("cUsToM cAcHe OpTiOn", 0xfedcba98u);
+    EXPECT_STREQ("Custom cache option", Manager->m_VertexCache.Key.CStr());
+    EXPECT_EQ(0xfedcba98u, Manager->m_VertexCache.Value);
+    EXPECT_EQ(filter, Manager->m_DisableFilter.Value);
+    Manager->SetRenderOptions("VertexCache", 11);
+    EXPECT_EQ(0xfedcba98u, Manager->m_VertexCache.Value);
+}
 } // namespace
