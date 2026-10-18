@@ -339,4 +339,174 @@ TEST_F(RenderContextDispatchCompletionTest, PendingPayloadAndCallbackOwnerRemain
     ASSERT_EQ(1, Boundary.MarkerCount);
     EXPECT_EQ(CKDRAW_SOURCE_MESH, Parsed(0).Source); EXPECT_EQ(35u, Parsed(0).Mesh.Id);
 }
+static CKBOOL DrawWithScopedOwner(RCKRenderContext *device, RCKRenderObject *owner,
+                                  VxDrawPrimitiveData *data) {
+    CKScopedDrawAnnotation scope(device, owner);
+    return device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, data);
+}
+
+TEST_F(RenderContextDispatchCompletionTest, ScopedOwnerRestoresThePreviousSnapshotAfterARejectedDrawReturns) {
+    EnableAnnotations();
+    CKDrawAnnotationObjectRef previous = {};
+    previous.Id = 701;
+    CKDrawAnnotationCopyText(previous.Name, sizeof(previous.Name), "previous owner");
+    Device->SetDrawCallbackObject(&previous);
+    RCK3dEntity owner(Context, (CKSTRING)"temporary owner");
+    Boundary.DrawAccepted = FALSE;
+    EXPECT_FALSE(DrawWithScopedOwner(Device, &owner, &Data));
+    EXPECT_EQ(CKERR_INVALIDOPERATION, Device->m_FrameRenderError);
+    CKDrawAnnotationObjectRef restored = {};
+    ASSERT_TRUE(Device->GetDrawCallbackObject(&restored));
+    EXPECT_EQ(701u, restored.Id);
+    EXPECT_STREQ("previous_owner", restored.Name);
+    previous.Id = 999;
+    previous.Name[0] = 'X';
+    Boundary.DrawAccepted = TRUE;
+    EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    ASSERT_EQ(2, Boundary.MarkerCount);
+    EXPECT_EQ(owner.GetID(), Parsed(0).Object.Id);
+    EXPECT_STREQ("temporary_owner", Parsed(0).Object.Name);
+    EXPECT_EQ(701u, Parsed(1).Object.Id);
+    EXPECT_STREQ("previous_owner", Parsed(1).Object.Name);
+    EXPECT_EQ(2, Boundary.DrawCount);
+    EXPECT_FLOAT_EQ(9, Boundary.LastVertex.z);
+}
+
+TEST_F(RenderContextDispatchCompletionTest, InactiveScopeDoesNotEnableDiagnosticsOrRestoreIntoALaterEnabledState) {
+    ASSERT_EQ(nullptr, Device->m_DrawAnnotationState);
+    RCK3dEntity owner(Context, (CKSTRING)"inactive owner");
+    {
+        CKScopedDrawAnnotation nullContext(nullptr, &owner);
+        CKScopedDrawAnnotation inactive(Device, &owner);
+        EXPECT_EQ(nullptr, Device->m_DrawAnnotationState);
+        ASSERT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+        EXPECT_EQ(0, Boundary.MarkerCount);
+        EnableAnnotations();
+        CKDrawAnnotationObjectRef later = {};
+        later.Id = 702;
+        CKDrawAnnotationCopyText(later.Name, sizeof(later.Name), "later owner");
+        Device->SetDrawCallbackObject(&later);
+    }
+    CKDrawAnnotationObjectRef current = {};
+    ASSERT_TRUE(Device->GetDrawCallbackObject(&current));
+    EXPECT_EQ(702u, current.Id);
+    EXPECT_STREQ("later_owner", current.Name);
+    ASSERT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    ASSERT_EQ(1, Boundary.MarkerCount);
+    EXPECT_EQ(702u, Parsed(0).Object.Id);
+    EXPECT_EQ(2, Boundary.DrawCount);
+    EXPECT_FLOAT_EQ(9, Boundary.LastVertex.z);
+}
+
+TEST_F(RenderContextDispatchCompletionTest, OverlappingScopesOnDistinctContextsRestoreOnlyTheirOwnOwners) {
+    EnableAnnotations();
+    DispatchBoundary otherBoundary;
+    RCKRenderContext other(Context);
+    other.ApplyDrawAnnotationDebugFlags(CKRST_DEBUG_DRAWMAP_MARKERS);
+    RCK3dEntity first(Context, (CKSTRING)"first scoped owner");
+    RCK3dEntity second(Context, (CKSTRING)"second scoped owner");
+    CKDrawAnnotationObjectRef previous = {};
+    previous.Id = 703;
+    Device->SetDrawCallbackObject(&previous);
+    other.m_RasterizerContext = &otherBoundary;
+    {
+        CKScopedDrawAnnotation outer(Device, &first);
+        {
+            CKScopedDrawAnnotation inner(&other, &second);
+            EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+            EXPECT_TRUE(other.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+        }
+        EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+        EXPECT_TRUE(other.DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    }
+    EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    other.m_RasterizerContext = nullptr;
+    ASSERT_EQ(3, Boundary.MarkerCount);
+    EXPECT_EQ(first.GetID(), Parsed(0).Object.Id);
+    EXPECT_EQ(first.GetID(), Parsed(1).Object.Id);
+    EXPECT_EQ(703u, Parsed(2).Object.Id);
+    ASSERT_EQ(2, otherBoundary.MarkerCount);
+    CKDrawAnnotationParsed otherFirst = {}, otherLast = {};
+    ASSERT_TRUE(CKDrawAnnotationParseLabel(otherBoundary.Markers[0], &otherFirst));
+    ASSERT_TRUE(CKDrawAnnotationParseLabel(otherBoundary.Markers[1], &otherLast));
+    EXPECT_EQ(second.GetID(), otherFirst.Object.Id);
+    EXPECT_EQ(CKDRAW_SOURCE_RAW_PRIMITIVE, otherLast.Source);
+    EXPECT_EQ(2, otherBoundary.DrawCount);
+}
+
+TEST_F(RenderContextDispatchCompletionTest, NullObjectScopeKeepsCallbackAttributionAndRestoresItsOuterOwner) {
+    EnableAnnotations();
+    RCK3dEntity owner(Context, (CKSTRING)"named outer owner");
+    {
+        CKScopedDrawAnnotation outer(Device, &owner);
+        {
+            CKScopedDrawAnnotation unnamed(Device, nullptr);
+            CKDrawAnnotationObjectRef current = {};
+            ASSERT_TRUE(Device->GetDrawCallbackObject(&current));
+            EXPECT_EQ(0u, current.Id);
+            EXPECT_STREQ("", current.Name);
+            EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+        }
+        EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    }
+    EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    ASSERT_EQ(3, Boundary.MarkerCount);
+    EXPECT_EQ(CKDRAW_SOURCE_CALLBACK, Parsed(0).Source);
+    EXPECT_EQ(0u, Parsed(0).Object.Id);
+    EXPECT_EQ(owner.GetID(), Parsed(1).Object.Id);
+    EXPECT_EQ(CKDRAW_SOURCE_RAW_PRIMITIVE, Parsed(2).Source);
+}
+
+struct ScopedEntityDraws {
+    VxDrawPrimitiveData *Data;
+    int Count = 0;
+    int Phases[3] = {};
+    CKRenderObject *Objects[3] = {};
+    CKRenderContext *Contexts[3] = {};
+};
+struct ScopedEntityPhase {
+    ScopedEntityDraws *Draws;
+    int Phase;
+};
+static CKBOOL DrawFromActualEntityScope(CKRenderContext *context, CKRenderObject *object, void *argument) {
+    ScopedEntityPhase *phase = static_cast<ScopedEntityPhase *>(argument);
+    ScopedEntityDraws *draws = phase->Draws;
+    EXPECT_LT(draws->Count, 3);
+    if (draws->Count >= 3) return FALSE;
+    const int index = draws->Count++;
+    draws->Phases[index] = phase->Phase;
+    draws->Objects[index] = object;
+    draws->Contexts[index] = context;
+    return static_cast<RCKRenderContext *>(context)->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, draws->Data);
+}
+
+TEST_F(RenderContextDispatchCompletionTest, ActualEntityPreMainAndPostCallbacksKeepOrderArgumentsAndScopedOwner) {
+    EnableAnnotations();
+    RCK3dEntity owner(Context, (CKSTRING)"actual entity owner");
+    owner.m_MoveableFlags |= VX_MOVEABLE_EXTENTSUPTODATE;
+    ScopedEntityDraws draws = {&Data};
+    ScopedEntityPhase phases[] = {{&draws, 1}, {&draws, 2}, {&draws, 3}};
+    ASSERT_TRUE(owner.AddPreRenderCallBack(DrawFromActualEntityScope, &phases[0], FALSE));
+    ASSERT_TRUE(owner.SetRenderCallBack(DrawFromActualEntityScope, &phases[1]));
+    ASSERT_TRUE(owner.AddPostRenderCallBack(DrawFromActualEntityScope, &phases[2], FALSE));
+    EXPECT_TRUE(owner.Render(Device, CK_RENDER_CLEARVIEWPORT));
+    ASSERT_EQ(3, draws.Count);
+    ASSERT_EQ(3, Boundary.DrawCount);
+    ASSERT_EQ(3, Boundary.MarkerCount);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(i + 1, draws.Phases[i]);
+        EXPECT_EQ(&owner, draws.Objects[i]);
+        EXPECT_EQ(Device, draws.Contexts[i]);
+        EXPECT_EQ(CKDRAW_SOURCE_CALLBACK, Parsed(i).Source);
+        EXPECT_EQ(owner.GetID(), Parsed(i).Object.Id);
+        EXPECT_STREQ("actual_entity_owner", Parsed(i).Object.Name);
+    }
+    CKDrawAnnotationObjectRef after = {};
+    EXPECT_FALSE(Device->GetDrawCallbackObject(&after));
+    EXPECT_EQ(nullptr, Device->m_Current3dEntity);
+    EXPECT_TRUE(Device->DrawPrimitive(VX_TRIANGLELIST, nullptr, 0, &Data));
+    ASSERT_EQ(4, Boundary.MarkerCount);
+    EXPECT_EQ(CKDRAW_SOURCE_RAW_PRIMITIVE, Parsed(3).Source);
+    EXPECT_FLOAT_EQ(9, Boundary.LastVertex.z);
+}
 } // namespace
