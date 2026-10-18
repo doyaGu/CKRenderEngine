@@ -47,6 +47,8 @@ public:
 class ManagerContextDriver : public CKRasterizerDriver {
 public:
     ManagerContextCalls Calls;
+    CKBOOL HasNativeLimits = FALSE;
+    CKRasterizerNativeCapsDesc Limits = {};
     ManagerContextDriver(CKRasterizer *owner, CKDWORD index, CKSTRING name, CKBOOL hardware)
         : CKRasterizerDriver(owner, index, name, hardware) {
         m_CapsFinal = TRUE;
@@ -60,7 +62,11 @@ public:
         }
     }
     ~ManagerContextDriver() override { DestroyContexts(); }
-    CKBOOL GetNativeCaps(CKRasterizerNativeCapsDesc *) const override { return FALSE; }
+    CKBOOL GetNativeCaps(CKRasterizerNativeCapsDesc *caps) const override {
+        if (!HasNativeLimits) return FALSE;
+        *caps = Limits;
+        return TRUE;
+    }
     CKRasterizerContext *CreateContext() override {
         ManagerContextBoundary *context = new ManagerContextBoundary(this, &Calls);
         AddContext(context);
@@ -68,6 +74,9 @@ public:
     }
     void Description(const char *value) { m_Description = value; }
     void PublishCaps(CKBOOL final, int width) { m_CapsFinal = final; m_DisplayModes[0].Width = width; }
+    void PublishFirstFormat(VX_PIXELFORMAT format) {
+        VxPixelFormat2ImageDesc(format, m_TextureFormats[0].Format);
+    }
 };
 
 class ManagerContextRasterizer : public CKRasterizer {
@@ -305,5 +314,109 @@ TEST_F(RenderManagerContextTest, ScreenPointLookupUsesARealHiddenWindowAndPublic
     EXPECT_EQ(nullptr, Manager->GetRenderContextFromPoint(after));
     Manager->RemoveRenderContext(scope.Views[0]);
     EXPECT_EQ(scope.Views[1], Manager->GetRenderContextFromPoint(inside));
+}
+TEST_F(RenderManagerContextTest, DriverStorageRetainsIdentityAndPublishesBothCapabilityBlocks) {
+    for (int i = 0; i < 3; ++i) {
+        VxDriverDescEx *stored = Manager->GetDriverDescription(i);
+        VxDriverDesc *visible = Manager->GetRenderDriverDescription(i);
+        ASSERT_NE(nullptr, stored);
+        ASSERT_NE(nullptr, visible);
+        EXPECT_EQ(static_cast<CKDWORD>(i), stored->DriverId);
+        EXPECT_EQ(Manager->m_Rasterizers[0], stored->Rasterizer);
+        EXPECT_EQ(Driver(i), stored->RasterizerDriver);
+        EXPECT_TRUE(stored->CapsUpToDate);
+        EXPECT_EQ(i == 0 ? TRUE : FALSE, stored->Hardware);
+        EXPECT_STREQ(i == 0 ? "Hardware observer" : i == 1 ? "Software observer" : "Second software observer",
+                     stored->DriverDesc);
+        EXPECT_STREQ(stored->DriverDesc, stored->DriverDesc2);
+        EXPECT_STREQ(stored->DriverDesc, visible->DriverDesc);
+        EXPECT_STREQ(stored->DriverDesc2, visible->DriverName);
+        const CKDWORD specific = stored->Caps3D.CKRasterizerSpecificCaps;
+        EXPECT_EQ(i == 0 ? 0u : static_cast<CKDWORD>(CKRST_SPECIFICCAPS_SOFTWARE),
+                  specific & CKRST_SPECIFICCAPS_SOFTWARE);
+        EXPECT_EQ(i == 0 ? static_cast<CKDWORD>(CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL) : 0u,
+                  specific & (CKRST_SPECIFICCAPS_HARDWARE | CKRST_SPECIFICCAPS_HARDWARETL));
+        EXPECT_EQ(0, memcmp(&stored->Caps2D, &visible->Caps2D, sizeof(stored->Caps2D)));
+        EXPECT_EQ(0, memcmp(&stored->Caps3D, &visible->Caps3D, sizeof(stored->Caps3D)));
+        EXPECT_EQ(static_cast<CKDWORD>(CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D),
+                  stored->Caps2D.Caps & (CKRST_2DCAPS_WINDOWED | CKRST_2DCAPS_3D));
+    }
+}
+
+TEST_F(RenderManagerContextTest, DriverNamesTruncateAtTheBufferBoundaryAndReplaceBothCachedNames) {
+    char name[769];
+    for (int i = 0; i < 768; ++i) name[i] = 'a' + i % 26;
+    name[768] = '\0';
+    Driver()->Description(name);
+    Manager->RefreshDriverCaps(0);
+    VxDriverDescEx *stored = Manager->GetDriverDescription(0);
+    VxDriverDesc *visible = Manager->GetRenderDriverDescription(0);
+    EXPECT_EQ(511u, strlen(stored->DriverDesc));
+    EXPECT_EQ(511u, strlen(stored->DriverDesc2));
+    EXPECT_EQ(0, memcmp(name, stored->DriverDesc, 511));
+    EXPECT_EQ('\0', stored->DriverDesc[511]);
+    EXPECT_EQ('\0', stored->DriverDesc2[511]);
+    EXPECT_STREQ(stored->DriverDesc, visible->DriverDesc);
+    EXPECT_STREQ(stored->DriverDesc2, visible->DriverName);
+    Driver()->Description("Short updated driver");
+    Manager->RefreshDriverCaps(0);
+    EXPECT_EQ(stored, Manager->GetDriverDescription(0));
+    EXPECT_EQ(visible, Manager->GetRenderDriverDescription(0));
+    EXPECT_STREQ("Short updated driver", stored->DriverDesc);
+    EXPECT_STREQ("Short updated driver", stored->DriverDesc2);
+    EXPECT_STREQ("Short updated driver", visible->DriverDesc);
+    EXPECT_STREQ("Short updated driver", visible->DriverName);
+    EXPECT_EQ(0u, stored->DriverId);
+    EXPECT_EQ(Driver(), stored->RasterizerDriver);
+}
+
+TEST_F(RenderManagerContextTest, RefreshCopiesDriverArraysAndLimitsWithoutAliasingPublishedTextureFormats) {
+    VxDriverDescEx *stored = Manager->GetDriverDescription(0);
+    VxDriverDesc *visible = Manager->GetRenderDriverDescription(0);
+    ASSERT_EQ(1, stored->DisplayModeCount);
+    ASSERT_EQ(3, stored->TextureFormats.Size());
+    EXPECT_EQ(stored->DisplayModes, visible->DisplayModes);
+    EXPECT_NE(stored->TextureFormats.Begin(), visible->TextureFormats.Begin());
+    Driver()->PublishCaps(TRUE, 1366);
+    Driver()->PublishFirstFormat(_16_RGB565);
+    Driver()->HasNativeLimits = TRUE;
+    Driver()->Limits.MaxTextureSize = 512;
+    Driver()->Limits.MaxUserClipPlanes = 2;
+    Driver()->Limits.MaxLights = 3;
+    Driver()->Limits.MaxTextureStages = 2;
+    EXPECT_EQ(800, stored->DisplayModes[0].Width);
+    EXPECT_EQ(_24_RGB888, VxImageDesc2PixelFormat(stored->TextureFormats[0]));
+
+    Manager->RefreshDriverCaps(0);
+    EXPECT_EQ(stored, Manager->GetDriverDescription(0));
+    EXPECT_EQ(visible, Manager->GetRenderDriverDescription(0));
+    ASSERT_EQ(1, stored->DisplayModeCount);
+    EXPECT_EQ(1366, stored->DisplayModes[0].Width);
+    EXPECT_EQ(600, stored->DisplayModes[0].Height);
+    EXPECT_EQ(32, stored->DisplayModes[0].Bpp);
+    EXPECT_EQ(75, stored->DisplayModes[0].RefreshRate);
+    EXPECT_EQ(stored->DisplayModes, visible->DisplayModes);
+    ASSERT_EQ(3, stored->TextureFormats.Size());
+    ASSERT_EQ(3, visible->TextureFormats.Size());
+    EXPECT_EQ(_16_RGB565, VxImageDesc2PixelFormat(stored->TextureFormats[0]));
+    EXPECT_EQ(_16_RGB565, VxImageDesc2PixelFormat(visible->TextureFormats[0]));
+    EXPECT_EQ(512u, stored->Caps3D.MaxTextureWidth);
+    EXPECT_EQ(512u, stored->Caps3D.MaxTextureHeight);
+    EXPECT_EQ(512u, stored->Caps3D.MaxTextureRatio);
+    EXPECT_EQ(2u, stored->Caps3D.MaxClipPlanes);
+    EXPECT_EQ(3u, stored->Caps3D.MaxActiveLights);
+    EXPECT_EQ(2u, stored->Caps3D.MaxNumberTextureStage);
+    EXPECT_EQ(2u, stored->Caps3D.MaxNumberBlendStage);
+    EXPECT_EQ(0, memcmp(&stored->Caps3D, &visible->Caps3D, sizeof(stored->Caps3D)));
+
+    visible->TextureFormats[0].Width = 17;
+    EXPECT_NE(17, stored->TextureFormats[0].Width);
+    Driver()->PublishCaps(TRUE, 1920);
+    Driver()->PublishFirstFormat(_32_ARGB8888);
+    EXPECT_EQ(1366, stored->DisplayModes[0].Width);
+    EXPECT_EQ(_16_RGB565, VxImageDesc2PixelFormat(stored->TextureFormats[0]));
+    Manager->RefreshDriverCaps(0);
+    EXPECT_EQ(1920, visible->DisplayModes[0].Width);
+    EXPECT_EQ(_32_ARGB8888, VxImageDesc2PixelFormat(visible->TextureFormats[0]));
 }
 } // namespace
