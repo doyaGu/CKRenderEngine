@@ -174,3 +174,74 @@ TEST_F(MaterialPipelineTest, UnreadableRealStructMembersRetainIndependentBumpAmp
     float unreadableFloat = 0; CKDWORD unreadableDword = 0; ASSERT_NE(CK_OK, helper[0]->GetValue(&unreadableFloat)); ASSERT_NE(CK_OK, helper[1]->GetValue(&unreadableDword));
     ASSERT_EQ(2u, material.BumpMapEnvEffect(Device)); EXPECT_EQ(Bits(2.0f), State.StageStates[1][CKRST_TSS_BUMPENVMAT00]); EXPECT_EQ(CKRST_TOP_ADDSIGNED, State.StageStates[2][CKRST_TSS_OP]);
 }
+
+TEST_F(MaterialPipelineTest, CombineThreeUsesTwoDistinctLiveReferencesWithoutCrossingParameterTriplets) {
+    RCKMaterial material(Context);
+    PipelineTexture first(Context, &State, &Trace, 42), second(Context, &State, &Trace, 43);
+    RCK3dEntity firstReference(Context), secondReference(Context);
+    VxMatrix a = VxMatrix::Identity(), b = VxMatrix::Identity();
+    a[3].Set(3, 5, 7, 1); b[3].Set(11, 13, 17, 1);
+    firstReference.SetWorldMatrix(a); secondReference.SetWorldMatrix(b);
+    material.SetTexture(1, Texture(first)); material.SetTexture(2, Texture(second));
+    Combination(material, VXEFFECT_3TEXTURES,
+                CKRST_TOP_ADDSIGNED, VXEFFECT_TGTRANSFORM, firstReference.GetID(),
+                CKRST_TOP_SUBTRACT, VXEFFECT_TGTRANSFORM, secondReference.GetID());
+
+    ASSERT_EQ(2u, material.BlendTexturesEffect(Device, 3));
+    ColorAndAlpha(3, CKRST_TOP_ADDSIGNED); ColorAndAlpha(4, CKRST_TOP_SUBTRACT);
+    EXPECT_EQ(42u, State.Textures[3]); EXPECT_EQ(43u, State.Textures[4]);
+    const float firstXYZ[3] = {3, 5, 7}, secondXYZ[3] = {11, 13, 17};
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FLOAT_EQ(firstXYZ[i], State.Matrices[VXMATRIX_TEXTURE0 + 3][3][i]);
+        EXPECT_FLOAT_EQ(secondXYZ[i], State.Matrices[VXMATRIX_TEXTURE0 + 4][3][i]);
+    }
+    EXPECT_FLOAT_EQ(3, State.Matrices[VXMATRIX_TEXTURE0 + 3][2][0]);
+    EXPECT_FLOAT_EQ(5, State.Matrices[VXMATRIX_TEXTURE0 + 3][2][1]);
+    EXPECT_FLOAT_EQ(11, State.Matrices[VXMATRIX_TEXTURE0 + 4][2][0]);
+    EXPECT_FLOAT_EQ(13, State.Matrices[VXMATRIX_TEXTURE0 + 4][2][1]);
+    for (int stage = 3; stage < 5; ++stage) {
+        EXPECT_EQ(CKRSTPackTexcoordIndex(stage, CKRST_TEXGEN_PASSTHRU), State.StageStates[stage][CKRST_TSS_TEXCOORDINDEX]);
+        EXPECT_EQ(CKRST_TTF_COUNT2, State.StageStates[stage][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+    }
+    for (int row = 0; row < 4; ++row) for (int column = 0; column < 4; ++column) {
+        EXPECT_FLOAT_EQ(a[row][column], firstReference.GetWorldMatrix()[row][column]);
+        EXPECT_FLOAT_EQ(b[row][column], secondReference.GetWorldMatrix()[row][column]);
+    }
+}
+
+TEST_F(MaterialPipelineTest, CombineThreeRereadsEditedTripletsAndLiveTransformsWithoutKeepingPriorReferences) {
+    RCKMaterial material(Context);
+    PipelineTexture first(Context, &State, &Trace, 42), second(Context, &State, &Trace, 43);
+    RCK3dEntity a(Context), b(Context), replacement(Context);
+    VxMatrix world = VxMatrix::Identity();
+    world[3].Set(3, 5, 7, 1); a.SetWorldMatrix(world);
+    world[3].Set(11, 13, 17, 1); b.SetWorldMatrix(world);
+    world[3].Set(23, 29, 31, 1); replacement.SetWorldMatrix(world);
+    material.SetTexture(1, Texture(first)); material.SetTexture(2, Texture(second));
+    Combination(material, VXEFFECT_3TEXTURES,
+                CKRST_TOP_ADDSIGNED, VXEFFECT_TGTRANSFORM, a.GetID(),
+                CKRST_TOP_SUBTRACT, VXEFFECT_TGTRANSFORM, b.GetID());
+    ASSERT_EQ(2u, material.BlendTexturesEffect(Device, 3));
+
+    CKStructHelper parameters(material.GetEffectParameter());
+    Dword(parameters, 0, CKRST_TOP_SUBTRACT); Dword(parameters, 1, VXEFFECT_TGNONE); Dword(parameters, 2, 0);
+    Dword(parameters, 3, CKRST_TOP_ADD); Dword(parameters, 5, replacement.GetID());
+    ASSERT_EQ(2u, material.BlendTexturesEffect(Device, 3));
+    Identity(3); ColorAndAlpha(3, CKRST_TOP_SUBTRACT); ColorAndAlpha(4, CKRST_TOP_ADD);
+    EXPECT_FLOAT_EQ(23, State.Matrices[VXMATRIX_TEXTURE0 + 4][3][0]);
+    EXPECT_FLOAT_EQ(29, State.Matrices[VXMATRIX_TEXTURE0 + 4][3][1]);
+    EXPECT_FLOAT_EQ(31, State.Matrices[VXMATRIX_TEXTURE0 + 4][3][2]);
+    EXPECT_EQ(CKRST_TTF_NONE, State.StageStates[3][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+    EXPECT_EQ(CKRST_TTF_COUNT2, State.StageStates[4][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+
+    world[3].Set(37, 41, 43, 1); a.SetWorldMatrix(world);
+    Dword(parameters, 1, VXEFFECT_TGTRANSFORM); Dword(parameters, 2, a.GetID());
+    Dword(parameters, 4, VXEFFECT_TGNONE); Dword(parameters, 5, 0);
+    ASSERT_EQ(2u, material.BlendTexturesEffect(Device, 3));
+    ColorAndAlpha(3, CKRST_TOP_SUBTRACT); ColorAndAlpha(4, CKRST_TOP_ADD); Identity(4);
+    EXPECT_FLOAT_EQ(37, State.Matrices[VXMATRIX_TEXTURE0 + 3][3][0]);
+    EXPECT_FLOAT_EQ(41, State.Matrices[VXMATRIX_TEXTURE0 + 3][3][1]);
+    EXPECT_FLOAT_EQ(43, State.Matrices[VXMATRIX_TEXTURE0 + 3][3][2]);
+    EXPECT_EQ(CKRST_TTF_COUNT2, State.StageStates[3][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+    EXPECT_EQ(CKRST_TTF_NONE, State.StageStates[4][CKRST_TSS_TEXTURETRANSFORMFLAGS]);
+}
