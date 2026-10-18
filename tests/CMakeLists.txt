@@ -477,7 +477,7 @@ if (TARGET gtest_main)
             TextureLifecycleTest TextureImageLifecycleTest TextureSerializationTest TextureCopyTest
             TextureUploadTest TextureContextCopyTest TextureStateTest
             MaterialApplyTest MaterialPipelineTest MaterialLifecycleTest MaterialDependenciesTest
-            MaterialBatchTest MaterialSerializationTest MaterialPropertiesTest MaterialStateTest MaterialEffectsStateTest
+            MaterialBatchTest SpriteBatchStorageTest MaterialSerializationTest MaterialPropertiesTest MaterialStateTest MaterialEffectsStateTest
             MaterialTexGenTest MaterialDP3Test
             Sprite3DDependenciesTest Sprite3DGeometryTest Sprite3DLifecycleTest
             Sprite3DOrientationTest Sprite3DPickThresholdTest Sprite3DRayTest Sprite3DRenderTest Sprite3DSerializationTest
