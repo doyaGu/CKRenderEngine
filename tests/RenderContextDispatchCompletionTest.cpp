@@ -509,4 +509,251 @@ TEST_F(RenderContextDispatchCompletionTest, ActualEntityPreMainAndPostCallbacksK
     EXPECT_EQ(CKDRAW_SOURCE_RAW_PRIMITIVE, Parsed(3).Source);
     EXPECT_FLOAT_EQ(9, Boundary.LastVertex.z);
 }
+static void ExpectAnnotationCounters(CKDrawAnnotationState &state, CKDWORD sets, CKDWORD consumed,
+                                     CKDWORD callbacks, CKDWORD raw, CKDWORD overwritten) {
+    CKDrawAnnotationCounters counters = {};
+    CKDrawAnnotationStateGetCounters(&state, &counters);
+    EXPECT_EQ(sets, counters.PendingSetCount);
+    EXPECT_EQ(consumed, counters.ExplicitCount);
+    EXPECT_EQ(callbacks, counters.CallbackFallbackCount);
+    EXPECT_EQ(raw, counters.RawFallbackCount);
+    EXPECT_EQ(overwritten, counters.PendingOverwriteCount);
+}
+
+TEST(DrawAnnotationStateTest, ReinitializingPopulatedStateClearsPayloadOwnerTokensAndAllCounters) {
+    CKDrawAnnotationState state;
+    CKDrawAnnotationStateInit(&state);
+    CKDrawAnnotation pending;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_MESH);
+    pending.Mesh.Id = 805;
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationObjectRef owner = {};
+    owner.Id = 806;
+    CKDrawAnnotationCopyText(owner.Name, sizeof(owner.Name), "reset_owner");
+    CKDrawAnnotationStateSetCallbackObject(&state, &owner);
+    CKDrawAnnotation output;
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_TRIANGLELIST, 3, 9);
+    CKDrawAnnotationStateSetCallbackObject(&state, nullptr);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_LINELIST, 4, 7);
+    ExpectAnnotationCounters(state, 2, 1, 1, 1, 1);
+    CKDrawAnnotationStateSetCallbackObject(&state, &owner);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationStateInit(&state);
+    EXPECT_FALSE(CKDrawAnnotationStateHasPending(&state));
+    EXPECT_FALSE(CKDrawAnnotationStateGetCallbackObject(&state, &owner));
+    EXPECT_EQ(0u, state.NextToken);
+    EXPECT_EQ(CKDRAW_SOURCE_NONE, state.Pending.Source);
+    EXPECT_EQ(0u, state.Pending.Mesh.Id);
+    EXPECT_EQ(0u, state.CallbackObject.Id);
+    EXPECT_STREQ("", state.CallbackObject.Name);
+    ExpectAnnotationCounters(state, 0, 0, 0, 0, 0);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(1u, output.Token);
+    EXPECT_EQ(805u, output.Mesh.Id);
+    ExpectAnnotationCounters(state, 1, 1, 0, 0, 0);
+}
+
+TEST(DrawAnnotationStateTest, PendingReplacementCopiesTheWholePayloadAndClearDoesNotCountAsConsumption) {
+    CKDrawAnnotationState state;
+    CKDrawAnnotationStateInit(&state);
+    CKDrawAnnotation pending;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_SPRITE);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_MESH);
+    pending.PrimitiveType = VX_TRIANGLESTRIP;
+    pending.IndexCount = 12; pending.VertexCount = 8;
+    pending.Mesh.Id = 11; pending.Entity.Id = 13; pending.Material.Id = 17;
+    pending.GroupIndex = 19; pending.PrimitiveIndex = 23;
+    CKDrawAnnotationCopyText(pending.Mesh.Name, sizeof(pending.Mesh.Name), "copied_mesh");
+    CKDrawAnnotationCopyText(pending.Path, sizeof(pending.Path), "test_path");
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    pending.Mesh.Id = 999;
+    pending.Mesh.Name[0] = 'X'; pending.Path[0] = 'X';
+    CKDrawAnnotation output;
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(CKDRAW_SOURCE_MESH, output.Source);
+    EXPECT_EQ(VX_TRIANGLESTRIP, output.PrimitiveType);
+    EXPECT_EQ(12u, output.IndexCount); EXPECT_EQ(8u, output.VertexCount);
+    EXPECT_EQ(11u, output.Mesh.Id); EXPECT_EQ(13u, output.Entity.Id); EXPECT_EQ(17u, output.Material.Id);
+    EXPECT_EQ(19, output.GroupIndex); EXPECT_EQ(23, output.PrimitiveIndex);
+    EXPECT_STREQ("copied_mesh", output.Mesh.Name); EXPECT_STREQ("test_path", output.Path);
+    EXPECT_EQ(2u, output.Token);
+    EXPECT_FALSE(CKDrawAnnotationStateHasPending(&state));
+    EXPECT_EQ(CKDRAW_SOURCE_NONE, state.Pending.Source);
+    EXPECT_EQ(0u, state.Pending.Token);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationStateClearPending(&state);
+    EXPECT_FALSE(CKDrawAnnotationStateHasPending(&state));
+    EXPECT_FALSE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(2u, output.Token) << "Failed consume must not change the caller's output";
+    EXPECT_EQ(3u, state.NextToken);
+    ExpectAnnotationCounters(state, 3, 1, 0, 0, 1);
+}
+
+TEST(DrawAnnotationStateTest, AutomaticTokenWrapSkipsZeroAndSuppliedTokenDoesNotAdvanceTheGenerator) {
+    CKDrawAnnotationState state;
+    CKDrawAnnotationStateInit(&state);
+    state.NextToken = 0xfffffffeu;
+    CKDrawAnnotation pending, output;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_MESH);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(0xffffffffu, output.Token);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_TRIANGLELIST, 3, 3);
+    EXPECT_EQ(1u, output.Token);
+    pending.Token = 400;
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    EXPECT_EQ(1u, state.NextToken);
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(400u, output.Token);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_POINTLIST, 2, 2);
+    EXPECT_EQ(2u, output.Token);
+    ExpectAnnotationCounters(state, 2, 2, 0, 2, 0);
+}
+
+TEST(DrawAnnotationStateTest, FallbackCopiesCallbackIdentityWithoutConsumingOrReplacingTheQueuedPayload) {
+    CKDrawAnnotationState state;
+    CKDrawAnnotationStateInit(&state);
+    CKDrawAnnotationObjectRef owner = {};
+    owner.Id = 31;
+    CKDrawAnnotationCopyText(owner.Name, sizeof(owner.Name), "copied_owner");
+    CKDrawAnnotationStateSetCallbackObject(&state, &owner);
+    owner.Id = 99; owner.Name[0] = 'X';
+    CKDrawAnnotationObjectRef copy = {};
+    ASSERT_TRUE(CKDrawAnnotationStateGetCallbackObject(&state, &copy));
+    EXPECT_EQ(31u, copy.Id); EXPECT_STREQ("copied_owner", copy.Name);
+    copy.Id = 101; copy.Name[0] = 'Y';
+    CKDrawAnnotation pending, output;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_MESH);
+    pending.Token = 100; pending.Mesh.Id = 41;
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_TRIANGLEFAN, 4, 6);
+    EXPECT_EQ(CKDRAW_SOURCE_CALLBACK, output.Source);
+    EXPECT_EQ(31u, output.Object.Id); EXPECT_STREQ("copied_owner", output.Object.Name);
+    EXPECT_EQ(VX_TRIANGLEFAN, output.PrimitiveType);
+    EXPECT_EQ(4u, output.IndexCount); EXPECT_EQ(6u, output.VertexCount);
+    EXPECT_TRUE(CKDrawAnnotationStateHasPending(&state));
+    CKDrawAnnotationStateSetCallbackObject(&state, nullptr);
+    EXPECT_FALSE(CKDrawAnnotationStateGetCallbackObject(&state, &copy));
+    EXPECT_EQ(101u, copy.Id);
+    EXPECT_EQ(0u, state.CallbackObject.Id); EXPECT_STREQ("", state.CallbackObject.Name);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_LINELIST, 8, 9);
+    EXPECT_EQ(CKDRAW_SOURCE_RAW_PRIMITIVE, output.Source);
+    EXPECT_EQ(0u, output.Object.Id);
+    EXPECT_EQ(8u, output.IndexCount); EXPECT_EQ(9u, output.VertexCount);
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(CKDRAW_SOURCE_MESH, output.Source);
+    EXPECT_EQ(100u, output.Token); EXPECT_EQ(41u, output.Mesh.Id);
+    ExpectAnnotationCounters(state, 1, 1, 1, 1, 0);
+}
+
+TEST_F(RenderContextDispatchCompletionTest, ObjectReferenceCaptureCopiesLongNamesAndHandlesUnnamedAndNullObjects) {
+    char name[160];
+    for (int i = 0; i < 159; ++i) name[i] = 'a' + i % 26;
+    name[17] = ' '; name[159] = '\0';
+    RCK3dEntity owner(Context, name), unnamed(Context);
+    CKDrawAnnotationObjectRef ref = {};
+    CKDrawAnnotationSetObject(&ref, &owner);
+    EXPECT_EQ(owner.GetID(), ref.Id);
+    EXPECT_EQ(95u, std::strlen(ref.Name));
+    EXPECT_EQ('_', ref.Name[17]);
+    EXPECT_EQ('\0', ref.Name[95]);
+    for (int i = 0; i < 95; ++i) EXPECT_EQ(i == 17 ? '_' : name[i], ref.Name[i]);
+    owner.SetName((CKSTRING)"changed_owner");
+    EXPECT_EQ('a', ref.Name[0]);
+    EXPECT_EQ(95u, std::strlen(ref.Name));
+    CKDrawAnnotationSetObject(&ref, &unnamed);
+    EXPECT_EQ(unnamed.GetID(), ref.Id); EXPECT_STREQ("", ref.Name);
+    CKDrawAnnotationSetObject(&ref, nullptr);
+    EXPECT_EQ(0u, ref.Id); EXPECT_STREQ("", ref.Name);
+}
+
+TEST(DrawAnnotationStateTest, CounterSnapshotsAndImplicitStateCopiesDoNotShareMutableStorage) {
+    CKDrawAnnotationState state, other;
+    CKDrawAnnotationStateInit(&state); CKDrawAnnotationStateInit(&other);
+    state.PendingSetCount = 11; state.ExplicitCount = 13;
+    state.CallbackFallbackCount = 17; state.RawFallbackCount = 19; state.PendingOverwriteCount = 23;
+    state.NextToken = 29; state.Pending.Mesh.Id = 31;
+    CKDrawAnnotationCounters counters = {};
+    CKDrawAnnotationStateGetCounters(&state, &counters);
+    EXPECT_EQ(11u, counters.PendingSetCount); EXPECT_EQ(13u, counters.ExplicitCount);
+    EXPECT_EQ(17u, counters.CallbackFallbackCount); EXPECT_EQ(19u, counters.RawFallbackCount);
+    EXPECT_EQ(23u, counters.PendingOverwriteCount);
+    CKDrawAnnotationCounters copied = counters;
+    counters.PendingSetCount = 999; counters.RawFallbackCount = 998;
+    EXPECT_EQ(11u, copied.PendingSetCount); EXPECT_EQ(19u, copied.RawFallbackCount);
+    ExpectAnnotationCounters(state, 11, 13, 17, 19, 23);
+    CKDrawAnnotationState snapshot = state;
+    snapshot.Pending.Mesh.Id = 99; snapshot.NextToken = 98; snapshot.ExplicitCount = 97;
+    EXPECT_EQ(31u, state.Pending.Mesh.Id); EXPECT_EQ(29u, state.NextToken);
+    EXPECT_EQ(13u, state.ExplicitCount);
+    CKDrawAnnotation pending;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_SPRITE);
+    CKDrawAnnotationStateSetPending(&other, &pending);
+    EXPECT_EQ(1u, other.NextToken); EXPECT_EQ(29u, state.NextToken);
+    ExpectAnnotationCounters(other, 1, 0, 0, 0, 0);
+}
+
+TEST(DrawAnnotationStateTest, CounterOverflowUsesIndependentUnsignedDwordArithmetic) {
+    CKDrawAnnotationState state;
+    CKDrawAnnotationStateInit(&state);
+    CKDrawAnnotation pending, output;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_MESH);
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    state.PendingSetCount = state.ExplicitCount = state.CallbackFallbackCount = 0xffffffffu;
+    state.RawFallbackCount = state.PendingOverwriteCount = 0xffffffffu;
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    CKDrawAnnotationObjectRef owner = {};
+    CKDrawAnnotationStateSetCallbackObject(&state, &owner);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_POINTLIST, 1, 1);
+    EXPECT_EQ(CKDRAW_SOURCE_CALLBACK, output.Source);
+    EXPECT_EQ(0u, output.Object.Id) << "Present anonymous callback is distinct from no callback";
+    CKDrawAnnotationStateSetCallbackObject(&state, nullptr);
+    CKDrawAnnotationStateBuildFallback(&state, &output, VX_POINTLIST, 1, 1);
+    ExpectAnnotationCounters(state, 0, 0, 0, 0, 0);
+}
+
+TEST(DrawAnnotationStateTest, MissingInputsAndOutputsLeaveQueuedStateAndCallerSnapshotsIntact) {
+    CKDrawAnnotationState state;
+    CKDrawAnnotationStateInit(&state);
+    CKDrawAnnotation pending, output;
+    CKDrawAnnotationInit(&pending, CKDRAW_SOURCE_MESH);
+    pending.Mesh.Id = 51;
+    CKDrawAnnotationStateSetPending(&state, &pending);
+    CKDrawAnnotationStateSetPending(&state, nullptr);
+    CKDrawAnnotationStateSetPending(nullptr, &pending);
+    EXPECT_FALSE(CKDrawAnnotationStateConsume(&state, nullptr));
+    EXPECT_TRUE(CKDrawAnnotationStateHasPending(&state));
+    CKDrawAnnotationStateBuildFallback(&state, nullptr, VX_POINTLIST, 1, 1);
+    EXPECT_EQ(1u, state.NextToken);
+    ExpectAnnotationCounters(state, 1, 0, 0, 0, 0);
+    CKDrawAnnotationCounters counters = {};
+    counters.PendingSetCount = 61;
+    CKDrawAnnotationStateGetCounters(nullptr, &counters);
+    CKDrawAnnotationStateGetCounters(&state, nullptr);
+    EXPECT_EQ(61u, counters.PendingSetCount);
+    CKDrawAnnotationObjectRef owner = {}; owner.Id = 67;
+    CKDrawAnnotationStateSetCallbackObject(&state, &owner);
+    EXPECT_FALSE(CKDrawAnnotationStateGetCallbackObject(&state, nullptr));
+    EXPECT_FALSE(CKDrawAnnotationStateGetCallbackObject(nullptr, &owner));
+    EXPECT_EQ(67u, owner.Id);
+    CKDrawAnnotationSetObject(nullptr, nullptr);
+    CKDrawAnnotationStateInit(nullptr);
+    CKDrawAnnotationStateClearPending(nullptr);
+    CKDrawAnnotationStateSetCallbackObject(nullptr, &owner);
+    EXPECT_FALSE(CKDrawAnnotationStateHasPending(nullptr));
+    CKDrawAnnotationInit(&output, CKDRAW_SOURCE_SPRITE); output.Token = 71;
+    EXPECT_FALSE(CKDrawAnnotationStateConsume(nullptr, &output));
+    EXPECT_EQ(71u, output.Token); EXPECT_EQ(CKDRAW_SOURCE_SPRITE, output.Source);
+    CKDrawAnnotationStateBuildFallback(nullptr, &output, VX_LINESTRIP, 7, 8);
+    EXPECT_EQ(CKDRAW_SOURCE_RAW_PRIMITIVE, output.Source); EXPECT_EQ(0u, output.Token);
+    EXPECT_EQ(7u, output.IndexCount); EXPECT_EQ(8u, output.VertexCount);
+    ASSERT_TRUE(CKDrawAnnotationStateConsume(&state, &output));
+    EXPECT_EQ(51u, output.Mesh.Id); EXPECT_EQ(1u, output.Token);
+    ExpectAnnotationCounters(state, 1, 1, 0, 0, 0);
+}
 } // namespace
