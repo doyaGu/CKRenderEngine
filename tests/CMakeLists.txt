@@ -525,6 +525,7 @@ if (TARGET gtest_main)
             VertexCacheOptimizerTopologyTest VertexCacheOptimizerStateTest
             NvStripifierTopologyTest NvStripifierLifetimeTest NvStripifierOptimizationTest
             ProgressiveMeshTopologyTest ProgressiveMeshHeapTest ProgressiveMeshOwnershipTest
+            ProgressiveMeshCollapseTest ProgressiveMeshCallbackTest LegacyMeshLoadTest PMChainGeoMorphTest BuildRenderMeshCompletionTest
             MaterialGroupStorageTest VertexBufferRemapTest MaterialChannelStorageTest
             MeshDrawScopeTest MeshDrawDelegationTest
             MeshNormalGenerationTest MeshVertexStorageTest MeshRayIntersectionTest
@@ -550,6 +551,14 @@ if (TARGET gtest_main)
         target_link_libraries(${animation_test} PRIVATE gtest_main)
         target_compile_features(${animation_test} PRIVATE cxx_std_17)
     endforeach ()
+    target_include_directories(ProgressiveMeshCollapseTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_include_directories(LegacyMeshLoadTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_include_directories(PMChainGeoMorphTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_include_directories(BuildRenderMeshCompletionTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(RenderEngineInitializationTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(RenderEnginePluginInfoTest PRIVATE

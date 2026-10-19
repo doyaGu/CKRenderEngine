@@ -3125,10 +3125,10 @@ void RCKMesh::BuildRenderMesh() {
                 const int step = m_ProgressiveMesh->m_MorphStep;
                 currentCount = currentCount > step ? currentCount - step : 0;
             }
-            int nextLod = currentCount + m_ProgressiveMesh->m_MorphStep;
-            if (nextLod >= targetVertexCount)
-                nextLod = targetVertexCount;
-            targetVertexCount = nextLod;
+            const int remaining = targetVertexCount - currentCount;
+            targetVertexCount = m_ProgressiveMesh->m_MorphStep >= remaining
+                ? targetVertexCount
+                : currentCount + m_ProgressiveMesh->m_MorphStep;
         } else if (m_ProgressiveMesh->m_VertexCount) {
             // Without morph step, use power-of-2 stepping
             while (currentCount >= m_ProgressiveMesh->m_VertexCount) {
