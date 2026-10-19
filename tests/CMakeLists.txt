@@ -512,7 +512,7 @@ if (TARGET gtest_main)
             RenderContextDispatchCompletionTest RenderContextDiagnosticCompletionTest
             RenderContextAbiCompletionTest RenderContextStorageCompletionTest
             RenderContextCallbackTimingTest RenderContextTraversalTimingTest RenderContextParentWindowTest
-            RenderedSceneLifecycleTest RenderedSceneCameraTest RenderedSceneDrawTest
+            RenderedSceneLifecycleTest RenderedSceneCameraTest RenderedSceneDrawTest RenderedSceneFloatStateTest
             SceneGraphLifecycleTest SceneGraphVisibilityTest SceneGraphTraversalTest
             SceneGraphRootLifecycleTest SceneGraphRootSortTest SceneGraphRootTraversalTest
             CallbacksLifetimeTest CallbacksRegistrationTest CallbacksDispatchTest
@@ -668,6 +668,8 @@ if (TARGET gtest_main)
                 VERBATIM)
         endif ()
     endif ()
+    target_include_directories(RenderedSceneFloatStateTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(RenderContextFrameCompletionTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(RenderContextOptionsCompletionTest PRIVATE
