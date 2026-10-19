@@ -701,6 +701,26 @@ if (TARGET gtest_main)
         target_compile_features(${render_stats_target} PRIVATE cxx_std_17)
     endforeach ()
 
+    # Keep the logger active in both variants to isolate the scene gates.
+    foreach (scene_log_variant Enabled Disabled)
+        set(scene_log_target RenderedSceneLogGates${scene_log_variant}Test)
+        set(scene_log_enabled 0)
+        if (scene_log_variant STREQUAL "Enabled")
+            set(scene_log_enabled 1)
+        endif ()
+        ckre_add_engine_test(${scene_log_target} RenderedSceneLogGatesTest.cpp
+            ../src/CKRasterizer/CKRasterizerLib/CKDebugLogger.cpp)
+        get_target_property(scene_log_definitions ${scene_log_target} COMPILE_DEFINITIONS)
+        list(FILTER scene_log_definitions EXCLUDE REGEX "^CKRE_ENABLE_(DEBUG_LOGGER|FRAME_DIAGNOSTICS)=")
+        set_property(TARGET ${scene_log_target} PROPERTY COMPILE_DEFINITIONS "${scene_log_definitions}")
+        target_compile_definitions(${scene_log_target} PRIVATE
+            CKRE_ENABLE_DEBUG_LOGGER=1 CKRE_ENABLE_FRAME_DIAGNOSTICS=${scene_log_enabled})
+        target_include_directories(${scene_log_target} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+        target_link_libraries(${scene_log_target} PRIVATE gtest_main)
+        target_compile_features(${scene_log_target} PRIVATE cxx_std_17)
+    endforeach ()
+
     if (WIN32)
         # Use the actual Windows filter and DbgHelp session, plus the disabled
         # header implementation, independently of the engine's logger option.
