@@ -1,0 +1,4 @@
+LIBRARY CKREPluginLifetimeProbe
+EXPORTS
+    CKREConfigureLifetimeProbe
+    CKRasterizerGetInfo

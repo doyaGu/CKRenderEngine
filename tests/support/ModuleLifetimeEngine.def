@@ -1,0 +1,20 @@
+EXPORTS
+    CKGetPluginInfo
+    CKRETestModuleHandle
+    CKRETestProviderCount
+    CKRETestProvider
+    CKRETestRegisterProvider
+    CKRETestRegisterStaticProvider
+    CKRETestReleaseProviders
+    CKRETestEnumerateProviders
+    CKRETestEnumerationDone
+    CKRETestRegisterStaticInfo
+    CKRETestRegisterNullProvider
+    CKRETestModulePath
+    CKRETestProviderMask
+    CKRETestExitInstance
+    CKRETestTimingConfigure
+    CKRETestTimingBeginFrame
+    CKRETestTimingEndFrame
+    CKRETestTimingInsideFrame
+    CKRETestTimingSnapshot

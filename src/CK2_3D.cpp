@@ -221,7 +221,7 @@ CKERROR InitInstanceFct(CKContext *context) {
 }
 
 CKERROR ExitInstanceFct(CKContext *context) {
-    ReleaseRasterizers();
+    // Contexts own their managers; provider libraries belong to the module.
     return CK_OK;
 }
 
@@ -236,7 +236,7 @@ PLUGIN_EXPORT CKPluginInfo *CKGetPluginInfo(int) {
     g_PluginInfo.m_Type = CKPLUGIN_RENDERENGINE_DLL;
     g_PluginInfo.m_Version = 0x000001;
     g_PluginInfo.m_InitInstanceFct = InitInstanceFct;
-    g_PluginInfo.m_ExitInstanceFct = ExitInstanceFct;
+    g_PluginInfo.m_ExitInstanceFct = nullptr; // Rasterizer DLLs belong to the module.
     g_PluginInfo.m_GUID = VIRTOOLS_RENDERENGIEN_GUID;
     g_PluginInfo.m_Summary = "Virtools Default Rendering Engine";
     return &g_PluginInfo;
@@ -270,6 +270,15 @@ void ReleaseRasterizers() {
         info.DllInstance = nullptr;
     }
 }
+
+#if defined(CKRE_DYNAMIC_RENDER_ENGINE)
+struct CKRenderEngineModuleLifetime {
+    ~CKRenderEngineModuleLifetime() { ReleaseRasterizers(); }
+};
+
+// Constructed after the registry, so providers unload before it is destroyed.
+static CKRenderEngineModuleLifetime g_RenderEngineModuleLifetime;
+#endif
 
 #if defined(CKRE_DYNAMIC_RENDER_ENGINE) && defined(_WIN32)
 

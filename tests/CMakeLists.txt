@@ -529,7 +529,7 @@ if (TARGET gtest_main)
             MeshDrawScopeTest MeshDrawDelegationTest
             MeshNormalGenerationTest MeshVertexStorageTest MeshRayIntersectionTest
             RenderObjectLifecycleTest RenderObjectContextTest RenderObjectCallbacksTest
-            Object3dRegistrationTest Object3dLifecycleTest
+            Object3dRegistrationTest Object3dLifecycleTest RenderEngineInitializationTest RenderEnginePluginInfoTest
             AnimationSerializationTest KeyedAnimationLoadTest KeyedAnimationSaveTest
             AnimationDependenciesTest KeyedAnimationDependenciesTest KeyedAnimationListTest KeyedAnimationCompositionTest
             KeyedAnimationPlaybackTest AnimationClockTest AnimationFlagsTest AnimationLifecycleTest
@@ -550,6 +550,109 @@ if (TARGET gtest_main)
         target_link_libraries(${animation_test} PRIVATE gtest_main)
         target_compile_features(${animation_test} PRIVATE cxx_std_17)
     endforeach ()
+    target_include_directories(RenderEngineInitializationTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    target_include_directories(RenderEnginePluginInfoTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+    if (WIN32)
+        add_library(ckre_plugin_lifetime_probe SHARED
+            support/PluginLifetimeProbe.cpp support/PluginLifetimeProbe.def)
+        set_target_properties(ckre_plugin_lifetime_probe PROPERTIES
+            OUTPUT_NAME CKREPluginLifetimeProbe
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lifetime-probe)
+        add_dependencies(RenderEnginePluginInfoTest ckre_plugin_lifetime_probe)
+        add_custom_command(TARGET RenderEnginePluginInfoTest POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:ckre_plugin_lifetime_probe>
+                $<TARGET_FILE_DIR:RenderEnginePluginInfoTest>
+            VERBATIM)
+
+        # The host and loaded module must share the same core registries.
+        if (NOT TARGET CK2Static AND NOT TARGET VxMathStatic)
+            add_library(ckre_module_lifetime_engine SHARED
+                support/ModuleLifetimeEngine.cpp support/ModuleLifetimeEngine.def)
+            target_link_libraries(ckre_module_lifetime_engine PRIVATE CK2_3DStatic)
+            target_include_directories(ckre_module_lifetime_engine PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+            ckre_apply_diagnostic_definitions(ckre_module_lifetime_engine PRIVATE)
+            get_target_property(module_lifetime_definitions ckre_module_lifetime_engine COMPILE_DEFINITIONS)
+            list(FILTER module_lifetime_definitions EXCLUDE REGEX "^CKRE_ENABLE_FRAME_COST_STATS=")
+            set_property(TARGET ckre_module_lifetime_engine PROPERTY COMPILE_DEFINITIONS "${module_lifetime_definitions}")
+            target_compile_definitions(ckre_module_lifetime_engine PRIVATE CKRE_ENABLE_FRAME_COST_STATS=0)
+            set_target_properties(ckre_module_lifetime_engine PROPERTIES
+                OUTPUT_NAME CKREModuleLifetimeEngine
+                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lifetime-engine)
+
+            ckre_add_engine_test(RenderEngineModuleLifetimeTest RenderEngineModuleLifetimeTest.cpp)
+            target_include_directories(RenderEngineModuleLifetimeTest PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+            target_link_libraries(RenderEngineModuleLifetimeTest PRIVATE gtest_main)
+            target_compile_features(RenderEngineModuleLifetimeTest PRIVATE cxx_std_17)
+            add_dependencies(RenderEngineModuleLifetimeTest
+                ckre_module_lifetime_engine ckre_plugin_lifetime_probe)
+            add_custom_command(TARGET RenderEngineModuleLifetimeTest POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:ckre_module_lifetime_engine>
+                    $<TARGET_FILE_DIR:RenderEngineModuleLifetimeTest>
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:ckre_plugin_lifetime_probe>
+                    $<TARGET_FILE_DIR:RenderEngineModuleLifetimeTest>
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:ckre_plugin_lifetime_probe>
+                    $<TARGET_FILE_DIR:RenderEngineModuleLifetimeTest>/CKREPluginLifetimeProbe2.dll
+                VERBATIM)
+
+            add_library(ckre_no_info_lifetime_probe SHARED
+                support/PluginLifetimeProbe.cpp support/NoInfoLifetimeProbe.def)
+            set_target_properties(ckre_no_info_lifetime_probe PROPERTIES
+                OUTPUT_NAME CKRENoInfoLifetimeProbe
+                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/no-info-probe)
+            ckre_add_engine_test(RenderEngineRasterizerRegistrationTest RenderEngineRasterizerRegistrationTest.cpp)
+            target_include_directories(RenderEngineRasterizerRegistrationTest PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+            target_link_libraries(RenderEngineRasterizerRegistrationTest PRIVATE gtest_main)
+            target_compile_features(RenderEngineRasterizerRegistrationTest PRIVATE cxx_std_17)
+            add_dependencies(RenderEngineRasterizerRegistrationTest
+                ckre_module_lifetime_engine ckre_plugin_lifetime_probe ckre_no_info_lifetime_probe)
+            add_custom_command(TARGET RenderEngineRasterizerRegistrationTest POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:ckre_module_lifetime_engine>
+                    $<TARGET_FILE:ckre_plugin_lifetime_probe>
+                    $<TARGET_FILE:ckre_no_info_lifetime_probe>
+                    $<TARGET_FILE_DIR:RenderEngineRasterizerRegistrationTest>
+                VERBATIM)
+
+            add_library(ckre_module_timing_engine SHARED
+                support/ModuleLifetimeEngine.cpp support/ModuleLifetimeEngine.def
+                ../src/CKRasterizer/CKRasterizerLib/CKRenderFrameCostStats.cpp)
+            target_link_libraries(ckre_module_timing_engine PRIVATE CK2_3DStatic)
+            target_include_directories(ckre_module_timing_engine PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+            ckre_apply_diagnostic_definitions(ckre_module_timing_engine PRIVATE)
+            get_target_property(module_timing_definitions ckre_module_timing_engine COMPILE_DEFINITIONS)
+            list(FILTER module_timing_definitions EXCLUDE REGEX "^CKRE_ENABLE_FRAME_COST_STATS=")
+            set_property(TARGET ckre_module_timing_engine PROPERTY COMPILE_DEFINITIONS "${module_timing_definitions}")
+            target_compile_definitions(ckre_module_timing_engine PRIVATE CKRE_ENABLE_FRAME_COST_STATS=1)
+            set_target_properties(ckre_module_timing_engine PROPERTIES
+                OUTPUT_NAME CKREModuleTimingEngine
+                RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/timing-engine)
+            ckre_add_engine_test(RenderEngineModuleExportsTest RenderEngineModuleExportsTest.cpp)
+            target_include_directories(RenderEngineModuleExportsTest PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+            target_link_libraries(RenderEngineModuleExportsTest PRIVATE gtest_main)
+            target_compile_features(RenderEngineModuleExportsTest PRIVATE cxx_std_17)
+            add_dependencies(RenderEngineModuleExportsTest
+                ckre_module_lifetime_engine ckre_module_timing_engine ckre_plugin_lifetime_probe)
+            add_custom_command(TARGET RenderEngineModuleExportsTest POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:ckre_module_lifetime_engine>
+                    $<TARGET_FILE:ckre_module_timing_engine>
+                    $<TARGET_FILE:ckre_plugin_lifetime_probe>
+                    $<TARGET_FILE_DIR:RenderEngineModuleExportsTest>
+                VERBATIM)
+        endif ()
+    endif ()
     target_include_directories(RenderContextFrameCompletionTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(RenderContextOptionsCompletionTest PRIVATE
