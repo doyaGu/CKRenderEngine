@@ -677,6 +677,30 @@ if (TARGET gtest_main)
     target_include_directories(RenderContextDispatchCompletionTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
 
+    # Validate both render-statistics variants independently of the main engine.
+    foreach (render_stats_variant Enabled Disabled)
+        set(render_stats_target RenderPerfStats${render_stats_variant}Test)
+        set(render_stats_sources RenderPerfStatsTest.cpp)
+        set(render_stats_enabled 0)
+        if (render_stats_variant STREQUAL "Enabled")
+            set(render_stats_enabled 1)
+            list(APPEND render_stats_sources
+                ../src/CKRenderPerfStats.cpp ../src/CKRenderContext.cpp ../src/CKMaterial.cpp
+                ../src/CKRasterizer/CKRasterizerLib/CKDebugLogger.cpp
+                ../src/CKRasterizer/CKRasterizerLib/CKRenderPerfClock.cpp)
+        endif ()
+        ckre_add_engine_test(${render_stats_target} ${render_stats_sources})
+        get_target_property(render_stats_definitions ${render_stats_target} COMPILE_DEFINITIONS)
+        list(FILTER render_stats_definitions EXCLUDE REGEX "^CKRE_ENABLE_(DEBUG_LOGGER|RENDER_STATS)=")
+        set_property(TARGET ${render_stats_target} PROPERTY COMPILE_DEFINITIONS "${render_stats_definitions}")
+        target_compile_definitions(${render_stats_target} PRIVATE
+            CKRE_ENABLE_DEBUG_LOGGER=${render_stats_enabled} CKRE_ENABLE_RENDER_STATS=${render_stats_enabled})
+        target_include_directories(${render_stats_target} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+        target_link_libraries(${render_stats_target} PRIVATE gtest_main)
+        target_compile_features(${render_stats_target} PRIVATE cxx_std_17)
+    endforeach ()
+
     if (WIN32)
         # Use the actual Windows filter and DbgHelp session, plus the disabled
         # header implementation, independently of the engine's logger option.
