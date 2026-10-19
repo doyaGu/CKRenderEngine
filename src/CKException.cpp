@@ -184,14 +184,25 @@ static void LogStackTrace(CONTEXT context) {
     }
 }
 
+static bool g_ExceptionHandlerInstalled = false;
+
 void CKInstallExceptionHandler() {
+    if (g_ExceptionHandlerInstalled)
+        return;
     g_PreviousFilter = SetUnhandledExceptionFilter(CKExceptionHandler);
+    g_ExceptionHandlerInstalled = true;
     CKDebugLogger::Instance().Log("[CK2_3D] Unhandled exception filter installed");
 }
 
 void CKRemoveExceptionHandler() {
-    SetUnhandledExceptionFilter(g_PreviousFilter);
-    g_PreviousFilter = nullptr;
+    if (g_ExceptionHandlerInstalled) {
+        LPTOP_LEVEL_EXCEPTION_FILTER current = SetUnhandledExceptionFilter(g_PreviousFilter);
+        // A later host registration owns the filter until the host removes it.
+        if (current != CKExceptionHandler)
+            SetUnhandledExceptionFilter(current);
+        g_PreviousFilter = nullptr;
+        g_ExceptionHandlerInstalled = false;
+    }
     CleanupSymbols();
     CKDebugLogger::Instance().Log("[CK2_3D] Unhandled exception filter removed");
 }

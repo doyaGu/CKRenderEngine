@@ -557,6 +557,30 @@ if (TARGET gtest_main)
     target_include_directories(RenderContextDispatchCompletionTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
 
+    if (WIN32)
+        # Use the actual Windows filter and DbgHelp session, plus the disabled
+        # header implementation, independently of the engine's logger option.
+        foreach (exception_variant Enabled Disabled)
+            set(exception_target ExceptionHandler${exception_variant}Test)
+            set(exception_enabled 0)
+            set(exception_sources ExceptionHandlerLifecycleTest.cpp)
+            if (exception_variant STREQUAL "Enabled")
+                set(exception_enabled 1)
+                list(APPEND exception_sources
+                    ../src/CKRasterizer/CKRasterizerLib/CKDebugLogger.cpp)
+            endif ()
+            ckre_add_engine_test(${exception_target} ${exception_sources})
+            get_target_property(exception_definitions ${exception_target} COMPILE_DEFINITIONS)
+            list(FILTER exception_definitions EXCLUDE REGEX "^CKRE_ENABLE_DEBUG_LOGGER=")
+            set_property(TARGET ${exception_target} PROPERTY COMPILE_DEFINITIONS "${exception_definitions}")
+            target_compile_definitions(${exception_target} PRIVATE CKRE_ENABLE_DEBUG_LOGGER=${exception_enabled})
+            target_include_directories(${exception_target} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
+            target_link_libraries(${exception_target} PRIVATE gtest_main dbghelp)
+            target_compile_features(${exception_target} PRIVATE cxx_std_17)
+        endforeach ()
+    endif ()
+
     # Exercise the enabled Context paths even when the regular engine has its
     # optional diagnostics disabled. Direct Context objects precede the archive.
     ckre_add_engine_test(RenderContextLoggingCompletionTest
