@@ -26,7 +26,7 @@ TEST_F(TextureUploadTest, CompressedFormatsPassActualARGBPixelsToRasterizerForEn
         TextureTestProbe texture(Context); Pixels(texture, pixels, 2, 2); texture.SetDesiredVideoFormat(formats[i]);
         ASSERT_TRUE(texture.SystemToVideoMemory(Device, FALSE));
         EXPECT_EQ(formats[i], VxImageDesc2PixelFormat(State.Created[i].Format));
-        EXPECT_EQ(i == 0 ? 4 : 8, State.Created[i].Format.BitsPerPixel); EXPECT_TRUE(State.Created[i].Flags & CKRST_TEXTURE_ALPHA);
+        EXPECT_EQ(0, State.Created[i].Format.BitsPerPixel); EXPECT_TRUE(State.Created[i].Flags & CKRST_TEXTURE_ALPHA);
         EXPECT_EQ(32, State.Uploads[i].Image.BitsPerPixel); EXPECT_EQ(0, memcmp(pixels, State.Uploads[i].Bytes, sizeof(pixels)));
     }
 }
@@ -157,16 +157,30 @@ TEST_F(TextureUploadTest, BumpFormatsAllocateRequestedEncodingAndPackIndependent
     const VX_PIXELFORMAT formats[] = {_16_V8U8, _32_V16U16, _16_L6V5U5, _32_X8L8V8U8};
     // Expected packed bytes follow each public descriptor's RG[B] bit widths;
     // this checks uploads, not the excluded backend's bump shading semantics.
-    const CKDWORD expected[] = {0x3412,0x34341212,0x28C2,0x00563412};
+    const CKDWORD expected[] = {0x3412,0x34341212,0x54C2,0x00563412};
     const CKDWORD pixel = 0xFF123456;
     for (int i = 0; i < 4; ++i) {
         TextureTestProbe texture(Context); Pixels(texture, &pixel, 1, 1); texture.SetDesiredVideoFormat(formats[i]);
-        ASSERT_TRUE(texture.SystemToVideoMemory(Device, FALSE)); EXPECT_EQ(formats[i], VxImageDesc2PixelFormat(State.Created[i].Format));
+        ASSERT_TRUE(texture.SystemToVideoMemory(Device, FALSE));
+        EXPECT_EQ((CKDWORD)formats[i], State.Created[i].Format.Flags);
+        EXPECT_EQ(i == 3 ? _32_BGR888 : formats[i], VxImageDesc2PixelFormat(State.Created[i].Format));
         EXPECT_TRUE(State.Created[i].Flags & CKRST_TEXTURE_BUMPDUDV);
         EXPECT_EQ(i >= 2, (State.Created[i].Flags & CKRST_TEXTURE_BUMPLUMINANCE) != 0);
         CKDWORD actual = 0; memcpy(&actual, State.Uploads[i].Bytes, State.Uploads[i].Image.BitsPerPixel / 8);
         EXPECT_EQ(expected[i], actual);
     }
+}
+TEST_F(TextureUploadTest, FallbackBumpEncodingSurvivesItsCanonicalBgrDetection) {
+    TextureTestProbe texture(Context); const CKDWORD pixel = 0xFF123456;
+    Pixels(texture, &pixel, 1, 1); texture.SetDesiredVideoFormat(UNKNOWN_PF);
+    Manager->m_TextureVideoFormat.Value = _32_X8L8V8U8;
+    ASSERT_TRUE(texture.SystemToVideoMemory(Device, FALSE));
+    EXPECT_EQ((CKDWORD)_32_X8L8V8U8, State.Created[0].Format.Flags);
+    EXPECT_EQ(_32_BGR888, VxImageDesc2PixelFormat(State.Created[0].Format));
+    EXPECT_TRUE(State.Created[0].Flags & CKRST_TEXTURE_BUMPDUDV);
+    EXPECT_TRUE(State.Created[0].Flags & CKRST_TEXTURE_BUMPLUMINANCE);
+    EXPECT_EQ(_32_BGR888, texture.GetVideoPixelFormat());
+    EXPECT_EQ(0x00563412u, Pixel(State.Uploads[0], 0));
 }
 TEST_F(TextureUploadTest, CubeFaceFailurePropagatesAndReleasesPartialAllocation) {
     TextureTestProbe texture(Context); texture.SetCubeMap(TRUE);
