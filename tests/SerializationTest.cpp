@@ -933,7 +933,7 @@ void AppendWire(WireWords &words, const void *data, size_t size) {
     std::memcpy(words.data() + offset, data, size);
 }
 
-Chunk AnimationWithController(CKANIMATION_CONTROLLER type, WireWords &words) {
+Chunk AnimationWithController(CKANIMATION_CONTROLLER type, WireWords words) {
     Chunk chunk = NewChunk(CKCID_OBJECTANIMATION);
     chunk->WriteIdentifier(CK_STATESAVE_OBJANIMCONTROLLERS);
     for (int i = 0; i < 7; ++i) chunk->WriteFloat(0.0f);
