@@ -6078,7 +6078,10 @@ void ObjectPlaybackTransitionMorphReuseResetsTimelineAndMeshFallbackNormals() {
     Check(target.HasMorphNormalInfo() && target.EvaluateMorphTarget(0,3,result,sizeof(VxVector),normals) && Equal(result[0],VxVector(20,30,40)),
           "Mesh fallback transition lost source mesh position/normal channel");
     VxVector decoded; decoded=normals[0];
-    Check(std::fabs(decoded.x)<0.0002f && std::fabs(decoded.z)<0.0002f && std::fabs(decoded.y-1)<0.0002f,
+    // The 14-bit angle conversion truncates, so libm rounding at the pole can
+    // select the adjacent code. Bound the error by one encoded angular step.
+    const float angularStep = 2.0f * PI / 16384.0f;
+    Check(std::fabs(decoded.x)<angularStep && std::fabs(decoded.z)<angularStep && std::fabs(decoded.y-1)<angularStep,
           "Mesh fallback transition did not preserve mesh normal direction within angular quantization");
     Check(target.SetStep(1)==CK_OK && Equal(*reinterpret_cast<VxVector *>(mesh.GetModifierVertices(&pStride)),VxVector(10,7,8)),
           "Morph transition destination did not reach actual mesh");

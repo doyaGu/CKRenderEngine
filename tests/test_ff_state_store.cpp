@@ -10,8 +10,8 @@ static void ViewProjectionRebuildsOnceThenCaches()
 {
     CKFFStateStore s;
     s.Reset();
-    s.Projection.Identity();
-    s.View.Identity();
+    s.Projection.SetIdentity();
+    s.View.SetIdentity();
     s.MarkViewProjectionDirty();
     Check(s.EnsureViewProjection() == TRUE, "first ensure must rebuild");
     Check(s.EnsureViewProjection() == FALSE, "second ensure must hit cache");

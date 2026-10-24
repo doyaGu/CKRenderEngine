@@ -687,8 +687,8 @@ static void LargePointSpriteBatchUses32BitIndices()
     params.Size = 1.0f;
     params.MinSize = 1.0f;
     params.MaxSize = 1.0f;
-    params.World.Identity();
-    params.View.Identity();
+    params.World.SetIdentity();
+    params.View.SetIdentity();
 
     data.VertexCount = pointCount;
     data.Flags = CKRST_DP_TRANSFORM;
@@ -725,9 +725,9 @@ static void IndexedPointSpritesUseSelectedVertices()
     params.Size = 2.0f;
     params.MinSize = 1.0f;
     params.MaxSize = 64.0f;
-    params.World.Identity();
-    params.View.Identity();
-    params.Projection.Identity();
+    params.World.SetIdentity();
+    params.View.SetIdentity();
+    params.Projection.SetIdentity();
     params.ViewportWidth = 2.0f;
     params.ViewportHeight = 2.0f;
 
@@ -758,9 +758,9 @@ static void PointSpritesReplaceEveryDeclaredTexcoord()
     params.Size = 2.0f;
     params.MinSize = 1.0f;
     params.MaxSize = 64.0f;
-    params.World.Identity();
-    params.View.Identity();
-    params.Projection.Identity();
+    params.World.SetIdentity();
+    params.View.SetIdentity();
+    params.Projection.SetIdentity();
     params.ViewportWidth = 2.0f;
     params.ViewportHeight = 2.0f;
 

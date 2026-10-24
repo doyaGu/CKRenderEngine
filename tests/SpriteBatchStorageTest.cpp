@@ -200,7 +200,8 @@ TEST_F(SpriteBatchStorageTest, RealSubmissionUsesIndependentQuadIndicesColorsUVA
     RCKMaterial material(Context); material.SetDiffuse(VxColor(0.0f, 1.0f, 0.0f, 1.0f)); material.SetSpecular(VxColor(0.0f, 0.0f, 1.0f, 0.0f));
     RCKSprite3D *first = Sprite(material, 0, 0, 5), *second = Sprite(material, 10, 2, 6);
     ASSERT_NE(nullptr, first); ASSERT_NE(nullptr, second);
-    first->SetUVMapping(VxRect(.25f, .125f, .75f, .875f));
+    VxRect mapping(.25f, .125f, .75f, .875f);
+    first->SetUVMapping(mapping);
     second->m_SceneGraphNode->SetAsPotentiallyVisible();
     second->m_SceneGraphNode->SetAsOutsideFrustum();
     Device->AddSprite3DBatch(first); Device->AddSprite3DBatch(second);
