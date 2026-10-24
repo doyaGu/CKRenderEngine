@@ -117,7 +117,7 @@ protected:
         Manager=new RCKRenderManager(Context); View=new RCKRenderContext(Context);
         View->m_RasterizerContext=&Spy; Context->m_BehaviorContext.CurrentRenderContext=View;
         View->m_Settings.m_Rect.right=400; View->m_Settings.m_Rect.bottom=300;
-        View->SetViewRect(VxRect(0,0,200,100));
+        VxRect viewRect(0,0,200,100); View->SetViewRect(viewRect);
         Sprite=static_cast<RCKSprite *>(Context->CreateObject(CKCID_SPRITE)); ASSERT_NE(nullptr,Sprite);
         Sprite->SetDesiredVideoFormat(_32_ARGB8888); Sprite->EnableRatioOffset(FALSE);
     }
@@ -152,8 +152,9 @@ TEST_F(SpriteDrawTest, BothSideClippingUsesPixelSourceCacheBeforeNormalizedSubmi
     EXPECT_FLOAT_EQ(-.5f,b.Points[0].x); EXPECT_FLOAT_EQ(199.5f,b.Points[2].x);
 }
 TEST_F(SpriteDrawTest, ExplicitPixelSourceAndRatioOffsetFeedActualQuad) {
-    Image(); View->SetViewRect(VxRect(20,30,220,130)); Sprite->EnableRatioOffset(TRUE);
-    Sprite->UseSourceRect(TRUE); Sprite->SetSourceRect(VxRect(1,0,3,1)); ASSERT_TRUE(Sprite->UpdateExtents(View));
+    VxRect viewRect(20,30,220,130), sourceRect(1,0,3,1);
+    Image(); View->SetViewRect(viewRect); Sprite->EnableRatioOffset(TRUE);
+    Sprite->UseSourceRect(TRUE); Sprite->SetSourceRect(sourceRect); ASSERT_TRUE(Sprite->UpdateExtents(View));
     ASSERT_EQ(CK_OK,Sprite->Draw(View)); const auto &b=Spy.Batches[0];
     EXPECT_FLOAT_EQ(.25f,b.UV[0].x); EXPECT_FLOAT_EQ(0,b.UV[0].y); EXPECT_FLOAT_EQ(.75f,b.UV[2].x); EXPECT_FLOAT_EQ(.5f,b.UV[2].y);
     EXPECT_FLOAT_EQ(29.5f,b.Points[0].x); EXPECT_FLOAT_EQ(49.5f,b.Points[0].y);

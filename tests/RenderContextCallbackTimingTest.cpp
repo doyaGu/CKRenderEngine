@@ -121,7 +121,7 @@ protected:
         Manager = new RCKRenderManager(Context); Device = new RCKRenderContext(Context);
         Device->DetachAll(); Device->m_RasterizerContext = &Boundary;
         Device->m_Settings.m_Rect = {0,0,200,200};
-        Device->SetViewRect(VxRect(0,0,200,200));
+        VxRect viewRect(0,0,200,200); Device->SetViewRect(viewRect);
         Device->SetWorldTransformationMatrix(VxMatrix::Identity());
         Device->SetViewTransformationMatrix(VxMatrix::Identity());
         VxMatrix projection; projection.Perspective(PI/2,1,1,20);

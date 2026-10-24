@@ -121,7 +121,7 @@ protected:
         new RCKRenderManager(Context); View=new RCKRenderContext(Context);
         View->m_RasterizerContext=&Spy; Context->m_BehaviorContext.CurrentRenderContext=View;
         View->m_Settings.m_Rect.right=400; View->m_Settings.m_Rect.bottom=300;
-        View->SetViewRect(VxRect(0,0,200,100));
+        VxRect viewRect(0,0,200,100); View->SetViewRect(viewRect);
     }
     void TearDown() override {
         Context->m_BehaviorContext.CurrentRenderContext=nullptr;
@@ -149,7 +149,7 @@ TEST_F(Entity2dRenderTest, FourEdgeClippingUsesOriginalUVOriginForBothTrailingEd
 }
 TEST_F(Entity2dRenderTest, FourEdgeClippingPreservesExplicitSourceSubrectangle) {
     Inspect2d *e=Entity(VxRect(-100,-50,300,150)); e->UseSourceRect(TRUE);
-    e->SetSourceRect(VxRect(.2f,.3f,.8f,.9f)); ASSERT_TRUE(e->UpdateExtents(View));
+    VxRect sourceRect(.2f,.3f,.8f,.9f); e->SetSourceRect(sourceRect); ASSERT_TRUE(e->UpdateExtents(View));
     Rect(e->UV(),.35f,.45f,.65f,.75f);
 }
 TEST_F(Entity2dRenderTest, LeadingEdgeClippingAndOutsideCacheAreIndependent) {
@@ -159,7 +159,7 @@ TEST_F(Entity2dRenderTest, LeadingEdgeClippingAndOutsideCacheAreIndependent) {
     Rect(e->Pixels(),0,0,0,0); Rect(e->UV(),0,0,0,0);
 }
 TEST_F(Entity2dRenderTest, RatioOffsetUsesViewportOriginAndWindowClipUsesWindowSize) {
-    View->SetViewRect(VxRect(20,30,220,130)); Inspect2d *e=Entity(VxRect(10,10,60,60));
+    VxRect viewRect(20,30,220,130); View->SetViewRect(viewRect); Inspect2d *e=Entity(VxRect(10,10,60,60));
     e->EnableRatioOffset(TRUE); ASSERT_TRUE(e->UpdateExtents(View)); Rect(e->Pixels(),30,40,80,90);
     e->EnableRatioOffset(FALSE); e->EnableClipToCamera(FALSE); e->SetRect(VxRect(250,150,350,250));
     ASSERT_TRUE(e->UpdateExtents(View)); Rect(e->Pixels(),250,150,350,250);

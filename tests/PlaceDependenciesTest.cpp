@@ -129,7 +129,7 @@ TEST_F(PlaceDependenciesTest, SelfCopyPreservesActualSkinBoneVertexMeshAndPortal
     place.References(level.GetID(), camera.GetID()); place.Append(&other, nullptr); place.SetCurrentMesh(reinterpret_cast<CKMesh *>(&mesh), TRUE);
     CKSkin *skin = place.CreateSkin(); ASSERT_NE(nullptr, skin); skin->SetBoneCount(1); skin->GetBoneData(0)->SetBone(Entity(bone));
     skin->SetVertexCount(1); CKSkinVertexData *vertex = skin->GetVertexData(0); vertex->SetBoneCount(1); vertex->SetBone(0, 0); vertex->SetWeight(0, .75f);
-    vertex->SetInitialPos(VxVector(7, 11, 13)); CKDependencies options; Options(options, 1); CKDependenciesContext dependencies(Context); dependencies.StartDependencies(&options);
+    VxVector initialPos(7, 11, 13); vertex->SetInitialPos(initialPos); CKDependencies options; Options(options, 1); CKDependenciesContext dependencies(Context); dependencies.StartDependencies(&options);
     ASSERT_EQ(CK_OK, place.Copy(place, dependencies)); EXPECT_EQ(skin, place.GetSkin()); ASSERT_EQ(1, skin->GetBoneCount()); EXPECT_EQ(Entity(bone), skin->GetBoneData(0)->GetBone());
     ASSERT_EQ(1, skin->GetVertexCount()); EXPECT_EQ(vertex, skin->GetVertexData(0)); ASSERT_EQ(1, vertex->GetBoneCount()); EXPECT_FLOAT_EQ(.75f, vertex->GetWeight(0));
     EXPECT_EQ(reinterpret_cast<CKMesh *>(&mesh), place.GetCurrentMesh()); EXPECT_EQ(1, place.GetMeshCount()); EXPECT_EQ(Place(other), place.GetPortal(0, nullptr));

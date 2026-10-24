@@ -131,7 +131,7 @@ TEST_F(Sprite3DDependenciesTest, SelfCopyPreservesRealSkinBoneVertexMeshAndOwnSt
     sprite.SetSize(size); sprite.SetOffset(offset); sprite.SetUVMapping(rect); CKSkin *skin = sprite.CreateSkin(); ASSERT_NE(nullptr, skin);
     skin->SetBoneCount(1); skin->GetBoneData(0)->SetBone(Entity(bone)); skin->SetVertexCount(1);
     CKSkinVertexData *vertex = skin->GetVertexData(0); vertex->SetBoneCount(1); vertex->SetBone(0, 0); vertex->SetWeight(0, .75f);
-    vertex->SetInitialPos(VxVector(7, 11, 13)); CKDependencies options; Options(options, 1);
+    VxVector initialPos(7, 11, 13); vertex->SetInitialPos(initialPos); CKDependencies options; Options(options, 1);
     CKDependenciesContext dependencies(Context); dependencies.StartDependencies(&options); ASSERT_EQ(CK_OK, sprite.Copy(sprite, dependencies));
     EXPECT_EQ(skin, sprite.GetSkin()); ASSERT_EQ(1, skin->GetBoneCount()); EXPECT_EQ(Entity(bone), skin->GetBoneData(0)->GetBone());
     ASSERT_EQ(1, skin->GetVertexCount()); EXPECT_EQ(vertex, skin->GetVertexData(0)); EXPECT_FLOAT_EQ(.75f, vertex->GetWeight(0));
