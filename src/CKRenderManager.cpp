@@ -1070,6 +1070,15 @@ void RCKRenderManager::DeleteNode(CKSceneGraphNode *node) {
     if (!node)
         return;
 
+    CKTransparentObject *entry = m_SceneGraphRootNode.m_TransparentObjects.Begin();
+    while (entry != m_SceneGraphRootNode.m_TransparentObjects.End()) {
+        if (entry->m_Node == node)
+            entry = m_SceneGraphRootNode.m_TransparentObjects.Remove(entry);
+        else
+            ++entry;
+    }
+    node->ClearInTransparentList();
+
     // Remove from parent
     if (node->m_Parent) {
         node->m_Parent->RemoveNode(node);

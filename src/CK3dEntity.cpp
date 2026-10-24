@@ -739,8 +739,8 @@ RCK3dEntity::~RCK3dEntity() {
     delete m_LastFrameMatrix;
     m_LastFrameMatrix = nullptr;
 
+    RCKRenderManager *renderManager = (RCKRenderManager *) m_Context->GetRenderManager();
     if (m_SceneGraphNode) {
-        RCKRenderManager *renderManager = (RCKRenderManager *) m_Context->GetRenderManager();
         if (renderManager) {
             renderManager->DeleteNode(m_SceneGraphNode);
         } else {
@@ -750,6 +750,13 @@ RCK3dEntity::~RCK3dEntity() {
             delete m_SceneGraphNode;
         }
         m_SceneGraphNode = nullptr;
+    }
+
+    // Direct destruction also has to retire borrowed queue entries; a later
+    // deletion notification must not inspect an entity whose lifetime ended.
+    if (renderManager) {
+        renderManager->UnregisterLastFrameEntity(this);
+        while (renderManager->m_MovedEntities.Remove(this)) {}
     }
 }
 
