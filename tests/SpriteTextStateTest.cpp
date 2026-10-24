@@ -55,14 +55,11 @@ protected:
                               CKBOOL italic, CKBOOL underline) {
         EXPECT_STREQ(face, s.FontName()); EXPECT_EQ(size, s.FontSize()); EXPECT_EQ(weight, s.FontWeight());
         EXPECT_EQ(italic, s.Italic()); EXPECT_EQ(underline, s.Underline());
-#ifdef _WIN32
         ASSERT_NE(nullptr, s.Font()); VXFONTINFO info; ASSERT_TRUE(VxGetFontInfo(s.Font(), info));
-        EXPECT_STREQ(face, info.FaceName.CStr()); EXPECT_EQ(size < 0 ? -size : info.Height, info.Height);
+        EXPECT_STREQ(face, info.FaceName.CStr());
+        if (size < 0) EXPECT_EQ(-size, info.Height); else EXPECT_GT(info.Height, 0);
         EXPECT_EQ(weight, info.Weight); EXPECT_EQ(italic != FALSE, info.Italic != FALSE);
         EXPECT_EQ(underline != FALSE, info.Underline != FALSE);
-#else
-        EXPECT_EQ(nullptr, s.Font());
-#endif
     }
 };
 }

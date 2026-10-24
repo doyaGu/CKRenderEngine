@@ -161,6 +161,8 @@ protected:
     }
 
     void Capture(ParentWindowSnapshot &snapshot) {
+        // SDL window changes may be asynchronous on X11 and Wayland.
+        ASSERT_TRUE(SDL_SyncWindow(Window)) << SDL_GetError();
         ASSERT_TRUE(SDL_GetWindowPosition(Window, &snapshot.X, &snapshot.Y)) << SDL_GetError();
         ASSERT_TRUE(SDL_GetWindowSize(Window, &snapshot.Width, &snapshot.Height)) << SDL_GetError();
         snapshot.Flags = SDL_GetWindowFlags(Window);

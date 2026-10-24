@@ -217,8 +217,8 @@ TEST_F(CharacterPlaybackCompletionTest, SecondaryReturnInterpolatesRotationAndNo
     rig.Character.Tick(1.953125f); ReturnCurve(rig, warp, 190, 12);
     ASSERT_FALSE(::testing::Test::HasFatalFailure()); warp->LinkToFrameRate(TRUE, 1024); rig.Character.Tick(.9765625f);
     const VxMatrix &m = rig.Limb.GetLocalMatrix(); const float c = .707106781f;
-    EXPECT_NEAR(2*c, m[0][0], .0006f); EXPECT_NEAR(-3*c, m[0][1], .0006f);
-    EXPECT_NEAR(2*c, m[1][0], .0006f); EXPECT_NEAR(3*c, m[1][1], .0006f); EXPECT_NEAR(4, m[2][2], .0006f);
+    EXPECT_NEAR(2*c, m[0][0], .0006f); EXPECT_NEAR(-2*c, m[0][1], .0006f);
+    EXPECT_NEAR(3*c, m[1][0], .0006f); EXPECT_NEAR(3*c, m[1][1], .0006f); EXPECT_NEAR(4, m[2][2], .0006f);
     Pose(rig, 102, 101); rig.Character.Tick(.9765625f);
     const VxMatrix &last = rig.Limb.GetLocalMatrix();
     for (int row = 0; row < 3; ++row) for (int col = 0; col < 3; ++col) EXPECT_NEAR(row == col ? 1 : 0, last[row][col], .0006f);

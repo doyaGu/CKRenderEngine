@@ -15,7 +15,9 @@ public:
     void Resident() { m_InVideoMemory = TRUE; }
     static void RecordLayout(RCKTexture &texture) {
         const std::uintptr_t begin = reinterpret_cast<std::uintptr_t>(&texture);
-        std::size_t previous = sizeof(CKTexture);
+        // A derived member may reuse base tail padding on non-MSVC ABIs.
+        std::size_t previous = reinterpret_cast<std::uintptr_t>(&texture.m_SaveOptions)
+            + sizeof(texture.m_SaveOptions) - begin;
 #define FIELD(field) { auto member = &TextureLifecycleProbe::field; \
         const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(&(texture.*member)); \
         const std::size_t offset = address - begin; EXPECT_GE(offset, previous); \

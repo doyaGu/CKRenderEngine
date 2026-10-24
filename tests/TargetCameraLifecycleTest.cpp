@@ -25,7 +25,11 @@ public:
         auto member = &TargetCameraLifecycleProbe::m_Target;
         const std::uintptr_t address = reinterpret_cast<std::uintptr_t>(&(camera.*member));
         const std::size_t offset = address - begin;
-        EXPECT_GE(offset, sizeof(RCKCamera));
+        // Bound occupied base storage, excluding reusable tail padding.
+        auto lastBaseMember = &TargetCameraLifecycleProbe::m_Height;
+        const std::size_t baseEnd = reinterpret_cast<std::uintptr_t>(&(camera.*lastBaseMember))
+            + sizeof(camera.*lastBaseMember) - begin;
+        EXPECT_GE(offset, baseEnd);
         EXPECT_LE(offset + sizeof(camera.*member), sizeof(RCKTargetCamera));
         EXPECT_EQ(0u, address % alignof(CK_ID));
         ::testing::Test::RecordProperty("m_Target_offset", static_cast<int>(offset));
@@ -136,7 +140,7 @@ TEST_F(TargetCameraLifecycleTest, ObjectUsageDelegatesToInheritedMeshReferences)
 }
 TEST_F(TargetCameraLifecycleTest, MemoryOccupationAddsActualPlatformTailToInheritedStorage) {
     RCKTargetCamera camera(Context); RCK3dEntity target(Context);
-    const int tail = static_cast<int>(sizeof(RCKTargetCamera) - sizeof(RCKCamera)); EXPECT_GE(tail, 4);
+    const int tail = static_cast<int>(sizeof(RCKTargetCamera) - sizeof(RCKCamera)); EXPECT_GE(tail, 0);
     EXPECT_EQ(camera.RCKCamera::GetMemoryOccupation() + tail, camera.GetMemoryOccupation());
     char name[] = "Target camera memory"; camera.SetName(name); camera.SetTarget(reinterpret_cast<CK3dEntity *>(&target));
     ASSERT_NE(nullptr, camera.CreateSkin()); camera.GetSkin()->SetBoneCount(2); camera.GetSkin()->SetVertexCount(3);

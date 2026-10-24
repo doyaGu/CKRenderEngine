@@ -5,6 +5,7 @@
 #include "RCKSpriteText.h"
 #include "RCKRenderObject.h"
 #include "RCKRenderManager.h"
+#include "FontReleaseObserver.h"
 
 extern void SetProcessorSpecific_FunctionsPtr();
 
@@ -37,6 +38,7 @@ class SpriteTextLifecycleTest : public ::testing::Test {
 protected:
     CKContext *Context = nullptr;
     void SetUp() override {
+        CkreFontTest::Reset();
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK, CKStartUp());
         CKCLASSREGISTERCID(RCKRenderObject, CKCID_BEOBJECT); CKCLASSREGISTERCID(RCK2dEntity, CKCID_RENDEROBJECT);
         CKCLASSREGISTERCID(RCKSprite, CKCID_2DENTITY); CKCLASSREGISTERCID(RCKSpriteText, CKCID_SPRITE);
@@ -66,7 +68,7 @@ TEST_F(SpriteTextLifecycleTest, FactoryVirtualDestructorReleasesActualFontAndObj
     FONT_HANDLE font = TextLifecycleProbe::Font(*s); ASSERT_NE(nullptr, font); VXFONTINFO info; ASSERT_TRUE(VxGetFontInfo(font, info));
     EXPECT_EQ(17, info.Height); EXPECT_EQ(700, info.Weight); EXPECT_TRUE(info.Italic); EXPECT_TRUE(info.Underline);
     const CK_ID id = s->GetID(); delete static_cast<CKObject *>(s);
-    EXPECT_EQ(nullptr, Context->GetObject(id)); EXPECT_FALSE(VxGetFontInfo(font, info));
+    EXPECT_EQ(nullptr, Context->GetObject(id)); CkreFontTest::ExpectReleased(font);
 }
 TEST_F(SpriteTextLifecycleTest, MemoryOccupationIncludesPlatformTailAndOwnedTextAndFontName) {
     RCKSpriteText s(Context); const int base = s.RCKSprite::GetMemoryOccupation();
@@ -83,5 +85,5 @@ TEST_F(SpriteTextLifecycleTest, ConstructorAndDestructorKeepDistinctFontsAndOwne
     { RCKSpriteText temporary(Context); temporary.SetFont(face, -19, 700, TRUE, FALSE); temporary.SetText(second);
       released = TextLifecycleProbe::Font(temporary); ASSERT_NE(nullptr, released); EXPECT_NE(keep, released);
       first[0] = 'X'; second[0] = 'Y'; EXPECT_STREQ("survivor", survivor.GetText()); EXPECT_STREQ("temporary", temporary.GetText()); }
-    VXFONTINFO info; EXPECT_FALSE(VxGetFontInfo(released, info)); EXPECT_TRUE(VxGetFontInfo(keep, info)); EXPECT_STREQ("survivor", survivor.GetText());
+    VXFONTINFO info; CkreFontTest::ExpectReleased(released); EXPECT_TRUE(VxGetFontInfo(keep, info)); EXPECT_STREQ("survivor", survivor.GetText());
 }

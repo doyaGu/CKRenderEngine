@@ -4,6 +4,7 @@
 #include "RCKSpriteText.h"
 #include "RCKRenderObject.h"
 #include "RCKRenderManager.h"
+#include "FontReleaseObserver.h"
 
 extern void SetProcessorSpecific_FunctionsPtr();
 
@@ -18,6 +19,7 @@ class SpriteTextCopyTest : public ::testing::Test {
 protected:
     CKContext *Context = nullptr;
     void SetUp() override {
+        CkreFontTest::Reset();
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK, CKStartUp());
         CKCLASSREGISTERCID(RCKRenderObject, CKCID_BEOBJECT); CKCLASSREGISTERCID(RCK2dEntity, CKCID_RENDEROBJECT);
         CKCLASSREGISTERCID(RCKSprite, CKCID_2DENTITY); CKCLASSREGISTERCID(RCKSpriteText, CKCID_SPRITE);
@@ -57,7 +59,7 @@ TEST_F(SpriteTextCopyTest, DestinationRemainsUsableAfterSourceAndItsFontAreDestr
     RCKSpriteText destination(Context); CKDependencies options; Options(options); CKDependenciesContext dependencies(Context); dependencies.StartDependencies(&options);
     FONT_HANDLE sourceFont = nullptr;
     { RCKSpriteText source(Context); Configure(source); sourceFont = TextCopyProbe::Font(source); ASSERT_EQ(CK_OK, destination.Copy(source, dependencies)); }
-    VXFONTINFO info; EXPECT_FALSE(VxGetFontInfo(sourceFont, info)); EXPECT_TRUE(VxGetFontInfo(TextCopyProbe::Font(destination), info));
+    VXFONTINFO info; CkreFontTest::ExpectReleased(sourceFont); EXPECT_TRUE(VxGetFontInfo(TextCopyProbe::Font(destination), info));
     EXPECT_STREQ("Copy me", destination.GetText()); char changed[] = "Destination only"; destination.SetText(changed); EXPECT_STREQ(changed, destination.GetText()); dependencies.StopDependencies();
 }
 TEST_F(SpriteTextCopyTest, EmptySourceClearsDestinationTextAndReleasesPreviousFont) {
@@ -65,7 +67,7 @@ TEST_F(SpriteTextCopyTest, EmptySourceClearsDestinationTextAndReleasesPreviousFo
     CKDependencies options; Options(options); CKDependenciesContext dependencies(Context); dependencies.StartDependencies(&options); ASSERT_EQ(CK_OK, destination.Copy(source, dependencies));
     EXPECT_EQ(nullptr, destination.GetText()); EXPECT_EQ(nullptr, TextCopyProbe::Font(destination)); EXPECT_EQ(nullptr, TextCopyProbe::Face(destination));
     EXPECT_EQ(0xffffffffu, destination.GetTextColor()); EXPECT_EQ(0u, destination.GetBackgroundTextColor()); EXPECT_EQ(CKSPRITETEXT_CENTER, destination.GetAlign());
-    VXFONTINFO info; EXPECT_FALSE(VxGetFontInfo(oldFont, info)); dependencies.StopDependencies();
+    CkreFontTest::ExpectReleased(oldFont); dependencies.StopDependencies();
 }
 TEST_F(SpriteTextCopyTest, SelfCopyPreservesOwnedTextFontPixelsAndSingleParentEntry) {
     RCK2dEntity parent(Context); RCKSpriteText s(Context); ASSERT_TRUE(s.Create(96, 32, 32)); Configure(s); s.SetParent(reinterpret_cast<CK2dEntity *>(&parent));

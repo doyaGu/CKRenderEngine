@@ -2,6 +2,7 @@
 #include <chrono>
 #include <thread>
 #include "CKAll.h"
+#include "VxTimeProfiler.h"
 #include "RCKRenderObject.h"
 #include "RCK3dEntity.h"
 #include "RCK2dEntity.h"
@@ -17,9 +18,10 @@ extern void SetProcessorSpecific_FunctionsPtr();
 extern XClassArray<CKRasterizerInfo> g_RasterizersInfo;
 
 namespace {
-using Clock = std::chrono::steady_clock;
-float Milliseconds(Clock::time_point start) {
-    return std::chrono::duration<float, std::milli>(Clock::now() - start).count();
+// Compare intervals on the engine's time base. SDL's performance counter and
+// std::chrono::steady_clock may use different OS clocks (notably under WSL).
+float Milliseconds(VxTimeProfiler &start) {
+    return start.Current();
 }
 
 struct TimedCall {
@@ -34,7 +36,7 @@ struct TimedCall {
         ObjectsAtEntry = device->m_Stats.ObjectsCallbacksTime;
         SpritesAtEntry = device->m_Stats.SpriteCallbacksTime;
         SkinAtEntry = device->m_Stats.SkinTime;
-        const auto start = Clock::now();
+        VxTimeProfiler start;
         ++Calls;
         if (Bone) Bone->SetPosition3f(BoneX, 0, 0);
         if (DelayMs) std::this_thread::sleep_for(std::chrono::milliseconds(DelayMs));
@@ -57,7 +59,7 @@ public:
     int Draws = 0, LastCount = 0, LastVertices = 0, DrawDelayMs = 0;
     float DrawElapsed = 0;
     CKBOOL DrawPrimitive(VXPRIMITIVETYPE, CKWORD *, int count, VxDrawPrimitiveData *data) override {
-        const auto start = Clock::now();
+        VxTimeProfiler start;
         ++Draws; LastCount = count; LastVertices = data->VertexCount;
         EXPECT_NE(nullptr, data->PositionPtr);
         if (DrawDelayMs) std::this_thread::sleep_for(std::chrono::milliseconds(DrawDelayMs));
@@ -75,7 +77,7 @@ public:
     CKBOOL UpdateResult = FALSE;
     explicit MeasuredSkinEntity(CKContext *context) : RCK3dEntity(context) {}
     CKBOOL UpdateSkin() override {
-        const auto start = Clock::now();
+        VxTimeProfiler start;
         UpdateResult = RCK3dEntity::UpdateSkin();
         LastUpdateElapsed = Milliseconds(start);
         UpdateElapsed += LastUpdateElapsed; ++Updates;
@@ -89,7 +91,7 @@ public:
     VxVector Sample;
     explicit SkinMeshBoundary(CKContext *context) : RCKMesh(context) {}
     CKERROR Render(CKRenderContext *, CK3dEntity *) override {
-        const auto start = Clock::now();
+        VxTimeProfiler start;
         ++Draws; GetVertexPosition(1, &Sample);
         if (DelayMs) std::this_thread::sleep_for(std::chrono::milliseconds(DelayMs));
         DrawElapsed += Milliseconds(start);
@@ -196,7 +198,7 @@ TEST_F(RenderContextCallbackTimingTest, EntityPreAndPostAccumulateWhileTheMainCa
     ASSERT_TRUE(entity->AddPreRenderCallBack(ObjectCall,&pre,FALSE));
     entity->SetRenderCallBack(ObjectCall,&main);
     ASSERT_TRUE(entity->AddPostRenderCallBack(ObjectCall,&post,FALSE));
-    const auto start=Clock::now(); ASSERT_TRUE(entity->Render(Device,0)); const float wall=Milliseconds(start);
+    VxTimeProfiler start; ASSERT_TRUE(entity->Render(Device,0)); const float wall=Milliseconds(start);
     EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,main.Calls); EXPECT_EQ(1,post.Calls);
     EXPECT_FLOAT_EQ(ObjectsSeed,pre.ObjectsAtEntry);
     EXPECT_GE(main.ObjectsAtEntry-ObjectsSeed,pre.Elapsed-.1f);
@@ -211,7 +213,7 @@ TEST_F(RenderContextCallbackTimingTest, MeshPreAndPostAccumulateWhileTheMainCall
     ASSERT_TRUE(mesh->AddPreRenderCallBack(MeshCall,&pre,FALSE)); mesh->SetRenderCallBack(MeshCall,&main);
     ASSERT_TRUE(mesh->AddPostRenderCallBack(MeshCall,&post,FALSE));
     Device->m_Current3dEntity=entity;
-    const auto start=Clock::now(); ASSERT_EQ(CK_OK,mesh->Render(Device,Api(entity))); const float wall=Milliseconds(start);
+    VxTimeProfiler start; ASSERT_EQ(CK_OK,mesh->Render(Device,Api(entity))); const float wall=Milliseconds(start);
     Device->m_Current3dEntity=nullptr;
     EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,main.Calls); EXPECT_EQ(1,post.Calls);
     EXPECT_FLOAT_EQ(ObjectsSeed,pre.ObjectsAtEntry);
@@ -235,7 +237,7 @@ TEST_F(RenderContextCallbackTimingTest, SubmeshCallbacksExcludeTheActualSubmitte
     data.VertexCount=3; data.PositionPtr=positions; data.PositionStride=sizeof(VxVector);
     data.ColorPtr=colors; data.ColorStride=sizeof(CKDWORD);
     Boundary.DrawDelayMs=31;
-    const auto start=Clock::now(); ASSERT_EQ(1,mesh->RenderGroup(Device,&group,nullptr,&data)); const float wall=Milliseconds(start);
+    VxTimeProfiler start; ASSERT_EQ(1,mesh->RenderGroup(Device,&group,nullptr,&data)); const float wall=Milliseconds(start);
     EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,post.Calls); ASSERT_EQ(1,Boundary.Draws);
     EXPECT_EQ(3,Boundary.LastCount); EXPECT_EQ(3,Boundary.LastVertices);
     Interval(Device->m_Stats.ObjectsCallbacksTime-ObjectsSeed,pre.Elapsed+post.Elapsed,wall,Boundary.DrawElapsed);
@@ -251,7 +253,7 @@ TEST_F(RenderContextCallbackTimingTest, Sprite3dCallbacksAccumulateWhileQueueing
     TimedCall pre,post; pre.DelayMs=9; post.DelayMs=15;
     ASSERT_TRUE(sprite->AddPreRenderCallBack(ObjectCall,&pre,FALSE));
     ASSERT_TRUE(sprite->AddPostRenderCallBack(ObjectCall,&post,FALSE));
-    const auto start=Clock::now(); ASSERT_TRUE(sprite->Render(Device,0)); const float wall=Milliseconds(start);
+    VxTimeProfiler start; ASSERT_TRUE(sprite->Render(Device,0)); const float wall=Milliseconds(start);
     EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,post.Calls); ASSERT_EQ(1,Device->m_Sprite3DBatches.Size());
     ASSERT_NE(nullptr,material->GetSprite3DBatch()); EXPECT_EQ(4,material->GetSprite3DBatch()->m_Vertices.Size());
     EXPECT_EQ(0,Boundary.Draws);
@@ -269,7 +271,7 @@ TEST_F(RenderContextCallbackTimingTest, TwoDimensionalCallbacksAccumulateAcrossD
     ASSERT_TRUE(entity->AddPreRenderCallBack(ObjectCall,&pre,FALSE));
     ASSERT_TRUE(entity->AddPostRenderCallBack(ObjectCall,&post,FALSE));
     Boundary.DrawDelayMs=33;
-    const auto start=Clock::now();
+    VxTimeProfiler start;
     ASSERT_EQ(CK_OK,entity->Render(Device)); ASSERT_EQ(CK_OK,entity->Render(Device));
     const float wall=Milliseconds(start);
     EXPECT_EQ(2,pre.Calls); EXPECT_EQ(2,post.Calls); ASSERT_EQ(2,Boundary.Draws); EXPECT_EQ(4,Boundary.LastVertices);
@@ -284,7 +286,7 @@ TEST_F(RenderContextCallbackTimingTest, NonProgressiveSkinMeasuresRealDeformatio
     TimedCall pre,post; pre.DelayMs=18; post.DelayMs=12; pre.Bone=bone; pre.BoneX=7;
     ASSERT_TRUE(SkinEntity->AddPreRenderCallBack(ObjectCall,&pre,FALSE));
     ASSERT_TRUE(SkinEntity->AddPostRenderCallBack(ObjectCall,&post,FALSE)); SkinMesh->DelayMs=25;
-    const auto start=Clock::now(); ASSERT_TRUE(SkinEntity->Render(Device,0)); const float wall=Milliseconds(start);
+    VxTimeProfiler start; ASSERT_TRUE(SkinEntity->Render(Device,0)); const float wall=Milliseconds(start);
     EXPECT_EQ(1,SkinEntity->Updates); EXPECT_TRUE(SkinEntity->UpdateResult); EXPECT_EQ(1,SkinMesh->Draws);
     EXPECT_NEAR(initial.x+3,SkinMesh->Sample.x,1e-4f); EXPECT_NEAR(7,bone->GetWorldMatrix()[3].x,1e-4f);
     EXPECT_GT(pre.SkinAtEntry,SkinSeed);
@@ -300,7 +302,7 @@ TEST_F(RenderContextCallbackTimingTest, ProgressiveSkinMeasuresRealDeformationAf
     TimedCall pre,post; pre.DelayMs=19; post.DelayMs=11; pre.Bone=bone; pre.BoneX=7;
     ASSERT_TRUE(SkinEntity->AddPreRenderCallBack(ObjectCall,&pre,FALSE));
     ASSERT_TRUE(SkinEntity->AddPostRenderCallBack(ObjectCall,&post,FALSE)); SkinMesh->DelayMs=25;
-    const auto start=Clock::now(); ASSERT_TRUE(SkinEntity->Render(Device,0)); const float wall=Milliseconds(start);
+    VxTimeProfiler start; ASSERT_TRUE(SkinEntity->Render(Device,0)); const float wall=Milliseconds(start);
     EXPECT_EQ(1,SkinEntity->Updates); EXPECT_TRUE(SkinEntity->UpdateResult); EXPECT_EQ(1,SkinMesh->Draws);
     EXPECT_FLOAT_EQ(SkinSeed,pre.SkinAtEntry); EXPECT_GT(post.SkinAtEntry,SkinSeed);
     EXPECT_NEAR(initial.x+7,SkinMesh->Sample.x,1e-4f);
@@ -313,7 +315,7 @@ TEST_F(RenderContextCallbackTimingTest, RepeatedActualSkinUpdatesAccumulateWitho
     PrepareSkin(FALSE,32768); ASSERT_NE(nullptr,SkinEntity); ASSERT_NE(nullptr,SkinMesh);
     CKSkin *skin=SkinEntity->GetSkin(); RCK3dEntity *bone=reinterpret_cast<RCK3dEntity *>(skin->GetBoneData(0)->GetBone());
     VxVector initial; SkinMesh->GetVertexPosition(1,&initial);
-    const auto start=Clock::now(); ASSERT_TRUE(SkinEntity->Render(Device,0));
+    VxTimeProfiler start; ASSERT_TRUE(SkinEntity->Render(Device,0));
     const float first=Device->m_Stats.SkinTime;
     EXPECT_NEAR(initial.x+3,SkinMesh->Sample.x,1e-4f);
     bone->SetPosition3f(8,0,0); SkinEntity->m_MoveableFlags |= VX_MOVEABLE_EXTENTSUPTODATE;
