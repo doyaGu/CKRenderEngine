@@ -157,7 +157,11 @@ TEST_F(MorphEvaluationTest, PackedNormalSamplingRetainsFixedPointRoundingAndAngu
     EXPECT_EQ(400, normal.ya); // Endpoint uses the original packed representation.
 }
 
-TEST_F(MorphEvaluationTest, ExistingOriginalRuntimeFixturesStillMatchAllOneHundredFiftySamples) {
+TEST_F(MorphEvaluationTest, OriginalRuntimeFixturesKeepValuesExceptTheKnownPositiveYawWrapDefect) {
+    // Vertex 1 crosses from yaw 400 to 16000 between times 2 and 10.
+    // Keep the captured DLL data intact; the corrected arc goes backwards by 784.
+    const int originalYaw[] = {449,498,530,608,792,1159,1183,1184};
+    const int correctedYaw[] = {351,302,269,191,8,-360,-384,-384};
     for (int fixtureIndex = 0; fixtureIndex < 10; ++fixtureIndex) {
         const MorphReference::Fixture &fixture = MorphReference::Fixtures[fixtureIndex];
         SCOPED_TRACE(fixture.name);
@@ -172,17 +176,72 @@ TEST_F(MorphEvaluationTest, ExistingOriginalRuntimeFixturesStillMatchAllOneHundr
             VxCompressedVector normals[8];
             const CKDWORD sentinel = 0x13572468u;
             for (int i = 0; i < 8; ++i)
-                std::memcpy(normals + i, &sentinel, sizeof(sentinel));
+                memcpy(normals + i, &sentinel, sizeof(sentinel));
             EXPECT_EQ(sample.success, controller.Evaluate(sample.time, fixture.vertexCount,
                 fixture.outputMask & 1 ? positions + 4 : nullptr, fixture.stride,
                 fixture.outputMask & 2 ? normals + 1 : nullptr));
             const int positionFloats = fixture.vertexCount * fixture.stride / 4 + 8;
             for (int i = 0; i < positionFloats; ++i)
                 EXPECT_NEAR(sample.vertices[i], positions[i], 5.0e-5f);
-            EXPECT_EQ(0, std::memcmp(sample.normals, normals,
+            VxCompressedVector expected[8];
+            memcpy(expected, sample.normals, (fixture.vertexCount + 2) * sizeof(VxCompressedVector));
+            if (fixtureIndex < 4 && sampleIndex >= 2 && sampleIndex <= 9) {
+                EXPECT_EQ(originalYaw[sampleIndex - 2], expected[2].ya);
+                expected[2].ya = static_cast<short>(correctedYaw[sampleIndex - 2]);
+            }
+            EXPECT_EQ(0, memcmp(expected, normals,
                                     (fixture.vertexCount + 2) * sizeof(VxCompressedVector)));
         }
     }
+}
+
+TEST_F(MorphEvaluationTest, NormalSeamSamplingReachesTheSameDirectionAsItsEndpointKey) {
+    RCKMorphController controller;
+    Fill(controller, TRUE, 1);
+    CKMorphKey *first = static_cast<CKMorphKey *>(controller.GetKey(0));
+    CKMorphKey *last = static_cast<CKMorphKey *>(controller.GetKey(1));
+    first->NormArray[0].xa = last->NormArray[0].xa = 0;
+    first->NormArray[0].ya = 100;
+    last->NormArray[0].ya = -100;
+    VxCompressedVector normal;
+    ASSERT_TRUE(controller.Evaluate(6, 1, nullptr, 0, &normal));
+    EXPECT_EQ(0, normal.ya);
+    VxVector decoded;
+    decoded = normal;
+    EXPECT_FLOAT_EQ(0, decoded.x);
+    EXPECT_FLOAT_EQ(0, decoded.y);
+    EXPECT_FLOAT_EQ(1, decoded.z);
+    ASSERT_TRUE(controller.Evaluate(10, 1, nullptr, 0, &normal));
+    EXPECT_EQ(last->NormArray[0].ya & 16383, normal.ya & 16383);
+}
+
+TEST_F(MorphEvaluationTest, MergedAnimationNormalsUseTheShortYawArc) {
+    RCKObjectAnimation first(Context), last(Context);
+    RCKMorphController *a = static_cast<RCKMorphController *>(first.CreateController(CKANIMATION_MORPH_CONTROL));
+    RCKMorphController *b = static_cast<RCKMorphController *>(last.CreateController(CKANIMATION_MORPH_CONTROL));
+    ASSERT_NE(nullptr, a);
+    ASSERT_NE(nullptr, b);
+    Fill(*a, TRUE, 1);
+    Fill(*b, TRUE, 1);
+    first.SetLength(10);
+    last.SetLength(10);
+    for (int key = 0; key < 2; ++key) {
+        CKMorphKey *left = static_cast<CKMorphKey *>(a->GetKey(key));
+        CKMorphKey *right = static_cast<CKMorphKey *>(b->GetKey(key));
+        left->NormArray[0].xa = right->NormArray[0].xa = 0;
+        left->NormArray[0].ya = 100;
+        right->NormArray[0].ya = -100;
+    }
+    CKObjectAnimation *merged = first.CreateMergedAnimation(reinterpret_cast<CKObjectAnimation *>(&last));
+    ASSERT_NE(nullptr, merged);
+    VxCompressedVector normal;
+    merged->SetMergeFactor(.5f);
+    ASSERT_TRUE(merged->EvaluateMorphTarget(6, 1, nullptr, 0, &normal));
+    EXPECT_EQ(0, normal.xa);
+    EXPECT_EQ(0, normal.ya);
+    merged->SetMergeFactor(1);
+    ASSERT_TRUE(merged->EvaluateMorphTarget(6, 1, nullptr, 0, &normal));
+    EXPECT_EQ((-100 & 16383), normal.ya & 16383);
 }
 
 TEST_F(MorphEvaluationTest, PositionOnlyNormalOnlyAndOmittedOutputsKeepTheSameSample) {
