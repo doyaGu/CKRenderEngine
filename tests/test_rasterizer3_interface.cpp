@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "FFPRecordingContext.h"
@@ -17,6 +18,17 @@
 #include "TestTriangleMultiset.h"
 
 namespace {
+
+static_assert(offsetof(CKTextureImportDesc, Type) == 0,
+              "texture import type is the leading field");
+static_assert(offsetof(CKTextureImportDesc, Data) == sizeof(CKGUID),
+              "texture import data follows the GUID without hidden state");
+static_assert(offsetof(CKTextureImportDesc, DataSize) ==
+                  sizeof(CKGUID) + sizeof(void *),
+              "texture import size follows the borrowed pointer");
+static_assert(sizeof(CKTextureImportDesc) ==
+                  (sizeof(void *) == 8 ? 24u : 16u),
+              "texture import descriptor has only GUID, pointer and size");
 
 struct Fixture {
     CKRasterizer *Rasterizer;
@@ -218,7 +230,7 @@ void TestLifecycle()
     TestCheck((caps.Features & CKRST_CAPS_TEXTURE_DXT) == (nativeCaps.Features & CKRST_CAPS_TEXTURE_DXT),
               "context DXT capability must match the formats supported by its driver");
     TestCheck(!f.Context->GetCaps(NULL), "GetCaps(NULL) must fail");
-    TestCheck(CKRST_INTERFACE_REVISION == 0x00060000u,
+    TestCheck(CKRST_INTERFACE_REVISION == 0x00070000u,
               "direct concrete-context revision value");
 
     // A second context on the same driver is allowed for the recording backend.
@@ -357,6 +369,13 @@ void TestNullBackendResources()
     }
     TestCheck(context->Create(NULL, 0, 0, 64, 48, 32, FALSE, 60, 24, 8),
               "NULL context create");
+
+    CKTextureImportDesc importDesc = {CKGUID(), NULL, 0};
+    CKDWORD imported = 0x12345678u;
+    TestCheck(!context->ImportTexture(NULL, &importDesc, &imported) && imported == 0,
+              "generic backend rejects import and clears its output");
+    TestCheck(!context->SetBackBufferTexture(0),
+              "generic backend leaves custom backbuffers unsupported");
 
     const CKDWORD texture = CreateTexture2D(context, 8, 8, 0, 1);
     const CKDWORD vertexBuffer = CreateVB(context, CKRST_DP_TR_CL_V, 4);

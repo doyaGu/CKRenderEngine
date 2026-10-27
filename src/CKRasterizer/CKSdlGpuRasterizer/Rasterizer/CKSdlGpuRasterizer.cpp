@@ -1,3 +1,4 @@
+#include "CKSdlGpuRasterizer.h"
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuShaders.h"
 

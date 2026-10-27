@@ -373,6 +373,7 @@ ckre_add_dxbc_validation(FFNativeFragmentJitDxbcValidation ff_native_fragment_ji
 if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     ckre_add_recording_context_white_box_test(sdl_gpu_ffp_pixel_tests test_rasterizer3_pixels.cpp)
     target_include_directories(sdl_gpu_ffp_pixel_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Native
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
     )
     target_compile_definitions(sdl_gpu_ffp_pixel_tests PRIVATE CKRE_PIXEL_SDL_GPU=1)

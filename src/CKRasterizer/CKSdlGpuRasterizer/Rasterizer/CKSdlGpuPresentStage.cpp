@@ -47,8 +47,34 @@ CKBOOL CKSdlGpuPresentStage::EnsureNativeTarget(CKDWORD width, CKDWORD height)
         return FALSE;
     if (m_Native.IsActive() && m_Native.Width == width && m_Native.Height == height)
         return TRUE;
+    // A custom target is a Context binding, not a resizeable allocation.
+    if (m_Native.IsActive() && !m_Native.OwnsColor)
+        return FALSE;
     DestroyTarget(m_Native);
     return CreateTarget(m_Native, width, height, 0);
+}
+
+CKBOOL CKSdlGpuPresentStage::SetNativeTargetTexture(CKDWORD texture, CKDWORD width,
+                                                    CKDWORD height)
+{
+    if (!m_Context)
+        return FALSE;
+    if (texture == 0) {
+        DestroyTarget(m_Native);
+        return TRUE;
+    }
+    if (width == 0 || height == 0)
+        return FALSE;
+    CKSdlGpuPresentTarget candidate;
+    candidate.ColorTexture = texture;
+    candidate.OwnsColor = FALSE;
+    if (!CreateTargetAttachments(candidate, width, height, 0)) {
+        DestroyTarget(candidate);
+        return FALSE;
+    }
+    DestroyTarget(m_Native);
+    m_Native = candidate;
+    return TRUE;
 }
 
 void CKSdlGpuPresentStage::DestroyTargets()
@@ -57,6 +83,26 @@ void CKSdlGpuPresentStage::DestroyTargets()
     DestroyTarget(m_Native);
     DestroyReadbackTexture();
 }
+
+void CKSdlGpuPresentStage::DestroySceneTarget()
+{
+    DestroyTarget(m_Scene);
+}
+
+#if defined(CKSDL_GPU_TEST_HOOKS)
+void CKSdlGpuPresentStage::DisableResourcesForTests()
+{
+    DestroyResources();
+    m_TestShaders = m_Shaders;
+    m_Shaders = CKFFShaderSet();
+}
+
+void CKSdlGpuPresentStage::RestoreResourcesForTests()
+{
+    m_Shaders = m_TestShaders;
+    m_TestShaders = CKFFShaderSet();
+}
+#endif
 
 CKDWORD CKSdlGpuPresentStage::AcquireReadbackTexture(CKDWORD width, CKDWORD height)
 {
@@ -109,6 +155,20 @@ CKBOOL CKSdlGpuPresentStage::CreateTarget(CKSdlGpuPresentTarget &target, CKDWORD
                       CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET | msaaFlag;
     if (m_Context->CreateTexture(&colorDesc, nullptr, &target.ColorTexture) != CK_OK)
         return FALSE;
+    target.OwnsColor = TRUE;
+    if (!CreateTargetAttachments(target, width, height, samples)) {
+        DestroyTarget(target);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+CKBOOL CKSdlGpuPresentStage::CreateTargetAttachments(CKSdlGpuPresentTarget &target,
+                                                     CKDWORD width, CKDWORD height,
+                                                     CKDWORD samples)
+{
+    if (!target.ColorTexture)
+        return FALSE;
 
     CKDepthTextureDesc depthDesc;
     depthDesc.Width = width;
@@ -121,8 +181,6 @@ CKBOOL CKSdlGpuPresentStage::CreateTarget(CKSdlGpuPresentTarget &target, CKDWORD
         depthErr = m_Context->CreateDepthTexture(&depthDesc, &target.DepthTexture);
     }
     if (depthErr != CK_OK) {
-        m_Context->DestroyObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
-        target.ColorTexture = 0;
         return FALSE;
     }
 
@@ -131,8 +189,7 @@ CKBOOL CKSdlGpuPresentStage::CreateTarget(CKSdlGpuPresentTarget &target, CKDWORD
     rtDesc.DepthTexture = target.DepthTexture;
     if (m_Context->CreateRenderTarget(&rtDesc, &target.FrameBuffer) != CK_OK) {
         m_Context->DestroyObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
-        m_Context->DestroyObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
-        target = CKSdlGpuPresentTarget();
+        target.DepthTexture = 0;
         return FALSE;
     }
 
@@ -150,7 +207,7 @@ void CKSdlGpuPresentStage::DestroyTarget(CKSdlGpuPresentTarget &target)
             m_Context->DestroyObject(target.FrameBuffer, CKRST_OBJ_RENDERTARGET);
         if (target.DepthTexture)
             m_Context->DestroyObject(target.DepthTexture, CKRST_OBJ_TEXTURE);
-        if (target.ColorTexture)
+        if (target.ColorTexture && target.OwnsColor)
             m_Context->DestroyObject(target.ColorTexture, CKRST_OBJ_TEXTURE);
     }
     target = CKSdlGpuPresentTarget();

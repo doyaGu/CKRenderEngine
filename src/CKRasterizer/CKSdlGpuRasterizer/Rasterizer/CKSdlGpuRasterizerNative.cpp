@@ -86,6 +86,12 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     }
     const char *driver = SDL_getenv("CKRE_SDL_GPU_DRIVER");
     if (driver && SDL_strcmp(driver, "auto") == 0) driver = nullptr;
+    const bool explicitDriver = driver != nullptr;
+    auto *external = static_cast<SDL_GPUDevice *>(SDL_GetPointerProperty(
+        SDL_GetWindowProperties(Window), CKSDL_GPU_DEVICE_PROPERTY, nullptr));
+    if (external && (!(SDL_GetGPUShaderFormats(external) & allowedFormats) ||
+        (explicitDriver && SDL_strcmp(driver, SDL_GetGPUDeviceDriver(external)) != 0)))
+        external = nullptr;
 #ifdef _WIN32
     if (!driver) driver = allowedFormats & SDL_GPU_SHADERFORMAT_DXIL ? "direct3d12" : "vulkan";
 #elif defined(__APPLE__)
@@ -93,13 +99,15 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
 #endif
     const bool debug = SDL_getenv("CKRE_SDL_GPU_DEBUG") && SDL_strcmp(SDL_getenv("CKRE_SDL_GPU_DEBUG"), "0") != 0;
     // Decode the shader packs while the device is created.
+    if (external) driver = SDL_GetGPUDeviceDriver(external);
     CKSdlGpuShaderPrefetch prefetch(DriverPackFormats(driver, allowedFormats));
-    Device = SDL_CreateGPUDevice(allowedFormats, debug, driver);
+    OwnsDevice = external == nullptr;
+    Device = external ? external : SDL_CreateGPUDevice(allowedFormats, debug, driver);
     if (!Device) return Fail("CreateGPUDevice");
     PresentCopySupported = CKSdlGpuSupportsSwapchainCopy(SDL_GetGPUDeviceDriver(Device));
     // Keep the SDL default depth explicit. A third queued frame improves peak
     // throughput on some systems, but increases presentation latency.
-    if (!SDL_SetGPUAllowedFramesInFlight(Device, 2)) {
+    if (OwnsDevice && !SDL_SetGPUAllowedFramesInFlight(Device, 2)) {
         Fail("SetGPUAllowedFramesInFlight.init"); Shutdown(); return CKERR_INVALIDOPERATION;
     }
     const SDL_GPUShaderFormat formats = SDL_GetGPUShaderFormats(Device) & allowedFormats;
@@ -425,7 +433,8 @@ void CKSdlGpuRasterizerContext::Shutdown()
     Target.reset(); Targets.Clear(); Programs.Clear(); ShaderObjects.Clear();
     VertexBuffers.Clear(); IndexBuffers.Clear(); Layouts.Clear(); Textures.Clear();
     if (WindowClaimed) SDL_ReleaseWindowFromGPUDevice(Device, Window);
-    SDL_DestroyGPUDevice(Device);
+    if (OwnsDevice) SDL_DestroyGPUDevice(Device);
+    OwnsDevice = true;
     WindowClaimed = false; Device = nullptr; Window = nullptr; Swapchain = nullptr; PassOpen = false;
     PresentCopySupported = false;
     PresentCopyLogged = false;

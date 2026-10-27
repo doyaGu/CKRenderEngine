@@ -93,6 +93,56 @@ CKBOOL CKSdlGpuRasterizerContext::CreateTexture(const CKTextureDesc *Desc, CKDWO
     return TRUE;
 }
 
+CKBOOL CKSdlGpuRasterizerContext::ImportTexture(const CKTextureDesc *Desc,
+                                                const CKTextureImportDesc *Import,
+                                                CKDWORD *OutTexture)
+{
+    if (OutTexture)
+        *OutTexture = 0;
+    // A wrong-thread call must be a side-effect-free failure: even diagnostic
+    // counters are render-thread state.
+    if (SDL_GetCurrentThreadID() != Thread)
+        return FALSE;
+    if (!Ready() || !m_Created || m_ShuttingDown || !Desc || !Import ||
+        !OutTexture || Import->Type != CKSDL_GPU_TEXTURE_GUID ||
+        !Import->Data || Import->DataSize != sizeof(CKSdlGpuTextureImportData))
+        return FALSE;
+    const CKSdlGpuTextureImportData *native =
+        static_cast<const CKSdlGpuTextureImportData *>(Import->Data);
+    if (native->Device != Device || !native->Texture)
+        return FALSE;
+
+    CKTextureDesc publicDesc = *Desc;
+    publicDesc.Flags |= CKRST_TEXTURE_VALID;
+    if (publicDesc.Depth == 0)
+        publicDesc.Depth = 1;
+    if (publicDesc.MipMapCount == 0)
+        publicDesc.MipMapCount = 1;
+    std::shared_ptr<CKSdlGpuTexture> texture =
+        std::make_shared<CKSdlGpuTexture>();
+    const CKERROR configured = ConfigureTexture(*texture, publicDesc, TRUE);
+    if (configured != CK_OK)
+        return FALSE;
+    texture->Image = std::shared_ptr<SDL_GPUTexture>(
+        native->Texture, [](SDL_GPUTexture *) {});
+    const int subresources = (int)(texture->Info.num_levels *
+                                   texture->Info.layer_count_or_depth);
+    texture->Defined.CheckSize(subresources - 1);
+    for (int index = 0; index < subresources; ++index)
+        texture->Defined.Set(index);
+    texture->GpuMipBase.CheckSize((int)texture->Info.layer_count_or_depth - 1);
+
+    const CKDWORD handle = Textures.Add(texture);
+    if (!handle)
+        return FALSE;
+    if (!m_PublicResources.InsertTexture(handle, publicDesc)) {
+        Textures.Remove(handle);
+        return FALSE;
+    }
+    *OutTexture = handle;
+    return TRUE;
+}
+
 CKBOOL CKSdlGpuRasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel,
                                         CKRST_CUBEFACE Face, const CKRECT *Region)
 {
@@ -314,6 +364,10 @@ CKBOOL CKSdlGpuRasterizerContext::DeleteObject(CKRST_HANDLE Handle, CKRST_OBJECT
     }
     if (!m_PublicResources.IsAlive(Handle, Type)) {
         Diag(CKRST_DIAG_REJECT_INVALID_HANDLE);
+        return FALSE;
+    }
+    if (Type == CKRST_OBJ_TEXTURE && Handle == m_BackBufferTexture) {
+        Diag(CKRST_DIAG_INVALID_TARGET);
         return FALSE;
     }
     const CKBOOL wasTarget =

@@ -6,7 +6,7 @@
 
 #include "ImageIO.h"
 #include "SceneRegistry.h"
-#include "../../src/CKRasterizer/CKSdlGpuRasterizer/Native/CKSdlGpuFFJitSnapshot.h"
+#include "CKSdlGpuFFJitSnapshot.h"
 
 struct SDL_Window;
 struct SDL_SharedObject;

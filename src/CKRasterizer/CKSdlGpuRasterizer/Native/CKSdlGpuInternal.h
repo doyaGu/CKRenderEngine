@@ -121,6 +121,9 @@ struct CKSdlGpuTexture {
     unsigned Samples = 1;
     bool Depth = false;
     bool AutoMips = false;
+    // Borrowed images use the same logical resource and handle table as owned
+    // images, but their no-op deleter leaves destruction to the importer.
+    bool Borrowed = false;
     bool Referenced = false;
     bool AttachmentInitialized = false;
     XBitArray Defined;
@@ -462,11 +465,15 @@ struct CKSdlGpuReadback {
 
 struct CKSdlGpuSubmissionStats {
     CKDWORD Frames = 0;
+    CKDWORD Submits = 0;
     CKDWORD Passes = 0;
     CKDWORD Draws = 0;
     CKDWORD Blits = 0;
     CKDWORD TextureUploads = 0;
     CKDWORD BufferUploads = 0;
+    CKDWORD TexturePreserveCopies = 0;
+    CKDWORD TextureCycles = 0;
+    CKDWORD SwapchainAcquires = 0;
 };
 
 constexpr bool CKSdlGpuCanCopyPresent(SDL_GPUTextureFormat sourceFormat,

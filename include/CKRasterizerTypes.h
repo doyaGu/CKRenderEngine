@@ -218,6 +218,15 @@ struct CKRasterizerCapsDesc {
           MaxLights(0) {}
 };
 
+// Backend-defined texture import data. Type selects the concrete descriptor;
+// DataSize makes validation explicit without exposing backend types here.
+// The import is a creation parameter only and never owns Data or its resource.
+struct CKTextureImportDesc {
+    CKGUID Type;
+    const void *Data;
+    CKDWORD DataSize;
+};
+
 // ===========================================================================
 // Asynchronous readback
 // ===========================================================================

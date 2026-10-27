@@ -26,9 +26,14 @@ CKBOOL CKSdlGpuRasterizerContext::BuildReadbackImage(const PendingReadback &Read
 
 CKBOOL CKSdlGpuRasterizerContext::CanReadNativeTarget()
 {
-    if (!PrepareFrameTarget()) return FALSE;
+    // Reading a completed presentation reuses its native target. Preparing a
+    // new frame here would discard the exact image CopyToMemoryBuffer names.
+    const bool completed = !m_FrameState.Open && m_FrameState.NativePresented &&
+                           m_Present.NativeTarget().IsActive();
+    if (!completed && !PrepareFrameTarget()) return FALSE;
     const CKSdlGpuPresentTarget &native = m_Present.NativeTarget();
-    if (m_TargetState.IsActive() || !m_FrameState.InternalTargets || !native.IsActive())
+    if ((!m_BackBufferTexture && m_TargetState.IsActive()) ||
+        !m_FrameState.InternalTargets || !native.IsActive())
         return FALSE;
     return m_Present.AcquireReadbackTexture(native.Width, native.Height) != 0;
 }
@@ -46,6 +51,8 @@ CKBOOL CKSdlGpuRasterizerContext::CanReadTargetTexture()
 
 CKBOOL CKSdlGpuRasterizerContext::CanReadCurrentTarget()
 {
+    if (m_BackBufferTexture)
+        return CanReadNativeTarget();
     return m_TargetState.IsActive() ? CanReadTargetTexture() : CanReadNativeTarget();
 }
 
@@ -53,7 +60,9 @@ CKBOOL CKSdlGpuRasterizerContext::BlitForReadback()
 {
     const CKDWORD readbackTexture = m_Present.GetReadbackTexture();
     CKDWORD source = 0;
-    if (m_TargetState.IsActive()) {
+    if (m_BackBufferTexture && m_Present.NativeTarget().IsActive()) {
+        source = m_Present.NativeTarget().ColorTexture;
+    } else if (m_TargetState.IsActive()) {
         source = m_TargetState.Texture;
     } else if (m_Present.NativeTarget().IsActive()) {
         source = m_Present.NativeTarget().ColorTexture;
@@ -83,7 +92,8 @@ CKBOOL CKSdlGpuRasterizerContext::IssueTextureReadback(PendingReadback &Readback
     // A target texture was rendered in the D3D (top-down) layout already
     // The flip reported for framebuffer writes on
     // bottom-left backends has been done at render time.
-    Readback.YFlip = m_TargetState.IsActive() ? FALSE : desc.YFlip;
+    Readback.YFlip = (m_TargetState.IsActive() || m_BackBufferTexture)
+                         ? FALSE : desc.YFlip;
     return TRUE;
 }
 
@@ -118,14 +128,18 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitReadbackFrame(CKBOOL Present, CKBOOL Bli
         return FALSE;
     const CKBOOL passOpen = m_FrameState.PassOpen;
     const CKDWORD passes = m_FramePasses;
+    const CKBOOL customBackBuffer =
+        m_BackBufferTexture != 0 && !m_TargetState.IsActive();
     CKBOOL ok = TRUE;
-    if (Present && !m_TargetState.IsActive())
+    if (Present && !m_TargetState.IsActive() && !customBackBuffer)
         ok = PresentInternalTarget(CKRST_PRESENT_UNCHANGED);
     if (ok && Blit)
         ok = BlitForReadback();
     CKDWORD frame = 0;
     const CKERROR status = Submit(CKRST_PRESENT_UNCHANGED,
-                                  Present && !m_TargetState.IsActive(), &frame);
+                                  Present && !m_TargetState.IsActive() &&
+                                      !customBackBuffer,
+                                  &frame);
     if (status == CK_OK) {
         m_BufferUses.MarkSubmitted(GetLastSubmitId());
         m_BufferUses.Retire(GetCompletedSubmitId());
@@ -147,7 +161,7 @@ CKBOOL CKSdlGpuRasterizerContext::RequestReadback(const CKRECT *Rect, VXBUFFER_T
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
     }
-    const CKRECT target = LogicalTargetRect();
+    const CKRECT target = m_BackBufferTexture ? WindowRect() : LogicalTargetRect();
     if (!ValidateRect(Rect, (CKDWORD)target.right, (CKDWORD)target.bottom)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
@@ -263,7 +277,7 @@ int CKSdlGpuRasterizerContext::CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_T
         Diag(CKRST_DIAG_REJECT_SCENE_STATE);
         return 0;
     }
-    const CKRECT target = LogicalTargetRect();
+    const CKRECT target = m_BackBufferTexture ? WindowRect() : LogicalTargetRect();
     if (!ValidateRect(Rect, (CKDWORD)target.right, (CKDWORD)target.bottom)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return 0;

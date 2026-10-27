@@ -23,9 +23,13 @@ set(CKSDL_GPU_RASTERIZER_SOURCES
     Rasterizer/CKSdlGpuRasterizerTransfer.cpp
     Rasterizer/CKSdlGpuShaders.cpp
 )
+set(CKSDL_GPU_RASTERIZER_PUBLIC_HEADERS
+    CKSdlGpuRasterizer.h
+    CKSdlGpuFFJitSnapshot.h
+)
 set(CKSDL_GPU_RASTERIZER_HEADERS
+    ${CKSDL_GPU_RASTERIZER_PUBLIC_HEADERS}
     Native/CKSdlGpuFFJitStats.h
-    Native/CKSdlGpuFFJitSnapshot.h
     Native/CKSdlGpuFFJitUsage.h
     Native/CKSdlGpuInternal.h
     Native/CKSdlGpuNativeShaders.h
@@ -40,6 +44,11 @@ set(CKSDL_GPU_RASTERIZER_HEADERS
     Rasterizer/CKSdlGpuRasterizerContext.h
     Rasterizer/CKSdlGpuShaders.h
 )
+if (CKRE_INSTALL)
+    install(FILES ${CKSDL_GPU_RASTERIZER_PUBLIC_HEADERS}
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/CKSdlGpuRasterizer)
+endif ()
+
 # The DirectX shader packs embed DXIL, which needs its decoder.
 if (CKRE_ENABLE_DIRECTX)
     list(APPEND CKSDL_GPU_RASTERIZER_SOURCES Native/CKSdlGpuDxilCodec.cpp)
@@ -48,12 +57,17 @@ endif ()
 
 function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
     target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
-    target_include_directories(${TARGET_NAME} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/Native
-        ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
+    target_include_directories(${TARGET_NAME}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/CKSdlGpuRasterizer>
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/Native
+            ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
     )
-    target_link_libraries(${TARGET_NAME} PRIVATE CKFFPLib CKShaderJit SDL3::SDL3)
+    target_link_libraries(${TARGET_NAME}
+        PUBLIC CKRasterizerLib
+        PRIVATE CKFFPLib CKShaderJit SDL3::SDL3)
     ckre_apply_platform_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -87,7 +101,13 @@ if (CKRE_BUILD_STATIC)
         ${CKSDL_GPU_RASTERIZER_SOURCES}
         ${CKSDL_GPU_RASTERIZER_HEADERS}
     )
-    target_compile_definitions(CKSdlGpuRasterizerStatic PRIVATE CK_LIB=1)
+    target_compile_definitions(CKSdlGpuRasterizerStatic
+        PUBLIC CKSDL_GPU_RASTERIZER_STATIC=1
+        PRIVATE CK_LIB=1)
+    if (CKRE_BUILD_TESTS AND BUILD_TESTING)
+        target_compile_definitions(CKSdlGpuRasterizerStatic
+            PUBLIC CKSDL_GPU_TEST_HOOKS=1)
+    endif ()
     ckre_configure_sdl_gpu_rasterizer(CKSdlGpuRasterizerStatic)
     list(APPEND _cksdl_targets CKSdlGpuRasterizerStatic)
     if (NOT TARGET CKSdlGpuRasterizer)

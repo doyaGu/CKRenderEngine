@@ -247,6 +247,11 @@ public:
         return m_Target->CreateTexture(Desc, OutHandle);
     }
 
+    CKBOOL ImportTexture(const CKTextureDesc *Desc, const CKTextureImportDesc *Import,
+                         CKDWORD *OutTexture) override {
+        return m_Target->ImportTexture(Desc, Import, OutTexture);
+    }
+
     CKBOOL LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel, CKRST_CUBEFACE Face, const CKRECT *Region) override {
         return m_Target->LoadTexture(Texture, Image, MipLevel, Face, Region);
     }
@@ -301,6 +306,10 @@ public:
 
     CKBOOL SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face) override {
         return m_Target->SetTargetTexture(Texture, Width, Height, Face);
+    }
+
+    CKBOOL SetBackBufferTexture(CKDWORD Texture) override {
+        return m_Target->SetBackBufferTexture(Texture);
     }
 
     CKBOOL CopyToTexture(CKDWORD Texture, const VxRect *Src, const VxRect *Dst, CKRST_CUBEFACE Face) override {

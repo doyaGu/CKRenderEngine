@@ -322,51 +322,70 @@ CKERROR CKSdlGpuRasterizerContext::UpdateBuffer(const CKBufferUpdateDesc *desc)
     return error;
 }
 
-CKERROR CKSdlGpuRasterizerContext::CreateTexture(const CKTextureDesc *desc, const VxImageDescEx *data, CKDWORD *out)
+CKERROR CKSdlGpuRasterizerContext::ConfigureTexture(
+    CKSdlGpuTexture &texture, const CKTextureDesc &desc,
+    CKBOOL imported) const
 {
-    if (out) *out = 0;
-    if (!Ready()) return CKERR_INVALIDOPERATION;
-    if (!desc || !out || desc->Format.Width <= 0 || desc->Format.Height <= 0 ||
-        unsigned(desc->Format.Width) > Caps.MaxTextureSize || unsigned(desc->Format.Height) > Caps.MaxTextureSize)
+    if (desc.Format.Width <= 0 || desc.Format.Height <= 0 ||
+        unsigned(desc.Format.Width) > Caps.MaxTextureSize ||
+        unsigned(desc.Format.Height) > Caps.MaxTextureSize)
         return CKERR_INVALIDPARAMETER;
-    auto texture = std::make_shared<CKSdlGpuTexture>();
-    texture->PixelFormat = VxImageDesc2PixelFormat(desc->Format);
-    if (texture->PixelFormat == UNKNOWN_PF) return CKERR_NOTIMPLEMENTED;
-    texture->Flags = desc->Flags;
-    auto &info = texture->Info;
-    info.type = desc->Flags & CKRST_TEXTURE_CUBEMAP ? SDL_GPU_TEXTURETYPE_CUBE :
-        (desc->Flags & CKRST_TEXTURE_VOLUMEMAP ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D);
-    info.format = CKSdlGpuTextureFormat(texture->PixelFormat);
+    if ((desc.Flags & CKRST_TEXTURE_CUBEMAP) &&
+        (desc.Flags & CKRST_TEXTURE_VOLUMEMAP))
+        return CKERR_INVALIDPARAMETER;
+
+    texture.PixelFormat = VxImageDesc2PixelFormat(desc.Format);
+    if (texture.PixelFormat == UNKNOWN_PF) return CKERR_NOTIMPLEMENTED;
+    texture.Flags = desc.Flags;
+    texture.Borrowed = imported != FALSE;
+    auto &info = texture.Info;
+    info.type = desc.Flags & CKRST_TEXTURE_CUBEMAP ? SDL_GPU_TEXTURETYPE_CUBE :
+        (desc.Flags & CKRST_TEXTURE_VOLUMEMAP ? SDL_GPU_TEXTURETYPE_3D : SDL_GPU_TEXTURETYPE_2D);
+    info.format = CKSdlGpuTextureFormat(texture.PixelFormat);
     if (info.format == SDL_GPU_TEXTUREFORMAT_INVALID) return CKERR_NOTIMPLEMENTED;
-    info.width = desc->Format.Width; info.height = desc->Format.Height;
+    info.width = desc.Format.Width; info.height = desc.Format.Height;
     info.layer_count_or_depth = info.type == SDL_GPU_TEXTURETYPE_CUBE ? 6 :
-        (info.type == SDL_GPU_TEXTURETYPE_3D ? std::max(1u, unsigned(desc->Depth)) : 1);
+        (info.type == SDL_GPU_TEXTURETYPE_3D ? std::max(1u, unsigned(desc.Depth)) : 1);
     if (info.layer_count_or_depth > 2048 || (info.type == SDL_GPU_TEXTURETYPE_CUBE && info.width != info.height))
         return CKERR_INVALIDPARAMETER;
     unsigned fullLevels = 1;
     for (unsigned extent = std::max({info.width, info.height, info.type == SDL_GPU_TEXTURETYPE_3D ? info.layer_count_or_depth : 1u});
          extent > 1; extent >>= 1) ++fullLevels;
-    texture->AutoMips = desc->MipMapCount == CKRST_MIPMAP_GENERATE;
-    if (!texture->AutoMips && desc->MipMapCount > fullLevels) return CKERR_INVALIDPARAMETER;
-    if (texture->AutoMips && (texture->PixelFormat == _DXT1 || texture->PixelFormat == _DXT2 ||
-                              texture->PixelFormat == _DXT3 || texture->PixelFormat == _DXT4 ||
-                              texture->PixelFormat == _DXT5)) info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
-    info.num_levels = texture->AutoMips ? fullLevels : std::max(1u, unsigned(desc->MipMapCount));
+    texture.AutoMips = desc.MipMapCount == CKRST_MIPMAP_GENERATE;
+    if (!texture.AutoMips && desc.MipMapCount > fullLevels) return CKERR_INVALIDPARAMETER;
+    if (texture.AutoMips && (texture.PixelFormat == _DXT1 || texture.PixelFormat == _DXT2 ||
+                             texture.PixelFormat == _DXT3 || texture.PixelFormat == _DXT4 ||
+                             texture.PixelFormat == _DXT5)) info.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+    info.num_levels = texture.AutoMips ? fullLevels : std::max(1u, unsigned(desc.MipMapCount));
     info.sample_count = SDL_GPU_SAMPLECOUNT_1;
     info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
     // SDL 3.4's D3D12 3D RTV allocation uses base depth for every mip.
     // Keep volumes sample/copy-only and render their slices through 2D targets.
     if (info.type == SDL_GPU_TEXTURETYPE_3D) {
-        if ((desc->Flags & CKRST_TEXTURE_RENDERTARGET) && !SDL_GPUTextureSupportsFormat(Device,
+        if ((desc.Flags & CKRST_TEXTURE_RENDERTARGET) && !SDL_GPUTextureSupportsFormat(Device,
             info.format, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET)) return CKERR_NOTIMPLEMENTED;
-    } else if (desc->Flags & CKRST_TEXTURE_RENDERTARGET) info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
-    if (texture->AutoMips && info.type != SDL_GPU_TEXTURETYPE_3D && SDL_GPUTextureSupportsFormat(Device,
+    } else if (desc.Flags & CKRST_TEXTURE_RENDERTARGET) info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    if (texture.AutoMips && info.type != SDL_GPU_TEXTURETYPE_3D && SDL_GPUTextureSupportsFormat(Device,
         info.format, info.type, info.usage | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET)) info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
     if (!SDL_GPUTextureSupportsFormat(Device, info.format, info.type, info.usage)) return CKERR_NOTIMPLEMENTED;
-    texture->Samples = std::max(1u, unsigned(CKRSTTextureMSAASamples(desc->Flags)));
-    if (texture->Samples > Caps.MaxMSAASamples ||
-        (texture->Samples > 1 && (info.type != SDL_GPU_TEXTURETYPE_2D || info.num_levels > 1 ||
-                                !(desc->Flags & CKRST_TEXTURE_RENDERTARGET)))) return CKERR_NOTIMPLEMENTED;
+    texture.Samples = std::max(1u, unsigned(CKRSTTextureMSAASamples(desc.Flags)));
+    if (texture.Samples > Caps.MaxMSAASamples ||
+        (texture.Samples > 1 && (imported || info.type != SDL_GPU_TEXTURETYPE_2D ||
+                                 info.num_levels > 1 ||
+                                 !(desc.Flags & CKRST_TEXTURE_RENDERTARGET))))
+        return CKERR_NOTIMPLEMENTED;
+    return CK_OK;
+}
+
+CKERROR CKSdlGpuRasterizerContext::CreateTexture(const CKTextureDesc *desc, const VxImageDescEx *data, CKDWORD *out)
+{
+    if (out) *out = 0;
+    if (!Ready()) return CKERR_INVALIDOPERATION;
+    if (!desc || !out) return CKERR_INVALIDPARAMETER;
+    auto texture = std::make_shared<CKSdlGpuTexture>();
+    const CKERROR configured = ConfigureTexture(*texture, *desc, FALSE);
+    if (configured != CK_OK) return configured;
+    auto &info = texture->Info;
     texture->Image = CKSdlGpuOwn(Device, SDL_CreateGPUTexture(Device, &info), SDL_ReleaseGPUTexture);
     if (!texture->Image) return Fail("CreateGPUTexture");
     if (texture->Samples > 1) {
@@ -452,6 +471,7 @@ CKERROR CKSdlGpuRasterizerContext::PreserveTexture(CKSdlGpuTexture &texture)
     if (!EnsureCommands()) return Error;
     auto *copy = SDL_BeginGPUCopyPass(Commands);
     if (!copy) return Fail("BeginGPUCopyPass.preserve");
+    bool copied = false;
     for (unsigned mip = 0; mip < texture.Info.num_levels; ++mip) {
         for (unsigned layer = 0; layer < CKSdlGpuTextureLayers(texture, mip); ++layer) {
             if (!texture.Defined.IsSet((int)(mip * texture.Info.layer_count_or_depth + layer))) continue;
@@ -462,7 +482,40 @@ CKERROR CKSdlGpuRasterizerContext::PreserveTexture(CKSdlGpuTexture &texture)
             else source.layer = dest.layer = layer;
             SDL_CopyGPUTextureToTexture(copy, &source, &dest, std::max(1u, texture.Info.width >> mip),
                                         std::max(1u, texture.Info.height >> mip), 1, false);
+            ++FrameStats.TexturePreserveCopies;
+            copied = true;
         }
+    }
+    if (texture.Borrowed) {
+        // Borrowed resources keep their stable SDL_GPUTexture*. Copy the old
+        // contents through temporary storage, cycling the external logical
+        // texture exactly once before the partial update writes it.
+        bool cycled = false;
+        for (unsigned mip = 0; mip < texture.Info.num_levels; ++mip) {
+            for (unsigned layer = 0; layer < CKSdlGpuTextureLayers(texture, mip); ++layer) {
+                if (!texture.Defined.IsSet((int)(mip * texture.Info.layer_count_or_depth + layer))) continue;
+                SDL_GPUTextureLocation source = {}, dest = {};
+                source.texture = replacement.get(); dest.texture = texture.Image.get();
+                source.mip_level = dest.mip_level = mip;
+                if (texture.Info.type == SDL_GPU_TEXTURETYPE_3D) source.z = dest.z = layer;
+                else source.layer = dest.layer = layer;
+                SDL_CopyGPUTextureToTexture(copy, &source, &dest,
+                    std::max(1u, texture.Info.width >> mip),
+                    std::max(1u, texture.Info.height >> mip), 1, !cycled);
+                ++FrameStats.TexturePreserveCopies;
+                if (!cycled) {
+                    ++FrameStats.TextureCycles;
+                    cycled = true;
+                }
+            }
+        }
+        if (!copied) {
+            SDL_EndGPUCopyPass(copy);
+            return CKERR_INVALIDOPERATION;
+        }
+        SDL_EndGPUCopyPass(copy);
+        texture.Referenced = false;
+        return CK_OK;
     }
     SDL_EndGPUCopyPass(copy);
     texture.Image = std::move(replacement);

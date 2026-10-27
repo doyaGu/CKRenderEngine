@@ -94,6 +94,7 @@ add_executable(ckre_scene_capture
 target_compile_features(ckre_scene_capture PRIVATE cxx_std_20)
 target_include_directories(ckre_scene_capture PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../src/CKRasterizer/CKSdlGpuRasterizer
 )
 
 if (_ckre_scene_capture_standalone)

@@ -14,6 +14,9 @@
 #include "CKGlobals.h"
 #include "CKPluginManager.h"
 #include "CKRasterizerRegistration.h"
+#if defined(CKRE_STATIC_SDL_GPU_RASTERIZER)
+#include "CKSdlGpuRasterizer.h"
+#endif
 #include "CKException.h"
 #include "VxWindowFunctions.h"
 
@@ -157,7 +160,6 @@ static void RegisterNullRasterizer() {
 void EnumerateRasterizers() {
     if (!g_EnumerationDone) {
 #if defined(CKRE_STATIC_SDL_GPU_RASTERIZER)
-        extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
         RegisterStaticRasterizer(CKSdlGpuRasterizerGetInfo, "CKSdlGpuRasterizer");
 #endif
 

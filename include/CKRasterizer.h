@@ -191,6 +191,15 @@ public:
     // Handles are allocated by the rasterizer; 0 is never a valid handle and a
     // deleted handle MAY be reused.
     virtual CKBOOL CreateTexture(const CKTextureDesc *Desc, CKDWORD *OutHandle) = 0;
+    // Imports a caller-owned native resource as an ordinary generational
+    // texture handle. Desc is the complete native-resource contract; the
+    // backend validates every property it can observe. The Context never
+    // destroys the external resource, and the caller must keep it alive until
+    // the handle has been unbound and deleted. Unsupported backends return
+    // FALSE. Failure clears OutTexture and changes no Context state.
+    virtual CKBOOL ImportTexture(const CKTextureDesc *Desc,
+                                 const CKTextureImportDesc *Import,
+                                 CKDWORD *OutTexture);
     // Face selects a cube face, or the Z slice at MipLevel for a volume
     // texture (cast the slice index to CKRST_CUBEFACE); it is zero for 2D.
     virtual CKBOOL LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel,
@@ -211,6 +220,15 @@ public:
     // --- Targets, readback, copies ---
     // Texture == 0 selects the virtual backbuffer. Only outside a scene.
     virtual CKBOOL SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face) = 0;
+    // Between frames on the render thread, binds a complete, single-mip,
+    // single-sampled 2D render-target and sampler texture whose dimensions
+    // equal the Context as the virtual backbuffer. 0 restores the
+    // implementation-owned backbuffer. The binding survives temporary
+    // SetTargetTexture calls and is automatically removed on resize. A bound
+    // texture cannot be deleted. With a custom backbuffer, BackToFront submits
+    // the completed image without presenting the window; VSync has no effect.
+    // Unsupported backends return FALSE; failure preserves the old binding.
+    virtual CKBOOL SetBackBufferTexture(CKDWORD Texture);
     // Captures the contents at this call. Different rectangle sizes use point
     // sampling at destination pixel centers; pixels outside Dst are preserved.
     virtual CKBOOL CopyToTexture(CKDWORD Texture, const VxRect *Src, const VxRect *Dst, CKRST_CUBEFACE Face) = 0;

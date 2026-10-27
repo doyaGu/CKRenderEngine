@@ -146,8 +146,20 @@ CKRasterizerContext::CKRasterizerContext(CKRasterizerDriver *Driver)
     memset(&m_Stats, 0, sizeof(m_Stats));
 }
 
-CKRasterizerContext::~CKRasterizerContext()
+CKRasterizerContext::~CKRasterizerContext() = default;
+
+CKBOOL CKRasterizerContext::ImportTexture(const CKTextureDesc *,
+                                          const CKTextureImportDesc *,
+                                          CKDWORD *OutTexture)
 {
+    if (OutTexture)
+        *OutTexture = 0;
+    return FALSE;
+}
+
+CKBOOL CKRasterizerContext::SetBackBufferTexture(CKDWORD)
+{
+    return FALSE;
 }
 
 CKBOOL CKRasterizerContext::GetDesc(CKRasterizerContextDesc *Desc) const

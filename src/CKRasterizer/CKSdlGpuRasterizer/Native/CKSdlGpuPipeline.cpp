@@ -526,11 +526,11 @@ std::shared_ptr<SDL_GPUSampler> CKSdlGpuRasterizerContext::Sampler(const CKSampl
 }
 
 CKERROR CKSdlGpuRasterizerContext::ClearRect(SDL_GPURenderPass *pass, const CKRenderPassDesc &desc,
-    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples)
+    SDL_GPUTextureFormat color, SDL_GPUTextureFormat depth, SDL_GPUSampleCount samples, CKDWORD colorWrites)
 {
     CKSdlGpuDraw draw;
     draw.Program = ClearProgram.get();
-    draw.State.State.Lo = desc.ClearFlags & CKRST_CTXCLEAR_COLOR ? CKRST_STATE_WRITE_RGBA : 0;
+    draw.State.State.Lo = desc.ClearFlags & CKRST_CTXCLEAR_COLOR ? colorWrites : 0;
     draw.State.State.Mid = CKRST_STATE_PT(VX_TRIANGLELIST);
     draw.State.State.Hi = 0;
     if (desc.ClearFlags & CKRST_CTXCLEAR_DEPTH) draw.State.State.Lo |= CKRST_STATE_DEPTH_TEST | CKRST_STATE_DEPTH_WRITE | CKRST_STATE_DEPTH_FUNC(VXCMP_ALWAYS);

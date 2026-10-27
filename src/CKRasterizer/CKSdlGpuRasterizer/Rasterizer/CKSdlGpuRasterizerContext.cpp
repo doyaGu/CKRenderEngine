@@ -14,7 +14,8 @@
 CKSdlGpuRasterizerContext::CKSdlGpuRasterizerContext()
     : CKRasterizerContext(), m_Ready(NULL), m_ReadyUser(NULL),
       m_PassTarget(0), m_LastDeviceFrame(0),
-      m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
+      m_TargetFrameBuffer(0), m_TargetDepthTexture(0), m_BackBufferTexture(0),
+      m_CopyTexture(0), m_CopyWidth(0), m_CopyHeight(0),
       m_FrameDrawCalls(0), m_FramePrimitives(0), m_FramePasses(0), m_FrameClears(0),
       m_FrameTextureUploads(0), m_FrameBufferUploads(0), m_LayoutMismatchLogged(FALSE)
 {
@@ -144,6 +145,9 @@ CKBOOL CKSdlGpuRasterizerContext::Resize(int PosX, int PosY, int Width, int Heig
         return TRUE;
     m_Width = Width;
     m_Height = Height;
+    // A caller-owned attachment has a fixed descriptor. Resize removes only
+    // its binding; its ordinary texture handle remains alive for the caller.
+    m_BackBufferTexture = 0;
     m_Present.DestroyTargets();
     m_FrameState.NativePresented = FALSE;
     // The internal targets follow the new size at the next frame (a readback
@@ -227,6 +231,7 @@ CKBOOL CKSdlGpuRasterizerContext::BeginShutdown()
         m_CopyWidth = m_CopyHeight = 0;
     }
     m_Present.Shutdown();
+    m_BackBufferTexture = 0;
     if (!IsNativeIdle()) {
         if (GetDeviceStatus() == CK_OK) {
             m_ShuttingDown = FALSE;

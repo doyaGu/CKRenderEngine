@@ -20,10 +20,11 @@ struct CKSdlGpuPresentTarget {
     CKDWORD Height;
     CKDWORD Samples;      // 0 = single sampled
     CK_DEPTH_FORMAT DepthFormat;
+    CKBOOL OwnsColor;
 
     CKSdlGpuPresentTarget()
         : ColorTexture(0), DepthTexture(0), FrameBuffer(0), Width(0), Height(0), Samples(0),
-          DepthFormat(CKRST_DEPTHFMT_D24S8) {}
+          DepthFormat(CKRST_DEPTHFMT_D24S8), OwnsColor(FALSE) {}
     CKBOOL IsActive() const { return FrameBuffer != 0; }
 };
 
@@ -63,6 +64,17 @@ public:
     CKBOOL EnsureSceneTarget(CKDWORD width, CKDWORD height, CKDWORD samples);
     // Native target of the given size (single sampled).
     CKBOOL EnsureNativeTarget(CKDWORD width, CKDWORD height);
+    // Atomically replaces the native target with a caller-owned color texture.
+    // Texture == 0 removes a custom target; the default is recreated lazily.
+    CKBOOL SetNativeTargetTexture(CKDWORD texture, CKDWORD width, CKDWORD height);
+    CKBOOL HasCustomNativeTarget() const {
+        return m_Native.IsActive() && !m_Native.OwnsColor;
+    }
+    void DestroySceneTarget();
+#if defined(CKSDL_GPU_TEST_HOOKS)
+    void DisableResourcesForTests();
+    void RestoreResourcesForTests();
+#endif
     void DestroyTargets();
     CKBOOL EnsureResources();
     void DestroyResources();
@@ -86,6 +98,8 @@ public:
 
 private:
     CKBOOL CreateTarget(CKSdlGpuPresentTarget &target, CKDWORD width, CKDWORD height, CKDWORD samples);
+    CKBOOL CreateTargetAttachments(CKSdlGpuPresentTarget &target, CKDWORD width,
+                                   CKDWORD height, CKDWORD samples);
     void DestroyTarget(CKSdlGpuPresentTarget &target);
     void DestroyReadbackTexture();
     CKERROR Submit(const CKSdlGpuPresentTarget &source, CKBOOL fxaa, float sharpness);
@@ -95,6 +109,9 @@ private:
     CKSdlGpuRasterizerContext *m_Context;
     CKFFPresentDraw m_Draw;
     CKFFShaderSet m_Shaders;
+#if defined(CKSDL_GPU_TEST_HOOKS)
+    CKFFShaderSet m_TestShaders;
+#endif
     CKSdlGpuPresentResources m_ResourceIds;
     CKSdlGpuPresentTarget m_Scene;
     CKSdlGpuPresentTarget m_Native;

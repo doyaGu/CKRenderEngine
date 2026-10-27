@@ -15,17 +15,18 @@
 #include "CKFFShaderCache.h"
 #include "CKSdlGpuFFJitManifest.h"
 #include "CKSdlGpuPresentStage.h"
+#include "CKSdlGpuRasterizer.h"
 #include "CKSdlGpuShaders.h"
 #include "XSHashTable.h"
 
 #include <memory>
 #include <deque>
 
-#include "../Native/CKSdlGpuInternal.h"
-#include "../Native/CKSdlGpuFFJitStats.h"
-#include "../Native/CKSdlGpuFFJitSnapshot.h"
-#include "../Native/CKSdlGpuFFJitUsage.h"
-#include "../Native/CKSdlGpuWorker.h"
+#include "CKSdlGpuInternal.h"
+#include "CKSdlGpuFFJitStats.h"
+#include "CKSdlGpuFFJitSnapshot.h"
+#include "CKSdlGpuFFJitUsage.h"
+#include "CKSdlGpuWorker.h"
 
 class CKSdlGpuRasterizerContext;
 struct CKSdlGpuReadback;
@@ -56,6 +57,9 @@ public:
     const CKRasterizerDeviceCaps &GetCaps() const;
     CKBOOL IsNativeIdle() const;
     void SetDebugFlags(CKDWORD Flags);
+    CKERROR ConfigureTexture(CKSdlGpuTexture &Texture,
+                             const CKTextureDesc &Desc,
+                             CKBOOL Imported) const;
     CKERROR CreateTexture(const CKTextureDesc *Desc,
                           const VxImageDescEx *Data, CKDWORD *Out);
     CKERROR UpdateTexture(CKDWORD Texture, CKDWORD Mip, CKDWORD Face,
@@ -152,6 +156,9 @@ public:
 
     // --- Resources ---
     CKBOOL CreateTexture(const CKTextureDesc *Desc, CKDWORD *OutHandle) override;
+    CKBOOL ImportTexture(const CKTextureDesc *Desc,
+                         const CKTextureImportDesc *Import,
+                         CKDWORD *OutTexture) override;
     CKBOOL LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel,
                        CKRST_CUBEFACE Face, const CKRECT *Region) override;
     CKBOOL GetTextureDesc(CKDWORD Texture, CKTextureDesc *Desc) const override;
@@ -169,6 +176,7 @@ public:
 
     // --- Targets, readback, copies ---
     CKBOOL SetTargetTexture(CKDWORD Texture, int Width, int Height, CKRST_CUBEFACE Face) override;
+    CKBOOL SetBackBufferTexture(CKDWORD Texture) override;
     CKBOOL CopyToTexture(CKDWORD Texture, const VxRect *Src, const VxRect *Dst, CKRST_CUBEFACE Face) override;
     int CopyToMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, VxImageDescEx &Image) override;
     int CopyFromMemoryBuffer(const CKRECT *Rect, VXBUFFER_TYPE Buffer, const VxImageDescEx &Image) override;
@@ -186,6 +194,29 @@ public:
     CKBOOL IsOverlayPhaseForTests() const { return m_FrameState.IsOverlayActive(); }
     CKDWORD GetPassCountForTests() const { return m_FramePasses; }
     int GetLiveResourceCountForTests(CKDWORD TypeMask) const;
+    CKDWORD GetBackBufferTextureForTests() const { return m_BackBufferTexture; }
+    CKDWORD GetNativeTargetTextureForTests() const {
+        return m_Present.NativeTarget().ColorTexture;
+    }
+#if defined(CKSDL_GPU_TEST_HOOKS)
+    void DisablePresentResourcesForTests() {
+        m_Present.DisableResourcesForTests();
+    }
+    void RestorePresentResourcesForTests() {
+        m_Present.RestoreResourcesForTests();
+    }
+#endif
+    SDL_GPUTexture *GetNativeTextureForTests(CKDWORD Handle) const {
+        const std::shared_ptr<CKSdlGpuTexture> texture = Textures.Get(Handle);
+        return texture ? texture->Image.get() : NULL;
+    }
+    CKBOOL IsBorrowedTextureForTests(CKDWORD Handle) const {
+        const std::shared_ptr<CKSdlGpuTexture> texture = Textures.Get(Handle);
+        return texture && texture->Borrowed ? TRUE : FALSE;
+    }
+    const CKSdlGpuSubmissionStats &GetPendingSubmissionStatsForTests() const {
+        return FrameStats;
+    }
     const CKLightData &GetLightForTests(CKDWORD Index) const { return m_FFP.GetLight((int)Index); }
     CKBOOL IsLightEnabledForTests(CKDWORD Index) const { return m_FFP.IsLightEnabled((int)Index); }
     const CKMaterialData &GetMaterialForTests() const { return m_FFP.GetMaterial(); }
@@ -233,6 +264,7 @@ public:
     };
     PipelineCacheCounts CountPipelineCacheForTests() const;
 private:
+    friend class CKSdlGpuPresentStage;
     typedef CKFFVertexBufferData VertexBufferData;
     typedef CKFFIndexBufferData IndexBufferData;
 
@@ -279,7 +311,7 @@ private:
                       const CKRenderPassDesc &Desc,
                       SDL_GPUTextureFormat ColorFormat,
                       SDL_GPUTextureFormat DepthFormat,
-                      SDL_GPUSampleCount Samples);
+                      SDL_GPUSampleCount Samples, CKDWORD ColorWrites = CKRST_STATE_WRITE_RGBA);
     CKERROR ConvertColorTexture(SDL_GPUTexture *Source,
                                 SDL_GPUTexture *Destination,
                                 SDL_GPUTextureFormat DestinationFormat,
@@ -293,7 +325,8 @@ private:
                              const SDL_Rect &Scissor,
                              CKDWORD ColorTargetFormat,
                              CKBOOL Dither,
-                             CKBOOL ExplicitQuantize);
+                             CKBOOL ExplicitQuantize,
+                             CKDWORD ColorWrites = CKRST_STATE_WRITE_RGBA);
     CKERROR EnsureDitherTargets(unsigned Width, unsigned Height,
                                 unsigned Samples,
                                 SDL_GPUTextureFormat SourceFormat);
@@ -610,6 +643,7 @@ private:
     CKFFRenderTargetState m_TargetState;
     CKDWORD m_TargetFrameBuffer;
     CKDWORD m_TargetDepthTexture;
+    CKDWORD m_BackBufferTexture;
 
     // Resources
     CKFFResourceStore m_PublicResources;
@@ -632,6 +666,7 @@ private:
 
     // Native SDL_GPU state is owned directly by this concrete Context.
     SDL_GPUDevice *Device = nullptr;
+    bool OwnsDevice = true;
     SDL_Window *Window = nullptr; // borrowed from Player
     bool WindowClaimed = false;
     SDL_ThreadID Thread = 0;

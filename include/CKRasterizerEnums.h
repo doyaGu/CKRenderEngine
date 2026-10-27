@@ -19,9 +19,9 @@
 // Interface revision
 // ===========================================================================
 
-// The current revision contains the direct concrete-Context refactor. Rebuild
-// every rasterizer plugin; older revisions are intentionally incompatible.
-#define CKRST_INTERFACE_REVISION 0x00060000u
+// Imported textures and virtual-backbuffer binding extend the interface.
+// Rebuild every rasterizer plugin; older revisions are intentionally incompatible.
+#define CKRST_INTERFACE_REVISION 0x00070000u
 
 // ===========================================================================
 // Limits

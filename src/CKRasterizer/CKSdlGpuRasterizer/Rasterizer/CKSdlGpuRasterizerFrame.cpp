@@ -92,9 +92,11 @@ CKRECT CKSdlGpuRasterizerContext::CurrentPassRect() const
 // Prepares the internal targets once per frame. At native size without MSAA or
 // postprocessing, scene and overlay draws share the native target and skip the
 // identity resolve. Other configurations render through the scaled/MSAA scene
-// target before resolving to native size. The final blit remains the only pass
-// that touches the swap chain. Without MSAA, an optional internal target may
-// fall back to the swap chain. A requested sample count must be preserved.
+// target before resolving to native size. Default presentation alone adds the
+// final operation that touches the swap chain; a custom virtual backbuffer is
+// already the completed native target. Without MSAA, an optional internal
+// target may fall back to the swap chain. A requested sample count must be
+// preserved.
 CKBOOL CKSdlGpuRasterizerContext::PrepareFrameTarget()
 {
     const bool required = GetCaps().RequiresIntermediateTarget && !m_TargetState.IsActive();
@@ -121,6 +123,12 @@ CKBOOL CKSdlGpuRasterizerContext::PrepareFrameTarget()
     if (sceneReady && m_Present.EnsureNativeTarget(nativeWidth, nativeHeight) && m_Present.EnsureResources()) {
         m_FrameState.InternalTargets = TRUE;
         m_FrameState.SceneUsesNative = sceneUsesNative ? TRUE : FALSE;
+    } else if (m_BackBufferTexture) {
+        // The native target is the caller-owned presentation binding. A
+        // transient scene/postprocess allocation failure must not tear that
+        // binding down or silently replace it with an internal target.
+        m_Present.DestroySceneTarget();
+        m_FrameState.TargetDecided = FALSE;
     } else {
         m_Present.DestroyTargets();
     }
@@ -131,6 +139,8 @@ CKBOOL CKSdlGpuRasterizerContext::PrepareFrameTarget()
     m_FFP.SetMultisampledTarget(m_FrameState.InternalTargets && !m_FrameState.SceneUsesNative &&
                                 m_Present.SceneTarget().Samples > 0);
     UpdateTargetExtents();
+    if (m_BackBufferTexture && !m_FrameState.InternalTargets)
+        return FALSE;
     return (!required && !msaaRequired) || m_FrameState.InternalTargets;
 }
 
@@ -359,10 +369,14 @@ CKBOOL CKSdlGpuRasterizerContext::BackToFront(CKBOOL VSync)
         return FALSE;
     }
     CKBOOL frameSucceeded = TRUE;
+    const bool customBackBuffer = m_BackBufferTexture != 0 &&
+                                  !m_TargetState.IsActive();
     if (m_FrameState.Open) {
         if (!m_TargetState.IsActive()) {
             if (!CompositeScene()) {
                 frameSucceeded = FALSE;
+            } else if (customBackBuffer) {
+                m_FrameState.NativePresented = m_FrameState.InternalTargets;
             } else if (PresentInternalTarget(VSync ? CKRST_PRESENT_VSYNC : CKRST_PRESENT_IMMEDIATE)) {
                 m_FrameState.NativePresented = m_FrameState.InternalTargets;
             } else {
@@ -370,10 +384,12 @@ CKBOOL CKSdlGpuRasterizerContext::BackToFront(CKBOOL VSync)
             }
         }
     }
-    const CKPresentSync mode = m_TargetState.IsActive() ? CKRST_PRESENT_UNCHANGED
+    const CKPresentSync mode = (m_TargetState.IsActive() || customBackBuffer)
+                                       ? CKRST_PRESENT_UNCHANGED
                                        : (VSync ? CKRST_PRESENT_VSYNC : CKRST_PRESENT_IMMEDIATE);
     CKDWORD frameNumber = 0;
-    const CKERROR status = Submit(mode, !m_TargetState.IsActive(), &frameNumber);
+    const CKERROR status = Submit(
+        mode, !m_TargetState.IsActive() && !customBackBuffer, &frameNumber);
     m_FrameState.Open = FALSE;
     if (status == CK_OK) {
         m_LastDeviceFrame = frameNumber;

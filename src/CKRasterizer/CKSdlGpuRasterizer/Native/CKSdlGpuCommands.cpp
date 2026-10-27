@@ -424,6 +424,9 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
     }
     CKSdlGpuDraw draw;
     draw.State = desc->Pipeline;
+    if (Pass.RenderTarget &&
+        Pass.RenderTarget == m_Present.NativeTarget().FrameBuffer)
+        draw.State.State.Lo &= ~CKRST_STATE_WRITE_A;
     draw.LayoutHandle = desc->Layout; draw.Layout1Handle = desc->Stream1Layout;
     draw.StartVertex = desc->StartVertex; draw.Stream1StartVertex = desc->Stream1StartVertex;
     draw.VertexCount = desc->VertexCount; draw.StartIndex = desc->StartIndex;
@@ -692,14 +695,14 @@ CKERROR CKSdlGpuRasterizerContext::DrawColorTexture(
     SDL_GPUTextureFormat colorFormat, SDL_GPUTextureFormat depthFormat,
     SDL_GPUSampleCount samples, unsigned width, unsigned height,
     const SDL_Rect &scissor, CKDWORD colorTargetFormat, CKBOOL dither,
-    CKBOOL explicitQuantize)
+    CKBOOL explicitQuantize, CKDWORD colorWrites)
 {
     if (!pass || !source || !width || !height || !DitherProgram ||
         !DitherSampler)
         return CKERR_INVALIDPARAMETER;
     CKSdlGpuDraw draw;
     draw.Program = DitherProgram.get();
-    draw.State.State.Lo = CKRST_STATE_WRITE_RGBA;
+    draw.State.State.Lo = colorWrites;
     draw.State.State.Mid = CKRST_STATE_PT(VX_TRIANGLELIST);
     SDL_GPUGraphicsPipeline *pipeline = Pipeline(
         draw, colorFormat, depthFormat, samples);
@@ -884,6 +887,8 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
     const unsigned height = Target ? std::max(1u, Target->Color->Info.height >> Target->Desc.ColorMip) : SwapHeight;
     const bool fullRect = Pass.Rect.left == 0 && Pass.Rect.top == 0 && unsigned(Pass.Rect.right) == width && unsigned(Pass.Rect.bottom) == height;
     const bool hasDepth = Target && Target->Depth;
+    const bool virtualBackBuffer = Target && Pass.RenderTarget &&
+        Pass.RenderTarget == m_Present.NativeTarget().FrameBuffer;
     const auto samples = CKSdlGpuSampleCount(Target ? Target->Color->Samples : 1);
     const CKDWORD logicalColorFormat = Draws.Size() != 0
         ? Draws[0].ColorTargetFormat : Pass.ColorTargetFormat;
@@ -894,6 +899,11 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
     if (outputResolve && (routedPass.ClearFlags & CKRST_CTXCLEAR_COLOR))
         routedPass.ClearColor = CKSdlGpuQuantizeClearColor(
             routedPass.ClearColor, logicalColorFormat);
+    if (virtualBackBuffer) {
+        if ((routedPass.ClearFlags & CKRST_CTXCLEAR_COLOR) ||
+            !Target->Color->AttachmentInitialized)
+            routedPass.ClearColor |= 0xFF000000u;
+    }
     SDL_GPUColorTargetInfo color = {};
     color.texture = Target ? (Target->Color->Multisample ? Target->Color->Multisample.get() : Target->Color->Image.get()) : Swapchain;
     color.mip_level = Target ? Target->Desc.ColorMip : 0;
@@ -901,6 +911,12 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
     color.clear_color = {float((routedPass.ClearColor >> 16) & 255) / 255, float((routedPass.ClearColor >> 8) & 255) / 255,
                          float(routedPass.ClearColor & 255) / 255, float(routedPass.ClearColor >> 24) / 255};
     color.load_op = fullRect && (routedPass.ClearFlags & CKRST_CTXCLEAR_COLOR) ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+    if (virtualBackBuffer && !Target->Color->AttachmentInitialized &&
+        color.load_op == SDL_GPU_LOADOP_LOAD) {
+        routedPass.ClearColor = 0xFF000000u;
+        color.clear_color = {0, 0, 0, 1};
+        color.load_op = SDL_GPU_LOADOP_CLEAR;
+    }
     color.store_op = SDL_GPU_STOREOP_STORE;
     if (Target && Target->VolumeSlice) {
         if (color.load_op == SDL_GPU_LOADOP_LOAD) {
@@ -957,6 +973,12 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         color.resolve_texture = Target->Color->Image.get();
         color.resolve_mip_level = color.mip_level; color.resolve_layer = color.layer_or_depth_plane;
         color.store_op = SDL_GPU_STOREOP_RESOLVE_AND_STORE;
+    }
+    if (virtualBackBuffer && !outputResolve &&
+        color.load_op != SDL_GPU_LOADOP_LOAD &&
+        (fullRect || !Target->Color->AttachmentInitialized)) {
+        color.cycle = true;
+        ++FrameStats.TextureCycles;
     }
     SDL_GPUDepthStencilTargetInfo ds = {};
     const SDL_GPUTextureFormat colorFormat = outputResolve
@@ -1101,6 +1123,13 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
         resolved.layer_or_depth_plane = finalColorLayer;
         resolved.load_op = SDL_GPU_LOADOP_LOAD;
         resolved.store_op = SDL_GPU_STOREOP_STORE;
+        if (virtualBackBuffer &&
+            (fullRect || !Target->Color->AttachmentInitialized)) {
+            resolved.clear_color = {0, 0, 0, 1};
+            resolved.load_op = SDL_GPU_LOADOP_CLEAR;
+            resolved.cycle = true;
+            ++FrameStats.TextureCycles;
+        }
         SDL_GPURenderPass *resolvePass = SDL_BeginGPURenderPass(
             Commands, &resolved, 1, nullptr);
         if (!resolvePass) return Fail("BeginGPURenderPass.ditherResolve");
@@ -1111,7 +1140,9 @@ CKERROR CKSdlGpuRasterizerContext::Flush(bool presentWindow)
                 SDL_GPU_TEXTUREFORMAT_INVALID, SDL_GPU_SAMPLECOUNT_1,
                 width, height, passRect, logicalColorFormat,
                 ditherEnabled ? TRUE : FALSE,
-                explicitQuantize ? TRUE : FALSE) != CK_OK) {
+                explicitQuantize ? TRUE : FALSE,
+                virtualBackBuffer ? CKRST_STATE_WRITE_RGB
+                                  : CKRST_STATE_WRITE_RGBA) != CK_OK) {
             SDL_EndGPURenderPass(resolvePass);
             return Error;
         }
@@ -1144,6 +1175,7 @@ CKERROR CKSdlGpuRasterizerContext::AcquireSwapchain()
     if (Swapchain) return CK_OK;
     const unsigned previousWidth = SwapWidth, previousHeight = SwapHeight;
     CKRE_PROFILE_SCOPE("CKRE.SDL.Acquire");
+    ++FrameStats.SwapchainAcquires;
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(Commands, Window, &Swapchain, &SwapWidth, &SwapHeight))
         return Fail("WaitAndAcquireGPUSwapchainTexture");
     if (Swapchain && (SwapWidth != previousWidth || SwapHeight != previousHeight))
@@ -1349,6 +1381,7 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     uint64_t retained = 0;
     TransientVertices.Trim(retained);
     TransientIndices.Trim(retained);
+    ++FrameStats.Submits;
     FrameStats.Frames = ++Submission;
     Stats = FrameStats;
     FrameStats = CKSdlGpuSubmissionStats();
