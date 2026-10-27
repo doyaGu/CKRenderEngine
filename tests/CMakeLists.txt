@@ -255,6 +255,23 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
         FOLDER "Benchmarks"
         INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     ckre_copy_runtime_dependencies(sdl_gpu_pipeline_benchmark)
+
+    add_executable(sdl_gpu_backbuffer_benchmark
+        rasterizers/benchmark_sdl_gpu_backbuffer.cpp)
+    target_include_directories(sdl_gpu_backbuffer_benchmark PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Native
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
+    )
+    target_link_libraries(sdl_gpu_backbuffer_benchmark PRIVATE
+        CKFFPLib CKSdlGpuRasterizerStatic SDL3::SDL3)
+    target_compile_definitions(sdl_gpu_backbuffer_benchmark PRIVATE
+        CKRE_BENCHMARK_RELEASE=$<IF:$<CONFIG:Release>,1,0>)
+    set_target_properties(sdl_gpu_backbuffer_benchmark PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        FOLDER "Benchmarks"
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    ckre_copy_runtime_dependencies(sdl_gpu_backbuffer_benchmark)
 endif ()
 
 # Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the

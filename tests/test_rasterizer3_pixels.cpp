@@ -9,6 +9,7 @@
 
 #include "CKRasterizer.h"
 #include "CKSdlGpuRasterizerContext.h"
+#include "CKSdlGpuRasterizer.h"
 #include "CKFFNativeFragmentJit.h"
 #include "TestTriangleMultiset.h"
 #include "TestFFImageDiff.h"
@@ -20,10 +21,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <string>
+#include <thread>
 #include <vector>
-
-// Static plugin entry; both executables run the same public rasterizer cases.
-extern void CKSdlGpuRasterizerGetInfo(CKRasterizerInfo *info);
 
 namespace {
 
@@ -94,7 +93,8 @@ struct Backend {
     Backend() : Window(NULL), Rasterizer(NULL), Driver(NULL), Context(NULL) {}
 };
 
-CKBOOL OpenBackend(Backend &b, int width, int height)
+CKBOOL OpenBackend(Backend &b, int width, int height,
+                   SDL_GPUDevice *externalDevice = NULL)
 {
     b.Window = SDL_CreateWindow("rasterizer3-pixels", 640, 480, SDL_WINDOW_RESIZABLE);
     TestCheckf(b.Window != NULL, "SDL visible window creation failed: %s", SDL_GetError());
@@ -102,6 +102,12 @@ CKBOOL OpenBackend(Backend &b, int width, int height)
         return FALSE;
     SDL_ShowWindow(b.Window);
     SDL_RaiseWindow(b.Window);
+    if (externalDevice &&
+        !SDL_SetPointerProperty(SDL_GetWindowProperties(b.Window),
+                                CKSDL_GPU_DEVICE_PROPERTY, externalDevice)) {
+        TestCheckf(false, "SDL device offer failed: %s", SDL_GetError());
+        return FALSE;
+    }
     CKSdlGpuRasterizerGetInfo(&b.Info);
     TestCheck(b.Info.InterfaceRevision == CKRST_INTERFACE_REVISION,
               "plugin reports the current interface revision");
@@ -4246,6 +4252,389 @@ void CheckFirstFrame(Backend &b)
     TestCheck(PixelNear(first, 2, 2, 0, 0, 0), "the first frame's clear colour reads back");
 }
 
+void CheckImportedBackBufferContract()
+{
+    const char *driver = GetEnvValue("CKRE_SDL_GPU_DRIVER");
+    if (driver && strcmp(driver, "auto") == 0)
+        driver = NULL;
+    SDL_GPUDevice *device = SDL_CreateGPUDevice(
+        SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV |
+            SDL_GPU_SHADERFORMAT_MSL,
+        false, driver);
+    TestCheckf(device != NULL, "external SDL GPU device creation failed: %s",
+               SDL_GetError());
+    if (!device)
+        return;
+
+    Backend b;
+    if (!OpenBackend(b, kWidth, kHeight, device)) {
+        CloseBackend(b);
+        SDL_DestroyGPUDevice(device);
+        return;
+    }
+
+    SDL_GPUTextureCreateInfo nativeDesc = {};
+    nativeDesc.type = SDL_GPU_TEXTURETYPE_2D;
+    nativeDesc.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    nativeDesc.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
+                       SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    nativeDesc.width = kWidth;
+    nativeDesc.height = kHeight;
+    nativeDesc.layer_count_or_depth = 1;
+    nativeDesc.num_levels = 1;
+    nativeDesc.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture *native = SDL_CreateGPUTexture(device, &nativeDesc);
+    TestCheckf(native != NULL, "external SDL GPU texture creation failed: %s",
+               SDL_GetError());
+    if (!native) {
+        CloseBackend(b);
+        SDL_DestroyGPUDevice(device);
+        return;
+    }
+
+    CKTextureDesc desc;
+    VxPixelFormat2ImageDesc(_32_ABGR8888, desc.Format);
+    desc.Format.Width = kWidth;
+    desc.Format.Height = kHeight;
+    desc.Format.BytesPerLine = kWidth * 4;
+    desc.Depth = 1;
+    desc.MipMapCount = 1;
+    desc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                 CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+    CKSdlGpuTextureImportData data = {device, native};
+    CKTextureImportDesc importDesc = {
+        CKSDL_GPU_TEXTURE_GUID, &data, (CKDWORD)sizeof(data)};
+
+    CKDWORD output = 0xFFFFFFFFu;
+    CKTextureImportDesc invalid = importDesc;
+    invalid.Type = CKGUID(0x11223344u, 0x55667788u);
+    const CKDWORD importRejectsBefore =
+        ReadStats(b.Context).Diagnostics[CKRST_DIAG_REJECT_INVALID_PARAMETER];
+    TestCheck(!b.Context->ImportTexture(&desc, &invalid, &output) && output == 0,
+              "unknown import GUID fails without publishing a handle");
+    TestCheck(ReadStats(b.Context).Diagnostics[CKRST_DIAG_REJECT_INVALID_PARAMETER] ==
+                  importRejectsBefore,
+              "failed import leaves diagnostics and Context state unchanged");
+    output = 0xFFFFFFFFu;
+    invalid = importDesc;
+    --invalid.DataSize;
+    TestCheck(!b.Context->ImportTexture(&desc, &invalid, &output) && output == 0,
+              "wrong import payload size fails without publishing a handle");
+    output = 0xFFFFFFFFu;
+    CKSdlGpuTextureImportData wrongDevice = {
+        reinterpret_cast<SDL_GPUDevice *>(uintptr_t(1)), native};
+    invalid = {CKSDL_GPU_TEXTURE_GUID, &wrongDevice,
+               (CKDWORD)sizeof(wrongDevice)};
+    TestCheck(!b.Context->ImportTexture(&desc, &invalid, &output) && output == 0,
+              "texture from another device is rejected");
+    output = 0xFFFFFFFFu;
+    CKTextureDesc invalidDesc = desc;
+    invalidDesc.Format.Width = 0;
+    TestCheck(!b.Context->ImportTexture(&invalidDesc, &importDesc, &output) &&
+                  output == 0,
+              "invalid imported texture descriptor is rejected");
+
+    CKBOOL wrongThreadResult = TRUE;
+    CKDWORD wrongThreadOutput = 0xFFFFFFFFu;
+    std::thread wrongThread([&] {
+        wrongThreadResult = CKSdlGpuImportTexture(
+            b.Context, &desc, device, native, &wrongThreadOutput);
+    });
+    wrongThread.join();
+    TestCheck(!wrongThreadResult && wrongThreadOutput == 0,
+              "texture import is rejected off the render thread");
+
+    // Import is an ordinary texture-resource operation. Shape and mip
+    // restrictions belong to virtual-backbuffer binding, not to import.
+    SDL_GPUTextureCreateInfo cubeNativeDesc = {};
+    cubeNativeDesc.type = SDL_GPU_TEXTURETYPE_CUBE;
+    cubeNativeDesc.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+    cubeNativeDesc.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    cubeNativeDesc.width = cubeNativeDesc.height = 4;
+    cubeNativeDesc.layer_count_or_depth = 6;
+    cubeNativeDesc.num_levels = 2;
+    cubeNativeDesc.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture *cubeNative = SDL_CreateGPUTexture(device, &cubeNativeDesc);
+    TestCheckf(cubeNative != NULL, "external cube texture creation failed: %s",
+               SDL_GetError());
+    if (cubeNative) {
+        CKTextureDesc cubeDesc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, cubeDesc.Format);
+        cubeDesc.Format.Width = cubeDesc.Format.Height = 4;
+        cubeDesc.Format.BytesPerLine = 16;
+        cubeDesc.Depth = 1;
+        cubeDesc.MipMapCount = 2;
+        cubeDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                         CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_CUBEMAP;
+        CKDWORD cube = 0;
+        TestCheck(CKSdlGpuImportTexture(b.Context, &cubeDesc, device,
+                                        cubeNative, &cube) && cube,
+                  "cube and mip resources use the ordinary import path");
+        CKTextureDesc importedCubeDesc;
+        TestCheck(b.Context->GetTextureDesc(cube, &importedCubeDesc) &&
+                      importedCubeDesc.MipMapCount == 2 &&
+                      (importedCubeDesc.Flags & CKRST_TEXTURE_CUBEMAP),
+                  "import preserves an ordinary texture descriptor");
+        TestCheck(!b.Context->SetBackBufferTexture(cube),
+                  "backbuffer binding independently rejects a cube texture");
+        TestCheck(b.Context->DeleteObject(cube, CKRST_OBJ_TEXTURE),
+                  "unbound imported cube texture is deletable");
+        SDL_ReleaseGPUTexture(device, cubeNative);
+    }
+
+    // A partial update after an imported texture was submitted must preserve
+    // untouched texels without replacing the caller's logical SDL texture.
+    SDL_GPUTextureCreateInfo updateNativeDesc = {};
+    updateNativeDesc.type = SDL_GPU_TEXTURETYPE_2D;
+    updateNativeDesc.format = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+    updateNativeDesc.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
+                             SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    updateNativeDesc.width = updateNativeDesc.height = 4;
+    updateNativeDesc.layer_count_or_depth = 1;
+    updateNativeDesc.num_levels = 1;
+    updateNativeDesc.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture *updateNative = SDL_CreateGPUTexture(device, &updateNativeDesc);
+    TestCheckf(updateNative != NULL,
+               "external partial-update texture creation failed: %s",
+               SDL_GetError());
+    if (updateNative) {
+        CKTextureDesc updateDesc;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, updateDesc.Format);
+        updateDesc.Format.Width = updateDesc.Format.Height = 4;
+        updateDesc.Format.BytesPerLine = 16;
+        updateDesc.Depth = 1;
+        updateDesc.MipMapCount = 1;
+        updateDesc.Flags = CKRST_TEXTURE_VALID | CKRST_TEXTURE_RGB |
+                           CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+        CKDWORD updateTexture = 0;
+        TestCheck(CKSdlGpuImportTexture(b.Context, &updateDesc, device,
+                                        updateNative, &updateTexture) &&
+                      updateTexture,
+                  "ordinary render-target texture import");
+        TestCheck(b.Context->SetTargetTexture(updateTexture, 4, 4,
+                                               CKRST_CUBEFACE_XPOS),
+                  "bind imported texture as an ordinary RTT");
+        TestCheck(b.Context->Clear(CKRST_CTXCLEAR_COLOR, 0xFFFF0000u,
+                                   1.0f, 0, 0, NULL) &&
+                      b.Context->BeginScene() && b.Context->EndScene() &&
+                      b.Context->BackToFront(FALSE),
+                  "submit imported RTT before its partial update");
+        TestCheck(b.Context->SetTargetTexture(0, kWidth, kHeight,
+                                               CKRST_CUBEFACE_XPOS),
+                  "restore the virtual backbuffer after imported RTT use");
+
+        CKDWORD blue = 0xFF0000FFu;
+        VxImageDescEx patch;
+        VxPixelFormat2ImageDesc(_32_ARGB8888, patch);
+        patch.Width = patch.Height = 1;
+        patch.BytesPerLine = 4;
+        patch.Image = reinterpret_cast<CKBYTE *>(&blue);
+        const CKRECT onePixel = {0, 0, 1, 1};
+        TestCheck(b.Context->LoadTexture(updateTexture, patch, 0,
+                                         CKRST_CUBEFACE_XPOS, &onePixel),
+                  "partial update of an in-flight imported texture");
+        const CKSdlGpuSubmissionStats updateStats =
+            static_cast<CKSdlGpuRasterizerContext *>(b.Context)
+                ->GetPendingSubmissionStatsForTests();
+        const bool stableUpdatePointer =
+            static_cast<CKSdlGpuRasterizerContext *>(b.Context)
+                ->GetNativeTextureForTests(updateTexture) == updateNative;
+        TestCheckf(updateStats.TexturePreserveCopies >= 2 &&
+                       updateStats.TextureCycles >= 1 && stableUpdatePointer,
+                   "partial imported update uses GPU preserve plus one cycle without replacing the native pointer (copies=%u cycles=%u pointer=%u)",
+                   (unsigned)updateStats.TexturePreserveCopies,
+                   (unsigned)updateStats.TextureCycles,
+                   stableUpdatePointer ? 1u : 0u);
+        TestCheck(b.Context->SetTargetTexture(updateTexture, 4, 4,
+                                               CKRST_CUBEFACE_XPOS),
+                  "rebind partially updated imported RTT");
+        Pixels updated;
+        TestCheck(ReadBackbuffer(b.Context, updated),
+                  "read partially updated imported RTT");
+        TestCheck(PixelNear(updated, 0, 0, 0, 0, 255) &&
+                      PixelNear(updated, 3, 3, 255, 0, 0),
+                  "partial imported update preserves every untouched texel");
+        TestCheck(b.Context->SetTargetTexture(0, kWidth, kHeight,
+                                               CKRST_CUBEFACE_XPOS) &&
+                      b.Context->DeleteObject(updateTexture,
+                                              CKRST_OBJ_TEXTURE),
+                  "ordinary imported RTT unbind and deletion");
+        SDL_ReleaseGPUTexture(device, updateNative);
+    }
+
+    CKDWORD handle = 0;
+    TestCheck(CKSdlGpuImportTexture(b.Context, &desc, device, native, &handle) &&
+                  handle != 0,
+              "ordinary external texture imports into the CK texture table");
+    auto *backend = static_cast<CKSdlGpuRasterizerContext *>(b.Context);
+    TestCheck(backend->IsBorrowedTextureForTests(handle) &&
+                  backend->GetNativeTextureForTests(handle) == native,
+              "the imported handle borrows the original logical SDL texture");
+
+    // Binding initialization is distinct from ordinary RTT history. Seed the
+    // imported texture with transparent alpha, then bind it and begin with a
+    // LOAD pass; the virtual backbuffer must still become opaque.
+    TestCheck(b.Context->SetTargetTexture(handle, kWidth, kHeight,
+                                          CKRST_CUBEFACE_XPOS),
+              "precondition imported texture as an ordinary RTT");
+    TestCheck(b.Context->Clear(CKRST_CTXCLEAR_COLOR, 0x00112233u,
+                               1.0f, 0, 0, NULL) &&
+                  b.Context->BeginScene() && b.Context->EndScene() &&
+                  b.Context->BackToFront(FALSE) &&
+                  b.Context->SetTargetTexture(0, kWidth, kHeight,
+                                              CKRST_CUBEFACE_XPOS),
+              "ordinary RTT records transparent attachment history");
+    TestCheck(b.Context->SetBackBufferTexture(handle),
+              "imported render target binds as the virtual backbuffer");
+    TestCheck(!b.Context->DeleteObject(handle, CKRST_OBJ_TEXTURE),
+              "a bound backbuffer handle cannot be deleted");
+
+    SetDiffuseState(b.Context);
+    const CKDWORD transparent[3] = {
+        0x001234A6u, 0x001234A6u, 0x001234A6u};
+    TestCheck(b.Context->BeginScene() &&
+                  DrawColorTriangle(b.Context, kCenterTriangle, transparent) &&
+                  b.Context->EndScene() && b.Context->BackToFront(FALSE),
+              "first custom-backbuffer LOAD pass after ordinary RTT use");
+    Pixels firstBoundFrame;
+    TestCheck(ReadBackbuffer(b.Context, firstBoundFrame),
+              "read first custom-backbuffer LOAD pass");
+    CKBYTE firstCorner[4] = {};
+    GetPixel(firstBoundFrame, 1, 1, firstCorner);
+    TestCheck(firstCorner[3] == 0xFF,
+              "a newly bound virtual backbuffer initializes alpha to one");
+
+    backend->DisablePresentResourcesForTests();
+    TestCheck(!b.Context->BeginScene(),
+              "injected present preparation failure reaches the retry path");
+    TestCheck(backend->GetBackBufferTextureForTests() == handle &&
+                  backend->GetNativeTargetTextureForTests() == handle,
+              "present preparation failure preserves the custom target binding");
+    backend->RestorePresentResourcesForTests();
+    TestCheck(b.Context->BeginScene() && b.Context->EndScene() &&
+                  b.Context->BackToFront(FALSE),
+              "custom target retries after a transient preparation failure");
+
+    CKDWORD mismatched = 0;
+    CKTextureDesc mismatchDesc = desc;
+    --mismatchDesc.Format.Width;
+    TestCheck(CKSdlGpuImportTexture(b.Context, &mismatchDesc, device, native,
+                                    &mismatched),
+              "an ordinary imported texture may differ from the context size");
+    TestCheck(!b.Context->SetBackBufferTexture(mismatched) &&
+                  backend->GetBackBufferTextureForTests() == handle,
+              "failed replacement preserves the existing backbuffer binding");
+    TestCheck(b.Context->DeleteObject(mismatched, CKRST_OBJ_TEXTURE),
+              "failed replacement remains an ordinary deletable texture");
+
+    CKBOOL wrongThreadUnbind = TRUE;
+    std::thread wrongUnbind([&] {
+        wrongThreadUnbind = b.Context->SetBackBufferTexture(0);
+    });
+    wrongUnbind.join();
+    TestCheck(!wrongThreadUnbind &&
+                  backend->GetBackBufferTextureForTests() == handle,
+              "backbuffer mutation is rejected off the render thread");
+
+    CKTextureDesc temporaryDesc = desc;
+    temporaryDesc.Format.Width = temporaryDesc.Format.Height = 8;
+    temporaryDesc.Format.BytesPerLine = 8 * 4;
+    CKDWORD temporary = 0;
+    TestCheck(b.Context->CreateTexture(&temporaryDesc, &temporary) && temporary,
+              "temporary RTT creation");
+    TestCheck(b.Context->SetTargetTexture(temporary, 8, 8,
+                                          CKRST_CUBEFACE_XPOS) &&
+                  b.Context->SetTargetTexture(0, kWidth, kHeight,
+                                              CKRST_CUBEFACE_XPOS) &&
+                  backend->GetBackBufferTextureForTests() == handle,
+              "temporary RTT use does not change the virtual backbuffer");
+    TestCheck(b.Context->DeleteObject(temporary, CKRST_OBJ_TEXTURE),
+              "temporary RTT deletion");
+
+    auto render = [&] {
+        BeginFrame(b.Context, CKRST_CTXCLEAR_COLOR);
+        TestCheck(DrawColorTriangle(b.Context, kCenterTriangle, transparent),
+                  "transparent-alpha scene draw");
+        TestCheck(b.Context->EndScene(), "custom backbuffer EndScene");
+        TestCheck(b.Context->BeginOverlayPhase(),
+                  "custom backbuffer overlay phase");
+        TestCheck(DrawColorTriangle(b.Context, kCenterTriangle, transparent),
+                  "transparent-alpha overlay draw");
+        TestCheck(b.Context->BackToFront(TRUE),
+                  "custom backbuffer submission ignores window vsync");
+    };
+    render();
+    const SDL_GPUTexture *firstNative =
+        backend->GetNativeTextureForTests(handle);
+    render();
+    const CKSdlGpuSubmissionStats stats = backend->GetSubmissionStats();
+    TestCheck(backend->GetNativeTextureForTests(handle) == firstNative &&
+                  firstNative == native,
+              "consecutive frames keep one logical SDL texture pointer");
+    TestCheck(stats.TextureCycles > 0 && stats.TexturePreserveCopies == 0,
+              "full backbuffer coverage cycles without a preserve copy");
+    TestCheck(stats.SwapchainAcquires == 0 && stats.Blits == 0,
+              "custom backbuffer skips hidden swapchain acquisition and present blit");
+
+    // A temporary RTT changes only the draw target. VXBUFFER_BACKBUFFER keeps
+    // naming the bound virtual backbuffer and its Context-sized image.
+    CKTextureDesc readbackTargetDesc = desc;
+    readbackTargetDesc.Format.Width = readbackTargetDesc.Format.Height = 8;
+    readbackTargetDesc.Format.BytesPerLine = 8 * 4;
+    CKDWORD readbackTarget = 0;
+    TestCheck(b.Context->CreateTexture(&readbackTargetDesc, &readbackTarget) &&
+                  b.Context->SetTargetTexture(readbackTarget, 8, 8,
+                                              CKRST_CUBEFACE_XPOS) &&
+                  b.Context->Clear(CKRST_CTXCLEAR_COLOR, 0xFF0000FFu,
+                                   1.0f, 0, 0, NULL) &&
+                  b.Context->BeginScene() && b.Context->EndScene() &&
+                  b.Context->BackToFront(FALSE),
+              "render a temporary RTT while the custom backbuffer stays bound");
+    Pixels backbufferBehindTarget;
+    TestCheck(ReadBackbuffer(b.Context, backbufferBehindTarget) &&
+                  backbufferBehindTarget.Width == kWidth &&
+                  backbufferBehindTarget.Height == kHeight,
+              "VXBUFFER_BACKBUFFER ignores an active temporary RTT");
+    TestCheck(b.Context->SetTargetTexture(0, kWidth, kHeight,
+                                          CKRST_CUBEFACE_XPOS) &&
+                  b.Context->DeleteObject(readbackTarget, CKRST_OBJ_TEXTURE),
+              "release temporary readback RTT");
+
+    Pixels pixels;
+    TestCheck(ReadBackbuffer(b.Context, pixels),
+              "custom backbuffer reads through the generic backbuffer path");
+    bool opaque = pixels.Width == kWidth && pixels.Height == kHeight;
+    for (int y = 0; opaque && y < pixels.Height; ++y) {
+        for (int x = 0; x < pixels.Width; ++x) {
+            CKBYTE bgra[4];
+            GetPixel(pixels, x, y, bgra);
+            if (bgra[3] != 0xFF) {
+                opaque = false;
+                break;
+            }
+        }
+    }
+    TestCheck(opaque, "virtual backbuffer clear, scene and overlay output is opaque");
+
+    TestCheck(b.Context->Resize(0, 0, kWidth + 1, kHeight + 1, 0) &&
+                  backend->GetBackBufferTextureForTests() == 0 &&
+                  backend->GetNativeTextureForTests(handle) == native,
+              "resize unbinds the custom backbuffer but preserves its handle");
+    TestCheck(b.Context->DeleteObject(handle, CKRST_OBJ_TEXTURE),
+              "the imported handle is deletable after resize unbinds it");
+
+    // Shutdown clears any remaining borrowed handle, but never releases the
+    // caller-owned SDL object. Releasing it once afterwards is the ownership
+    // contract and is checked by SDL validation builds as well.
+    CKDWORD shutdownHandle = 0;
+    TestCheck(CKSdlGpuImportTexture(b.Context, &desc, device, native,
+                                    &shutdownHandle),
+              "second borrowed handle before Context shutdown");
+    CloseBackend(b);
+    SDL_ReleaseGPUTexture(device, native);
+    SDL_DestroyGPUDevice(device);
+}
+
 // Render-target readback (spec 5.8): the bound 2D target texture is read in
 // texture pixels and in the D3D (top-down) layout on every backend.
 void CheckRenderTargetReadback(Backend &b)
@@ -4558,6 +4947,7 @@ void BackendRendersFixedFunctionSemantics()
         SDL_Quit();
         return;
     }
+    CheckImportedBackBufferContract();
     Samples samples;
     Samples precompiled;
     auto replayCases = MakeFFReplayCases();
