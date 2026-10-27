@@ -12,10 +12,47 @@ consumes explicit shader and program descriptors from the compatibility layer.
 
 The Player owns its `SDL_Window` and controls fullscreen and window events.
 The backend claims that window on the main thread and releases it during
-shutdown. Presentation acquires the actual drawable extent each frame.
-Scene rendering always uses an internal sampleable target, followed by
-resolve/postprocessing, window-size composition and the swapchain blit.
-An unavailable swapchain during minimization does not discard resource work.
+shutdown. Default presentation acquires the actual drawable extent each frame.
+Scene rendering uses the native target directly when no scaling, multisampling
+or postprocessing is requested; the other modes retain their necessary
+intermediate passes. An unavailable swapchain during minimization does not
+discard resource work.
+
+The module root holds its external declarations: static registration and SDL
+texture import data in `CKSdlGpuRasterizer.h`, and diagnostics in
+`CKSdlGpuFFJitSnapshot.h`. Internal headers stay beside their implementations
+in `Native/` and `Rasterizer/`. Only those two external headers
+are installed; white-box tests and benchmarks opt into the internal include
+paths. `shaders/generated/` remains owned by shader generation.
+
+External presentation uses the same texture resource and target model as every
+other render target. A host may offer its SDL GPU device through
+`CKSDL_GPU_DEVICE_PROPERTY` before Context creation, create a regular
+`COLOR_TARGET | SAMPLER` SDL texture, import it as a normal generational CK
+texture handle, and bind that handle with `SetBackBufferTexture`. The import is
+borrowed: deleting the handle or destroying the Context never releases the SDL
+texture. A bound handle cannot be deleted, and resize removes the binding while
+leaving the handle alive.
+
+The bound texture is the virtual backbuffer for `SetTargetTexture(0, ...)`,
+readback, scene composition and overlays. Temporary RTTs do not change the
+binding. `BackToFront` submits the completed custom target without acquiring the
+hidden window swapchain or encoding a final present blit; window VSync is
+therefore irrelevant in this mode. Unsupported rasterizers simply reject import
+or binding, so callers keep the generic `CopyToMemoryBuffer` path.
+
+SDL texture cycling supplies in-flight storage without changing the logical
+`SDL_GPUTexture *`. A complete pass whose load operation discards previous
+contents cycles the attachment. A partial update of a referenced imported
+texture first preserves its defined subresources through a temporary GPU copy,
+then cycles the same external logical texture; it never performs a CPU readback
+or substitutes another pointer. Submission order on the shared device orders
+the rasterizer producer before the host consumer.
+
+The virtual backbuffer is top-left and opaque. Its first pass initializes alpha
+to one, clears force alpha to one, ordinary scene and overlay draws mask alpha
+writes, and resolve/dither output writes RGB only. These rules are applied in
+existing passes; there is no alpha-fix pass.
 
 Draw packets retain their constants, geometry and bindings. Updates, copies,
 clears and target changes flush the pending packet batch before encoding the
