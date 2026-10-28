@@ -17,6 +17,7 @@
 #include <algorithm>
 
 bool CheckSdlGpuNegativePitchUploads(CKSdlGpuRasterizerContext &backend);
+bool CheckSdlGpuPackedMipChannels(CKSdlGpuRasterizerContext &backend);
 
 static bool CheckReadback(CKSdlGpuRasterizerContext &backend, const CKSdlGpuReadbackTicket &ticket,
                           const std::vector<CKDWORD> &expected, unsigned tolerance, const char *name)
@@ -981,6 +982,7 @@ static int Run(SDL_Window *window, const char *focus)
     if (backend.Init(&init) != CK_OK) return 1;
     if (!CheckSdlGpuNegativePitchUploads(backend)) return 29;
     if (focus && strcmp(focus, "--negative-pitch") == 0) return 0;
+    if (!CheckSdlGpuPackedMipChannels(backend)) return 30;
     if (!CheckPackedTextureUploads(backend)) return 28;
     if (focus) return 0;
     if (backend.Submit(static_cast<CKPresentSync>(99), FALSE, nullptr) != CKERR_INVALIDPARAMETER ||

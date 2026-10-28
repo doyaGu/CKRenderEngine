@@ -675,6 +675,10 @@ CKERROR CKSdlGpuRasterizerContext::GenerateUploadMips(CKSdlGpuTexture &texture, 
     const bool premultiplied = texture.PixelFormat == _DXT2 || texture.PixelFormat == _DXT4;
     const bool signed8 = texture.Info.format == SDL_GPU_TEXTUREFORMAT_R8G8_SNORM;
     const bool signed16 = texture.Info.format == SDL_GPU_TEXTUREFORMAT_R16G16_SNORM;
+    const bool rgb565 = texture.Info.format == SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM;
+    const bool packedColor = rgb565 || texture.Info.format == SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM;
+    const unsigned redShift = rgb565 ? 11 : 10;
+    const unsigned greenMask = rgb565 ? 63 : 31;
     const unsigned componentBytes = signed16 ? 2 : 1;
     XClassArray<XArray<CKBYTE>> previous;
     if (volume) previous = texture.BasePixels;
@@ -695,6 +699,24 @@ CKERROR CKSdlGpuRasterizerContext::GenerateUploadMips(CKSdlGpuTexture &texture, 
             const unsigned y0 = y * ph / nh, y1 = (y + 1) * ph / nh;
             const unsigned z0 = z * pd / nd, z1 = (z + 1) * pd / nd;
             const int count = int((x1 - x0) * (y1 - y0) * (z1 - z0));
+            if (packedColor) {
+                unsigned red = 0, green = 0, blue = 0, alpha = 0;
+                for (unsigned sz = z0; sz < z1; ++sz) for (unsigned sy = y0; sy < y1; ++sy)
+                    for (unsigned sx = x0; sx < x1; ++sx) {
+                        CKWORD pixel;
+                        memcpy(&pixel, previous[(int)sz].Begin() + (size_t(sy) * pw + sx) * 2, 2);
+                        red += (pixel >> redShift) & 31;
+                        green += (pixel >> 5) & greenMask;
+                        blue += pixel & 31;
+                        alpha += pixel >> 15;
+                    }
+                CKWORD pixel = CKWORD((((red + count / 2) / count) << redShift) |
+                                      (((green + count / 2) / count) << 5) |
+                                      ((blue + count / 2) / count));
+                if (!rgb565) pixel |= CKWORD(((alpha + count / 2) / count) << 15);
+                memcpy(next[(int)z].Begin() + (size_t(y) * nw + x) * 2, &pixel, 2);
+                continue;
+            }
             if (premultiplied) {
                 // Filter in premultiplied space, then store straight-alpha BGRA.
                 unsigned alphaSum = 0, colorSums[3] = {};
