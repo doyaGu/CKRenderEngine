@@ -870,6 +870,103 @@ static bool CheckGpuWrittenMips(CKSdlGpuRasterizerContext &backend)
     return true;
 }
 
+static bool CheckPackedTextureResult(CKERROR error, const char *operation)
+{
+    if (error == CK_OK) return true;
+    fprintf(stderr, "packed texture %s failed: %d (%s)\n", operation, int(error), SDL_GetError());
+    return false;
+}
+
+static bool CheckPackedTextureUploads(CKSdlGpuRasterizerContext &backend)
+{
+    const VX_PIXELFORMAT targets[] = {_16_RGB565, _16_ARGB1555};
+    const VX_PIXELFORMAT sources[] = {_16_RGB565, _16_ARGB1555, _32_ARGB8888, _32_ABGR8888};
+    const CKDWORD colors[] = {0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff};
+    const CKWORD rgb565[] = {0xf800, 0x07e0, 0x001f, 0xffff};
+    const CKWORD argb1555[] = {0xfc00, 0x83e0, 0x801f, 0xffff};
+    const unsigned width = 32, height = 32;
+    for (VX_PIXELFORMAT targetFormat : targets) {
+        for (VX_PIXELFORMAT sourceFormat : sources) {
+            CKTextureDesc desc;
+            VxPixelFormat2ImageDesc(targetFormat, desc.Format);
+            desc.Format.Width = width; desc.Format.Height = height;
+            desc.MipMapCount = 2;
+            desc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA;
+            CKDWORD texture = 0;
+            VxImageDescEx source;
+            VxPixelFormat2ImageDesc(sourceFormat, source);
+            const unsigned bytes = source.BitsPerPixel / 8;
+            XArray<CKBYTE> pixels;
+            for (unsigned mip = 0; mip < 2; ++mip) {
+                source.Width = width >> mip; source.Height = height >> mip;
+                source.BytesPerLine = source.Width * bytes + 8;
+                pixels.Resize(source.BytesPerLine * source.Height);
+                memset(pixels.Begin(), 0x6d, pixels.Size());
+                source.Image = pixels.Begin();
+                CKTextureDesc outputDesc;
+                VxPixelFormat2ImageDesc(_32_ARGB8888, outputDesc.Format);
+                outputDesc.Format.Width = source.Width; outputDesc.Format.Height = source.Height;
+                outputDesc.MipMapCount = 1;
+                outputDesc.Flags = CKRST_TEXTURE_RGB | CKRST_TEXTURE_ALPHA | CKRST_TEXTURE_RENDERTARGET;
+                CKDWORD output = 0, mipCopy = 0;
+                if (!CheckPackedTextureResult(backend.CreateTexture(&outputDesc, nullptr, &output), "create output")) return false;
+                if (mip != 0) {
+                    CKTextureDesc copyDesc = desc;
+                    copyDesc.Format.Width = source.Width; copyDesc.Format.Height = source.Height;
+                    copyDesc.MipMapCount = 1;
+                    if (!CheckPackedTextureResult(backend.CreateTexture(&copyDesc, nullptr, &mipCopy), "create mip copy")) return false;
+                }
+                for (unsigned phase = 0; phase < 2; ++phase) {
+                    for (unsigned y = 0; y < unsigned(source.Height); ++y) {
+                        for (unsigned x = 0; x < unsigned(source.Width); ++x) {
+                            const unsigned index = (x + 3 * y + phase) % 4;
+                            CKDWORD color = colors[index];
+                            if (sourceFormat == _16_RGB565) color = rgb565[index];
+                            else if (sourceFormat == _16_ARGB1555) color = argb1555[index];
+                            else if (sourceFormat == _32_ABGR8888)
+                                color = (color & 0xff00ff00) | ((color & 0xff) << 16) | ((color >> 16) & 0xff);
+                            memcpy(source.Image + y * source.BytesPerLine + x * bytes, &color, bytes);
+                        }
+                    }
+                    if (mip == 0 && phase == 0) {
+                        if (!CheckPackedTextureResult(backend.CreateTexture(&desc, &source, &texture), "create with data")) return false;
+                    } else if (!CheckPackedTextureResult(backend.UpdateTexture(texture, mip, 0, nullptr, &source), "update")) return false;
+                    CKDWORD readSource = texture;
+                    if (mip != 0) {
+                        // Format conversion reads mip zero; snapshot the packed mip without conversion first.
+                        if (!CheckPackedTextureResult(backend.Blit(mipCopy, 0, 0, 0, 0, texture, mip, 0, nullptr), "copy mip")) return false;
+                        readSource = mipCopy;
+                    }
+                    if (!CheckPackedTextureResult(backend.Blit(output, 0, 0, 0, 0, readSource, 0, 0, nullptr), "blit")) return false;
+                    CKReadbackDesc read;
+                    CKSdlGpuReadbackTicket ticket;
+                    if (!CheckPackedTextureResult(backend.ReadTexture(output, 0, &read, &ticket), "readback") ||
+                        !CheckPackedTextureResult(backend.Submit(CKRST_PRESENT_UNCHANGED, FALSE, nullptr), "submit") ||
+                        backend.PollReadback(ticket, TRUE) != CKRST_READBACK_READY) return false;
+                    const XArray<CKBYTE> &result = backend.GetReadbackData(ticket);
+                    if (result.Size() != source.Width * source.Height * 4) return false;
+                    for (unsigned y = 0; y < unsigned(source.Height); ++y) {
+                        for (unsigned x = 0; x < unsigned(source.Width); ++x) {
+                            CKDWORD color;
+                            memcpy(&color, result.Begin() + (y * source.Width + x) * 4, sizeof(color));
+                            if (color != colors[(x + 3 * y + phase) % 4]) {
+                                fprintf(stderr, "packed texture upload %d -> %d mip %u phase %u at %u,%u: %08x\n",
+                                        int(sourceFormat), int(targetFormat), mip, phase, x, y, unsigned(color));
+                                return false;
+                            }
+                        }
+                    }
+                }
+                backend.DestroyObject(output, CKRST_OBJ_TEXTURE);
+                if (mipCopy) backend.DestroyObject(mipCopy, CKRST_OBJ_TEXTURE);
+            }
+            backend.DestroyObject(texture, CKRST_OBJ_TEXTURE);
+        }
+    }
+    puts("SDL_gpu 16-bit texture creation, updates and mips preserve native storage and padded source rows");
+    return true;
+}
+
 static int Run(SDL_Window *window)
 {
     if (!CheckExactCopyMatchesBlit(window)) return 26;
@@ -880,6 +977,7 @@ static int Run(SDL_Window *window)
     const SDL_WindowFlags ownerFlags = SDL_GetWindowFlags(window);
     init.Fullscreen = TRUE;
     if (backend.Init(&init) != CK_OK) return 1;
+    if (!CheckPackedTextureUploads(backend)) return 28;
     if (backend.Submit(static_cast<CKPresentSync>(99), FALSE, nullptr) != CKERR_INVALIDPARAMETER ||
         backend.GetDeviceStatus() != CK_OK) return 25;
     SDL_SyncWindow(window);

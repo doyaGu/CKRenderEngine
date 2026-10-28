@@ -599,7 +599,14 @@ CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsig
     } else {
         VxImageDescEx source = data, dest;
         source.BytesPerLine = ImagePitch(data);
-        VxPixelFormat2ImageDesc(texture.Info.format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ? _32_ABGR8888 : _32_ARGB8888, dest);
+        VX_PIXELFORMAT destinationFormat = _32_ARGB8888;
+        switch (texture.Info.format) {
+        case SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM: destinationFormat = _16_RGB565; break;
+        case SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM: destinationFormat = _16_ARGB1555; break;
+        case SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM: destinationFormat = _32_ABGR8888; break;
+        default: break;
+        }
+        VxPixelFormat2ImageDesc(destinationFormat, dest);
         dest.Width = w; dest.Height = h; dest.BytesPerLine = rowBytes; dest.Image = pixels.Begin();
         VxDoBlit(source, dest);
     }
