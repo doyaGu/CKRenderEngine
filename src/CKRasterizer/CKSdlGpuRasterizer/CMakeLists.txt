@@ -141,6 +141,8 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
         )
         ckre_copy_runtime_dependencies(${_test})
     endforeach ()
+    target_sources(test_sdl_gpu_pixels PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/rasterizers/test_sdl_gpu_texture_uploads.cpp)
     add_test(NAME SdlGpuRasterizerTests COMMAND $<TARGET_FILE:test_sdl_gpu_rasterizer>)
     set_tests_properties(SdlGpuRasterizerTests PROPERTIES TIMEOUT 60)
     add_test(NAME SdlGpuPixelTests COMMAND $<TARGET_FILE:test_sdl_gpu_pixels>)

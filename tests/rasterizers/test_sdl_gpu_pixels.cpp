@@ -16,6 +16,8 @@
 #include <vector>
 #include <algorithm>
 
+bool CheckSdlGpuNegativePitchUploads(CKSdlGpuRasterizerContext &backend);
+
 static bool CheckReadback(CKSdlGpuRasterizerContext &backend, const CKSdlGpuReadbackTicket &ticket,
                           const std::vector<CKDWORD> &expected, unsigned tolerance, const char *name)
 {
@@ -967,9 +969,9 @@ static bool CheckPackedTextureUploads(CKSdlGpuRasterizerContext &backend)
     return true;
 }
 
-static int Run(SDL_Window *window)
+static int Run(SDL_Window *window, const char *focus)
 {
-    if (!CheckExactCopyMatchesBlit(window)) return 26;
+    if (!focus && !CheckExactCopyMatchesBlit(window)) return 26;
     CKSdlGpuRasterizerContext backend;
     CKRasterizerInitParameters init;
     init.Window = window; init.Width = 640; init.Height = 480;
@@ -977,7 +979,10 @@ static int Run(SDL_Window *window)
     const SDL_WindowFlags ownerFlags = SDL_GetWindowFlags(window);
     init.Fullscreen = TRUE;
     if (backend.Init(&init) != CK_OK) return 1;
+    if (!CheckSdlGpuNegativePitchUploads(backend)) return 29;
+    if (focus && strcmp(focus, "--negative-pitch") == 0) return 0;
     if (!CheckPackedTextureUploads(backend)) return 28;
+    if (focus) return 0;
     if (backend.Submit(static_cast<CKPresentSync>(99), FALSE, nullptr) != CKERR_INVALIDPARAMETER ||
         backend.GetDeviceStatus() != CK_OK) return 25;
     SDL_SyncWindow(window);
@@ -1096,6 +1101,8 @@ int main(int argc, char **argv)
         std::puts("Skipped: run --visible on the interactive desktop for GPU acceptance.");
         return 77;
     }
+    const char *focus = argc > 2 ? argv[2] : nullptr;
+    if (focus && strcmp(focus, "--negative-pitch") != 0 && strcmp(focus, "--texture-uploads") != 0) return 31;
     if (!SDL_Init(SDL_INIT_VIDEO)) return 10;
     SDL_Window *window = SDL_CreateWindow("SDL_gpu rasterizer pixel tests", 640, 480, SDL_WINDOW_RESIZABLE);
     if (!window) { SDL_Quit(); return 11; }
@@ -1124,7 +1131,7 @@ int main(int argc, char **argv)
         SDL_DestroyWindow(window); SDL_Quit(); return 27;
     }
     std::puts("SDL_gpu visible acceptance window is shown and has input focus");
-    const int result = Run(window);
+    const int result = Run(window, focus);
     SDL_DestroyWindow(window); SDL_Quit();
     return result;
 }

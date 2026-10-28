@@ -2,6 +2,8 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuShaderJob.h"
 #include "CKSdlGpuTextureData.h"
+#include <stddef.h>
+#include <string.h>
 
 SDL_GPUSampleCount CKSdlGpuSampleCount(unsigned samples)
 {
@@ -523,14 +525,14 @@ CKERROR CKSdlGpuRasterizerContext::PreserveTexture(CKSdlGpuTexture &texture)
     return CK_OK;
 }
 
-static unsigned ImagePitch(const VxImageDescEx &data)
+static ptrdiff_t ImagePitch(const VxImageDescEx &data)
 {
-    const unsigned row = unsigned(data.Width) * unsigned(data.BitsPerPixel) / 8;
-    const unsigned pitch = data.BytesPerLine > 0 ? unsigned(data.BytesPerLine) : row;
+    const ptrdiff_t row = ptrdiff_t(data.Width) * data.BitsPerPixel / 8;
+    const ptrdiff_t pitch = data.BytesPerLine ? data.BytesPerLine : row;
     // TotalImageSize occupies this field only for compressed formats. A large
     // uncompressed pitch is still a pitch (for example a narrow image in a
     // larger CPU surface), and must never be divided by the image height.
-    return pitch >= row ? pitch : 0;
+    return pitch >= row || pitch <= -row ? pitch : 0;
 }
 
 CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsigned mip, unsigned layer,
@@ -555,7 +557,8 @@ CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsig
         image.Width = w; image.Height = h; image.BytesPerLine = w * 4; image.Image = decoded.Begin();
         return UploadTexture(texture, mip, layer, rect, image);
     }
-    if (!compressed && !ImagePitch(data)) return CKERR_INVALIDPARAMETER;
+    const ptrdiff_t sourcePitch = compressed ? 0 : ImagePitch(data);
+    if (!compressed && !sourcePitch) return CKERR_INVALIDPARAMETER;
     if (compressed && (sourceFormat != texture.PixelFormat || x % 4 || y % 4 ||
                        (w % 4 && x + w != width) || (h % 4 && y + h != height))) return CKERR_INVALIDPARAMETER;
     const unsigned block = compressed ? SDL_GPUTextureFormatTexelBlockSize(texture.Info.format) : 0;
@@ -571,10 +574,10 @@ CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsig
         std::memcpy(pixels.Begin(), data.Image, (size_t)pixels.Size());
     } else if (sourceFormat == _16_L6V5U5 || sourceFormat == _32_X8L8V8U8) {
         if (sourceFormat != texture.PixelFormat) return CKERR_INVALIDPARAMETER;
-        const unsigned pitch = ImagePitch(data), sourceBytes = sourceFormat == _16_L6V5U5 ? 2 : 4;
+        const unsigned sourceBytes = sourceFormat == _16_L6V5U5 ? 2 : 4;
         for (unsigned row = 0; row < h; ++row) for (unsigned col = 0; col < w; ++col) {
             CKDWORD packed = 0;
-            std::memcpy(&packed, data.Image + row * pitch + col * sourceBytes, sourceBytes);
+            memcpy(&packed, data.Image + ptrdiff_t(row) * sourcePitch + col * sourceBytes, sourceBytes);
             int u, v, l, scale;
             if (sourceBytes == 2) {
                 u = int(packed & 31); v = int((packed >> 5) & 31);
@@ -595,10 +598,10 @@ CKERROR CKSdlGpuRasterizerContext::UploadTexture(CKSdlGpuTexture &texture, unsig
                 sourceFormat == _32_V16U16)) {
         for (unsigned row = 0; row < h; ++row)
             std::memcpy(pixels.Begin() + row * rowBytes,
-                        data.Image + row * ImagePitch(data), rowBytes);
+                        data.Image + ptrdiff_t(row) * sourcePitch, rowBytes);
     } else {
         VxImageDescEx source = data, dest;
-        source.BytesPerLine = ImagePitch(data);
+        source.BytesPerLine = int(sourcePitch);
         VX_PIXELFORMAT destinationFormat = _32_ARGB8888;
         switch (texture.Info.format) {
         case SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM: destinationFormat = _16_RGB565; break;
