@@ -9,7 +9,7 @@
 #include "RCKRenderObject.h"
 #include "RCK3dEntity.h"
 #include "RCKMesh.h"
-#include "MorphReferenceSamples.h"
+#include "MorphReferenceExpectations.h"
 
 extern void SetProcessorSpecific_FunctionsPtr();
 
@@ -158,10 +158,6 @@ TEST_F(MorphEvaluationTest, PackedNormalSamplingRetainsFixedPointRoundingAndAngu
 }
 
 TEST_F(MorphEvaluationTest, OriginalRuntimeFixturesKeepValuesExceptTheKnownPositiveYawWrapDefect) {
-    // Vertex 1 crosses from yaw 400 to 16000 between times 2 and 10.
-    // Keep the captured DLL data intact; the corrected arc goes backwards by 784.
-    const int originalYaw[] = {449,498,530,608,792,1159,1183,1184};
-    const int correctedYaw[] = {351,302,269,191,8,-360,-384,-384};
     for (int fixtureIndex = 0; fixtureIndex < 10; ++fixtureIndex) {
         const MorphReference::Fixture &fixture = MorphReference::Fixtures[fixtureIndex];
         SCOPED_TRACE(fixture.name);
@@ -183,12 +179,9 @@ TEST_F(MorphEvaluationTest, OriginalRuntimeFixturesKeepValuesExceptTheKnownPosit
             const int positionFloats = fixture.vertexCount * fixture.stride / 4 + 8;
             for (int i = 0; i < positionFloats; ++i)
                 EXPECT_NEAR(sample.vertices[i], positions[i], 5.0e-5f);
-            VxCompressedVector expected[8];
-            memcpy(expected, sample.normals, (fixture.vertexCount + 2) * sizeof(VxCompressedVector));
-            if (fixtureIndex < 4 && sampleIndex >= 2 && sampleIndex <= 9) {
-                EXPECT_EQ(originalYaw[sampleIndex - 2], expected[2].ya);
-                expected[2].ya = static_cast<short>(correctedYaw[sampleIndex - 2]);
-            }
+            CKDWORD expected[8];
+            for (int i = 0; i < fixture.vertexCount + 2; ++i)
+                expected[i] = MorphReference::ExpectedNormalWord(fixture, sampleIndex, i);
             EXPECT_EQ(0, memcmp(expected, normals,
                                     (fixture.vertexCount + 2) * sizeof(VxCompressedVector)));
         }

@@ -43,7 +43,7 @@
 #include "SerializationGridRegistry.h"
 #include "TCBReferenceSamples.h"
 #include "BezierReferenceSamples.h"
-#include "MorphReferenceSamples.h"
+#include "MorphReferenceExpectations.h"
 #include "MorphEditReferenceSamples.h"
 #include "LinearReferenceSamples.h"
 #include "VxSharedLibrary.h"
@@ -4788,9 +4788,12 @@ void CheckMorphReference(RCKObjectAnimation &animation, const MorphReference::Fi
                 Check(false, "Morph vertex output or stride padding differs from original runtime");
             }
         }
-        if (std::memcmp(normals.data(), sample.normals, normals.size() * sizeof(VxCompressedVector))) {
+        std::vector<CKDWORD> expectedNormals(normals.size());
+        for (size_t i = 0; i < expectedNormals.size(); ++i)
+            expectedNormals[i] = MorphReference::ExpectedNormalWord(fixture, sampleIndex, static_cast<int>(i));
+        if (std::memcmp(normals.data(), expectedNormals.data(), normals.size() * sizeof(VxCompressedVector))) {
             std::printf("Morph %s time %.9g\n", fixture.name, sample.time);
-            Check(false, "Morph packed normal output differs from original runtime");
+            Check(false, "Morph packed normal output differs beyond the known yaw-wrap correction");
         }
     }
 }
@@ -5016,7 +5019,8 @@ void MergedMorphPreservesNormalOutputs() {
         for (CKDWORD &value : expectedNormals) value = 0x13572468;
         std::memcpy(normals, expectedNormals, sizeof(normals));
         for (int i = 0; i < 4; ++i) {
-            if (FirstNormals && SecondNormals) expectedNormals[i + 1] = sample.normals[i + 1];
+            if (FirstNormals && SecondNormals)
+                expectedNormals[i + 1] = MorphReference::ExpectedNormalWord(MorphReference::Fixtures[0], sampleIndex, i + 1);
             else if (FirstNormals) expectedNormals[i + 1] = firstKey[13 + i];
             else if (SecondNormals) expectedNormals[i + 1] = secondKey[13 + i];
         }
