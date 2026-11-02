@@ -124,7 +124,7 @@ void CKDrawStateCache::ResetBuildStats() {
 }
 
 void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
-    if ((CKDWORD)state >= CKFF_RS_COUNT)
+    if ((CKDWORD)state >= VXRENDERSTATE_MAXSTATE)
         return;
 
     m_QueryStates[state] = value;
@@ -170,18 +170,18 @@ void CKDrawStateCache::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
 }
 
 CKDWORD CKDrawStateCache::GetRenderState(VXRENDERSTATETYPE state) const {
-    if ((CKDWORD)state >= CKFF_RS_COUNT)
+    if ((CKDWORD)state >= VXRENDERSTATE_MAXSTATE)
         return 0;
     return m_States[state];
 }
 
 void CKDrawStateCache::ResetQueryDefaults() {
-    for (CKDWORD state = 0; state < CKFF_RS_COUNT; ++state)
+    for (CKDWORD state = 0; state < VXRENDERSTATE_MAXSTATE; ++state)
         m_QueryStates[state] = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
 }
 
 CKDWORD CKDrawStateCache::QueryRenderState(VXRENDERSTATETYPE state) const {
-    if ((CKDWORD)state >= CKFF_RS_COUNT)
+    if ((CKDWORD)state >= VXRENDERSTATE_MAXSTATE)
         return 0;
     return m_QueryStates[state];
 }

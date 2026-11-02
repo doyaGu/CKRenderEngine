@@ -338,7 +338,7 @@ inline CKDWORD CKRSTDefaultRenderStateValue(VXRENDERSTATETYPE State)
     case VXRENDERSTATE_LIGHTING:         return 1;
     case VXRENDERSTATE_LOCALVIEWER:      return 1;
     case VXRENDERSTATE_NORMALIZENORMALS: return 1;
-    case 168 /* VXRENDERSTATE_COLORWRITEENABLE */: return CKRST_COLORWRITE_ALL;
+    case VXRENDERSTATE_COLORWRITEENABLE: return CKRST_COLORWRITE_ALL;
     default:                             return 0;
     }
 }

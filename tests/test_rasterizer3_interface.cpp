@@ -587,7 +587,7 @@ void TestInvalidStateTypesLeaveStateUnchanged()
 
     const CKDWORD invalidDiags = Diag(f.Context, CKRST_DIAG_INVALID_RENDER_STATE);
     TestCheck(!f.Context->SetRenderState((VXRENDERSTATETYPE)VXRENDERSTATE_MAXSTATE, 1), "MAXSTATE rejected");
-    TestCheck(!f.Context->SetRenderState((VXRENDERSTATETYPE)0x7FFFFFFF, 1), "huge type rejected");
+    TestCheck(!f.Context->SetRenderState(VXRENDERSTATE_FORCE_DWORD, 1), "huge type rejected");
     TestCheck(Diag(f.Context, CKRST_DIAG_INVALID_RENDER_STATE) == invalidDiags + 2, "invalid render state counted");
     CKDWORD dummy = 0;
     TestCheck(!f.Context->GetRenderState((VXRENDERSTATETYPE)VXRENDERSTATE_MAXSTATE, &dummy), "Get MAXSTATE rejected");

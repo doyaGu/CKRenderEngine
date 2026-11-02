@@ -4,8 +4,6 @@
 #include "CKTypes.h"
 #include "CKRasterizerContextEnums.h"
 
-#define CKFF_RS_COUNT 256
-
 enum CKDrawStateDirty : CKDWORD {
     CKFF_DIRTY_BLEND     = 0x01,
     CKFF_DIRTY_DEPTH     = 0x02,
@@ -46,8 +44,8 @@ public:
     void Reset();
 
 private:
-    CKDWORD m_States[CKFF_RS_COUNT];
-    CKDWORD m_QueryStates[CKFF_RS_COUNT];
+    CKDWORD m_States[VXRENDERSTATE_MAXSTATE];
+    CKDWORD m_QueryStates[VXRENDERSTATE_MAXSTATE];
     CKDWORD m_DirtyMask;
     CKDrawState m_CachedState;
     VXPRIMITIVETYPE m_LastTopology;

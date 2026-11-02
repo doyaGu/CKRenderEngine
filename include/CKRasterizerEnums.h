@@ -141,12 +141,8 @@ typedef enum CKRST_LOCKFLAGS {
                        CKRST_DP_MATRIXPAL | CKRST_DP_PSIZE | CKRST_DP_TWEEN)
 
 // ===========================================================================
-// Render state extensions
+// Color channel write masks (VXRENDERSTATE_COLORWRITEENABLE)
 // ===========================================================================
-// VXRENDERSTATE_COLORWRITEENABLE = 168 has the D3D8 value; VxMath's
-// VXRENDERSTATETYPE enumeration leaves it free and does not declare it.
-
-#define VXRENDERSTATE_COLORWRITEENABLE ((VXRENDERSTATETYPE)168)
 
 #define CKRST_COLORWRITE_RED   0x00000001u
 #define CKRST_COLORWRITE_GREEN 0x00000002u
