@@ -456,3 +456,29 @@ TEST_F(RenderedSceneDrawTest, PhaseFailuresStopLaterWorkAndAnEmptyViewportDoesNo
     Device->RemovePostSpriteRenderCallBack(TraceCallback, &final);
 }
 } // namespace
+
+
+TEST_F(RenderedSceneDrawTest, AdjustedProjectionAndFrustumIncludeTheSameWideView) {
+    auto *camera = static_cast<RCKCamera *>(Context->CreateObject(CKCID_CAMERA));
+    ASSERT_NE(nullptr, camera);
+    camera->SetFov(PI / 2);
+    camera->SetAspectRatio(4, 3);
+    camera->SetFrontPlane(1);
+    camera->SetBackPlane(100);
+    camera->SetWorldMatrix(VxMatrix::Identity());
+    Device->m_Settings.m_Rect = {0, 0, 640, 360};
+    VxRect rect(0, 0, 640, 360);
+    Device->SetViewRect(rect);
+    Device->AttachViewpointToCamera(reinterpret_cast<CKCamera *>(camera));
+    Device->SetCurrentRenderOptions(CK_RENDER_ADJUSTFOV);
+    Device->PrepareCameras();
+    ASSERT_EQ(CK_OK, Device->DrawScene());
+    EXPECT_TRUE(Device->m_Frustum.IsInside(VxVector(12, 0, 10)));
+    EXPECT_NEAR(.75f, Device->GetProjectionTransformationMatrix()[0][0], 1e-5f);
+    Device->ChangeCurrentRenderOptions(0, CK_RENDER_ADJUSTFOV);
+    Device->PrepareCameras(CK_RENDER_CLEARZ);
+    ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_CLEARZ));
+    EXPECT_FALSE(Device->m_Frustum.IsInside(VxVector(12, 0, 10)));
+    EXPECT_NEAR(1.0f, Device->GetProjectionTransformationMatrix()[0][0], 1e-5f);
+    EXPECT_FLOAT_EQ(PI / 2, camera->GetFov());
+}

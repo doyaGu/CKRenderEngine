@@ -81,6 +81,14 @@ struct CKRenderContextReadback {
     int CubeMapFace;
 };
 
+static float AdjustPerspectiveFov(float Fov, float Aspect, CKCamera *Camera) {
+    int width = 4, height = 3;
+    if (Camera)
+        Camera->GetAspectRatio(width, height);
+    const float referenceAspect = width > 0 && height > 0 ? (float)width / height : 4.0f / 3.0f;
+    return 2.0f * atan2f(tanf(Fov * 0.5f) * Aspect / referenceAspect, 1.0f);
+}
+
 static float ParseSettingFloat(const char *value, float fallback) {
     if (!value || value[0] == '\0')
         return fallback;
@@ -701,6 +709,7 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
         return CKERR_INVALIDRENDERCONTEXT;
 
     CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    SetProjectionFlags(inputFlags);
     CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
     CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
     if ((renderFlags & CK_RENDER_SKIPDRAWSCENE) != 0)
@@ -1620,6 +1629,7 @@ void RCKRenderContext::SetGlobalRenderMode(VxShadeType Shading, CKBOOL Texture, 
 
 void RCKRenderContext::SetCurrentRenderOptions(CKDWORD flags) {
     m_RenderFlags = (CK_RENDER_FLAGS) flags;
+    SetProjectionFlags(m_RenderFlags);
 }
 
 CKDWORD RCKRenderContext::GetCurrentRenderOptions() {
@@ -1627,8 +1637,7 @@ CKDWORD RCKRenderContext::GetCurrentRenderOptions() {
 }
 
 void RCKRenderContext::ChangeCurrentRenderOptions(CKDWORD Add, CKDWORD Remove) {
-    m_RenderFlags = (CK_RENDER_FLAGS) (m_RenderFlags | Add);
-    m_RenderFlags = (CK_RENDER_FLAGS) (m_RenderFlags & ~Remove);
+    SetCurrentRenderOptions((m_RenderFlags | Add) & ~Remove);
 }
 
 void RCKRenderContext::SetCurrentExtents(VxRect &extents) {
@@ -2152,7 +2161,13 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *i
 
             // IDA line 123-124: Get camera back plane and FOV
             const float backPlane = camera->GetBackPlane();
-            const float cameraFov = camera->GetFov();
+            float cameraFov = camera->GetFov();
+            if ((ext->m_Flags & CK_RENDER_ADJUSTFOV) && camera->GetProjectionType() == CK_PERSPECTIVEPROJECTION) {
+                const float extentHeight = ext->m_Rect.GetHeight();
+                const float extentAspect = extentHeight > 0
+                    ? ext->m_Rect.GetWidth() / extentHeight : viewWidth / viewHeight;
+                cameraFov = AdjustPerspectiveFov(cameraFov, extentAspect, camera);
+            }
 
             // IDA line 125-126: Initialize ray (VxRay constructor)
             VxRay ray;
@@ -2249,7 +2264,8 @@ CK3dEntity *RCKRenderContext::Pick3D(const Vx2DVector &pt, VxIntersectionDesc *i
     // IDA line 177-190: Calculate ray start/end based on perspective mode
     if (m_Perspective) {
         // IDA line 179-182: Perspective projection
-        const float halfFovTan = tanf(m_Fov * 0.5f);
+        const float halfFovTan = tanf((m_Camera ? m_Fov : ComputeProjectionFov(
+            m_Fov, viewWidth / viewHeight, GetAttachedCamera())) * 0.5f);
         rayEnd.x = nx * m_NearPlane * halfFovTan;
         rayEnd.y = ny * m_NearPlane * halfFovTan;
     } else {
@@ -3088,6 +3104,7 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_WinHandle = nullptr;
     m_AppHandle = nullptr;
     m_RenderFlags = CK_RENDER_DEFAULTSETTINGS;
+    m_ProjectionFlags = m_RenderFlags;
 
     // Create RenderedScene
     m_RenderedScene = new CKRenderedScene(this);
@@ -3338,6 +3355,18 @@ void RCKRenderContext::SetClipRect(VxRect *rect) {
     if (m_RasterizerContext) m_RasterizerContext->SetTransformMatrix(VXMATRIX_PROJECTION, clipProj);
 }
 
+void RCKRenderContext::SetProjectionFlags(CK_RENDER_FLAGS Flags) {
+    if ((m_ProjectionFlags ^ Flags) & CK_RENDER_ADJUSTFOV)
+        m_ProjectionUpdated = FALSE;
+    m_ProjectionFlags = Flags;
+}
+
+float RCKRenderContext::ComputeProjectionFov(float Fov, float Aspect, CKCamera *Camera) const {
+    if (!m_Perspective || !(m_ProjectionFlags & CK_RENDER_ADJUSTFOV))
+        return Fov;
+    return AdjustPerspectiveFov(Fov, Aspect, Camera);
+}
+
 void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     if (!forceUpdate && m_ProjectionUpdated)
         return;
@@ -3351,7 +3380,8 @@ void RCKRenderContext::UpdateProjection(CKBOOL forceUpdate) {
     const float aspect = (float) ((double) m_ViewportData.ViewWidth / (double) m_ViewportData.ViewHeight);
 
     if (m_Perspective)
-        m_ProjectionMatrix.Perspective(m_Fov, aspect, m_NearPlane, m_FarPlane);
+        m_ProjectionMatrix.Perspective(
+            ComputeProjectionFov(m_Fov, aspect, GetAttachedCamera()), aspect, m_NearPlane, m_FarPlane);
     else
         m_ProjectionMatrix.Orthographic(m_Zoom, aspect, m_NearPlane, m_FarPlane);
 
@@ -3744,9 +3774,8 @@ void RCKRenderContext::Register() {
 }
 
 void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {
-    if (!(Flags & CK_RENDER_OPTIONSMASK))
-        Flags = static_cast<CK_RENDER_FLAGS>(m_RenderFlags);
-
+    Flags = ResolveRenderFlags(Flags);
+    SetProjectionFlags(Flags);
     m_RenderedScene->PrepareCameras(Flags);
 }
 

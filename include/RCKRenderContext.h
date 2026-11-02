@@ -196,6 +196,8 @@ public:
     void SetClipRect(VxRect *rect);
     void SetFullViewport(CKViewportData *vp, int width, int height);
     void UpdateProjection(CKBOOL forceUpdate);
+    void SetProjectionFlags(CK_RENDER_FLAGS Flags);
+    float ComputeProjectionFov(float Fov, float Aspect, CKCamera *Camera) const;
     void AddSprite3DBatch(RCKSprite3D *sprite);
     void CallSprite3DBatches();
     void FlushSprite3DBatchesIfNeeded();  // IDA: sub_1000D2F0
@@ -379,6 +381,7 @@ public:
     VxMatrix m_QueriedViewMatrix;
     VxMatrix m_QueriedProjectionMatrix;
     VxMatrix m_QueriedTextureMatrices[CKRST_MAX_STAGES];
+    CK_RENDER_FLAGS m_ProjectionFlags;
 };
 
 // Saves the fixed-function state the engine changes around a special draw

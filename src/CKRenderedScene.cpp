@@ -244,7 +244,9 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         VxVector *dir = (VxVector *) &rootEntity->m_WorldMatrix[2];
 
         VxFrustum frustum(*origin, *vright, *up, *dir,
-                          rc->m_NearPlane, rc->m_FarPlane, rc->m_Fov, aspectRatio);
+                          rc->m_NearPlane, rc->m_FarPlane,
+                          rc->m_Camera ? rc->m_Fov : rc->ComputeProjectionFov(rc->m_Fov, aspectRatio, m_AttachedCamera),
+                          aspectRatio);
         rc->m_Frustum = frustum;
 
         rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());

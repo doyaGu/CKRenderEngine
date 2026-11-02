@@ -374,3 +374,42 @@ TEST_F(RenderContextOptionsCompletionTest, UnchangedRootDimensionsDoNotRelayoutD
     Rect(Device->Get2dRoot(TRUE), 320, 180);
     child.SetParent(nullptr);
 }
+
+
+TEST_F(RenderContextOptionsCompletionTest, AdjustFovPreservesVerticalViewWithoutChangingCamera) {
+    RCKCamera *camera = Camera();
+    ASSERT_NE(nullptr, camera);
+    Device->SetCurrentRenderOptions(CK_RENDER_CLEARZ | CK_RENDER_ADJUSTFOV);
+    Device->PrepareCameras();
+    const VxMatrix wide = Device->GetProjectionTransformationMatrix();
+    EXPECT_NEAR(.75f, wide[0][0], 1e-5f);
+    EXPECT_NEAR(4.0f / 3.0f, wide[1][1], 1e-5f);
+    EXPECT_FLOAT_EQ(PI / 2, camera->GetFov());
+    int width, height; camera->GetAspectRatio(width, height);
+    EXPECT_EQ(4, width); EXPECT_EQ(3, height);
+    Device->ChangeCurrentRenderOptions(0, CK_RENDER_ADJUSTFOV);
+    EXPECT_FALSE(Device->m_ProjectionUpdated);
+    Device->PrepareCameras();
+    EXPECT_NEAR(1.0f, Device->GetProjectionTransformationMatrix()[0][0], 1e-5f);
+    // Explicit options override the stored adjust flag and then default calls restore it.
+    Device->ChangeCurrentRenderOptions(CK_RENDER_ADJUSTFOV, 0);
+    Device->PrepareCameras(CK_RENDER_CLEARZ);
+    EXPECT_NEAR(1.0f, Device->GetProjectionTransformationMatrix()[0][0], 1e-5f);
+    Device->PrepareCameras();
+    EXPECT_NEAR(.75f, Device->GetProjectionTransformationMatrix()[0][0], 1e-5f);
+}
+
+TEST_F(RenderContextOptionsCompletionTest, AdjustFovUsesCameraReferenceAspectAndLeavesOrthographicProjectionAlone) {
+    RCKCamera *camera = Camera();
+    ASSERT_NE(nullptr, camera);
+    camera->SetAspectRatio(16, 9);
+    Device->SetCurrentRenderOptions(CK_RENDER_CLEARZ | CK_RENDER_ADJUSTFOV);
+    Device->PrepareCameras();
+    EXPECT_NEAR(1.0f, Device->GetProjectionTransformationMatrix()[0][0], 1e-5f);
+    camera->SetProjectionType(CK_ORTHOGRAPHICPROJECTION);
+    Device->PrepareCameras();
+    const VxMatrix ortho = Device->GetProjectionTransformationMatrix();
+    Device->ChangeCurrentRenderOptions(0, CK_RENDER_ADJUSTFOV);
+    Device->PrepareCameras();
+    Matrix(ortho, Device->GetProjectionTransformationMatrix());
+}
