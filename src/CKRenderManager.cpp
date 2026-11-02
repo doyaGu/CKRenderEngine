@@ -1603,6 +1603,20 @@ void RCKRenderManager::ForgetMeshBuffers(CKRasterizerContext *Context) {
     }
 }
 
+CKTexture *RCKRenderManager::FindTextureObject(CKRasterizerContext *Context, CKDWORD ObjectIndex) {
+    if (!ObjectIndex)
+        return nullptr;
+    Context = CKRasterizerObservation::Identity(Context);
+    for (auto it = m_TextureEntries.Begin(); it != m_TextureEntries.End(); ++it) {
+        TextureEntryArray &entries = *it;
+        for (TextureEntry *entry = entries.Begin(); entry != entries.End(); ++entry) {
+            if (entry->Context == Context && entry->ObjectIndex == ObjectIndex)
+                return CKTexture::Cast(m_Context->GetObject(it.GetKey()));
+        }
+    }
+    return nullptr;
+}
+
 RCKRenderManager::TextureEntry *RCKRenderManager::FindTextureEntry(
     CKObject *Object, CKRasterizerContext *Context) {
     Context = CKRasterizerObservation::Identity(Context);

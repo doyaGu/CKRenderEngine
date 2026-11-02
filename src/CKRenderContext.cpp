@@ -1390,6 +1390,21 @@ CKBOOL RCKRenderContext::SetTexture(CKTexture *tex, CKBOOL Clamped, int Stage) {
     return TRUE;
 }
 
+CKTexture *RCKRenderContext::GetTexture(int Stage) {
+    CKDWORD texture = 0;
+    if (Stage < 0 || Stage >= CKRST_MAX_STAGES || !m_RasterizerContext ||
+        !m_RasterizerContext->GetTexture(Stage, &texture))
+        return nullptr;
+    return m_RenderManager->FindTextureObject(m_RasterizerContext, texture);
+}
+
+CKDWORD RCKRenderContext::GetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, int Stage) {
+    CKDWORD value = 0;
+    if (Stage >= 0 && Stage < CKRST_MAX_STAGES && m_RasterizerContext)
+        m_RasterizerContext->GetTextureStageState(Stage, State, &value);
+    return value;
+}
+
 void RCKRenderContext::ResetTextureStage(int Stage) {
     if (!m_RasterizerContext || Stage < 0 || Stage >= CKRST_MAX_TEXTURE_STAGES)
         return;
@@ -2868,6 +2883,18 @@ CKBOOL RCKRenderContext::ReleaseCurrentVB() {
 void RCKRenderContext::SetTextureMatrix(const VxMatrix &M, int Stage) {
     if (m_RasterizerContext)
         m_RasterizerContext->SetTransformMatrix((VXMATRIX_TYPE) (VXMATRIX_TEXTURE0 + Stage), M);
+}
+
+const VxMatrix &RCKRenderContext::GetTextureMatrix(int Stage) {
+    if (Stage < 0 || Stage >= CKRST_MAX_STAGES) {
+        static const VxMatrix identity = VxMatrix::Identity();
+        return identity;
+    }
+    VxMatrix &matrix = m_QueriedTextureMatrices[Stage];
+    matrix = VxMatrix::Identity();
+    if (m_RasterizerContext)
+        m_RasterizerContext->GetTransformMatrix((VXMATRIX_TYPE)(VXMATRIX_TEXTURE0 + Stage), matrix);
+    return matrix;
 }
 
 void RCKRenderContext::SetStereoParameters(float EyeSeparation, float FocalLength) {

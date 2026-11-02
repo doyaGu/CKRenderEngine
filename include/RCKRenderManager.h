@@ -52,6 +52,8 @@ public:
     int AddEffect(const VxEffectDescription &NewEffect) override;
 
     CKMaterial *GetDefaultMaterial();
+    // Reverse lookup in this manager's context-local texture entries.
+    CKTexture *FindTextureObject(CKRasterizerContext *Context, CKDWORD ObjectIndex);
 
     void DetachAllObjects();
     CKBOOL RegisterRasterizerContext(CKRasterizerContext *Context, int DriverIndex);

@@ -105,7 +105,9 @@ public:
     void SetState(VXRENDERSTATETYPE State, CKDWORD Value) override;
     CKDWORD GetState(VXRENDERSTATETYPE State) override;
     CKBOOL SetTexture(CKTexture *tex, CKBOOL Clamped = 0, int Stage = 0) override;
+    CKTexture *GetTexture(int Stage = 0) override;
     CKBOOL SetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, CKDWORD Value, int Stage = 0) override;
+    CKDWORD GetTextureStageState(CKRST_TEXTURESTAGESTATETYPE State, int Stage = 0) override;
     // CK2 public API: returns the active CKRasterizerContext.
     CKRasterizerContext *GetRasterizerContext() override;
     // Texture stage back to "not set": no texture, every stage
@@ -182,6 +184,7 @@ public:
     VxDrawPrimitiveData *LockCurrentVB(CKDWORD VertexCount) override;
     CKBOOL ReleaseCurrentVB() override;
     void SetTextureMatrix(const VxMatrix &M, int Stage = 0) override;
+    const VxMatrix &GetTextureMatrix(int Stage = 0) override;
     void BeginFrameErrorTracking();
     void RecordFrameRenderError(CKERROR Error);
     void SetStereoParameters(float EyeSeparation, float FocalLength) override;
@@ -375,6 +378,7 @@ public:
     VxMatrix m_QueriedWorldMatrix;
     VxMatrix m_QueriedViewMatrix;
     VxMatrix m_QueriedProjectionMatrix;
+    VxMatrix m_QueriedTextureMatrices[CKRST_MAX_STAGES];
 };
 
 // Saves the fixed-function state the engine changes around a special draw

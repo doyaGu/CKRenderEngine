@@ -184,3 +184,56 @@ TEST_F(RenderContextStateCompletionTest, ExtentsAndStatsReturnCurrentValuesWitho
     EXPECT_EQ(32, bpp); EXPECT_EQ(24, depth); EXPECT_EQ(8, stencil);
 }
 } // namespace
+
+
+TEST_F(RenderContextStateCompletionTest, PublicTextureQueriesObserveDirectTextureAndMaterialChanges) {
+    Manager->m_Drivers[0].CapsUpToDate = TRUE;
+    VxImageDescEx format;
+    VxPixelFormat2ImageDesc(_32_ARGB8888, format);
+    Manager->m_Drivers[0].TextureFormats.PushBack(format);
+    auto *first = static_cast<CKTexture *>(Context->CreateObject(CKCID_TEXTURE));
+    auto *second = static_cast<CKTexture *>(Context->CreateObject(CKCID_TEXTURE));
+    ASSERT_NE(nullptr, first); ASSERT_NE(nullptr, second);
+    ASSERT_TRUE(first->Create(2, 2, 32)); ASSERT_TRUE(second->Create(2, 2, 32));
+    // Public GetTexture must see SetAsCurrent and material binding as well as SetTexture.
+    ASSERT_TRUE(first->SetAsCurrent(Device, FALSE, 2));
+    EXPECT_EQ(first, Device->GetTexture(2));
+    auto *material = static_cast<CKMaterial *>(Context->CreateObject(CKCID_MATERIAL));
+    ASSERT_NE(nullptr, material);
+    material->SetTexture(0, second);
+    material->SetAsCurrent(Device);
+    EXPECT_EQ(second, Device->GetTexture());
+    EXPECT_EQ(nullptr, Device->GetTexture(2));
+    ASSERT_TRUE(Device->SetTexture(nullptr));
+    EXPECT_EQ(nullptr, Device->GetTexture());
+    EXPECT_EQ(nullptr, Device->GetTexture(-1));
+    EXPECT_EQ(nullptr, Device->GetTexture(CKRST_MAX_STAGES));
+}
+
+TEST_F(RenderContextStateCompletionTest, PublicStageAndMatrixQueriesReturnCurrentStateAndRoundTripAfterReset) {
+    CKRenderContext *context = Device;
+    context->SetTextureStageState(CKRST_TSS_ADDRESSU, VXTEXTURE_ADDRESSCLAMP, 2);
+    VxMatrix matrix = VxMatrix::Identity(); matrix[3][0] = .625f;
+    context->SetTextureMatrix(matrix, 2);
+    const CKDWORD address = context->GetTextureStageState(CKRST_TSS_ADDRESSU, 2);
+    const VxMatrix saved = context->GetTextureMatrix(2);
+    ASSERT_TRUE(context->SetTexture(nullptr, FALSE, 2));
+    EXPECT_FLOAT_EQ(0, context->GetTextureMatrix(2)[3][0]);
+    context->SetTextureStageState(CKRST_TSS_ADDRESSU, address, 2);
+    context->SetTextureMatrix(saved, 2);
+    EXPECT_EQ(CKDWORD(VXTEXTURE_ADDRESSCLAMP), context->GetTextureStageState(CKRST_TSS_ADDRESSU, 2));
+    EXPECT_FLOAT_EQ(.625f, context->GetTextureMatrix(2)[3][0]);
+    // Changes that bypass the public setters still have to be visible.
+    State.StageStates[2][CKRST_TSS_ADDRESSU] = VXTEXTURE_ADDRESSWRAP;
+    State.Matrices[VXMATRIX_TEXTURE0 + 2][3][0] = .25f;
+    EXPECT_EQ(CKDWORD(VXTEXTURE_ADDRESSWRAP), context->GetTextureStageState(CKRST_TSS_ADDRESSU, 2));
+    EXPECT_FLOAT_EQ(.25f, context->GetTextureMatrix(2)[3][0]);
+    EXPECT_EQ(0u, context->GetTextureStageState(CKRST_TSS_OP, -1));
+    EXPECT_EQ(0u, context->GetTextureStageState(CKRST_TSS_OP, CKRST_MAX_STAGES));
+    for (int stage : {-1, CKRST_MAX_STAGES}) {
+        const VxMatrix &identity = context->GetTextureMatrix(stage);
+        for (int row = 0; row < 4; ++row)
+            for (int column = 0; column < 4; ++column)
+                EXPECT_FLOAT_EQ(row == column ? 1.0f : 0.0f, identity[row][column]);
+    }
+}
