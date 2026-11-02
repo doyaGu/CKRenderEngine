@@ -174,6 +174,15 @@ void DisabledDepthBufferCannotWriteDepth() {
               "Disabled depth buffering must also clear depth writes");
 }
 
+void BlendDefaultSurvivesPublicStateRoundTrip() {
+    CKDrawStateCache cache;
+    const CKDWORD saved = cache.QueryRenderState(VXRENDERSTATE_BLENDOP);
+    cache.SetRenderState(VXRENDERSTATE_BLENDOP, VXBLENDOP_SUBTRACT);
+    cache.SetRenderState(VXRENDERSTATE_BLENDOP, saved);
+    TestCheck(cache.GetRenderState(VXRENDERSTATE_BLENDOP) == VXBLENDOP_ADD,
+              "Saving and restoring an untouched blend state must retain effective ADD blending");
+}
+
 void PublicQueryValuesTrackDefaultsAndExplicitWrites() {
     CKDrawStateCache cache;
     for (CKDWORD state = 0; state < VXRENDERSTATE_MAXSTATE; ++state) {
@@ -198,6 +207,7 @@ void PublicQueryValuesTrackDefaultsAndExplicitWrites() {
 
 int main() {
     TestFramework tests;
+    tests.Run("Default blend operation survives public save/restore", &BlendDefaultSurvivesPublicStateRoundTrip);
     tests.Run("Blend state keeps explicit source-color destination",
               &BlendStateKeepsExplicitSourceColorDestination);
     tests.Run("Blend operation is encoded in draw state",

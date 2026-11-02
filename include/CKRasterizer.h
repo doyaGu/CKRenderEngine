@@ -311,8 +311,7 @@ inline int CKRSTMatrixSlot(VXMATRIX_TYPE Type)
 
 // ---------------------------------------------------------------------------
 // Default state values: original CKRasterizerContext::
-// InitDefaultRenderStatesValue. States it does not list default to 0, except
-// COLORWRITEENABLE, which defaults to all channels.
+// InitDefaultRenderStatesValue. States it does not list default to 0.
 // ---------------------------------------------------------------------------
 
 inline CKDWORD CKRSTDefaultRenderStateValue(VXRENDERSTATETYPE State)
@@ -328,12 +327,13 @@ inline CKDWORD CKRSTDefaultRenderStateValue(VXRENDERSTATETYPE State)
     case VXRENDERSTATE_FILLMODE:         return VXFILL_SOLID;       // 3
     case VXRENDERSTATE_ZWRITEENABLE:     return 1;
     case VXRENDERSTATE_DESTBLEND:        return VXBLEND_ZERO;       // 1
+    case VXRENDERSTATE_BLENDOP:          return VXBLENDOP_ADD;      // 1
     case VXRENDERSTATE_CULLMODE:         return VXCULL_CCW;         // 3
     case VXRENDERSTATE_ZFUNC:            return VXCMP_LESSEQUAL;    // 4
     case VXRENDERSTATE_STENCILFAIL:      return VXSTENCILOP_KEEP;   // 1
     case VXRENDERSTATE_STENCILZFAIL:     return VXSTENCILOP_KEEP;   // 1
     case VXRENDERSTATE_STENCILPASS:      return VXSTENCILOP_KEEP;   // 1
-    case VXRENDERSTATE_TEXTUREFACTOR:    return 0xFF000000u;        // A_MASK
+    case VXRENDERSTATE_TEXTUREFACTOR:    return A_MASK;
     case VXRENDERSTATE_CLIPPING:         return 1;
     case VXRENDERSTATE_LIGHTING:         return 1;
     case VXRENDERSTATE_LOCALVIEWER:      return 1;
