@@ -584,6 +584,9 @@ void RCKRenderContext::FillStateString() {
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    if (inputFlags & CK_RENDER_SKIPALL)
+        return CK_OK;
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
     const bool frameLog = FrameLogEnabled();
@@ -592,7 +595,6 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
     CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
 
@@ -699,6 +701,9 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    if (inputFlags & CK_RENDER_SKIPALL)
+        return CK_OK;
     CKRE_PROFILE_SCOPE("CKRE.CK3D.DrawScene");
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
@@ -708,7 +713,6 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     SetProjectionFlags(inputFlags);
     CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
     CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
@@ -736,6 +740,9 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
 }
 
 CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    if (inputFlags & CK_RENDER_SKIPALL)
+        return CK_OK;
     CKRE_PROFILE_SCOPE("CKRE.CK3D.Present");
     // IDA: 0x1006abdd
     if (m_DeviceDestroying)
@@ -743,7 +750,6 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
     if (!m_RasterizerContext)
         return CKERR_INVALIDRENDERCONTEXT;
 
-    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     CKTimeManager *timeManager = m_Context ? m_Context->GetTimeManager() : nullptr;
     CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(inputFlags, timeManager);
 
@@ -807,6 +813,9 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 
 CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     CKRE_PROFILE_SCOPE("CKRE.CK3D.Render");
+    CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    if (inputFlags & CK_RENDER_SKIPALL)
+        return CK_OK;
     // IDA: 0x1006948e
     VxTimeProfiler profiler;
 
@@ -819,7 +828,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
 
     // Resolve flags and normalize present sync from CK_FRAMERATE_LIMITS.
     CK_RENDER_FLAGS renderFlags = ApplyFrameRateLimitOptions(
-        ResolveRenderFlags(Flags), m_Context ? m_Context->GetTimeManager() : nullptr);
+        inputFlags, m_Context ? m_Context->GetTimeManager() : nullptr);
 
     // Prepare cameras for rendering
     PrepareCameras(renderFlags);
@@ -3775,6 +3784,8 @@ void RCKRenderContext::Register() {
 
 void RCKRenderContext::PrepareCameras(CK_RENDER_FLAGS Flags) {
     Flags = ResolveRenderFlags(Flags);
+    if (Flags & CK_RENDER_SKIPALL)
+        return;
     SetProjectionFlags(Flags);
     m_RenderedScene->PrepareCameras(Flags);
 }

@@ -331,3 +331,80 @@ TEST_F(RenderContextFrameCompletionTest, DrawSceneOverlayFailureStopsFinalCallba
     Device->RemovePostSpriteRenderCallBack(CountFrameCallback, &final);
 }
 } // namespace
+
+
+TEST_F(RenderContextFrameCompletionTest, SkipAllIsPersistentAndSkipsEveryFramePhaseAndCounter) {
+    FrameScheduleContext schedule(Context, &State);
+    const CKDWORD options = CK_RENDER_CLEARBACK | CK_RENDER_DOBACKTOFRONT | CK_RENDER_DONOTUPDATEEXTENTS;
+    schedule.SetCurrentRenderOptions(options | CK_RENDER_SKIPALL);
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_EQ(CK_OK, schedule.Render());
+        EXPECT_EQ(CK_OK, schedule.Render(CK_RENDER_PLAYERCONTEXT));
+        EXPECT_EQ(0, schedule.Count);
+        EXPECT_EQ(0u, schedule.m_TimeFpsCalc);
+        EXPECT_EQ(0, schedule.m_Extents.Size());
+        EXPECT_EQ(options | CK_RENDER_SKIPALL, schedule.GetCurrentRenderOptions());
+    }
+    // Explicit options override stored settings, as with every ordinary flag.
+    EXPECT_EQ(CK_OK, schedule.Render(CK_RENDER_DEFAULTSETTINGS));
+    EXPECT_EQ(4, schedule.Count);
+    EXPECT_EQ(options | CK_RENDER_SKIPALL, schedule.GetCurrentRenderOptions());
+    schedule.Count = 0;
+    EXPECT_EQ(CK_OK, schedule.Render());
+    EXPECT_EQ(0, schedule.Count);
+    EXPECT_EQ(1u, schedule.m_TimeFpsCalc);
+    schedule.ChangeCurrentRenderOptions(0, CK_RENDER_SKIPALL);
+    EXPECT_EQ(options, schedule.GetCurrentRenderOptions());
+    EXPECT_EQ(CK_OK, schedule.Render());
+    EXPECT_EQ(4, schedule.Count);
+}
+
+TEST_F(RenderContextFrameCompletionTest, SkipAllAlsoSuppressesDirectCameraClearSceneAndPresentCalls) {
+    const CKDWORD options = CK_RENDER_CLEARBACK | CK_RENDER_CLEARZ | CK_RENDER_CLEARSTENCIL | CK_RENDER_DOBACKTOFRONT;
+    // A render target would normally request presentation even without DOBACKTOFRONT.
+    Device->m_TargetTexture = static_cast<RCKTexture *>(Context->CreateObject(CKCID_TEXTURE));
+    ASSERT_NE(nullptr, Device->m_TargetTexture);
+    const CK_RENDER_FLAGS flags = static_cast<CK_RENDER_FLAGS>(options | CK_RENDER_SKIPALL);
+    Device->m_ProjectionUpdated = FALSE;
+    Device->PrepareCameras(flags);
+    EXPECT_FALSE(Device->m_ProjectionUpdated);
+    EXPECT_EQ(CK_OK, Device->Clear(flags, 0x73));
+    EXPECT_EQ(CK_OK, Device->DrawScene(flags));
+    EXPECT_EQ(CK_OK, Device->BackToFront(flags));
+    EXPECT_EQ(CK_OK, Device->Render(flags));
+    EXPECT_EQ(0, State.Clears); EXPECT_EQ(0, State.Begins);
+    EXPECT_EQ(0, State.Draws); EXPECT_EQ(0, State.PresentCount);
+    EXPECT_EQ(0u, Device->m_StencilFreeMask);
+    Device->SetCurrentRenderOptions(options | CK_RENDER_SKIPALL);
+    Device->PrepareCameras();
+    EXPECT_FALSE(Device->m_ProjectionUpdated);
+    EXPECT_EQ(CK_OK, Device->Clear());
+    EXPECT_EQ(CK_OK, Device->DrawScene());
+    EXPECT_EQ(CK_OK, Device->BackToFront());
+    EXPECT_EQ(0, State.Clears); EXPECT_EQ(0, State.Begins);
+    EXPECT_EQ(0, State.Draws); EXPECT_EQ(0, State.PresentCount);
+    EXPECT_EQ(options | CK_RENDER_SKIPALL, Device->GetCurrentRenderOptions());
+    Device->m_TargetTexture = nullptr;
+}
+
+TEST_F(RenderContextFrameCompletionTest, SkipAllNeedsNoActiveDeviceAndDoesNotChangeNormalValidation) {
+    Device->m_Active = FALSE;
+    Device->m_RasterizerContext = nullptr;
+    Device->PrepareCameras(CK_RENDER_SKIPALL);
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    EXPECT_EQ(CK_OK, Device->Clear(CK_RENDER_SKIPALL));
+    EXPECT_EQ(CK_OK, Device->DrawScene(CK_RENDER_SKIPALL));
+    EXPECT_EQ(CK_OK, Device->BackToFront(CK_RENDER_SKIPALL));
+    EXPECT_EQ(CKERR_RENDERCONTEXTINACTIVE, Device->Render(CK_RENDER_CLEARZ));
+    EXPECT_EQ(CKERR_INVALIDRENDERCONTEXT, Device->Clear(CK_RENDER_CLEARZ));
+}
+
+TEST_F(RenderContextFrameCompletionTest, SkipDrawSceneKeepsItsExistingClearAndPresentSemantics) {
+    const CK_RENDER_FLAGS flags = static_cast<CK_RENDER_FLAGS>(
+        CK_RENDER_SKIPDRAWSCENE | CK_RENDER_CLEARBACK | CK_RENDER_DOBACKTOFRONT);
+    EXPECT_EQ(CK_OK, Device->Render(flags));
+    EXPECT_EQ(1, State.Clears);
+    EXPECT_EQ(1, State.PresentCount);
+    EXPECT_EQ(0, State.Begins);
+    EXPECT_EQ(0, State.Draws);
+}
