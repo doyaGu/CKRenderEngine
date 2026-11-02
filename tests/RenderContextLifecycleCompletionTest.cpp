@@ -202,3 +202,30 @@ TEST_F(RenderContextLifecycleCompletionTest, RegisteredRenderObjectNotificationC
     ASSERT_EQ(1, view->m_ObjectExtents.Size()); EXPECT_EQ(nullptr, view->m_ObjectExtents[0].m_Entity);
     Context->DestroyObject(view);
 }
+
+
+TEST_F(RenderContextLifecycleCompletionTest, ObjectHandlesKeepOnlyTheObjectsActuallyPreservedByClearAll) {
+    auto *view = static_cast<RCKRenderContext *>(Context->CreateObject(CKCID_RENDERCONTEXT));
+    ASSERT_NE(nullptr, view);
+    ASSERT_EQ(Manager, Context->GetRenderManager());
+    // Use the manager's ordinary context membership; no graphics device is
+    // needed to exercise CK's real ClearAll preservation rules.
+    Manager->m_RenderContexts.PushBack(view->GetID());
+    CKObject *preserved[] = {view, view->GetViewpoint(), view->GetBackgroundMaterial(),
+                            view->Get2dRoot(TRUE), view->Get2dRoot(FALSE)};
+    CKObjectHandle handles[5] = {};
+    for (int i = 0; i < 5; ++i) {
+        ASSERT_NE(nullptr, preserved[i]);
+        handles[i] = Context->GetObjectHandle(preserved[i]->GetID());
+        ASSERT_NE(0u, handles[i].Lifetime);
+    }
+    auto *removed = Context->CreateObject(CKCID_OBJECT, "Not preserved");
+    ASSERT_NE(nullptr, removed);
+    const auto old = Context->GetObjectHandle(removed->GetID());
+    ASSERT_EQ(CK_OK, Context->ClearAll());
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_EQ(preserved[i], Context->GetObjectByHandle(handles[i]));
+        EXPECT_EQ(handles[i].Lifetime, Context->GetObjectHandle(handles[i].Id).Lifetime);
+    }
+    EXPECT_EQ(nullptr, Context->GetObjectByHandle(old));
+}
