@@ -814,6 +814,14 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     CKRE_PROFILE_SCOPE("CKRE.CK3D.Render");
     CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
+    // Snapshot the borrowed slot: removing/replacing it during the callback
+    // affects only subsequent invocations.
+    const CK_RENDEROPTIONSCALLBACK callback = m_RenderOptionsCallBack;
+    void *const argument = m_RenderOptionsArgument;
+    if (callback) {
+        callback(this, &inputFlags, argument);
+        inputFlags = ResolveRenderFlags(inputFlags);
+    }
     if (inputFlags & CK_RENDER_SKIPALL)
         return CK_OK;
     // IDA: 0x1006948e
@@ -905,6 +913,28 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     m_Context->AddProfileTime(CK_PROFILE_RENDERTIME, profileTime);
 
     return CK_OK;
+}
+
+CKBOOL RCKRenderContext::SetRenderOptionsCallBack(CK_RENDEROPTIONSCALLBACK Function, void *Argument) {
+    if (!Function)
+        return FALSE;
+    if (m_RenderOptionsCallBack)
+        return m_RenderOptionsCallBack == Function && m_RenderOptionsArgument == Argument;
+    m_RenderOptionsCallBack = Function;
+    m_RenderOptionsArgument = Argument;
+    return TRUE;
+}
+
+CKBOOL RCKRenderContext::RemoveRenderOptionsCallBack(CK_RENDEROPTIONSCALLBACK Function, void *Argument) {
+    if (!Function)
+        return FALSE;
+    if (!m_RenderOptionsCallBack)
+        return TRUE;
+    if (m_RenderOptionsCallBack != Function || m_RenderOptionsArgument != Argument)
+        return FALSE;
+    m_RenderOptionsCallBack = nullptr;
+    m_RenderOptionsArgument = nullptr;
+    return TRUE;
 }
 
 void RCKRenderContext::AddPreRenderCallBack(CK_RENDERCALLBACK Function, void *Argument, CKBOOL Temporary) {
@@ -3114,6 +3144,8 @@ RCKRenderContext::RCKRenderContext(CKContext *Context, CKSTRING name) : CKRender
     m_AppHandle = nullptr;
     m_RenderFlags = CK_RENDER_DEFAULTSETTINGS;
     m_ProjectionFlags = m_RenderFlags;
+    m_RenderOptionsCallBack = nullptr;
+    m_RenderOptionsArgument = nullptr;
 
     // Create RenderedScene
     m_RenderedScene = new CKRenderedScene(this);

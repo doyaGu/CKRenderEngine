@@ -408,3 +408,186 @@ TEST_F(RenderContextFrameCompletionTest, SkipDrawSceneKeepsItsExistingClearAndPr
     EXPECT_EQ(0, State.Begins);
     EXPECT_EQ(0, State.Draws);
 }
+
+
+namespace {
+struct RenderOptionsTrace {
+    int Calls = 0;
+    CKRenderContext *Context = nullptr;
+    CK_RENDER_FLAGS Seen = CK_RENDER_USECURRENTSETTINGS;
+    CKDWORD Add = 0, Remove = 0;
+};
+void AdjustRenderOptions(CKRenderContext *context, CK_RENDER_FLAGS *flags, void *argument) {
+    auto &trace = *static_cast<RenderOptionsTrace *>(argument);
+    ++trace.Calls; trace.Context = context; trace.Seen = *flags;
+    *flags = static_cast<CK_RENDER_FLAGS>((*flags | trace.Add) & ~trace.Remove);
+}
+void OtherRenderOptions(CKRenderContext *context, CK_RENDER_FLAGS *flags, void *argument) {
+    AdjustRenderOptions(context, flags, argument);
+}
+struct RenderOptionsReplacement { RenderOptionsTrace Next; int Calls = 0; };
+void ReplaceRenderOptions(CKRenderContext *context, CK_RENDER_FLAGS *flags, void *argument) {
+    auto &state = *static_cast<RenderOptionsReplacement *>(argument);
+    ++state.Calls;
+    EXPECT_TRUE(context->RemoveRenderOptionsCallBack(ReplaceRenderOptions, argument));
+    EXPECT_TRUE(context->SetRenderOptionsCallBack(OtherRenderOptions, &state.Next));
+    *flags = static_cast<CK_RENDER_FLAGS>(*flags | CK_RENDER_SKIPALL);
+}
+} // namespace
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsSlotRequiresMatchingOwnership) {
+    RenderOptionsTrace first, second;
+    EXPECT_FALSE(Device->SetRenderOptionsCallBack(nullptr, &first));
+    EXPECT_FALSE(Device->RemoveRenderOptionsCallBack(nullptr, &first));
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &first));
+    EXPECT_TRUE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &first));
+    EXPECT_FALSE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &second));
+    EXPECT_FALSE(Device->SetRenderOptionsCallBack(OtherRenderOptions, &first));
+    EXPECT_FALSE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &second));
+    EXPECT_FALSE(Device->RemoveRenderOptionsCallBack(OtherRenderOptions, &first));
+    ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    EXPECT_EQ(1, first.Calls); EXPECT_EQ(0, second.Calls);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &first));
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &first));
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(OtherRenderOptions, &second));
+    ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    EXPECT_EQ(1, first.Calls); EXPECT_EQ(1, second.Calls);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(OtherRenderOptions, &second));
+    // A NULL argument is a valid part of the registration identity.
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(OtherRenderOptions, nullptr));
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(OtherRenderOptions, nullptr));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsSeeResolvedFlagsAndOnlyChangeThisInvocation) {
+    FrameScheduleContext schedule(Context, &State);
+    const CKDWORD stored = CK_RENDER_CLEARZ | CK_RENDER_SKIPDRAWSCENE;
+    schedule.SetCurrentRenderOptions(stored);
+    RenderOptionsTrace trace; trace.Add = CK_RENDER_CLEARBACK; trace.Remove = CK_RENDER_CLEARZ;
+    ASSERT_TRUE(schedule.SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    ASSERT_EQ(CK_OK, schedule.Render());
+    EXPECT_EQ(stored, CKDWORD(trace.Seen)); EXPECT_EQ(&schedule, trace.Context);
+    ASSERT_EQ(4, schedule.Count);
+    for (int i = 0; i < schedule.Count; ++i) {
+        EXPECT_TRUE(schedule.Seen[i] & CK_RENDER_CLEARBACK);
+        EXPECT_FALSE(schedule.Seen[i] & CK_RENDER_CLEARZ);
+        EXPECT_TRUE(schedule.Seen[i] & CK_RENDER_SKIPDRAWSCENE);
+    }
+    EXPECT_EQ(stored, schedule.GetCurrentRenderOptions());
+    schedule.Count = 0;
+    ASSERT_EQ(CK_OK, schedule.Render(CK_RENDER_CLEARSTENCIL));
+    EXPECT_EQ(CK_RENDER_CLEARSTENCIL, trace.Seen);
+    EXPECT_FALSE(schedule.Seen[0] & CK_RENDER_SKIPDRAWSCENE);
+    EXPECT_TRUE(schedule.Seen[0] & CK_RENDER_CLEARSTENCIL);
+    EXPECT_EQ(stored, schedule.GetCurrentRenderOptions());
+    schedule.Count = 0;
+    ASSERT_EQ(CK_OK, schedule.Render(CK_RENDER_PLAYERCONTEXT));
+    EXPECT_EQ(stored, CKDWORD(trace.Seen)); // Preserve existing high-only resolution.
+    EXPECT_EQ(3, trace.Calls);
+    EXPECT_TRUE(schedule.RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsRunBeforeSkipAndEveryValidationExit) {
+    RenderOptionsTrace trace; trace.Add = CK_RENDER_SKIPALL;
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    Device->m_Active = FALSE; Device->m_RasterizerContext = nullptr;
+    const CKDWORD stored = Device->GetCurrentRenderOptions();
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(1, trace.Calls); EXPECT_EQ(CK_RENDER_CLEARBACK, trace.Seen);
+    EXPECT_EQ(stored, Device->GetCurrentRenderOptions());
+    trace.Add = 0;
+    EXPECT_EQ(CKERR_RENDERCONTEXTINACTIVE, Device->Render());
+    Device->m_Active = TRUE;
+    EXPECT_EQ(CKERR_INVALIDRENDERCONTEXT, Device->Render());
+    Device->m_RasterizerContext = &State; Device->m_ViewportData.ViewWidth = 0;
+    EXPECT_EQ(CK_OK, Device->Render());
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    EXPECT_EQ(5, trace.Calls);
+    EXPECT_EQ(0, State.Clears); EXPECT_EQ(0, State.Begins); EXPECT_EQ(0, State.PresentCount);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsCanRemoveSkipLocallyWithoutChangingStoredOptions) {
+    const CKDWORD stored = CK_RENDER_SKIPALL | CK_RENDER_SKIPDRAWSCENE | CK_RENDER_CLEARBACK | CK_RENDER_DOBACKTOFRONT;
+    Device->SetCurrentRenderOptions(stored);
+    RenderOptionsTrace trace; trace.Remove = CK_RENDER_SKIPALL;
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    EXPECT_EQ(CK_OK, Device->Render());
+    EXPECT_EQ(1, State.Clears); EXPECT_EQ(1, State.PresentCount);
+    EXPECT_EQ(stored, Device->GetCurrentRenderOptions());
+    EXPECT_EQ(CK_OK, Device->Clear()); // Direct helpers still see the stored SKIPALL.
+    EXPECT_EQ(1, State.Clears); EXPECT_EQ(1, trace.Calls);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsDoNotInterceptDirectRenderPhases) {
+    RenderOptionsTrace trace; trace.Add = CK_RENDER_SKIPALL;
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    Device->PrepareCameras(CK_RENDER_SKIPALL);
+    EXPECT_EQ(CK_OK, Device->Clear(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(CK_OK, Device->DrawScene(CK_RENDER_SKIPDRAWSCENE));
+    EXPECT_EQ(CK_OK, Device->BackToFront(CK_RENDER_DOBACKTOFRONT));
+    EXPECT_EQ(0, trace.Calls); EXPECT_EQ(1, State.Clears); EXPECT_EQ(1, State.PresentCount);
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_DEFAULTSETTINGS));
+    EXPECT_EQ(1, trace.Calls); EXPECT_EQ(1, State.Clears); EXPECT_EQ(1, State.PresentCount);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsRegistrationBelongsToTheContextNotTheScene) {
+    RenderOptionsTrace trace;
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    Device->ClearCallbacks();
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    Device->OnClearAll();
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    RCKRenderContext other(Context);
+    EXPECT_EQ(CK_OK, other.Render(CK_RENDER_SKIPALL));
+    EXPECT_EQ(2, trace.Calls);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsReplacementDuringDispatchStartsWithTheNextInvocation) {
+    RenderOptionsReplacement state;
+    ASSERT_TRUE(Device->SetRenderOptionsCallBack(ReplaceRenderOptions, &state));
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_DEFAULTSETTINGS));
+    EXPECT_EQ(1, state.Calls); EXPECT_EQ(0, state.Next.Calls);
+    EXPECT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
+    EXPECT_EQ(1, state.Calls); EXPECT_EQ(1, state.Next.Calls);
+    EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(OtherRenderOptions, &state.Next));
+}
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsRunOnceWhenLaterFramePhasesFail) {
+    FrameScheduleContext schedule(Context, &State);
+    RenderOptionsTrace trace;
+    ASSERT_TRUE(schedule.SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    schedule.ClearError = CKERR_INVALIDPARAMETER;
+    EXPECT_EQ(CKERR_INVALIDPARAMETER, schedule.Render(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(2, schedule.Count); EXPECT_EQ(1, trace.Calls);
+    schedule.Count = 0; schedule.ClearError = CK_OK; schedule.SceneError = CKERR_INVALIDOPERATION;
+    EXPECT_EQ(CKERR_INVALIDOPERATION, schedule.Render(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(3, schedule.Count); EXPECT_EQ(2, trace.Calls);
+    schedule.Count = 0; schedule.SceneError = CK_OK; schedule.PresentError = CKERR_INVALIDRENDERCONTEXT;
+    EXPECT_EQ(CKERR_INVALIDRENDERCONTEXT, schedule.Render(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(4, schedule.Count); EXPECT_EQ(3, trace.Calls);
+    EXPECT_TRUE(schedule.RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}
+
+
+TEST_F(RenderContextFrameCompletionTest, RenderOptionsCanSelectCurrentSettingsBeforeTheSkipCheck) {
+    FrameScheduleContext schedule(Context, &State);
+    RenderOptionsTrace trace; trace.Remove = ~CKDWORD(0); // Return USECURRENTSETTINGS.
+    ASSERT_TRUE(schedule.SetRenderOptionsCallBack(AdjustRenderOptions, &trace));
+    schedule.SetCurrentRenderOptions(CK_RENDER_SKIPALL | CK_RENDER_CLEARZ);
+    EXPECT_EQ(CK_OK, schedule.Render(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(CK_RENDER_CLEARBACK, trace.Seen);
+    EXPECT_EQ(0, schedule.Count); EXPECT_EQ(0u, schedule.m_TimeFpsCalc);
+    schedule.SetCurrentRenderOptions(CK_RENDER_CLEARSTENCIL | CK_RENDER_SKIPDRAWSCENE);
+    EXPECT_EQ(CK_OK, schedule.Render(CK_RENDER_CLEARBACK));
+    ASSERT_EQ(4, schedule.Count);
+    for (int i = 0; i < schedule.Count; ++i) {
+        EXPECT_TRUE(schedule.Seen[i] & CK_RENDER_CLEARSTENCIL);
+        EXPECT_TRUE(schedule.Seen[i] & CK_RENDER_SKIPDRAWSCENE);
+        EXPECT_FALSE(schedule.Seen[i] & CK_RENDER_CLEARBACK);
+    }
+    EXPECT_EQ(2, trace.Calls);
+    EXPECT_TRUE(schedule.RemoveRenderOptionsCallBack(AdjustRenderOptions, &trace));
+}

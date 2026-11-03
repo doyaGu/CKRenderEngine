@@ -234,6 +234,9 @@ public:
     CKERROR RemapDependencies(CKDependenciesContext &context) override;
     CKERROR Copy(CKObject &o, CKDependenciesContext &context) override;
 
+    CKBOOL SetRenderOptionsCallBack(CK_RENDEROPTIONSCALLBACK Function, void *Argument) override;
+    CKBOOL RemoveRenderOptionsCallBack(CK_RENDEROPTIONSCALLBACK Function, void *Argument) override;
+
     static CKSTRING GetClassName();
     static int GetDependenciesCount(int mode);
     static CKSTRING GetDependencies(int i, int mode);
@@ -382,6 +385,10 @@ public:
     VxMatrix m_QueriedProjectionMatrix;
     VxMatrix m_QueriedTextureMatrices[CKRST_MAX_STAGES];
     CK_RENDER_FLAGS m_ProjectionFlags;
+
+private:
+    CK_RENDEROPTIONSCALLBACK m_RenderOptionsCallBack;
+    void *m_RenderOptionsArgument;
 };
 
 // Saves the fixed-function state the engine changes around a special draw
