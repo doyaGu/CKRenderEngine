@@ -413,6 +413,7 @@ TEST_F(RenderContextFrameCompletionTest, SkipDrawSceneKeepsItsExistingClearAndPr
 namespace {
 struct RenderOptionsTrace {
     int Calls = 0;
+    int OtherCalls = 0;
     CKRenderContext *Context = nullptr;
     CK_RENDER_FLAGS Seen = CK_RENDER_USECURRENTSETTINGS;
     CKDWORD Add = 0, Remove = 0;
@@ -424,6 +425,8 @@ void AdjustRenderOptions(CKRenderContext *context, CK_RENDER_FLAGS *flags, void 
 }
 void OtherRenderOptions(CKRenderContext *context, CK_RENDER_FLAGS *flags, void *argument) {
     AdjustRenderOptions(context, flags, argument);
+    // Keep the second callback observably distinct under Release code folding.
+    ++static_cast<RenderOptionsTrace *>(argument)->OtherCalls;
 }
 struct RenderOptionsReplacement { RenderOptionsTrace Next; int Calls = 0; };
 void ReplaceRenderOptions(CKRenderContext *context, CK_RENDER_FLAGS *flags, void *argument) {
@@ -447,11 +450,13 @@ TEST_F(RenderContextFrameCompletionTest, RenderOptionsSlotRequiresMatchingOwners
     EXPECT_FALSE(Device->RemoveRenderOptionsCallBack(OtherRenderOptions, &first));
     ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
     EXPECT_EQ(1, first.Calls); EXPECT_EQ(0, second.Calls);
+    EXPECT_EQ(0, first.OtherCalls);
     EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &first));
     EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(AdjustRenderOptions, &first));
     ASSERT_TRUE(Device->SetRenderOptionsCallBack(OtherRenderOptions, &second));
     ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_SKIPALL));
     EXPECT_EQ(1, first.Calls); EXPECT_EQ(1, second.Calls);
+    EXPECT_EQ(1, second.OtherCalls);
     EXPECT_TRUE(Device->RemoveRenderOptionsCallBack(OtherRenderOptions, &second));
     // A NULL argument is a valid part of the registration identity.
     ASSERT_TRUE(Device->SetRenderOptionsCallBack(OtherRenderOptions, nullptr));
