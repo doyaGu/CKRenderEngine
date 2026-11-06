@@ -65,9 +65,18 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
             ${CMAKE_CURRENT_SOURCE_DIR}/Native
             ${CMAKE_CURRENT_SOURCE_DIR}/Rasterizer
     )
+    set(_rasterizer_dep CKRasterizerLib)
+    set(_ffp_dep CKFFPLib)
+    set(_shader_jit_dep CKShaderJit)
+    get_target_property(_rasterizer_type ${TARGET_NAME} TYPE)
+    if (_rasterizer_type STREQUAL "SHARED_LIBRARY" AND TARGET CKRasterizerLibShared)
+        set(_rasterizer_dep CKRasterizerLibShared)
+        set(_ffp_dep CKFFPLibShared)
+        set(_shader_jit_dep CKShaderJitShared)
+    endif ()
     target_link_libraries(${TARGET_NAME}
-        PUBLIC CKRasterizerLib
-        PRIVATE CKFFPLib CKShaderJit SDL3::SDL3)
+        PUBLIC ${_rasterizer_dep}
+        PRIVATE ${_ffp_dep} ${_shader_jit_dep} SDL3::SDL3)
     ckre_apply_platform_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

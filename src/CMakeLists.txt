@@ -189,7 +189,11 @@ function(ckre_configure_target TARGET_NAME)
         target_link_libraries(${TARGET_NAME} PRIVATE dbghelp)
     endif ()
 
-    target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
+    if (NOT _ckre_type STREQUAL "STATIC_LIBRARY" AND TARGET CKRasterizerLibShared)
+        target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLibShared)
+    else ()
+        target_link_libraries(${TARGET_NAME} PRIVATE CKRasterizerLib)
+    endif ()
 
     ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
     target_link_libraries(${TARGET_NAME} PRIVATE SDL3::SDL3)

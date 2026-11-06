@@ -89,24 +89,31 @@ set(CKFFP_LIB_HEADERS
     FixedFunction/CKVertexLayoutCache.h
 )
 
-add_library(CKFFPLib STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
-target_compile_features(CKFFPLib PRIVATE cxx_std_20)
-ckre_apply_diagnostic_definitions(CKFFPLib PRIVATE)
-# Rasterizer contexts own the fixed-function objects and build shaders from the
-# shader model, so every layer except Core is part of the library interface.
-target_include_directories(CKFFPLib
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Interface>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/State>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel>
-)
-target_link_libraries(CKFFPLib
-    PUBLIC CKRasterizerLib CKShaderJit
-)
-set_target_properties(CKFFPLib PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    FOLDER "Rasterizer"
-    POSITION_INDEPENDENT_CODE ON
-    INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
-)
+function(ckre_add_ffp_library TARGET_NAME RASTERIZER_DEP SHADER_JIT_DEP)
+    add_library(${TARGET_NAME} STATIC ${CKFFP_LIB_SOURCES} ${CKFFP_LIB_HEADERS})
+    target_compile_features(${TARGET_NAME} PRIVATE cxx_std_20)
+    ckre_apply_diagnostic_definitions(${TARGET_NAME} PRIVATE)
+    # Rasterizer contexts own the fixed-function objects and build shaders from the
+    # shader model, so every layer except Core is part of the library interface.
+    target_include_directories(${TARGET_NAME}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Interface>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/State>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/FixedFunction>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ShaderModel>
+    )
+    target_link_libraries(${TARGET_NAME}
+        PUBLIC ${RASTERIZER_DEP} ${SHADER_JIT_DEP}
+    )
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+        FOLDER "Rasterizer"
+        POSITION_INDEPENDENT_CODE ON
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
+    )
+endfunction()
+
+ckre_add_ffp_library(CKFFPLib CKRasterizerLib CKShaderJit)
+if (CKRE_BUILD_SHARED AND CKRE_BUILD_STATIC)
+    ckre_add_ffp_library(CKFFPLibShared CKRasterizerLibShared CKShaderJitShared)
+endif ()
