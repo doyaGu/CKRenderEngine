@@ -5,7 +5,6 @@
 
 extern void SetProcessorSpecific_FunctionsPtr();
 
-namespace {
 class Entity3dScalePrecisionTest : public ::testing::Test {
 protected:
     CKContext *Context = nullptr;
@@ -66,12 +65,17 @@ TEST_F(Entity3dScalePrecisionTest, NonunitRotatedAxesApplySignedTargetLengthsWit
     pose[3].Set(17, -9, 4);
     entity->SetWorldMatrix(pose);
 
-    // The source lengths are 10, 15 and 2. These target lengths therefore
-    // multiply the rows by -1/2, 2 and 1/4, preserving their directions.
+    // The original normalizes each row with a stored float reciprocal, then
+    // stores the normalized components before applying the target length.
+    // For the second row this makes x one float below the ideal value -24.
     const VxVector requested(-5, 30, .5f);
     entity->SetScale(&requested, FALSE, FALSE);
     ExpectVector(entity->GetWorldMatrix()[0], -3, -4, 0);
-    ExpectVector(entity->GetWorldMatrix()[1], -24, 18, 0);
+#if VXMATH_ENABLE_X87_EMULATION
+    ExpectVector(entity->GetWorldMatrix()[1], -24.000001907348633f, 18, 0, 0);
+#else
+    ExpectVector(entity->GetWorldMatrix()[1], -24, 18, 0, 0);
+#endif
     ExpectVector(entity->GetWorldMatrix()[2], 0, 0, .5f);
     ExpectVector(entity->GetWorldMatrix()[3], 17, -9, 4);
 
@@ -132,7 +136,7 @@ TEST_F(Entity3dScalePrecisionTest, LocalAndWorldScalePreserveParentCoordinatesAn
     ExpectVector(transformed, 0, 134217728, 0, 2);
 }
 
-TEST_F(Entity3dScalePrecisionTest, SmallNonzeroAxesRecoverRequestedScaleWhileZeroAxisStaysZero) {
+TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesFollowTheSelectedArithmetic) {
     RCK3dEntity *entity = Entity();
     ASSERT_NE(nullptr, entity);
     VxMatrix pose = VxMatrix::Identity();
@@ -151,18 +155,25 @@ TEST_F(Entity3dScalePrecisionTest, SmallNonzeroAxesRecoverRequestedScaleWhileZer
     ExpectVector(measured, 2, 3, 4);
     ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
 
-    // A missing direction cannot acquire an orientation from a scale value.
-    // The other two nonzero directions must still recover their lengths.
+    // The original divides by a stored zero length; the non-emulated math
+    // retains its finite zero-direction handling.
     pose[2].Set(0, 0, 0);
     entity->SetWorldMatrix(pose);
     entity->SetScale(&requested, FALSE, FALSE);
+#if VXMATH_ENABLE_X87_EMULATION
+    for (int component = 0; component < 3; ++component) {
+        const float value = entity->GetWorldMatrix()[2][component];
+        EXPECT_NE(value, value);
+    }
+#else
     entity->TransformVector(&transformed, &point);
     ExpectVector(transformed, -3, 2, 0);
     ExpectVector(entity->GetWorldMatrix()[2], 0, 0, 0);
+#endif
     ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
 }
 
-TEST_F(Entity3dScalePrecisionTest, FiniteLargeAndTinyAxesRecoverOrdinaryTargetLengths) {
+TEST_F(Entity3dScalePrecisionTest, FiniteAxesRespectTheSelectedIntermediateRange) {
     RCK3dEntity *entity = Entity();
     ASSERT_NE(nullptr, entity);
     VxMatrix pose = VxMatrix::Identity();
@@ -176,6 +187,17 @@ TEST_F(Entity3dScalePrecisionTest, FiniteLargeAndTinyAxesRecoverOrdinaryTargetLe
     // a wider intermediate range than float, but the requested result fits.
     const VxVector requested(2, 3, 4), point(1, 1, 1);
     entity->SetScale(&requested, FALSE, FALSE);
+#if VXMATH_ENABLE_X87_EMULATION
+    // Original CK2_3D.dll's normalization helper: overflowing stored squares
+    // yield zero, while underflowing squares produce infinity and NaNs.
+    ExpectVector(entity->GetWorldMatrix()[0], 0, 0, 0, 0);
+    ExpectVector(entity->GetWorldMatrix()[2], 0, 0, 0, 0);
+    const VxVector &row = entity->GetWorldMatrix()[1];
+    EXPECT_LT(row.x, -1e38f);
+    EXPECT_NE(row.y, row.y);
+    EXPECT_NE(row.z, row.z);
+    ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
+#else
     ExpectVector(entity->GetWorldMatrix()[0], 0, 2, 0);
     ExpectVector(entity->GetWorldMatrix()[1], -3, 0, 0);
     ExpectVector(entity->GetWorldMatrix()[2], 0, 0, 4);
@@ -185,5 +207,5 @@ TEST_F(Entity3dScalePrecisionTest, FiniteLargeAndTinyAxesRecoverOrdinaryTargetLe
     ExpectVector(transformed, -3, 2, 4);
     entity->GetScale(&measured, FALSE);
     ExpectVector(measured, 2, 3, 4);
+#endif
 }
-} // namespace

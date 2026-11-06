@@ -1563,34 +1563,13 @@ void RCK3dEntity::SetOrientation(const VxVector *Dir, const VxVector *Up, const 
         m_WorldMatrix[2][2] = (Dir->z == 0.0f) ? kEps : Dir->z;
     }
 
-    // Re-apply existing per-axis scale.
-    // IDA does this in two steps: normalizedAxis = axis * (1.0 / Magnitude(axis)) ; scaledAxis = normalizedAxis * savedScale.
-    {
-        const VxVector axis(m_WorldMatrix[0][0], m_WorldMatrix[0][1], m_WorldMatrix[0][2]);
-        const float invMag = static_cast<float>(1.0 / static_cast<double>(axis.Magnitude()));
-        const VxVector normalized = axis * invMag;
-        const VxVector scaled = normalized * prevScale.x;
-        m_WorldMatrix[0][0] = scaled.x;
-        m_WorldMatrix[0][1] = scaled.y;
-        m_WorldMatrix[0][2] = scaled.z;
-    }
-    {
-        const VxVector axis(m_WorldMatrix[1][0], m_WorldMatrix[1][1], m_WorldMatrix[1][2]);
-        const float invMag = static_cast<float>(1.0 / static_cast<double>(axis.Magnitude()));
-        const VxVector normalized = axis * invMag;
-        const VxVector scaled = normalized * prevScale.y;
-        m_WorldMatrix[1][0] = scaled.x;
-        m_WorldMatrix[1][1] = scaled.y;
-        m_WorldMatrix[1][2] = scaled.z;
-    }
-    {
-        const VxVector axis(m_WorldMatrix[2][0], m_WorldMatrix[2][1], m_WorldMatrix[2][2]);
-        const float invMag = static_cast<float>(1.0 / static_cast<double>(axis.Magnitude()));
-        const VxVector normalized = axis * invMag;
-        const VxVector scaled = normalized * prevScale.z;
-        m_WorldMatrix[2][0] = scaled.x;
-        m_WorldMatrix[2][1] = scaled.y;
-        m_WorldMatrix[2][2] = scaled.z;
+    const float savedScale[3] = {prevScale.x, prevScale.y, prevScale.z};
+    for (int i = 0; i < 3; ++i) {
+        VxVector axis(m_WorldMatrix[i][0], m_WorldMatrix[i][1], m_WorldMatrix[i][2]);
+        axis = Normalize(axis) * savedScale[i];
+        m_WorldMatrix[i][0] = axis.x;
+        m_WorldMatrix[i][1] = axis.y;
+        m_WorldMatrix[i][2] = axis.z;
     }
 
     WorldMatrixChanged(KeepChildren, TRUE);
@@ -1608,19 +1587,19 @@ void RCK3dEntity::GetOrientation(VxVector *Dir, VxVector *Up, VxVector *Right, C
             Right->x = tmp[0][0];
             Right->y = tmp[0][1];
             Right->z = tmp[0][2];
-            Right->Normalize();
+            *Right = Normalize(*Right);
         }
         if (Up) {
             Up->x = tmp[1][0];
             Up->y = tmp[1][1];
             Up->z = tmp[1][2];
-            Up->Normalize();
+            *Up = Normalize(*Up);
         }
         if (Dir) {
             Dir->x = tmp[2][0];
             Dir->y = tmp[2][1];
             Dir->z = tmp[2][2];
-            Dir->Normalize();
+            *Dir = Normalize(*Dir);
         }
         return;
     }
@@ -1628,15 +1607,15 @@ void RCK3dEntity::GetOrientation(VxVector *Dir, VxVector *Up, VxVector *Right, C
     const VxMatrix &world = GetWorldMatrix();
     if (Right) {
         *Right = VxVector(world[0][0], world[0][1], world[0][2]);
-        Right->Normalize();
+        *Right = Normalize(*Right);
     }
     if (Up) {
         *Up = VxVector(world[1][0], world[1][1], world[1][2]);
-        Up->Normalize();
+        *Up = Normalize(*Up);
     }
     if (Dir) {
         *Dir = VxVector(world[2][0], world[2][1], world[2][2]);
-        Dir->Normalize();
+        *Dir = Normalize(*Dir);
     }
 }
 
@@ -2432,16 +2411,23 @@ void RCK3dEntity::SetScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Lo
     VxMatrix &mat = Local ? m_LocalMatrix : m_WorldMatrix;
 
     const float requested[3] = {sx, sy, sz};
+#if VXMATH_ENABLE_X87_EMULATION
+    for (int i = 0; i < 3; ++i) {
+        VxVector axis(mat[i][0], mat[i][1], mat[i][2]);
+        axis = Normalize(axis) * requested[i];
+        mat[i][0] = axis.x; mat[i][1] = axis.y; mat[i][2] = axis.z;
+    }
+#else
     for (int axis = 0; axis < 3; ++axis) {
         const double x = mat[axis][0], y = mat[axis][1], z = mat[axis][2];
         const double length = sqrt(x * x + y * y + z * z);
-        // The native free Normalize has no member Normalize epsilon cutoff.
-        // Double intermediates preserve very small and very large finite axes.
         if (length > 0.0) {
             const double factor = requested[axis] / length;
-            for (int component = 0; component < 3; ++component) mat[axis][component] = static_cast<float>(mat[axis][component] * factor);
+            for (int component = 0; component < 3; ++component)
+                mat[axis][component] = static_cast<float>(mat[axis][component] * factor);
         }
     }
+#endif
 
     if (Local) {
         LocalMatrixChanged(KeepChildren, TRUE);
@@ -2458,9 +2444,9 @@ void RCK3dEntity::GetScale(VxVector *Scale, CKBOOL Local) {
     VxVector axis0 = mat[0];
     VxVector axis1 = mat[1];
     VxVector axis2 = mat[2];
-    Scale->x = axis0.Magnitude();
-    Scale->y = axis1.Magnitude();
-    Scale->z = axis2.Magnitude();
+    Scale->x = Magnitude(axis0);
+    Scale->y = Magnitude(axis1);
+    Scale->z = Magnitude(axis2);
 }
 
 static void RCK3dEntity_ConstructMatrix(VxMatrix &dst, const VxVector *pos, const VxVector *scale, const VxQuaternion *quat) {
