@@ -827,6 +827,9 @@ static bool CheckGeneratedMips(CKSdlGpuRasterizerContext &backend)
 
 static bool CheckGpuWrittenMips(CKSdlGpuRasterizerContext &backend)
 {
+    // Multiples of four keep both bilinear stages integral in UNORM8. This
+    // checks invalidation exactly without depending on a driver's fractional
+    // interpolation rounding (255 * 3/4 can differ by one stored channel unit).
     CKTextureDesc desc;
     VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
     desc.Format.Width = desc.Format.Height = 4; desc.Format.BytesPerLine = 16;
@@ -839,13 +842,13 @@ static bool CheckGpuWrittenMips(CKSdlGpuRasterizerContext &backend)
     for (auto &pixel : pixels) pixel = 0xffff0000;
     if (backend.UpdateTexture(target, 0, 0, nullptr, &upload) != CK_OK) return false;
     desc.MipMapCount = 1; desc.Flags = CKRST_TEXTURE_RGB;
-    for (auto &pixel : pixels) pixel = 0xff00ff00;
+    for (auto &pixel : pixels) pixel = 0xff00fc00;
     if (backend.CreateTexture(&desc, &upload, &source) != CK_OK ||
         backend.Blit(target, 0, 0, 0, 0, source, 0, 0, nullptr) != CK_OK) return false;
     CKSdlGpuReadbackTicket copied, patched, rendered;
     CKReadbackDesc read;
     if (backend.ReadTexture(target, 2, &read, &copied) != CK_OK) return false;
-    for (auto &pixel : pixels) pixel = 0xff0000ff;
+    for (auto &pixel : pixels) pixel = 0xff0000fc;
     upload.Width = upload.Height = 2; upload.BytesPerLine = 8;
     CKRECT rect = {0, 0, 2, 2};
     if (backend.UpdateTexture(target, 0, 0, &rect, &upload) != CK_OK ||
@@ -865,7 +868,7 @@ static bool CheckGpuWrittenMips(CKSdlGpuRasterizerContext &backend)
         if (pixel != expected) std::fprintf(stderr, "GPU-written mip: %08x expected %08x\n", unsigned(pixel), unsigned(expected));
         return pixel == expected;
     };
-    if (!check(copied, 0xff00ff00) || !check(patched, 0xff00bf40) || !check(rendered, 0xffff0000)) return false;
+    if (!check(copied, 0xff00fc00) || !check(patched, 0xff00bd3f) || !check(rendered, 0xffff0000)) return false;
     backend.DestroyObject(framebuffer, CKRST_OBJ_RENDERTARGET);
     backend.DestroyObject(target, CKRST_OBJ_TEXTURE);
     backend.DestroyObject(source, CKRST_OBJ_TEXTURE);
