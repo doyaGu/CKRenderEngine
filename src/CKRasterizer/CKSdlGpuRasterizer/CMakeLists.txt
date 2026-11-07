@@ -155,7 +155,7 @@ if (CKRE_BUILD_TESTS AND BUILD_TESTING)
     add_test(NAME SdlGpuRasterizerTests COMMAND $<TARGET_FILE:test_sdl_gpu_rasterizer>)
     set_tests_properties(SdlGpuRasterizerTests PROPERTIES TIMEOUT 60)
     add_test(NAME SdlGpuPixelTests COMMAND $<TARGET_FILE:test_sdl_gpu_pixels>)
-    set_tests_properties(SdlGpuPixelTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
+    set_tests_properties(SdlGpuPixelTests PROPERTIES TIMEOUT 180 RUN_SERIAL TRUE)
 endif ()
 
 # Checked-in native payloads are sufficient at runtime and in ordinary builds.

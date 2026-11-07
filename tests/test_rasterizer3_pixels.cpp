@@ -5080,10 +5080,6 @@ int main(int argc, char **argv)
     if (tests.ExitCode() != 0 || (argc > 1 && strcmp(argv[1], "--image-diff-only") == 0))
         return tests.ExitCode();
     const bool visible = argc > 1 && strcmp(argv[1], "--visible") == 0;
-    if (!visible && !EnvFlagEnabled("CKRE_RUN_GPU_RUNTIME_TESTS")) {
-        printf("SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 to run the real-backend pixel gate.\n");
-        return 77;
-    }
     // Earlier runs must not decide what the cases compile, so they use no
     // compiled program manifest unless one is named.
     SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", "0", 0);

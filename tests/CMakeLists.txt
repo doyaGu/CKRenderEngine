@@ -168,7 +168,7 @@ endfunction()
 ckre_add_spirv_validation(ShaderJitSpirvValidation test_shader_jit_spirv shader_jit_spirv)
 ckre_add_dxbc_validation(ShaderJitDxbcValidation test_shader_jit_dxbc shader_jit_dxbc)
 
-find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
     add_executable(scene_capture_image_tests test_scene_capture_image.cpp ../tools/scene_capture/ImageIO.cpp)
     target_include_directories(scene_capture_image_tests PRIVATE ../tools/scene_capture)
@@ -177,10 +177,8 @@ if(TARGET ckre_scene_capture AND TARGET VxMath::stb)
     ckre_copy_runtime_dependencies(scene_capture_image_tests)
     add_test(NAME SceneCaptureImageIO COMMAND scene_capture_image_tests)
 endif()
-if (Python3_Interpreter_FOUND)
-    add_test(NAME RasterizerTraceAccounting
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rasterizer_trace.py)
-endif ()
+add_test(NAME RasterizerTraceAccounting
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_rasterizer_trace.py)
 
 # White-box conformance tests drive CKRasterizerContext through its public
 # methods, then inspect test-owned Context state or recording output.
@@ -300,8 +298,8 @@ if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/scene_capture_multiframe.cmake
     )
     set_tests_properties(scene_capture_multiframe PROPERTIES
+        RUN_SERIAL TRUE
         TIMEOUT 900
-        SKIP_REGULAR_EXPRESSION "SKIPPED"
         ENVIRONMENT "CKRE_SDL_GPU_FF_JIT_CACHE=0"
     )
 endif ()
@@ -394,7 +392,7 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     target_compile_definitions(sdl_gpu_ffp_pixel_tests PRIVATE CKRE_PIXEL_SDL_GPU=1)
     target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
     # Software rasterizers on CI runners (lavapipe, WARP) take several minutes.
-    set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
+    set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE)
 endif ()
 
 ckre_add_recording_ckff_test(rasterizer_backend_tests

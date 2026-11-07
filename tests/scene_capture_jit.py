@@ -39,6 +39,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     results = []
     for driver in args.drivers.split(","):
+        # Metal uses the precompiled interpreter. Exercise every requested mode
+        # and compare all checkpoints, including the no-compilation contract.
+        compiled = driver != "metal"
         for mode in ("off", "fragment", "on"):
             folder = output / driver / mode
             folder.mkdir(parents=True, exist_ok=True)
@@ -70,31 +73,31 @@ def main():
                 stats = dict((name, int(value)) for name, value in re.findall(r"(\w+)=(\d+)", rows[-1])) if rows else {}
                 issues = []
                 if code: issues.append(f"capture/compare exit {code}")
-                if not stats: issues.append("missing JIT execution evidence")
+                if not stats or not stats.get("requests", 0): issues.append("missing JIT execution evidence")
                 if any(stats.get(name, 0) for name in ("compile_failed", "vertex_failed", "pipeline_failed")):
                     issues.append("shader or pipeline creation failed")
-                if mode == "off":
+                if mode == "off" or not compiled:
                     if stats.get("selected", 0) or stats.get("compile_queued", 0): issues.append("reference used JIT")
                 elif not stats.get("ready", 0):
                     issues.append("no ready JIT pipeline was drawn")
                 if mode != "on" and (stats.get("positiont", 0) or stats.get("unlit", 0) or stats.get("lit", 0) or stats.get("tween", 0) or stats.get("blend", 0) or stats.get("clip", 0) or stats.get("pad", 0)):
                     issues.append("disabled vertex JIT was drawn")
-                if mode == "on" and scene in ("composite_2d", "composite_3d"):
+                if compiled and mode == "on" and scene in ("composite_2d", "composite_3d"):
                     required = "positiont" if scene == "composite_2d" else "unlit"
                     if not stats.get(required, 0): issues.append(f"no generated {required} vertex draw")
-                if mode == "on" and scene in ("composite_3d", "opaque_lit", "lighting_dynamic",
+                if compiled and mode == "on" and scene in ("composite_3d", "opaque_lit", "lighting_dynamic",
                                              "lighting_attenuation", "lighting_spotlight", "tween_3d",
                                              "skinning_3d", "material_channels", "fog_linear", "fog_exp",
                                              "fog_exp2", "texgen_envmap", "rtt_2d", "rtt_cube",
                                              "cube_face_filter", "cube_filter_dynamic", "cube_mip_dynamic") and not stats.get("lit", 0):
                     issues.append("no generated lit vertex draw")
-                if mode == "on" and scene == "tween_3d":
+                if compiled and mode == "on" and scene == "tween_3d":
                     if not stats.get("tween", 0) or not stats.get("unlit", 0):
                         issues.append("no generated tween/unlit vertex draw")
-                if mode == "on" and scene == "skinning_3d":
+                if compiled and mode == "on" and scene == "skinning_3d":
                     if not stats.get("blend", 0) or not stats.get("unlit", 0):
                         issues.append("no generated matrix-blend/unlit vertex draw")
-                if mode == "on" and scene == "clipping_3d":
+                if compiled and mode == "on" and scene == "clipping_3d":
                     for field in ("clip", "positiont", "unlit", "lit", "tween", "blend"):
                         if not stats.get(field, 0): issues.append(f"no generated {field} draw in clipping scene")
                 maxima = [int(x) for x in re.findall(r"max diff (\d+)", text)]

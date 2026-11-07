@@ -1102,10 +1102,6 @@ static int Run(SDL_Window *window, const char *focus)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2 || std::strcmp(argv[1], "--visible") != 0) {
-        std::puts("Skipped: run --visible on the interactive desktop for GPU acceptance.");
-        return 77;
-    }
     const char *focus = argc > 2 ? argv[2] : nullptr;
     if (focus && strcmp(focus, "--negative-pitch") != 0 && strcmp(focus, "--texture-uploads") != 0) return 31;
     if (!SDL_Init(SDL_INIT_VIDEO)) return 10;

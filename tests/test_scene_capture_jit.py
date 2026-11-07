@@ -13,7 +13,7 @@ import scene_capture_jit
 
 class SceneCaptureReferenceTest(unittest.TestCase):
     def run_capture(self, external=True, off_exit=0, off_comparisons=None, scene="test_scene", lit_draws=0,
-                    off_failed_pixels=0, off_max_diff=1):
+                    off_failed_pixels=0, off_max_diff=1, driver="vulkan", requests=1):
         with tempfile.TemporaryDirectory() as directory:
             # The tool resolves its paths: macOS adds /private, Windows expands 8.3 names.
             root = Path(directory).resolve()
@@ -21,7 +21,7 @@ class SceneCaptureReferenceTest(unittest.TestCase):
             reference.mkdir()
             output = root / "captures"
             args = ["scene_capture_jit.py", "--tool", str(root / "tool"),
-                    "--engine-dir", str(root), "--out", str(output), "--drivers", "vulkan"]
+                    "--engine-dir", str(root), "--out", str(output), "--drivers", driver]
             if external:
                 args += ["--reference-dir", str(reference)]
             captures = []
@@ -30,8 +30,8 @@ class SceneCaptureReferenceTest(unittest.TestCase):
                 if "--list-scenes" in command:
                     return subprocess.CompletedProcess(command, 0, scene + " oracle=yes\n")
                 captures.append(command)
-                enabled = kwargs["env"]["CKRE_SDL_GPU_FF_JIT"] == "1"
-                stats = "FFJIT_STATS ready=1 selected=1" if enabled else "FFJIT_STATS ready=0 selected=0"
+                enabled = kwargs["env"]["CKRE_SDL_GPU_FF_JIT"] == "1" and driver != "metal"
+                stats = ("FFJIT_STATS ready=1 selected=1" if enabled else "FFJIT_STATS ready=0 selected=0") + f" requests={requests}"
                 if enabled and kwargs["env"]["CKRE_SDL_GPU_FF_VERTEX_JIT"] == "1":
                     stats += f" lit={lit_draws}"
                 frames = command[command.index("--capture-frames") + 1].split(",")
@@ -101,6 +101,18 @@ class SceneCaptureReferenceTest(unittest.TestCase):
         self.assertIsNone(rows[0]["reference"])
         for command in captures[1:]:
             self.assertEqual(command[command.index("--compare") + 1], str(output / "vulkan" / "off"))
+
+    def test_metal_checks_every_interpreter_checkpoint_without_compilation(self):
+        code, captures, rows, _, _ = self.run_capture(driver="metal", scene="clipping_3d")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(captures), 3)
+        self.assertTrue(all(row["comparisons"] == 5 for row in rows))
+        self.assertTrue(all(row["stats"]["selected"] == 0 for row in rows))
+
+    def test_no_draw_requests_cannot_pass(self):
+        code, _, rows, _, _ = self.run_capture(requests=0)
+        self.assertEqual(code, 1)
+        self.assertTrue(all("missing JIT execution evidence" in row["issues"] for row in rows))
 
     def test_reference_cannot_be_overwritten_by_capture(self):
         for reference in ("out", "out/vulkan/off", "."):

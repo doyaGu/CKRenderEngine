@@ -3,13 +3,7 @@
 #
 # Arguments (-D): TOOL, ENGINE_DIR, OUT_DIR.
 # Environment:
-#   CKRE_RUN_GPU_RUNTIME_TESTS=1           required, otherwise the test is skipped
-#   CKRE_SCENE_CAPTURE_SKIP=<a,b>          scenes the GPU of the runner cannot render
 
-if (NOT "$ENV{CKRE_RUN_GPU_RUNTIME_TESTS}" STREQUAL "1")
-    message(STATUS "SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 to run the multiframe scene gate")
-    return()
-endif ()
 
 set(_baseline "${OUT_DIR}/frame-1")
 set(_candidate "${OUT_DIR}/frame-5")
@@ -21,7 +15,7 @@ set(_animated composite_2d,composite_3d,lighting_dynamic,lighting_attenuation,li
 set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --skip dump_copy,${_animated})
 # Scenes the GPU of the runner cannot render, comma separated.
 if (NOT "$ENV{CKRE_SCENE_CAPTURE_SKIP}" STREQUAL "")
-    list(APPEND _common --skip "$ENV{CKRE_SCENE_CAPTURE_SKIP}")
+    message(FATAL_ERROR "Scene exclusions are not allowed in the acceptance suite")
 endif ()
 
 execute_process(
