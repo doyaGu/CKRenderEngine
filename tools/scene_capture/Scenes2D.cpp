@@ -66,8 +66,8 @@ bool BuildSpritesText(SceneContext &sc)
     sprite->SetPosition(spritePos);
     SceneAddRenderObject(sc, sprite);
 
-    // Sprite text: exercises the text raster path; glyph shapes depend on the
-    // platform font, so its area is masked when comparing across machines.
+    // Sprite text exercises native font rasterization. Regression references
+    // are platform-specific because system glyph shapes differ.
     CKSpriteText *text = static_cast<CKSpriteText *>(sc.Context->CreateObject(CKCID_SPRITETEXT, (CKSTRING)"text", CK_OBJECTCREATION_NONAMECHECK));
     if (!text || !text->Create(400, 48, 32, 0))
         return false;

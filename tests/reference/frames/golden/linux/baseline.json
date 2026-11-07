@@ -1,0 +1,138 @@
+{
+  "format": 1,
+  "renderer_revision": "99bb47aa26f44fd37221cda0039d201348a83d66",
+  "scene_revision": "caba5980a1096e9f75928093ee853c3885aaeef7",
+  "width": 640,
+  "height": 480,
+  "requested_frames": 5,
+  "scenes": [
+    {
+      "name": "alpha_blend",
+      "sha256": "06df8ab9102620222ca5330531b24fb2a88df8dc3e489e54d7c7327a94f328cb"
+    },
+    {
+      "name": "clear_subviewport",
+      "sha256": "dff78f384e6e0c391265d82382177404212bfc8863a90df5d4df59e6427b7582"
+    },
+    {
+      "name": "clipping_3d",
+      "sha256": "1e29891645be01268fc8e937bee615115dd9f806fd8439c9074bbb00b996fa3e"
+    },
+    {
+      "name": "composite_2d",
+      "sha256": "93dab6d1656a99d2b2b3b9f74cd48d1c71af7c12aaeb1d3196a9f246fcc3157d"
+    },
+    {
+      "name": "composite_3d",
+      "sha256": "e8773b5696f74015fcf17f1712e03442d0c4a45ea1f1d70daa7c3e7ccfe785e3"
+    },
+    {
+      "name": "cube_face_filter",
+      "sha256": "910a8dd1999d5bb4626834f8a8269aab0c367e587fbba493b8ba9aa6a65708c4"
+    },
+    {
+      "name": "cube_filter_dynamic",
+      "sha256": "51ae49e06883ce16cee64e0b6691a6f568ba4ab11313ebef77de827df1c91016"
+    },
+    {
+      "name": "cube_mip_dynamic",
+      "sha256": "0b2e91a6255e5ad5b5cf8a29901b6bb115423e889b36f8d490eebdac82f8bf82"
+    },
+    {
+      "name": "cutout",
+      "sha256": "a0469fe6ee890743e5be79de254c3a8f6226eb30700adc98d1e7c3b55b846e9c"
+    },
+    {
+      "name": "dump_copy",
+      "sha256": "166092f50ab2087c086689c27a90f5770e28a7fca97a73544fc6200f3bbefb67"
+    },
+    {
+      "name": "fog_exp",
+      "sha256": "3718c0cdaf6af47e65bfe54f77fc6db7397e3fbd366367a8689f546931fdebcd"
+    },
+    {
+      "name": "fog_exp2",
+      "sha256": "22ba4c09f4882383091374abad415ed6f2290832eeddfb1b1dfb8b86307b9bfc"
+    },
+    {
+      "name": "fog_linear",
+      "sha256": "0e94ab9e6686f678c3dcdd648842941aec9348cafb0fc38fa83c9308ee89803a"
+    },
+    {
+      "name": "lighting_attenuation",
+      "sha256": "ed2097a1fb8f23e865cd5ba9405db12272095f78320fbf331ab3d079b9409f66"
+    },
+    {
+      "name": "lighting_dynamic",
+      "sha256": "8a5106fe52be3232ff27af63b5535a5ec98de8f0ecf5305933e145ebb5bbb48b"
+    },
+    {
+      "name": "lighting_spotlight",
+      "sha256": "7711aeb2c6dc53654a8e64ab23e6cb30194e4d508e8b5e86ee95894bf4d86b8b"
+    },
+    {
+      "name": "material_additive",
+      "sha256": "19eaa6ef26954a0259cd32cb626f4e84d160f8ebdbebefa8fbc9ecfb501046d0"
+    },
+    {
+      "name": "material_channels",
+      "sha256": "c6a1123253729575062af0d9cd6c28fe9b6153328dfb41310656613716db9d75"
+    },
+    {
+      "name": "material_modulate",
+      "sha256": "142e1e0759d8e1b85ae9970131b85ea037e06942ce101a0ea6be5a76865ba4ee"
+    },
+    {
+      "name": "opaque_lit",
+      "sha256": "45003676a2b5ff2e1ba05c6127019c748de662db38cf89943fb9eb437c2f61bb"
+    },
+    {
+      "name": "present_fxaa",
+      "sha256": "2e2efccf382ed1e4f5c2be19349a8ead18eaad2a3d590cc60efdd5c6d0cc8301"
+    },
+    {
+      "name": "present_msaa",
+      "sha256": "a0a1dcf3d20fbedf61918619521d742eb498fa8aa3a8061477072c8f2927350e"
+    },
+    {
+      "name": "present_renderscale",
+      "sha256": "3448f328fef22a88413fde50528723217ee5be07a4e7ef4ee361bce3d3745ef3"
+    },
+    {
+      "name": "present_sharpness",
+      "sha256": "6bea243e9d1c1061414083e16c36c5bd29967b99581eb9dfda9f0e296391e5e6"
+    },
+    {
+      "name": "rtt_2d",
+      "sha256": "18be4a5662516d21c61ce41ee690f9e1d0061e26981bad6d659355c2d589fd82"
+    },
+    {
+      "name": "rtt_cube",
+      "sha256": "0bde0b45ca7111ebaeaab20c25b5e7ef365bcc8fe11d7d52096ce2b424dd3982"
+    },
+    {
+      "name": "skinning_3d",
+      "sha256": "61a13796ff63020d925c6c0f4ccd4f345f7cc0beebecdfdeb411381c0d64fdd6"
+    },
+    {
+      "name": "sprites_text",
+      "sha256": "3613f49dde005a192d05b95e69f0dd74c6bae37846e4695ce07990238b2962af"
+    },
+    {
+      "name": "stencil_clear_midframe",
+      "sha256": "e867882079be3ce47c1b70d0d47712e6f2f1d5e74426e506a67bffd9478f1d6f"
+    },
+    {
+      "name": "stencil_write_mask",
+      "sha256": "ac58f7186c5165f891534b24b3d67ca5ea5cd5b9b563fd8334229c5304c9b219"
+    },
+    {
+      "name": "texgen_envmap",
+      "sha256": "511b5b6d79a2b66e8743a65b101a2b6a1c5a01b4cc68967c41861709f648467c"
+    },
+    {
+      "name": "tween_3d",
+      "sha256": "a7b613bc25d110b1cb10fd7e913cf9679b42e9354271d24ed0dc38413277f125"
+    }
+  ]
+}

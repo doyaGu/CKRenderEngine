@@ -274,23 +274,21 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     ckre_copy_runtime_dependencies(sdl_gpu_backbuffer_benchmark)
 endif ()
 
-# Same-backend golden frame regression (spec 7.3 / plan task 0.7). Needs the
-# shared build (ckre_scene_capture loads CK2_3D.dll dynamically) and the same
-# environment gates as rasterizer3_pixel_tests. Skips when no golden frames
-# exist for the current runner / backend.
+# Compare every procedural scene with the frozen renderer baseline. Fonts use
+# native platform rasterization, so each platform has its own reference set.
 if (TARGET ckre_scene_capture AND TARGET CK2_3D AND CKRE_BUILD_SHARED)
     add_test(NAME scene_capture_golden
         COMMAND "${CMAKE_COMMAND}"
             -DTOOL=$<TARGET_FILE:ckre_scene_capture>
             -DENGINE_DIR=$<TARGET_FILE_DIR:CK2_3D>
             -DGOLDEN_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/reference/frames/golden
-            -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture
+            -DOUT_DIR=${CMAKE_BINARY_DIR}/scene_capture_golden
             -P ${CMAKE_CURRENT_SOURCE_DIR}/scene_capture_golden.cmake
     )
     # Captures never depend on a compiled program manifest of earlier runs.
     set_tests_properties(scene_capture_golden PROPERTIES
+        RUN_SERIAL TRUE
         TIMEOUT 900
-        SKIP_REGULAR_EXPRESSION "SKIPPED"
         ENVIRONMENT "CKRE_SDL_GPU_FF_JIT_CACHE=0"
     )
 

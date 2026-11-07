@@ -1,17 +1,27 @@
-# CI golden frames
+# Renderer regression frames
 
-One directory per CI runner and SDL_gpu driver, named `<runner>-<driver>`:
+Each platform directory contains frozen procedural frames and `baseline.json`,
+which identifies their renderer and scene source revision. Native font
+rasterization requires separate Windows, Linux and Darwin references. Font
+heights are specified in pixels so desktop DPI does not change the fixture.
 
-- `ci-windows-x64-direct3d12` (WARP)
-- `ci-linux-x64-vulkan` (lavapipe under xvfb)
-- `ci-macos-arm64-metal`
+`scene_capture_golden` renders every scene at 640x480 with five requested frames
+(scene-specific minimum frame counts still apply), then requires every reference
+image at threshold 2/255 and 99.5% passing pixels. Missing references fail. Tests
+never generate or update expected images, and scene exclusions are rejected.
 
-Each directory holds `<scene>.png` produced by `ckre_scene_capture` with our
-engine on that runner. `scene_capture_golden` (tests/CMakeLists.txt) compares
-new frames against them with threshold 2/255 and 99.5 % passing pixels, and is
-skipped when the directory for the current runner/backend does not exist.
+The initial Windows and Linux references use renderer production sources from
+`99bb47aa26f44fd37221cda0039d201348a83d66`, unchanged by the test repairs. They
+check renderer regressions; original-rasterizer comparisons remain a separate
+diagnostic corpus under `../oracle`. For example, the original DX8 backend cannot
+paste `dump_copy`, whose current exact copy contract checks 27,648 RGB pixels.
 
-Regenerate through the `Build` workflow (`workflow_dispatch`, `update-golden =
-true`), download the `golden-frames-*` artifacts and commit them. Golden frames
-are updated only after the oracle comparison (`frames/oracle/`) did not get
-worse.
+Capture proposed references with `ckre_scene_capture --scene all --size 640x480
+--frames 5 --out <review-directory>`, review the changes and compare with the
+original diagnostics before updating the versioned fixtures. Captures contain
+procedural test scenes, never game assets. Original diagnostic images are a
+historical corpus; verify their scene inputs before comparing another version.
+
+Darwin references have not been captured yet. The test renders candidate frames
+and fails explicitly when a reviewed platform baseline is absent; CI retains
+those frames for review instead of reporting a skipped or passing comparison.

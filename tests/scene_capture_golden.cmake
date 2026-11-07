@@ -1,63 +1,44 @@
-# CTest driver for the scene_capture_golden test (plan task 0.7, spec 7.3).
-#
-# Arguments (-D): TOOL, ENGINE_DIR, GOLDEN_ROOT, OUT_DIR, SKIP.
-# Environment:
-#   CKRE_RUN_GPU_RUNTIME_TESTS=1           required, otherwise the test is skipped
-#   CKRE_SDL_GPU_DRIVER=<driver>           golden directory suffix (default "default")
-#   CKRE_GOLDEN_RUNNER=<runner>            golden directory prefix (default "local")
-#   CKRE_UPDATE_GOLDEN=1                   write the golden frames instead of comparing
-#   CKRE_SCENE_CAPTURE_SKIP=<a,b>          scenes the GPU of the runner cannot render
-# A line containing SKIPPED marks the test as skipped (SKIP_REGULAR_EXPRESSION).
-
-if (NOT "$ENV{CKRE_RUN_GPU_RUNTIME_TESTS}" STREQUAL "1")
-    message(STATUS "SKIPPED: set CKRE_RUN_GPU_RUNTIME_TESTS=1 to run the scene capture golden gate")
-    return()
+# Baselines are reviewed versioned fixtures. A test run never updates them.
+if (NOT "$ENV{CKRE_SCENE_CAPTURE_SKIP}" STREQUAL "" OR SKIP)
+    message(FATAL_ERROR "Scene exclusions are not allowed in the acceptance suite")
 endif ()
-
-set(_backend "$ENV{CKRE_SDL_GPU_DRIVER}")
-if (_backend STREQUAL "")
-    set(_backend "default")
-endif ()
-set(_runner "$ENV{CKRE_GOLDEN_RUNNER}")
-if (_runner STREQUAL "")
-    set(_runner "local")
-endif ()
-set(_golden "${GOLDEN_ROOT}/${_runner}-${_backend}")
-set(_out "${OUT_DIR}/${_runner}-${_backend}")
-file(MAKE_DIRECTORY "${_out}")
-
-# Animated composites have deterministic checkpoint comparisons in scene_capture_jit.
-set(_common "${TOOL}" --render-engine-dir "${ENGINE_DIR}" --scene all --size 640x480 --frames 5
-    --skip composite_2d,composite_3d)
-if (SKIP)
-    list(APPEND _common --skip "${SKIP}")
-endif ()
-if (NOT "$ENV{CKRE_SCENE_CAPTURE_SKIP}" STREQUAL "")
-    list(APPEND _common --skip "$ENV{CKRE_SCENE_CAPTURE_SKIP}")
-endif ()
-
 if ("$ENV{CKRE_UPDATE_GOLDEN}" STREQUAL "1")
-    file(MAKE_DIRECTORY "${_golden}")
-    message(STATUS "Writing golden frames to ${_golden}")
-    execute_process(COMMAND ${_common} --out "${_golden}" RESULT_VARIABLE _rc)
-    if (NOT _rc EQUAL 0)
-        message(FATAL_ERROR "ckre_scene_capture failed while writing golden frames (${_rc})")
-    endif ()
-    # Remove stale diff images that an earlier compare may have left behind.
-    file(GLOB _stale "${_golden}/*.diff.png" "${_golden}/*.CK2_3D.ini")
-    if (_stale)
-        file(REMOVE ${_stale})
-    endif ()
-    return()
+    message(FATAL_ERROR "Capture reference images separately before running tests")
 endif ()
-
-if (NOT EXISTS "${_golden}")
-    message(STATUS "SKIPPED: no golden frames for ${_runner}-${_backend} in ${GOLDEN_ROOT}; rerun with CKRE_UPDATE_GOLDEN=1 to create them")
-    return()
+string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" _platform)
+set(_golden "${GOLDEN_ROOT}/${_platform}")
+file(MAKE_DIRECTORY "${OUT_DIR}")
+set(_capture "${TOOL}" --render-engine-dir "${ENGINE_DIR}"
+    --rasterizer sdlgpu --scene all --size 640x480 --frames 5 --out "${OUT_DIR}")
+if (NOT EXISTS "${_golden}/baseline.json")
+    execute_process(COMMAND ${_capture} RESULT_VARIABLE _capture_result)
+    message(FATAL_ERROR "Missing reviewed scene baseline for ${_platform}: ${_golden}; candidate frames (${_capture_result}) are in ${OUT_DIR}")
 endif ()
-
-execute_process(COMMAND ${_common} --out "${_out}" --compare "${_golden}" --threshold 2 --min-pass 0.995 --require-all
-        RESULT_VARIABLE _rc)
-if (NOT _rc EQUAL 0)
-    message(FATAL_ERROR "scene_capture_golden failed (${_rc}); captured frames and diff images are in ${_out}")
+file(READ "${_golden}/baseline.json" _baseline)
+string(JSON _count LENGTH "${_baseline}" scenes)
+if (_count LESS 1)
+    message(FATAL_ERROR "The scene baseline is empty")
+endif ()
+file(GLOB _images "${_golden}/*.png")
+list(LENGTH _images _image_count)
+if (NOT _count EQUAL _image_count)
+    message(FATAL_ERROR "The scene baseline manifest does not cover every image")
+endif ()
+math(EXPR _last "${_count} - 1")
+foreach (_index RANGE 0 ${_last})
+    string(JSON _scene GET "${_baseline}" scenes ${_index} name)
+    string(JSON _expected GET "${_baseline}" scenes ${_index} sha256)
+    if (NOT _scene MATCHES "^[a-z0-9_]+$")
+        message(FATAL_ERROR "Invalid scene baseline name: ${_scene}")
+    endif ()
+    file(SHA256 "${_golden}/${_scene}.png" _actual)
+    if (NOT _actual STREQUAL _expected)
+        message(FATAL_ERROR "Scene baseline changed without its manifest: ${_scene}")
+    endif ()
+endforeach ()
+execute_process(COMMAND ${_capture}
+    --compare "${_golden}" --threshold 2 --min-pass 0.995 --require-all
+    RESULT_VARIABLE _result)
+if (NOT _result EQUAL 0)
+    message(FATAL_ERROR "Scene regression failed; see ${OUT_DIR}")
 endif ()
