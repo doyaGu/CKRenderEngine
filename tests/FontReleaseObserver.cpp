@@ -1,25 +1,24 @@
 #include "FontReleaseObserver.h"
 
-namespace {
-FONT_HANDLE releasedFonts[512];
-unsigned releaseCount = 0;
-}
+#include <gtest/gtest.h>
 
-void CkreFontTest::Reset() { releaseCount = 0; }
+static FONT_HANDLE releasedFonts[512];
+static unsigned releaseCount;
 
-bool CkreFontTest::ConsumeRelease(FONT_HANDLE font) {
+void CkreFontTestReset() { releaseCount = 0; }
+
+void CkreFontTestExpectReleased(FONT_HANDLE font) {
     for (unsigned i = 0; i < releaseCount; ++i) {
         if (releasedFonts[i] == font) {
             releasedFonts[i] = nullptr;
-            return true;
+            return;
         }
     }
-    return false;
+    ADD_FAILURE() << "The owned font was not released";
 }
 
-extern "C" void __real__Z12VxDeleteFontPv(FONT_HANDLE font);
-extern "C" void __wrap__Z12VxDeleteFontPv(FONT_HANDLE font) {
-    __real__Z12VxDeleteFontPv(font);
+void CkreFontTestDeleteFont(FONT_HANDLE font) {
+    VxDeleteFont(font);
     if (font) {
         ASSERT_LT(releaseCount, 512u);
         releasedFonts[releaseCount++] = font;

@@ -1,24 +1,10 @@
-#pragma once
+#ifndef FONTRELEASEOBSERVER_H
+#define FONTRELEASEOBSERVER_H
 
-#include <gtest/gtest.h>
 #include "VxMath.h"
 
-namespace CkreFontTest {
-#if defined(CKRE_WRAP_FONT_DELETE)
-void Reset();
-bool ConsumeRelease(FONT_HANDLE font);
-#else
-inline void Reset() {}
-#endif
+void CkreFontTestReset();
+void CkreFontTestExpectReleased(FONT_HANDLE font);
+void CkreFontTestDeleteFont(FONT_HANDLE font);
 
-inline void ExpectReleased(FONT_HANDLE font) {
-#if defined(CKRE_WRAP_FONT_DELETE)
-    EXPECT_TRUE(ConsumeRelease(font));
-#elif defined(_WIN32)
-    VXFONTINFO information;
-    EXPECT_FALSE(VxGetFontInfo(font, information));
-#else
-    GTEST_SKIP() << "Released SDL pointer handles cannot be queried without a deletion observer";
-#endif
-}
-} // namespace CkreFontTest
+#endif // FONTRELEASEOBSERVER_H
