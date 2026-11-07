@@ -2411,23 +2411,11 @@ void RCK3dEntity::SetScale(const VxVector *Scale, CKBOOL KeepChildren, CKBOOL Lo
     VxMatrix &mat = Local ? m_LocalMatrix : m_WorldMatrix;
 
     const float requested[3] = {sx, sy, sz};
-#if VXMATH_ENABLE_X87_EMULATION
     for (int i = 0; i < 3; ++i) {
         VxVector axis(mat[i][0], mat[i][1], mat[i][2]);
-        axis = Normalize(axis) * requested[i];
+        axis = Normalize(axis, requested[i]);
         mat[i][0] = axis.x; mat[i][1] = axis.y; mat[i][2] = axis.z;
     }
-#else
-    for (int axis = 0; axis < 3; ++axis) {
-        const double x = mat[axis][0], y = mat[axis][1], z = mat[axis][2];
-        const double length = sqrt(x * x + y * y + z * z);
-        if (length > 0.0) {
-            const double factor = requested[axis] / length;
-            for (int component = 0; component < 3; ++component)
-                mat[axis][component] = static_cast<float>(mat[axis][component] * factor);
-        }
-    }
-#endif
 
     if (Local) {
         LocalMatrixChanged(KeepChildren, TRUE);

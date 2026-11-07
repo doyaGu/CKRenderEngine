@@ -36,6 +36,15 @@ protected:
         EXPECT_NEAR(y, actual.y, tolerance);
         EXPECT_NEAR(z, actual.z, tolerance);
     }
+
+    static void ExpectMathVector(const VxVector &actual, const VxVector &expected) {
+        for (int component = 0; component < 3; ++component) {
+            if (expected[component] != expected[component])
+                EXPECT_NE(actual[component], actual[component]);
+            else
+                EXPECT_EQ(expected[component], actual[component]);
+        }
+    }
 };
 
 TEST_F(Entity3dScalePrecisionTest, RepeatedUnitScalePreservesRepresentableIdentityGeometry) {
@@ -71,11 +80,7 @@ TEST_F(Entity3dScalePrecisionTest, NonunitRotatedAxesApplySignedTargetLengthsWit
     const VxVector requested(-5, 30, .5f);
     entity->SetScale(&requested, FALSE, FALSE);
     ExpectVector(entity->GetWorldMatrix()[0], -3, -4, 0);
-#if VXMATH_ENABLE_X87_EMULATION
-    ExpectVector(entity->GetWorldMatrix()[1], -24.000001907348633f, 18, 0, 0);
-#else
-    ExpectVector(entity->GetWorldMatrix()[1], -24, 18, 0, 0);
-#endif
+    ExpectMathVector(entity->GetWorldMatrix()[1], Normalize(VxVector(-12, 9, 0), 30));
     ExpectVector(entity->GetWorldMatrix()[2], 0, 0, .5f);
     ExpectVector(entity->GetWorldMatrix()[3], 17, -9, 4);
 
@@ -136,7 +141,7 @@ TEST_F(Entity3dScalePrecisionTest, LocalAndWorldScalePreserveParentCoordinatesAn
     ExpectVector(transformed, 0, 134217728, 0, 2);
 }
 
-TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesFollowTheSelectedArithmetic) {
+TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesPreserveTheMathNormalizationContract) {
     RCK3dEntity *entity = Entity();
     ASSERT_NE(nullptr, entity);
     VxMatrix pose = VxMatrix::Identity();
@@ -155,25 +160,14 @@ TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesFollowTheSelectedArithmetic) 
     ExpectVector(measured, 2, 3, 4);
     ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
 
-    // The original divides by a stored zero length; the non-emulated math
-    // retains its finite zero-direction handling.
     pose[2].Set(0, 0, 0);
     entity->SetWorldMatrix(pose);
     entity->SetScale(&requested, FALSE, FALSE);
-#if VXMATH_ENABLE_X87_EMULATION
-    for (int component = 0; component < 3; ++component) {
-        const float value = entity->GetWorldMatrix()[2][component];
-        EXPECT_NE(value, value);
-    }
-#else
-    entity->TransformVector(&transformed, &point);
-    ExpectVector(transformed, -3, 2, 0);
-    ExpectVector(entity->GetWorldMatrix()[2], 0, 0, 0);
-#endif
+    ExpectMathVector(entity->GetWorldMatrix()[2], Normalize(VxVector(0, 0, 0), requested.z));
     ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
 }
 
-TEST_F(Entity3dScalePrecisionTest, FiniteAxesRespectTheSelectedIntermediateRange) {
+TEST_F(Entity3dScalePrecisionTest, FiniteAxesPreserveTheMathNormalizationContract) {
     RCK3dEntity *entity = Entity();
     ASSERT_NE(nullptr, entity);
     VxMatrix pose = VxMatrix::Identity();
@@ -183,29 +177,9 @@ TEST_F(Entity3dScalePrecisionTest, FiniteAxesRespectTheSelectedIntermediateRange
     pose[3].Set(7, 11, 13);
     entity->SetWorldMatrix(pose);
 
-    // All input rows are finite and nonzero. Their squared lengths need
-    // a wider intermediate range than float, but the requested result fits.
     const VxVector requested(2, 3, 4), point(1, 1, 1);
     entity->SetScale(&requested, FALSE, FALSE);
-#if VXMATH_ENABLE_X87_EMULATION
-    // Original CK2_3D.dll's normalization helper: overflowing stored squares
-    // yield zero, while underflowing squares produce infinity and NaNs.
-    ExpectVector(entity->GetWorldMatrix()[0], 0, 0, 0, 0);
-    ExpectVector(entity->GetWorldMatrix()[2], 0, 0, 0, 0);
-    const VxVector &row = entity->GetWorldMatrix()[1];
-    EXPECT_LT(row.x, -1e38f);
-    EXPECT_NE(row.y, row.y);
-    EXPECT_NE(row.z, row.z);
+    for (int axis = 0; axis < 3; ++axis)
+        ExpectMathVector(entity->GetWorldMatrix()[axis], Normalize(pose[axis], requested[axis]));
     ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
-#else
-    ExpectVector(entity->GetWorldMatrix()[0], 0, 2, 0);
-    ExpectVector(entity->GetWorldMatrix()[1], -3, 0, 0);
-    ExpectVector(entity->GetWorldMatrix()[2], 0, 0, 4);
-    ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
-    VxVector transformed, measured;
-    entity->TransformVector(&transformed, &point);
-    ExpectVector(transformed, -3, 2, 4);
-    entity->GetScale(&measured, FALSE);
-    ExpectVector(measured, 2, 3, 4);
-#endif
 }

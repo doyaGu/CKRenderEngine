@@ -515,7 +515,7 @@ if (TARGET gtest_main)
             Entity2dLifecycleTest Entity2dHierarchyTest Entity2dLayoutTest Entity2dFlagsTest Entity2dSerializationTest Entity2dDependenciesTest Entity2dRenderTest
         Entity3dFrustumTest Entity3dHierFrustumTest Entity3dRenderTest
             Entity3dLifecycleTest Entity3dHierarchyTest
-            Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest Entity3dScalePrecisionTest Entity3dOriginalArithmeticTest
+            Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest Entity3dScalePrecisionTest Entity3dMathContractTest
             RenderManagerLifecycleTest RenderManagerContextTest RenderManagerOptionsTest
             RenderManagerSceneTest RenderManagerCallbacksTest RenderManagerResourcesTest
             RenderManagerHelpersCompletionTest RenderContextReadbackCompletionTest RenderContextStateCompletionTest
