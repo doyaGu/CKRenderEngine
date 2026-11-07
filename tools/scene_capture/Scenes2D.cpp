@@ -72,7 +72,8 @@ bool BuildSpritesText(SceneContext &sc)
     if (!text || !text->Create(400, 48, 32, 0))
         return false;
     text->SetDesiredVideoFormat(_32_ARGB8888);
-    text->SetFont((CKSTRING)"Arial", 24, 700, FALSE, FALSE);
+    // Negative height specifies pixels; point sizes vary with desktop DPI.
+    text->SetFont((CKSTRING)"Arial", -24, 700, FALSE, FALSE);
     text->SetTextColor(0xFFFFFFFF);
     text->SetBackgroundColor(0x00000000);
     text->SetAlign(CKSPRITETEXT_LEFT);
