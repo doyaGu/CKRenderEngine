@@ -63,8 +63,8 @@ bool CheckSdlGpuDepthClipping()
             info.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
             pipeline = SDL_CreateGPUGraphicsPipeline(device, &info);
             if (!pipeline) return false;
-            for (int plane = 0; plane < 2; ++plane) {
-                const float position[4] = {plane ? 1.5f : -0.5f, 0, 0, 0};
+            for (int plane = 0; plane < 3; ++plane) {
+                const float position[4] = {plane == 0 ? 0.5f : plane == 1 ? -0.5f : 1.5f, 0, 0, 0};
                 const float red[4] = {1, 0, 0, 1};
                 commands = SDL_AcquireGPUCommandBuffer(device);
                 if (!commands) return false;
@@ -97,7 +97,7 @@ bool CheckSdlGpuDepthClipping()
                 const unsigned char *pixels = static_cast<const unsigned char *>(SDL_MapGPUTransferBuffer(device, download, false));
                 if (!pixels) return false;
                 const unsigned char *pixel = pixels + 2 * 256 + 2 * 4;
-                const bool matches = pixel[0] == (clip ? 0 : 255) && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255;
+                const bool matches = pixel[0] == (clip && plane != 0 ? 0 : 255) && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255;
                 printf("SDL depth clipping: clip=%d test=%d z=%g RGBA=%u,%u,%u,%u\n",
                        clip, test, position[0], unsigned(pixel[0]), unsigned(pixel[1]), unsigned(pixel[2]), unsigned(pixel[3]));
                 SDL_UnmapGPUTransferBuffer(device, download);
