@@ -78,6 +78,9 @@ function(ckre_configure_sdl_gpu_rasterizer TARGET_NAME)
     target_link_libraries(${TARGET_NAME}
         PUBLIC ${_rasterizer_dep}
         PRIVATE ${_ffp_dep} ${_shader_jit_dep} SDL3::SDL3)
+    if (CKRE_ENABLE_DIRECTX)
+        target_link_libraries(${TARGET_NAME} PRIVATE dxguid)
+    endif ()
     ckre_apply_platform_definitions(${TARGET_NAME} PRIVATE)
     set_target_properties(${TARGET_NAME} PROPERTIES
         ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

@@ -1,9 +1,42 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKSdlGpuShaderPack.h"
 
+#if CKRE_ENABLE_DIRECTX
+#include <dxgidebug.h>
+
+static void CKSdlGpuLogDxgiErrors()
+{
+    HMODULE library = LoadLibraryExW(L"dxgidebug.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!library) return;
+    typedef HRESULT (WINAPI *GetDebugInterface)(UINT, REFIID, void **);
+    GetDebugInterface getDebug = reinterpret_cast<GetDebugInterface>(
+        GetProcAddress(library, "DXGIGetDebugInterface1"));
+    IDXGIInfoQueue *queue = NULL;
+    if (getDebug && SUCCEEDED(getDebug(0, __uuidof(IDXGIInfoQueue), reinterpret_cast<void **>(&queue)))) {
+        const UINT64 count = queue->GetNumStoredMessagesAllowedByRetrievalFilters(DXGI_DEBUG_ALL);
+        for (UINT64 index = count > 32 ? count - 32 : 0; index < count; ++index) {
+            SIZE_T size = 0;
+            if (FAILED(queue->GetMessage(DXGI_DEBUG_ALL, index, NULL, &size))) continue;
+            DXGI_INFO_QUEUE_MESSAGE *message = static_cast<DXGI_INFO_QUEUE_MESSAGE *>(SDL_malloc(size));
+            if (!message) break;
+            if (SUCCEEDED(queue->GetMessage(DXGI_DEBUG_ALL, index, message, &size)) &&
+                message->Severity <= DXGI_INFO_QUEUE_MESSAGE_SEVERITY_ERROR)
+                SDL_LogError(SDL_LOG_CATEGORY_RENDER, "DXGI error %d: %s", message->ID, message->pDescription);
+            SDL_free(message);
+        }
+        queue->Release();
+    }
+    FreeLibrary(library);
+}
+#endif
+
 CKERROR CKSdlGpuRasterizerContext::Fail(const char *operation)
 {
     SDL_LogError(SDL_LOG_CATEGORY_RENDER, "SDL_gpu %s failed: %s", operation, SDL_GetError());
+#if CKRE_ENABLE_DIRECTX
+    if (Device && SDL_strcmp(SDL_GetGPUDeviceDriver(Device), "direct3d12") == 0)
+        CKSdlGpuLogDxgiErrors();
+#endif
     Error = CKERR_INVALIDOPERATION;
     // Consumers fail immediately; keep GPU-owned transfer storage until its
     // fence completes or shutdown has retired the device.
