@@ -741,20 +741,21 @@ CKJitValue NativeFragmentCompiler::SampleCube(uint32_t slot, CKJitValue directio
     const CKJitValue y = m_B.And(m_B.Not(x), m_B.Greater(ay, az));
     const CKJitValue major = m_B.Max(m_B.Max(ax, ay), az);
     const CKJitValue size = m_B.IntToFloat(m_B.Component(m_B.TextureSize(slot, CKJIT_SAMPLER_CUBE, m_B.Int(0)), 0));
-    m_B.If(simple);
-    const CKJitValue limit = m_B.Mul(major, m_B.Sub(m_B.Float(1.0f), m_B.Div(m_B.Float(1.0f), size)));
-    const CKJitValue inside = m_B.Min(m_B.Max(direction, m_B.Neg(limit)), limit);
-    const CKJitValue at = m_B.Construct({
-        m_B.Select(x, m_B.Component(direction, 0), m_B.Component(inside, 0)),
-        m_B.Select(y, m_B.Component(direction, 1), m_B.Component(inside, 1)),
-        m_B.Select(m_B.And(m_B.Not(x), m_B.Not(y)), m_B.Component(direction, 2), m_B.Component(inside, 2))});
-    const CKJitValue ordinary = m_B.Sample(slot, CKJIT_SAMPLER_CUBE, at, lodBias);
-    m_B.Else({ordinary});
     const auto axis = [&](CKJitValue v) {
         return m_B.Select(x, m_B.Component(v, 0), m_B.Select(y, m_B.Component(v, 1), m_B.Component(v, 2)));
     };
     const CKJitValue divisor = m_B.Max(major, m_B.Float(1.0e-20f));
     const CKJitValue sign = m_B.Select(m_B.Less(axis(direction), m_B.Float(0)), m_B.Float(-1), m_B.Float(1));
+    m_B.If(simple);
+    const CKJitValue limit = m_B.Sub(m_B.Float(1.0f), m_B.Div(m_B.Float(1.0f), size));
+    const CKJitValue faceDirection = m_B.Div(direction, divisor);
+    const CKJitValue inside = m_B.Min(m_B.Max(faceDirection, m_B.Neg(limit)), limit);
+    const CKJitValue at = m_B.Construct({
+        m_B.Select(x, sign, m_B.Component(inside, 0)),
+        m_B.Select(y, sign, m_B.Component(inside, 1)),
+        m_B.Select(m_B.And(m_B.Not(x), m_B.Not(y)), sign, m_B.Component(inside, 2))});
+    const CKJitValue ordinary = m_B.Sample(slot, CKJIT_SAMPLER_CUBE, at, lodBias);
+    m_B.Else({ordinary});
     // Apply the face's orientation before taking floor in LevelCube; a sign
     // flip after choosing a texel changes nearest-filter boundary ties.
     const auto minor = [&](CKJitValue v) {

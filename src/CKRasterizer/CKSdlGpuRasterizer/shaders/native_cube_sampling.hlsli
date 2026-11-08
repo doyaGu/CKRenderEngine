@@ -43,18 +43,19 @@ float4 ckSampleCubeBias(CKFFTextureCube image, CKFFSampler state, uint slot,
     float3 axes = abs(direction);
     bool x = axes.x > axes.y && axes.x > axes.z;
     bool y = !x && axes.y > axes.z;
-    float major = max(max(axes.x, axes.y), axes.z);
-    if (levels == 1 && info.y == info.z && info.y != 7.0) {
-        // The cheap single-level path cannot change the selected filter/mip.
-        float limit = major * (1.0 - 1.0 / float(width));
-        float3 inside = clamp(direction, -limit, limit);
-        float3 at = float3(x ? direction.x : inside.x, y ? direction.y : inside.y,
-                          (!x && !y) ? direction.z : inside.z);
-        return image.SampleBias(state, at, bias);
-    }
-    major = max(major, 1.0e-20);
+    float major = max(max(max(axes.x, axes.y), axes.z), 1.0e-20);
     float signedMajor = x ? direction.x : (y ? direction.y : direction.z);
     float sign = signedMajor < 0.0 ? -1.0 : 1.0;
+    if (levels == 1 && info.y == info.z && info.y != 7.0) {
+        // The cheap single-level path cannot change the selected filter/mip.
+        // Project to a unit major axis before clamping. Scaling the border
+        // by an arbitrary major axis can round outside the edge texel center.
+        float limit = 1.0 - 1.0 / float(width);
+        float3 inside = clamp(direction / major, -limit, limit);
+        float3 at = float3(x ? sign : inside.x, y ? sign : inside.y,
+                          (!x && !y) ? sign : inside.z);
+        return image.SampleBias(state, at, bias);
+    }
     float2 projected = ckCubeMinor(direction, x, y, sign) / major;
     float2 uv = projected * 0.5 + 0.5;
     float3 dx3 = ddx(direction), dy3 = ddy(direction);

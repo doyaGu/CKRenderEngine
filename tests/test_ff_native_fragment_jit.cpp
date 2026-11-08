@@ -620,11 +620,11 @@ struct Reference {
         if (dim == CKJIT_SAMPLER_CUBE && F.Textures[slot].Levels == 1 && info.y == info.z && info.y != 7.0f) {
             const float ax = std::fabs(c[0]), ay = std::fabs(c[1]), az = std::fabs(c[2]);
             const int axis = ax > ay && ax > az ? 0 : ay > az ? 1 : 2;
-            const float major = std::fmax(std::fmax(ax, ay), az);
-            const float limit = major * (1.0f - 1.0f / (float)F.Textures[slot].Size[0]);
+            const float major = std::fmax(std::fmax(std::fmax(ax, ay), az), 1.0e-20f);
+            const float limit = 1.0f - 1.0f / (float)F.Textures[slot].Size[0];
             float at[3];
             for (int i = 0; i < 3; ++i) {
-                at[i] = i == axis ? c[i] : std::fmin(std::fmax(c[i], -limit), limit);
+                at[i] = i == axis ? (c[i] < 0 ? -1.0f : 1.0f) : std::fmin(std::fmax(c[i] / major, -limit), limit);
             }
             TexelHash(CKJIT_OP_SAMPLE, (uint32_t)slot, dim).Add(at, 3).Add(&lodBias, 1).Color(texel);
             return {texel[0], texel[1], texel[2], texel[3]};
