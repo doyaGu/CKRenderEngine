@@ -192,7 +192,7 @@ public:
     // deleted handle MAY be reused.
     virtual CKBOOL CreateTexture(const CKTextureDesc *Desc, CKDWORD *OutHandle) = 0;
     // Imports a caller-owned native resource as an ordinary generational
-    // texture handle. Desc is the complete native-resource contract; the
+    // texture handle. Desc specifies the native texture dimensions, format and usage; the
     // backend validates every property it can observe. The Context never
     // destroys the external resource, and the caller must keep it alive until
     // the handle has been unbound and deleted. Unsupported backends return

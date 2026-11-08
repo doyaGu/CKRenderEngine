@@ -1474,7 +1474,7 @@ void RCK3dEntity::SetPosition(const VxVector *Pos, CK3dEntity *Ref, CKBOOL KeepC
         // Direct copy (12 bytes)
         memcpy(worldPos, Pos, sizeof(VxVector));
     }
-    // Preserve the existing world/inverse flags and child update contract.
+    // Preserve world/inverse matrix flags and propagate transform updates to children.
     WorldPositionChanged(KeepChildren, TRUE);
     if (parentRelative) m_LocalMatrix[3] = requestedLocal;
 }

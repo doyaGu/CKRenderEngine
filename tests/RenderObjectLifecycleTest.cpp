@@ -167,7 +167,7 @@ TEST_F(RenderObjectLifecycleTest, DependencyCallbacksAdvertiseNoOwnOptionsForAll
     }
 }
 
-TEST_F(RenderObjectLifecycleTest, MemoryReportsNativeInlineContractWithRealCallbackOwnershipAndBorrowedArguments) {
+TEST_F(RenderObjectLifecycleTest, MemoryCountsInlineStorageAndOwnedCallbacksWithBorrowedArguments) {
     new RCKRenderManager(Context); // CKContext owns the registered manager.
     RCKRenderObject *object = Object();
     ASSERT_NE(nullptr, object);

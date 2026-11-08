@@ -143,7 +143,7 @@ TEST_F(CurveDependenciesTest, RemapAlwaysRemapsOwnArrayPreservingOrderAndInvalid
     EXPECT_EQ(&mapped, curve.RawPoint(0)); EXPECT_EQ(&b, curve.RawPoint(1)); EXPECT_FALSE(curve.GetObjectFlags() & CK_OBJECT_UPTODATE);
     EXPECT_EQ(nullptr, mapped.GetCurve()); EXPECT_EQ(nullptr, mapped.GetParent()); dependencies.StopDependencies();
 }
-TEST_F(CurveDependenciesTest, RemapExplicitZeroUsesPointerArrayNullSlotContract) {
+TEST_F(CurveDependenciesTest, RemapExplicitZeroClearsPointerArraySlot) {
     DependencyCurve curve(Context); RCKCurvePoint point(Context); curve.Append(&point); curve.Append(nullptr);
     CKDependencies options; Options(options); CurveDependencyMap dependencies(Context); dependencies.StartDependencies(&options);
     dependencies.Map(point.GetID(), 0); ASSERT_EQ(CK_OK, curve.RemapDependencies(dependencies)); EXPECT_EQ(2, curve.GetControlPointCount());

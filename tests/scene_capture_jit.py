@@ -40,7 +40,7 @@ def main():
     results = []
     for driver in args.drivers.split(","):
         # Metal uses the precompiled interpreter. Exercise every requested mode
-        # and compare all checkpoints, including the no-compilation contract.
+        # and compare all checkpoints, verifying that Metal compiles no JIT shaders.
         compiled = driver != "metal"
         for mode in ("off", "fragment", "on"):
             folder = output / driver / mode

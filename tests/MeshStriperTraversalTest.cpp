@@ -180,7 +180,7 @@ TEST(MeshStriperTraversalTest, CyclicTopologyWithAReversedFaceKeepsMultiplicityA
     }
 }
 
-TEST(MeshStriperTraversalTest, FlagOffRetainsTheNativeUnorientedCoverageContractForAcceptedMixedWinding) {
+TEST(MeshStriperTraversalTest, FlagOffPreservesUnorientedCoverageForMixedWinding) {
     const CKWORD source[] = {0,1,2, 1,2,3};
     CKWORD pair[6]; RotateTriangle(pair,source,0); RotateTriangle(pair+3,source+3,1);
     ExpectCoverage(pair,2,0,1); ExpectCoverage(pair,2,CKMESHSTRIPER_INDEX16,1);

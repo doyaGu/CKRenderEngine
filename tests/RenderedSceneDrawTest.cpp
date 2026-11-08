@@ -60,7 +60,7 @@ public:
 
 // Real engine scene/object/material paths run normally. This observer records
 // only their public device boundary; it does not implement a GPU or pipeline.
-class SceneDrawBoundary : public MaterialRenderObserver {
+class SceneDrawObserver : public MaterialRenderObserver {
 public:
     DrawTrace *Trace = nullptr;
     RCKRenderContext *Device = nullptr;
@@ -131,7 +131,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
-    SceneDrawBoundary Boundary;
+    SceneDrawObserver ObservedRasterizer;
     CKRasterizerDriver Driver;
     DrawTrace Trace;
     int SavedFogProjection = 0;
@@ -153,17 +153,17 @@ protected:
         Manager->m_Drivers[0].Caps3D.MaxNumberTextureStage = 8;
         Manager->m_Drivers[0].Caps3D.MaxNumberBlendStage = 8;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        ASSERT_TRUE(Manager->RegisterRasterizerContext(&Boundary, 0));
+        ASSERT_TRUE(Manager->RegisterRasterizerContext(&ObservedRasterizer, 0));
         Device = static_cast<RCKRenderContext *>(Context->CreateObject(CKCID_RENDERCONTEXT));
         ASSERT_NE(nullptr, Device);
         Device->DetachAll();
-        Device->m_RasterizerContext = &Boundary;
+        Device->m_RasterizerContext = &ObservedRasterizer;
         Device->m_RasterizerDriver = &Driver;
-        Boundary.Device = Device;
+        ObservedRasterizer.Device = Device;
         Device->m_Settings.m_Rect = {0, 0, 100, 100};
         Device->m_ViewportData.ViewWidth = Device->m_ViewportData.ViewHeight = 100;
         Device->m_ViewportData.ViewZMin = 0; Device->m_ViewportData.ViewZMax = 1;
-        Boundary.Viewport = Device->m_ViewportData;
+        ObservedRasterizer.Viewport = Device->m_ViewportData;
         Device->m_Fov = PI / 2; Device->m_NearPlane = 1; Device->m_FarPlane = 100;
         Context->m_BehaviorContext.CurrentRenderContext = Device;
         Device->Get2dRoot(TRUE)->SetRect(VxRect(0, 0, 100, 100));
@@ -229,28 +229,28 @@ protected:
 };
 
 TEST_F(RenderedSceneDrawTest, DefaultStatesHonorTheExplicitDeviceAndKeepNullAsTheContextFallback) {
-    SceneDrawBoundary other;
+    SceneDrawObserver other;
     Device->SetFogMode(VXFOG_NONE);
     Device->SetGlobalRenderMode(FlatShading, TRUE, FALSE);
     Device->m_RenderedScene->SetDefaultRenderStates(&other);
-    EXPECT_EQ(0, Boundary.StateWrites);
+    EXPECT_EQ(0, ObservedRasterizer.StateWrites);
     EXPECT_EQ(TRUE, other.States[VXRENDERSTATE_ZENABLE]);
     EXPECT_EQ(VXCULL_CCW, other.States[VXRENDERSTATE_CULLMODE]);
     EXPECT_EQ(VXCMP_LESSEQUAL, other.States[VXRENDERSTATE_ZFUNC]);
     EXPECT_EQ(VXSHADE_FLAT, other.States[VXRENDERSTATE_SHADEMODE]);
     Device->m_RenderedScene->SetDefaultRenderStates(nullptr);
-    EXPECT_EQ(TRUE, Boundary.States[VXRENDERSTATE_ZENABLE]);
-    EXPECT_EQ(VXSHADE_FLAT, Boundary.States[VXRENDERSTATE_SHADEMODE]);
+    EXPECT_EQ(TRUE, ObservedRasterizer.States[VXRENDERSTATE_ZENABLE]);
+    EXPECT_EQ(VXSHADE_FLAT, ObservedRasterizer.States[VXRENDERSTATE_SHADEMODE]);
 }
 
 TEST_F(RenderedSceneDrawTest, LightSetupUsesItsDeviceCompactsEligibleLightsAndDisablesThePreviousSlots) {
-    SceneDrawBoundary other;
+    SceneDrawObserver other;
     RCKLight *first = Light(7), *inactive = Light(20, FALSE), *second = Light(11), *hidden = Light(30);
     ASSERT_NE(nullptr, first); ASSERT_NE(nullptr, inactive); ASSERT_NE(nullptr, second); ASSERT_NE(nullptr, hidden);
     hidden->Show(CKHIDE);
     Device->SetAmbientLight(0xff123456u);
     Device->m_RenderedScene->SetupLights(&other);
-    EXPECT_EQ(0, Boundary.LightSets);
+    EXPECT_EQ(0, ObservedRasterizer.LightSets);
     ASSERT_EQ(2, other.LightSets); ASSERT_EQ(2, other.LightChanges);
     EXPECT_EQ(0u, other.SetSlots[0]); EXPECT_EQ(1u, other.SetSlots[1]);
     EXPECT_FLOAT_EQ(7, other.Lights[0].Position.x); EXPECT_FLOAT_EQ(11, other.Lights[1].Position.x);
@@ -265,11 +265,11 @@ TEST_F(RenderedSceneDrawTest, LightSetupUsesItsDeviceCompactsEligibleLightsAndDi
     EXPECT_EQ(0u, other.SetSlots[0]); EXPECT_FLOAT_EQ(11, other.Lights[0].Position.x);
     EXPECT_EQ(0u, other.ChangeSlots[2]); EXPECT_EQ(TRUE, other.ChangeEnabled[2]);
     second->Active(FALSE);
-    Boundary.LightChanges = Boundary.LightSets = 0;
+    ObservedRasterizer.LightChanges = ObservedRasterizer.LightSets = 0;
     Device->m_RenderedScene->SetupLights(nullptr);
-    EXPECT_EQ(0, Boundary.LightSets); ASSERT_EQ(1, Boundary.LightChanges);
-    EXPECT_EQ(0u, Boundary.ChangeSlots[0]); EXPECT_EQ(FALSE, Boundary.ChangeEnabled[0]);
-    EXPECT_EQ(0xff123456u, Boundary.States[VXRENDERSTATE_AMBIENT]);
+    EXPECT_EQ(0, ObservedRasterizer.LightSets); ASSERT_EQ(1, ObservedRasterizer.LightChanges);
+    EXPECT_EQ(0u, ObservedRasterizer.ChangeSlots[0]); EXPECT_EQ(FALSE, ObservedRasterizer.ChangeEnabled[0]);
+    EXPECT_EQ(0xff123456u, ObservedRasterizer.States[VXRENDERSTATE_AMBIENT]);
 }
 
 TEST_F(RenderedSceneDrawTest, FogCapabilityFallbackAndAllProjectionModesPublishTheActualFloatPayloads) {
@@ -285,25 +285,25 @@ TEST_F(RenderedSceneDrawTest, FogCapabilityFallbackAndAllProjectionModesPublishT
     for (int mode = 0; mode < 3; ++mode) {
         SCOPED_TRACE(mode); g_FogProjectionMode = mode;
         Device->m_RenderedScene->SetDefaultRenderStates(nullptr);
-        EXPECT_EQ(TRUE, Boundary.States[VXRENDERSTATE_FOGENABLE]);
-        EXPECT_EQ(VXFOG_EXP2, Boundary.States[VXRENDERSTATE_FOGPIXELMODE]);
-        EXPECT_EQ(Bits(starts[mode]), Boundary.States[VXRENDERSTATE_FOGSTART]);
-        EXPECT_EQ(Bits(ends[mode]), Boundary.States[VXRENDERSTATE_FOGEND]);
-        EXPECT_EQ(Bits(.125f), Boundary.States[VXRENDERSTATE_FOGDENSITY]);
-        EXPECT_EQ(0xff224466u, Boundary.States[VXRENDERSTATE_FOGCOLOR]);
+        EXPECT_EQ(TRUE, ObservedRasterizer.States[VXRENDERSTATE_FOGENABLE]);
+        EXPECT_EQ(VXFOG_EXP2, ObservedRasterizer.States[VXRENDERSTATE_FOGPIXELMODE]);
+        EXPECT_EQ(Bits(starts[mode]), ObservedRasterizer.States[VXRENDERSTATE_FOGSTART]);
+        EXPECT_EQ(Bits(ends[mode]), ObservedRasterizer.States[VXRENDERSTATE_FOGEND]);
+        EXPECT_EQ(Bits(.125f), ObservedRasterizer.States[VXRENDERSTATE_FOGDENSITY]);
+        EXPECT_EQ(0xff224466u, ObservedRasterizer.States[VXRENDERSTATE_FOGCOLOR]);
     }
     Manager->m_Drivers[0].Caps3D.RasterCaps = CKRST_RASTERCAPS_FOGPIXEL;
     Device->m_RenderedScene->SetDefaultRenderStates(nullptr);
-    EXPECT_EQ(VXFOG_LINEAR, Boundary.States[VXRENDERSTATE_FOGVERTEXMODE]);
+    EXPECT_EQ(VXFOG_LINEAR, ObservedRasterizer.States[VXRENDERSTATE_FOGVERTEXMODE]);
     EXPECT_EQ(VXFOG_EXP2, Device->GetFogMode()); // Requested scene value is not permanently rewritten by a fallback.
     Manager->m_Drivers[0].Caps3D.RasterCaps |= CKRST_RASTERCAPS_FOGRANGE;
     Manager->m_ForceLinearFog.Value = TRUE;
     Device->m_RenderedScene->SetDefaultRenderStates(nullptr);
-    EXPECT_EQ(VXFOG_LINEAR, Boundary.States[VXRENDERSTATE_FOGPIXELMODE]);
+    EXPECT_EQ(VXFOG_LINEAR, ObservedRasterizer.States[VXRENDERSTATE_FOGPIXELMODE]);
     EXPECT_EQ(VXFOG_EXP2, Device->GetFogMode());
     Device->SetFogMode(VXFOG_NONE);
     Device->m_RenderedScene->SetDefaultRenderStates(nullptr);
-    EXPECT_EQ(FALSE, Boundary.States[VXRENDERSTATE_FOGENABLE]);
+    EXPECT_EQ(FALSE, ObservedRasterizer.States[VXRENDERSTATE_FOGENABLE]);
 }
 
 TEST_F(RenderedSceneDrawTest, GlobalFlatAndWireframeSurviveTheActualMaterialSubmissionAndReleaseOnTheNextFrame) {
@@ -312,12 +312,12 @@ TEST_F(RenderedSceneDrawTest, GlobalFlatAndWireframeSurviveTheActualMaterialSubm
     const CKDWORD shade[3] = {VXSHADE_FLAT, VXSHADE_GOURAUD, VXSHADE_GOURAUD};
     const CKDWORD fill[3] = {VXFILL_SOLID, VXFILL_WIREFRAME, VXFILL_SOLID};
     for (int i = 0; i < 3; ++i) {
-        SCOPED_TRACE(i); Boundary.Draws = 0;
+        SCOPED_TRACE(i); ObservedRasterizer.Draws = 0;
         Device->SetGlobalRenderMode(modes[i], TRUE, FALSE);
         ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-        ASSERT_EQ(1, Boundary.Draws);
-        EXPECT_EQ(shade[i], Boundary.DrawShade[0]);
-        EXPECT_EQ(fill[i], Boundary.DrawFill[0]);
+        ASSERT_EQ(1, ObservedRasterizer.Draws);
+        EXPECT_EQ(shade[i], ObservedRasterizer.DrawShade[0]);
+        EXPECT_EQ(fill[i], ObservedRasterizer.DrawFill[0]);
     }
 }
 
@@ -328,11 +328,11 @@ TEST_F(RenderedSceneDrawTest, DisableSpecularSurvivesALitMaterialAndCanBeRelease
     material->SetSpecular(VxColor(1, 1, 1, 1));
     Manager->m_DisableSpecular.Value = TRUE;
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    ASSERT_EQ(1, Boundary.Draws); EXPECT_EQ(FALSE, Boundary.DrawSpecular[0]);
+    ASSERT_EQ(1, ObservedRasterizer.Draws); EXPECT_EQ(FALSE, ObservedRasterizer.DrawSpecular[0]);
     Manager->m_DisableSpecular.Value = FALSE;
-    Boundary.Draws = 0;
+    ObservedRasterizer.Draws = 0;
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    ASSERT_EQ(1, Boundary.Draws); EXPECT_EQ(TRUE, Boundary.DrawSpecular[0]);
+    ASSERT_EQ(1, ObservedRasterizer.Draws); EXPECT_EQ(TRUE, ObservedRasterizer.DrawSpecular[0]);
 }
 
 TEST_F(RenderedSceneDrawTest, ActualSceneDrawOrdersSpritesLightsManagersCallbacksAndBothGeometryPasses) {
@@ -346,22 +346,22 @@ TEST_F(RenderedSceneDrawTest, ActualSceneDrawOrdersSpritesLightsManagersCallback
     Device->AddPostRenderCallBack(TraceCallback, &before, FALSE, TRUE);
     Device->AddPostRenderCallBack(TraceCallback, &post, FALSE, FALSE);
     Device->AddPostSpriteRenderCallBack(TraceCallback, &final, FALSE);
-    Boundary.Trace = &Trace;
+    ObservedRasterizer.Trace = &Trace;
     const CK_RENDER_FLAGS flags = static_cast<CK_RENDER_FLAGS>(CK_RENDER_DONOTUPDATEEXTENTS | CK_RENDER_BACKGROUNDSPRITES | CK_RENDER_FOREGROUNDSPRITES);
     ASSERT_EQ(CK_OK, Device->DrawScene(flags));
     const int expected[] = {Begin, Background, PreCallback, PreManager, Opaque, BeforeTransparent, Transparent, PostCallback, PostManager, End, Overlay, Foreground, PostSpriteManager, FinalCallback};
     Trace.Expect(expected, sizeof(expected) / sizeof(expected[0]));
-    ASSERT_EQ(4, Boundary.Draws); EXPECT_EQ(1, Boundary.LightSets);
-    EXPECT_EQ(opaque->GetID(), Boundary.DrawEntity[1]);
-    EXPECT_EQ(transparent->GetID(), Boundary.DrawEntity[2]);
+    ASSERT_EQ(4, ObservedRasterizer.Draws); EXPECT_EQ(1, ObservedRasterizer.LightSets);
+    EXPECT_EQ(opaque->GetID(), ObservedRasterizer.DrawEntity[1]);
+    EXPECT_EQ(transparent->GetID(), ObservedRasterizer.DrawEntity[2]);
     EXPECT_EQ(0u, Device->m_DrawSceneCalls); EXPECT_FALSE(Device->m_SortTransparentObjects);
     EXPECT_EQ(FALSE, g_UpdateTransparency);
-    Trace.Count = Boundary.Draws = 0;
-    const int previousLights = Boundary.LightSets;
+    Trace.Count = ObservedRasterizer.Draws = 0;
+    const int previousLights = ObservedRasterizer.LightSets;
     ASSERT_EQ(CK_OK, Device->DrawScene(static_cast<CK_RENDER_FLAGS>(flags | CK_RENDER_SKIP3D)));
     const int skipped[] = {Begin, Background, End, Overlay, Foreground, PostSpriteManager, FinalCallback};
     Trace.Expect(skipped, sizeof(skipped) / sizeof(skipped[0]));
-    EXPECT_EQ(2, Boundary.Draws); EXPECT_EQ(previousLights, Boundary.LightSets);
+    EXPECT_EQ(2, ObservedRasterizer.Draws); EXPECT_EQ(previousLights, ObservedRasterizer.LightSets);
     Device->RemovePreRenderCallBack(TraceCallback, &pre);
     Device->RemovePostRenderCallBack(TraceCallback, &before);
     Device->RemovePostRenderCallBack(TraceCallback, &post);
@@ -391,16 +391,16 @@ TEST_F(RenderedSceneDrawTest, MasterPlaneAttributePreservesTheEyeAndPublishesOff
     EXPECT_FLOAT_EQ(1, Device->GetViewpoint()->GetWorldMatrix()[3].x);
     EXPECT_FLOAT_EQ(.5f, Device->GetViewpoint()->GetWorldMatrix()[3].y);
     EXPECT_FLOAT_EQ(0, Device->GetViewpoint()->GetWorldMatrix()[3].z);
-    EXPECT_FLOAT_EQ(-1, Boundary.Matrices[VXMATRIX_VIEW][3].x);
-    EXPECT_FLOAT_EQ(-.5f, Boundary.Matrices[VXMATRIX_VIEW][3].y);
-    const VxMatrix &projected = Boundary.Matrices[VXMATRIX_PROJECTION];
+    EXPECT_FLOAT_EQ(-1, ObservedRasterizer.Matrices[VXMATRIX_VIEW][3].x);
+    EXPECT_FLOAT_EQ(-.5f, ObservedRasterizer.Matrices[VXMATRIX_VIEW][3].y);
+    const VxMatrix &projected = ObservedRasterizer.Matrices[VXMATRIX_PROJECTION];
     EXPECT_NEAR(5, projected[0][0], 1e-5f); EXPECT_NEAR(10, projected[1][1], 1e-5f);
     EXPECT_NEAR(.5f, projected[2][0], 1e-5f); EXPECT_NEAR(.5f, projected[2][1], 1e-5f);
     EXPECT_NEAR(100.0f / 99, projected[2][2], 1e-5f);
     EXPECT_NEAR(-100.0f / 99, projected[3][2], 1e-5f);
     EXPECT_FLOAT_EQ(1, projected[2][3]); EXPECT_FLOAT_EQ(0, projected[3][3]);
-    EXPECT_EQ(viewport.ViewX, Boundary.Viewport.ViewX); EXPECT_EQ(viewport.ViewY, Boundary.Viewport.ViewY);
-    EXPECT_EQ(viewport.ViewWidth, Boundary.Viewport.ViewWidth); EXPECT_EQ(viewport.ViewHeight, Boundary.Viewport.ViewHeight);
+    EXPECT_EQ(viewport.ViewX, ObservedRasterizer.Viewport.ViewX); EXPECT_EQ(viewport.ViewY, ObservedRasterizer.Viewport.ViewY);
+    EXPECT_EQ(viewport.ViewWidth, ObservedRasterizer.Viewport.ViewWidth); EXPECT_EQ(viewport.ViewHeight, ObservedRasterizer.Viewport.ViewHeight);
     VxMatrix rotated = VxMatrix::Identity();
     rotated[0].Set(0, 0, -1, 0); rotated[2].Set(1, 0, 0, 0); rotated[3].Set(10, 0, 0, 1);
     plane->SetWorldMatrix(rotated);
@@ -411,10 +411,10 @@ TEST_F(RenderedSceneDrawTest, MasterPlaneAttributePreservesTheEyeAndPublishesOff
     EXPECT_FLOAT_EQ(-1, Device->GetViewpoint()->GetWorldMatrix()[3].z);
     EXPECT_FLOAT_EQ(-1, Device->GetViewpoint()->GetWorldMatrix()[0].z);
     EXPECT_FLOAT_EQ(1, Device->GetViewpoint()->GetWorldMatrix()[2].x);
-    EXPECT_FLOAT_EQ(1, Boundary.Matrices[VXMATRIX_VIEW][0][2]);
-    EXPECT_FLOAT_EQ(-1, Boundary.Matrices[VXMATRIX_VIEW][2][0]);
-    EXPECT_NEAR(5, Boundary.Matrices[VXMATRIX_PROJECTION][0][0], 1e-5f);
-    EXPECT_NEAR(.5f, Boundary.Matrices[VXMATRIX_PROJECTION][2][0], 1e-5f);
+    EXPECT_FLOAT_EQ(1, ObservedRasterizer.Matrices[VXMATRIX_VIEW][0][2]);
+    EXPECT_FLOAT_EQ(-1, ObservedRasterizer.Matrices[VXMATRIX_VIEW][2][0]);
+    EXPECT_NEAR(5, ObservedRasterizer.Matrices[VXMATRIX_PROJECTION][0][0], 1e-5f);
+    EXPECT_NEAR(.5f, ObservedRasterizer.Matrices[VXMATRIX_PROJECTION][2][0], 1e-5f);
     ASSERT_TRUE(eye->RemoveAttribute(attribute));
     ASSERT_EQ(CK_OK, Context->DestroyObject(plane));
     // This actual deletion notification must clear the borrow before the
@@ -422,10 +422,10 @@ TEST_F(RenderedSceneDrawTest, MasterPlaneAttributePreservesTheEyeAndPublishesOff
     ASSERT_EQ(nullptr, Device->m_Camera);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
     VxMatrix normal; normal.Perspective(PI / 2, 1, 1, 100);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], normal);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], normal);
     ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
     EXPECT_EQ(nullptr, Device->m_Camera);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], normal);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], normal);
     EXPECT_FLOAT_EQ(1, Device->GetViewpoint()->GetWorldMatrix()[0].x);
     EXPECT_FLOAT_EQ(-1, Device->GetViewpoint()->GetWorldMatrix()[3].z);
 }
@@ -434,22 +434,22 @@ TEST_F(RenderedSceneDrawTest, PhaseFailuresStopLaterWorkAndAnEmptyViewportDoesNo
     ASSERT_NE(nullptr, Sprite(TRUE)); ASSERT_NE(nullptr, Sprite(FALSE));
     CallbackEvent final = {&Trace, FinalCallback};
     Device->AddPostSpriteRenderCallBack(TraceCallback, &final, FALSE);
-    Boundary.Trace = &Trace;
+    ObservedRasterizer.Trace = &Trace;
     const CK_RENDER_FLAGS flags = static_cast<CK_RENDER_FLAGS>(CK_RENDER_SKIP3D | CK_RENDER_BACKGROUNDSPRITES | CK_RENDER_FOREGROUNDSPRITES);
     Device->m_ViewportData.ViewWidth = 0;
     ASSERT_EQ(CK_OK, Device->DrawScene(flags)); EXPECT_EQ(0, Trace.Count);
     Device->m_ViewportData.ViewWidth = 100;
-    Boundary.BeginResult = FALSE; Boundary.DeviceStatus = CKERR_INVALIDRENDERCONTEXT;
+    ObservedRasterizer.BeginResult = FALSE; ObservedRasterizer.DeviceStatus = CKERR_INVALIDRENDERCONTEXT;
     EXPECT_EQ(CKERR_INVALIDRENDERCONTEXT, Device->DrawScene(flags));
     const int beginFailed[] = {Begin}; Trace.Expect(beginFailed, 1);
-    Trace.Count = 0; Boundary.BeginResult = TRUE; Boundary.EndResult = FALSE;
+    Trace.Count = 0; ObservedRasterizer.BeginResult = TRUE; ObservedRasterizer.EndResult = FALSE;
     EXPECT_EQ(CKERR_INVALIDRENDERCONTEXT, Device->DrawScene(flags));
     const int endFailed[] = {Begin, Background, End}; Trace.Expect(endFailed, 3);
     EXPECT_EQ(FALSE, g_UpdateTransparency);
-    Trace.Count = 0; Boundary.EndResult = TRUE; Boundary.OverlayResult = FALSE; Boundary.DeviceStatus = CK_OK;
+    Trace.Count = 0; ObservedRasterizer.EndResult = TRUE; ObservedRasterizer.OverlayResult = FALSE; ObservedRasterizer.DeviceStatus = CK_OK;
     EXPECT_EQ(CKERR_INVALIDOPERATION, Device->DrawScene(flags));
     const int overlayFailed[] = {Begin, Background, End, Overlay}; Trace.Expect(overlayFailed, 4);
-    Trace.Count = 0; Boundary.OverlayResult = TRUE;
+    Trace.Count = 0; ObservedRasterizer.OverlayResult = TRUE;
     ASSERT_EQ(CK_OK, Device->DrawScene(flags));
     const int recovered[] = {Begin, Background, End, Overlay, Foreground, FinalCallback};
     Trace.Expect(recovered, 6); EXPECT_EQ(0u, Device->m_DrawSceneCalls);

@@ -97,7 +97,7 @@ void operator delete[](void *pointer) noexcept {
 }
 void operator delete[](void *pointer, size_t) noexcept { ::operator delete[](pointer); }
 
-TEST_F(BezierScaleLifecycleTest, ConstructorAndMeasuredLayoutDefineThePortableOwnershipContract) {
+TEST_F(BezierScaleLifecycleTest, ConstructorInitializesOwnedKeysAndPointerAlignedFields) {
     InspectBezierScale controller; controller.Layout();
     EXPECT_EQ(sizeof(void *) == 8 ? 40u : 24u, sizeof(RCKBezierScaleController));
     EXPECT_EQ(sizeof(void *), alignof(RCKBezierScaleController)); EXPECT_EQ(44u, sizeof(CKBezierScaleKey));

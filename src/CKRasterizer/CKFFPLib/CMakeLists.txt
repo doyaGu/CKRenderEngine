@@ -1,7 +1,7 @@
 # Reusable CPU fixed-function implementation of the concrete SDL_gpu
 # rasterizer context. Each layer includes only the layers
 # listed before it:
-#   Interface      data contracts shared with the rasterizer contexts
+#   Interface      vertex, texture and render-state types shared with rasterizer contexts
 #   State          fixed-function state vocabulary and texture stage rules
 #   ShaderModel    shader keys, shader ABI and the native fragment JIT front end
 #   FixedFunction  the pipeline runtime the contexts own

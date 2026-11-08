@@ -2131,7 +2131,7 @@ CKERROR RCKMesh::Load(CKStateChunk *chunk, CKFile *file) {
             CKMaterial *material = (CKMaterial *) chunk->ReadObject(m_Context);
             int channelIndex = -1;
             if (file) {
-                // File reloads retain the native material-based merge contract.
+                // File reloads merge material groups by material identity as in the original engine.
                 channelIndex = AddChannel(material, TRUE);
             } else if (m_MaterialChannels.Size() < 16) {
                 // State chunks describe stored slots, including null or duplicate

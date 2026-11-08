@@ -301,7 +301,7 @@ int RayIntersectionGenericFunc(RCKMesh *mesh, VxVector &origin, VxVector &direct
                 CKMaterial *mat = mesh->GetFaceMaterial(f);
                 CKBOOL twoSided = mat && mat->IsTwoSided();
 
-                // Keep the SDK plane/culling contract, but include triangle
+                // Keep SDK plane orientation and back-face culling, but include triangle
                 // boundaries for both windings rather than its SIMD face test.
                 VxPlane plane;
                 plane.Create(*faceNormalPtr, *v0);

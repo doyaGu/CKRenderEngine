@@ -9,7 +9,7 @@ extern void SetProcessorSpecific_FunctionsPtr();
 namespace {
 // Resource and readback acknowledgement only. Production bitmap conversion,
 // per-context resource bookkeeping and deferred-copy dispatch execute normally.
-class SpriteTransferBoundary : public CKRasterizerContext {
+class SpriteTransferObserver : public CKRasterizerContext {
 public:
     int Creates=0,Uploads=0,Deletes=0,Requests=0;
     CKDWORD NextHandle=1,UploadedHandle=0,DeletedHandle=0;
@@ -36,7 +36,7 @@ public:
     CKWORD BatchIndices[6] = {};
     VxVector4 BatchPositions[4];
     VxVector BatchWorldPosition;
-    SpriteTransferBoundary() {
+    SpriteTransferObserver() {
         for (int i = 0; i < 32; ++i) Matrices[i].SetIdentity();
     }
     CKBOOL Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp, CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp) override { ADD_FAILURE() << "Unexpected rasterizer call: Create"; return FALSE; }
@@ -55,7 +55,7 @@ public:
     CKBOOL GetRenderState(VXRENDERSTATETYPE State, CKDWORD *Value) override { *Value = States[(unsigned int)State]; return TRUE; }
     CKBOOL SetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD Value) override { StageStates[Stage][Tss] = Value; return TRUE; }
     CKBOOL GetTextureStageState(int Stage, CKRST_TEXTURESTAGESTATETYPE Tss, CKDWORD *Value) override { *Value = StageStates[Stage][Tss]; return TRUE; }
-    CKBOOL ResetTextureStages(int FirstStage, int StageCount) override { return TRUE; } // Boundary acknowledgement; no pipeline implementation.
+    CKBOOL ResetTextureStages(int FirstStage, int StageCount) override { return TRUE; } // ObservedRasterizer acknowledgement; no pipeline implementation.
     CKBOOL SetTexture(CKDWORD Texture, int Stage) override { Textures[Stage] = Texture; return TRUE; }
     CKBOOL GetTexture(int Stage, CKDWORD *Texture) override { *Texture = Textures[Stage]; return TRUE; }
     CKBOOL SetTransformMatrix(VXMATRIX_TYPE Type, const VxMatrix &Mat) override { Matrices[(unsigned int)Type] = Mat; if (Type == VXMATRIX_WORLD) { World = Mat; ++WorldWrites; } return TRUE; }
@@ -129,7 +129,7 @@ public:
 class SpriteTransferTest : public ::testing::Test {
 protected:
     CKContext *Context=nullptr; RCKRenderManager *Manager=nullptr;
-    RCKRenderContext *View[2]={}; SpriteTransferBoundary Boundary[2]; TransferSprite *Sprite=nullptr;
+    RCKRenderContext *View[2]={}; SpriteTransferObserver ObservedRasterizer[2]; TransferSprite *Sprite=nullptr;
     void SetUp() override {
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK,CKStartUp());
         CKCLASSREGISTERCID(RCKRenderObject,CKCID_BEOBJECT);
@@ -137,21 +137,21 @@ protected:
         CKCLASSREGISTERCID(RCKSprite,CKCID_2DENTITY);
         CKBuildClassHierarchyTable(); ASSERT_EQ(CK_OK,CKCreateContext(&Context,nullptr,0,0));
         Manager=new RCKRenderManager(Context); Manager->m_SpriteVideoFormat.Value=_32_ARGB8888;
-        Boundary[1].NextHandle=100;
-        for(int i=0;i<2;++i) { View[i]=new RCKRenderContext(Context); View[i]->m_RasterizerContext=&Boundary[i]; }
+        ObservedRasterizer[1].NextHandle=100;
+        for(int i=0;i<2;++i) { View[i]=new RCKRenderContext(Context); View[i]->m_RasterizerContext=&ObservedRasterizer[i]; }
         Sprite=new TransferSprite(Context); ASSERT_TRUE(Sprite->Create(4,4,32));
         for(int y=0;y<4;++y) for(int x=0;x<4;++x) ASSERT_TRUE(Sprite->SetPixel(x,y,0xff000000u|((y*4+x+1)*0x010101u)));
     }
     void TearDown() override {
         for(int i=0;i<2;++i) {
-            if(Boundary[i].PendingCallback) Boundary[i].Complete(nullptr,FALSE);
-            Boundary[i].FailDelete=FALSE;
+            if(ObservedRasterizer[i].PendingCallback) ObservedRasterizer[i].Complete(nullptr,FALSE);
+            ObservedRasterizer[i].FailDelete=FALSE;
         }
         delete Sprite;
         for(int i=0;i<2;++i) { View[i]->m_RasterizerContext=nullptr; delete View[i]; }
         CKCloseContext(Context); CKShutdown();
     }
-    CKDWORD Pixel(const SpriteTransferBoundary &b,int index) {
+    CKDWORD Pixel(const SpriteTransferObserver &b,int index) {
         CKDWORD pixel=0; memcpy(&pixel,b.Bytes+index*4,4); return pixel;
     }
     static VxImageDescEx Image(CKDWORD *pixels,int w=4,int h=4) {
@@ -163,80 +163,80 @@ protected:
 class SpriteContextCopyTest : public SpriteTransferTest {};
 TEST_F(SpriteContextCopyTest, CopyRejectsUnresidentAndForeignContextWithoutReadback) {
     EXPECT_FALSE(Sprite->CopyContext(View[0],nullptr,nullptr)); ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0]));
-    EXPECT_FALSE(Sprite->CopyContext(View[1],nullptr,nullptr)); EXPECT_EQ(0,Boundary[0].Requests); EXPECT_EQ(0,Boundary[1].Requests);
+    EXPECT_FALSE(Sprite->CopyContext(View[1],nullptr,nullptr)); EXPECT_EQ(0,ObservedRasterizer[0].Requests); EXPECT_EQ(0,ObservedRasterizer[1].Requests);
 }
 TEST_F(SpriteContextCopyTest, CopyQueuesBackbufferReadAndUploadStartsOnlyOnCompletion) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); ASSERT_TRUE(Sprite->CopyContext(View[0],nullptr,nullptr));
-    EXPECT_EQ(1,Boundary[0].Uploads); EXPECT_FALSE(Boundary[0].HasReadRegion);
+    EXPECT_EQ(1,ObservedRasterizer[0].Uploads); EXPECT_FALSE(ObservedRasterizer[0].HasReadRegion);
     CKDWORD pixels[16]; for(int i=0;i<16;++i) pixels[i]=0xffa00000u+i;
-    VxImageDescEx image=Image(pixels); Boundary[0].Complete(&image);
-    EXPECT_EQ(2,Boundary[0].Uploads); EXPECT_EQ(0xffa00000u,Pixel(Boundary[0],0)); EXPECT_EQ(0xffa0000fu,Pixel(Boundary[0],15));
+    VxImageDescEx image=Image(pixels); ObservedRasterizer[0].Complete(&image);
+    EXPECT_EQ(2,ObservedRasterizer[0].Uploads); EXPECT_EQ(0xffa00000u,Pixel(ObservedRasterizer[0],0)); EXPECT_EQ(0xffa0000fu,Pixel(ObservedRasterizer[0],15));
     EXPECT_EQ(0xff010101u,Sprite->GetPixel(0,0)); // CopyContext updates video, not the authoritative system bitmap.
 }
 TEST_F(SpriteContextCopyTest, DeferredCopySnapshotsSourceAndDestinationRectangles) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); VxRect source(7,9,9,11),dest(1,2,3,4);
     ASSERT_TRUE(Sprite->CopyContext(View[0],&source,&dest)); source=VxRect(0,0,1,1); dest=VxRect(0,0,1,1);
-    EXPECT_TRUE(Boundary[0].HasReadRegion); EXPECT_EQ(7,Boundary[0].ReadRegion.left); EXPECT_EQ(9,Boundary[0].ReadRegion.top);
-    CKDWORD pixels[]={0xff112233,0xff445566,0xff778899,0xffabcdef}; VxImageDescEx image=Image(pixels,2,2); Boundary[0].Complete(&image);
-    EXPECT_TRUE(Boundary[0].HasUploadRegion); EXPECT_EQ(1,Boundary[0].UploadRegion.left); EXPECT_EQ(2,Boundary[0].UploadRegion.top);
-    EXPECT_EQ(3,Boundary[0].UploadRegion.right); EXPECT_EQ(4,Boundary[0].UploadRegion.bottom); EXPECT_EQ(0xff112233u,Pixel(Boundary[0],0));
+    EXPECT_TRUE(ObservedRasterizer[0].HasReadRegion); EXPECT_EQ(7,ObservedRasterizer[0].ReadRegion.left); EXPECT_EQ(9,ObservedRasterizer[0].ReadRegion.top);
+    CKDWORD pixels[]={0xff112233,0xff445566,0xff778899,0xffabcdef}; VxImageDescEx image=Image(pixels,2,2); ObservedRasterizer[0].Complete(&image);
+    EXPECT_TRUE(ObservedRasterizer[0].HasUploadRegion); EXPECT_EQ(1,ObservedRasterizer[0].UploadRegion.left); EXPECT_EQ(2,ObservedRasterizer[0].UploadRegion.top);
+    EXPECT_EQ(3,ObservedRasterizer[0].UploadRegion.right); EXPECT_EQ(4,ObservedRasterizer[0].UploadRegion.bottom); EXPECT_EQ(0xff112233u,Pixel(ObservedRasterizer[0],0));
 }
 TEST_F(SpriteContextCopyTest, ReadbackQueueRejectionDoesNotUpload) {
-    ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); Boundary[0].FailRequest=TRUE;
-    EXPECT_FALSE(Sprite->CopyContext(View[0],nullptr,nullptr)); EXPECT_EQ(nullptr,Boundary[0].PendingCallback); EXPECT_EQ(1,Boundary[0].Uploads);
+    ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); ObservedRasterizer[0].FailRequest=TRUE;
+    EXPECT_FALSE(Sprite->CopyContext(View[0],nullptr,nullptr)); EXPECT_EQ(nullptr,ObservedRasterizer[0].PendingCallback); EXPECT_EQ(1,ObservedRasterizer[0].Uploads);
 }
 TEST_F(SpriteContextCopyTest, ReadbackFailureDoesNotUploadOrMutateSystemPixels) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); ASSERT_TRUE(Sprite->CopyContext(View[0],nullptr,nullptr));
-    Boundary[0].Complete(nullptr,FALSE); EXPECT_EQ(1,Boundary[0].Uploads); EXPECT_EQ(0xff010101u,Sprite->GetPixel(0,0));
+    ObservedRasterizer[0].Complete(nullptr,FALSE); EXPECT_EQ(1,ObservedRasterizer[0].Uploads); EXPECT_EQ(0xff010101u,Sprite->GetPixel(0,0));
 }
 TEST_F(SpriteContextCopyTest, ReadbackAfterVideoFreeDoesNotReallocateOrUpload) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); ASSERT_TRUE(Sprite->CopyContext(View[0],nullptr,nullptr)); ASSERT_TRUE(Sprite->FreeVideoMemory());
-    CKDWORD pixels[16]={}; VxImageDescEx image=Image(pixels); Boundary[0].Complete(&image);
-    EXPECT_EQ(1,Boundary[0].Creates); EXPECT_EQ(1,Boundary[0].Uploads); EXPECT_FALSE(Sprite->IsInVideoMemory());
+    CKDWORD pixels[16]={}; VxImageDescEx image=Image(pixels); ObservedRasterizer[0].Complete(&image);
+    EXPECT_EQ(1,ObservedRasterizer[0].Creates); EXPECT_EQ(1,ObservedRasterizer[0].Uploads); EXPECT_FALSE(Sprite->IsInVideoMemory());
 }
 TEST_F(SpriteContextCopyTest, ContextSwitchBeforeCompletionUploadsToRequestingCopy) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); CKDWORD first=Sprite->Handle(); ASSERT_TRUE(Sprite->CopyContext(View[0],nullptr,nullptr));
-    ASSERT_TRUE(Sprite->SystemToVideoMemory(View[1])); CKDWORD pixels[16]={0xff123456}; VxImageDescEx image=Image(pixels); Boundary[0].Complete(&image);
-    EXPECT_EQ(2,Boundary[0].Uploads); EXPECT_EQ(first,Boundary[0].UploadedHandle); EXPECT_EQ(1,Boundary[1].Uploads); EXPECT_EQ(0xff123456u,Pixel(Boundary[0],0));
+    ASSERT_TRUE(Sprite->SystemToVideoMemory(View[1])); CKDWORD pixels[16]={0xff123456}; VxImageDescEx image=Image(pixels); ObservedRasterizer[0].Complete(&image);
+    EXPECT_EQ(2,ObservedRasterizer[0].Uploads); EXPECT_EQ(first,ObservedRasterizer[0].UploadedHandle); EXPECT_EQ(1,ObservedRasterizer[1].Uploads); EXPECT_EQ(0xff123456u,Pixel(ObservedRasterizer[0],0));
 }
 TEST_F(SpriteContextCopyTest, ApplyClipsLeadingDestinationAndSkipsCorrespondingSourcePixels) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); CKDWORD pixels[16]; for(int i=0;i<16;++i) pixels[i]=0xffa00000u+i;
     VxImageDescEx image=Image(pixels); VxRect dest(-1,-1,3,3); ASSERT_TRUE(Sprite->Apply(View[0],image,&dest));
-    EXPECT_EQ(0,Boundary[0].UploadRegion.left); EXPECT_EQ(0,Boundary[0].UploadRegion.top); EXPECT_EQ(3,Boundary[0].UploadRegion.right);
-    EXPECT_EQ(3,Boundary[0].Uploaded.Width); EXPECT_EQ(3,Boundary[0].Uploaded.Height); EXPECT_EQ(16,Boundary[0].Uploaded.BytesPerLine);
-    EXPECT_EQ(0xffa00005u,Pixel(Boundary[0],0)); EXPECT_EQ(0xffa0000fu,Pixel(Boundary[0],8));
+    EXPECT_EQ(0,ObservedRasterizer[0].UploadRegion.left); EXPECT_EQ(0,ObservedRasterizer[0].UploadRegion.top); EXPECT_EQ(3,ObservedRasterizer[0].UploadRegion.right);
+    EXPECT_EQ(3,ObservedRasterizer[0].Uploaded.Width); EXPECT_EQ(3,ObservedRasterizer[0].Uploaded.Height); EXPECT_EQ(16,ObservedRasterizer[0].Uploaded.BytesPerLine);
+    EXPECT_EQ(0xffa00005u,Pixel(ObservedRasterizer[0],0)); EXPECT_EQ(0xffa0000fu,Pixel(ObservedRasterizer[0],8));
 }
 TEST_F(SpriteContextCopyTest, ApplyClipsTrailingDestinationToTextureBounds) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); CKDWORD pixels[16]; for(int i=0;i<16;++i) pixels[i]=0xffb00000u+i;
     VxImageDescEx image=Image(pixels); VxRect dest(2,3,6,7); ASSERT_TRUE(Sprite->Apply(View[0],image,&dest));
-    EXPECT_EQ(2,Boundary[0].UploadRegion.left); EXPECT_EQ(3,Boundary[0].UploadRegion.top); EXPECT_EQ(4,Boundary[0].UploadRegion.right); EXPECT_EQ(4,Boundary[0].UploadRegion.bottom);
-    EXPECT_EQ(2,Boundary[0].Uploaded.Width); EXPECT_EQ(1,Boundary[0].Uploaded.Height); EXPECT_EQ(0xffb00000u,Pixel(Boundary[0],0)); EXPECT_EQ(0xffb00001u,Pixel(Boundary[0],1));
+    EXPECT_EQ(2,ObservedRasterizer[0].UploadRegion.left); EXPECT_EQ(3,ObservedRasterizer[0].UploadRegion.top); EXPECT_EQ(4,ObservedRasterizer[0].UploadRegion.right); EXPECT_EQ(4,ObservedRasterizer[0].UploadRegion.bottom);
+    EXPECT_EQ(2,ObservedRasterizer[0].Uploaded.Width); EXPECT_EQ(1,ObservedRasterizer[0].Uploaded.Height); EXPECT_EQ(0xffb00000u,Pixel(ObservedRasterizer[0],0)); EXPECT_EQ(0xffb00001u,Pixel(ObservedRasterizer[0],1));
 }
 TEST_F(SpriteContextCopyTest, ApplyLimitsDestinationExtentToSuppliedSourceImage) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); CKDWORD pixels[]={0xff123456,0xffabcdef}; VxImageDescEx image=Image(pixels,2,1); VxRect dest(1,1,4,4);
-    ASSERT_TRUE(Sprite->Apply(View[0],image,&dest)); EXPECT_EQ(3,Boundary[0].UploadRegion.right); EXPECT_EQ(2,Boundary[0].UploadRegion.bottom);
-    EXPECT_EQ(2,Boundary[0].Uploaded.Width); EXPECT_EQ(1,Boundary[0].Uploaded.Height); EXPECT_EQ(0xffabcdefu,Pixel(Boundary[0],1));
+    ASSERT_TRUE(Sprite->Apply(View[0],image,&dest)); EXPECT_EQ(3,ObservedRasterizer[0].UploadRegion.right); EXPECT_EQ(2,ObservedRasterizer[0].UploadRegion.bottom);
+    EXPECT_EQ(2,ObservedRasterizer[0].Uploaded.Width); EXPECT_EQ(1,ObservedRasterizer[0].Uploaded.Height); EXPECT_EQ(0xffabcdefu,Pixel(ObservedRasterizer[0],1));
 }
 TEST_F(SpriteContextCopyTest, FullyOutsideAndEmptyDestinationDoNotUpload) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); CKDWORD pixels[16]={}; VxImageDescEx image=Image(pixels);
-    VxRect outside(5,0,9,4),empty(1,1,1,3); EXPECT_FALSE(Sprite->Apply(View[0],image,&outside)); EXPECT_FALSE(Sprite->Apply(View[0],image,&empty)); EXPECT_EQ(1,Boundary[0].Uploads);
+    VxRect outside(5,0,9,4),empty(1,1,1,3); EXPECT_FALSE(Sprite->Apply(View[0],image,&outside)); EXPECT_FALSE(Sprite->Apply(View[0],image,&empty)); EXPECT_EQ(1,ObservedRasterizer[0].Uploads);
 }
 TEST_F(SpriteContextCopyTest, ApplyRGB565ConversionKeepsClippedSourceOffset) {
     Sprite->SetDesiredVideoFormat(_16_RGB565); ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0]));
     CKDWORD pixels[]={0xff000000,0xffff0000,0xff00ff00,0xff0000ff}; VxImageDescEx image=Image(pixels,4,1); VxRect dest(-1,0,3,1);
-    ASSERT_TRUE(Sprite->Apply(View[0],image,&dest)); EXPECT_EQ(16,Boundary[0].Uploaded.BitsPerPixel); EXPECT_EQ(3,Boundary[0].Uploaded.Width);
-    CKWORD colors[3]={}; memcpy(colors,Boundary[0].Bytes,6); EXPECT_EQ(0xf800,colors[0]); EXPECT_EQ(0x07e0,colors[1]); EXPECT_EQ(0x001f,colors[2]);
+    ASSERT_TRUE(Sprite->Apply(View[0],image,&dest)); EXPECT_EQ(16,ObservedRasterizer[0].Uploaded.BitsPerPixel); EXPECT_EQ(3,ObservedRasterizer[0].Uploaded.Width);
+    CKWORD colors[3]={}; memcpy(colors,ObservedRasterizer[0].Bytes,6); EXPECT_EQ(0xf800,colors[0]); EXPECT_EQ(0x07e0,colors[1]); EXPECT_EQ(0x001f,colors[2]);
 }
 TEST_F(SpriteContextCopyTest, CompressedCopyTargetKeepsReadableARGBSourceAndPixelRegion) {
     Sprite->SetDesiredVideoFormat(_DXT5); ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0]));
     CKDWORD pixels[]={0xffff0000,0xff00ff00,0xff0000ff,0xffffffff}; VxImageDescEx image=Image(pixels,2,2); VxRect dest(1,1,3,3);
-    ASSERT_TRUE(Sprite->Apply(View[0],image,&dest)); EXPECT_EQ(32,Boundary[0].Uploaded.BitsPerPixel); EXPECT_EQ(0u,Boundary[0].Uploaded.Flags);
-    EXPECT_EQ(0xffff0000u,Pixel(Boundary[0],0)); EXPECT_EQ(0xffffffffu,Pixel(Boundary[0],3)); EXPECT_EQ(1,Boundary[0].UploadRegion.left); EXPECT_EQ(3,Boundary[0].UploadRegion.right);
+    ASSERT_TRUE(Sprite->Apply(View[0],image,&dest)); EXPECT_EQ(32,ObservedRasterizer[0].Uploaded.BitsPerPixel); EXPECT_EQ(0u,ObservedRasterizer[0].Uploaded.Flags);
+    EXPECT_EQ(0xffff0000u,Pixel(ObservedRasterizer[0],0)); EXPECT_EQ(0xffffffffu,Pixel(ObservedRasterizer[0],3)); EXPECT_EQ(1,ObservedRasterizer[0].UploadRegion.left); EXPECT_EQ(3,ObservedRasterizer[0].UploadRegion.right);
 }
 TEST_F(SpriteContextCopyTest, ApplyUploadFailureLeavesVideoAndBitmapStateIntact) {
     ASSERT_TRUE(Sprite->SystemToVideoMemory(View[0])); CKDWORD handle=Sprite->Handle(),pixels[16]={}; VxImageDescEx image=Image(pixels);
-    Boundary[0].FailUpload=TRUE; EXPECT_FALSE(Sprite->Apply(View[0],image)); EXPECT_TRUE(Sprite->IsInVideoMemory()); EXPECT_EQ(handle,Sprite->Handle());
-    EXPECT_FALSE(Sprite->ToRestore()); EXPECT_EQ(0xff010101u,Sprite->GetPixel(0,0)); EXPECT_EQ(0,Boundary[0].Deletes);
+    ObservedRasterizer[0].FailUpload=TRUE; EXPECT_FALSE(Sprite->Apply(View[0],image)); EXPECT_TRUE(Sprite->IsInVideoMemory()); EXPECT_EQ(handle,Sprite->Handle());
+    EXPECT_FALSE(Sprite->ToRestore()); EXPECT_EQ(0xff010101u,Sprite->GetPixel(0,0)); EXPECT_EQ(0,ObservedRasterizer[0].Deletes);
 }
 
 }

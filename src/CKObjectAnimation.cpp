@@ -557,7 +557,7 @@ CKERROR RCKObjectAnimation::Load(CKStateChunk *chunk, CKFile *file) {
                     case CKANIMATION_MORPH_CONTROL:
                         return CKERR_OUTOFMEMORY;
                     default:
-                        break; // Unknown records retain the native skip contract.
+                        break; // Skip unknown animation records as in the original loader.
                     }
                 }
                 if (ctrl) {

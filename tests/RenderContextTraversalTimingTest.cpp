@@ -24,7 +24,7 @@ float WaitForMeasuredWork(int milliseconds) {
 
 // Only the external submission boundary waits. The actual scene traversal,
 // entity/mesh/sprite implementations and all statistics accounting run intact.
-class TraversalTimingBoundary : public MaterialRenderObserver {
+class TraversalTimingObserver : public MaterialRenderObserver {
 public:
     RCKRenderContext *Device = nullptr;
     int Draws = 0, MeshDraws = 0, BackgroundDraws = 0, ForegroundDraws = 0;
@@ -122,7 +122,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
-    TraversalTimingBoundary Boundary;
+    TraversalTimingObserver ObservedRasterizer;
     CKRasterizerDriver Driver;
 
     void SetUp() override {
@@ -143,17 +143,17 @@ protected:
         Manager->m_Drivers[0].Caps3D.MaxNumberTextureStage = 8;
         Manager->m_Drivers[0].Caps3D.MaxNumberBlendStage = 8;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        ASSERT_TRUE(Manager->RegisterRasterizerContext(&Boundary, 0));
+        ASSERT_TRUE(Manager->RegisterRasterizerContext(&ObservedRasterizer, 0));
         Device = new RCKRenderContext(Context);
         Device->DetachAll();
-        Device->m_RasterizerContext = &Boundary;
+        Device->m_RasterizerContext = &ObservedRasterizer;
         Device->m_RasterizerDriver = &Driver;
-        Boundary.Device = Device;
+        ObservedRasterizer.Device = Device;
         Device->m_Settings.m_Rect = {0, 0, 100, 100};
         Device->m_ViewportData.ViewWidth = Device->m_ViewportData.ViewHeight = 100;
         Device->m_ViewportData.ViewZMin = 0;
         Device->m_ViewportData.ViewZMax = 1;
-        Boundary.Viewport = Device->m_ViewportData;
+        ObservedRasterizer.Viewport = Device->m_ViewportData;
         Device->m_NearPlane = 1;
         Device->m_FarPlane = 100;
         Device->m_Fov = PI / 2;
@@ -252,7 +252,7 @@ TEST_F(RenderContextTraversalTimingTest, TraversalCounterCountsEnteredNodesAcros
 TEST_F(RenderContextTraversalTimingTest, NoTestsTraversalAccumulatesTraversalThenRestartsAfterTheRealMeshDraw) {
     RCK3dEntity *entity = Triangle();
     ASSERT_NE(nullptr, entity);
-    Boundary.MeshDelay = 25;
+    ObservedRasterizer.MeshDelay = 25;
     Device->m_Stats.SceneTraversalTime = 17.0f;
     Device->m_SceneTraversalTimeProfiler.Reset();
     WaitForMeasuredWork(20);
@@ -261,20 +261,20 @@ TEST_F(RenderContextTraversalTimingTest, NoTestsTraversalAccumulatesTraversalThe
     entity->m_SceneGraphNode->NoTestsTraversal(Device, CK_RENDER_DONOTUPDATEEXTENTS);
     const float afterRender = Device->m_SceneTraversalTimeProfiler.Current();
     const float total = call.Current();
-    ASSERT_EQ(1, Boundary.MeshDraws);
-    EXPECT_GE(Boundary.MeshWork, 25.0f);
-    EXPECT_GE(Boundary.TraversalAtMesh, 17.0f + idle);
-    EXPECT_FLOAT_EQ(Boundary.TraversalAtMesh, Device->m_Stats.SceneTraversalTime);
-    EXPECT_LE(afterRender, total - Boundary.MeshWork + .5f);
+    ASSERT_EQ(1, ObservedRasterizer.MeshDraws);
+    EXPECT_GE(ObservedRasterizer.MeshWork, 25.0f);
+    EXPECT_GE(ObservedRasterizer.TraversalAtMesh, 17.0f + idle);
+    EXPECT_FLOAT_EQ(ObservedRasterizer.TraversalAtMesh, Device->m_Stats.SceneTraversalTime);
+    EXPECT_LE(afterRender, total - ObservedRasterizer.MeshWork + .5f);
     EXPECT_EQ(1u, Device->m_SceneTraversalCalls);
-    RecordProperty("opaque_boundary_work_ms", Boundary.MeshWork);
+    RecordProperty("opaque_boundary_work_ms", ObservedRasterizer.MeshWork);
     RecordProperty("traversal_epoch_after_opaque_ms", afterRender);
 }
 
 TEST_F(RenderContextTraversalTimingTest, ObjectFramePublishesTheMeasuredEpochMinusItsActualExclusiveStatistics) {
     RCK3dEntity *entity = Triangle();
     ASSERT_NE(nullptr, entity);
-    Boundary.MeshDelay = 20;
+    ObservedRasterizer.MeshDelay = 20;
     ObjectDelay objectCallback;
     objectCallback.Milliseconds = 15;
     ASSERT_TRUE(entity->AddPreRenderCallBack(DelayObject, &objectCallback, FALSE));
@@ -283,12 +283,12 @@ TEST_F(RenderContextTraversalTimingTest, ObjectFramePublishesTheMeasuredEpochMin
     Device->AddPostRenderCallBack(CaptureRawObjects, &measured, FALSE, FALSE);
     Device->AddPostSpriteRenderCallBack(CaptureBeforeFinalSubtraction, &measured, FALSE);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    ASSERT_EQ(1, Boundary.MeshDraws);
+    ASSERT_EQ(1, ObservedRasterizer.MeshDraws);
     ASSERT_EQ(1, objectCallback.Calls);
     ASSERT_EQ(1, measured.PreCalls);
     ASSERT_EQ(1, measured.ObjectCaptures);
     ASSERT_EQ(1, measured.SpriteCaptures);
-    EXPECT_GE(measured.RawObjects, Boundary.MeshWork + objectCallback.Measured);
+    EXPECT_GE(measured.RawObjects, ObservedRasterizer.MeshWork + objectCallback.Measured);
     EXPECT_LE(measured.RawObjects, measured.ObjectEpoch);
     EXPECT_LE(measured.ObjectEpoch, measured.SincePre + .5f);
     VxStats actual = {};
@@ -296,7 +296,7 @@ TEST_F(RenderContextTraversalTimingTest, ObjectFramePublishesTheMeasuredEpochMin
     const VxStats raw = measured.BeforeFinal;
     EXPECT_FLOAT_EQ(measured.RawObjects, raw.ObjectsRenderTime);
     EXPECT_FLOAT_EQ(raw.ObjectsRenderTime - (raw.SceneTraversalTime + raw.TransparentObjectsSortTime + raw.ObjectsCallbacksTime + raw.SkinTime), actual.ObjectsRenderTime);
-    EXPECT_GE(actual.ObjectsRenderTime + .5f, Boundary.MeshWork);
+    EXPECT_GE(actual.ObjectsRenderTime + .5f, ObservedRasterizer.MeshWork);
     EXPECT_GE(actual.ObjectsCallbacksTime, objectCallback.Measured);
     const CKDWORD traversals = Device->m_SceneTraversalCalls;
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_SKIPDRAWSCENE));
@@ -308,7 +308,7 @@ TEST_F(RenderContextTraversalTimingTest, ObjectFramePublishesTheMeasuredEpochMin
     Device->GetStats(&skipped);
     EXPECT_FLOAT_EQ(0, skipped.ObjectsRenderTime);
     EXPECT_FLOAT_EQ(0, skipped.SceneTraversalTime);
-    EXPECT_EQ(1, Boundary.MeshDraws);
+    EXPECT_EQ(1, ObservedRasterizer.MeshDraws);
     RecordProperty("object_raw_ms", raw.ObjectsRenderTime);
     RecordProperty("object_exclusive_ms", actual.ObjectsRenderTime);
     RecordProperty("object_callback_ms", actual.ObjectsCallbacksTime);
@@ -323,22 +323,22 @@ TEST_F(RenderContextTraversalTimingTest, BackgroundAndForegroundSpriteEpochsAccu
     beforeForeground.Milliseconds = 20;
     ASSERT_TRUE(background->AddPreRenderCallBack(DelayObject, &beforeBackground, FALSE));
     ASSERT_TRUE(foreground->AddPreRenderCallBack(DelayObject, &beforeForeground, FALSE));
-    Boundary.BackgroundDelay = 12;
-    Boundary.ForegroundDelay = 18;
+    ObservedRasterizer.BackgroundDelay = 12;
+    ObservedRasterizer.ForegroundDelay = 18;
     FrameMeasurements measured;
     Device->AddPostSpriteRenderCallBack(CaptureBeforeFinalSubtraction, &measured, FALSE);
     Device->m_SpriteTimeProfiler.Reset();
     WaitForMeasuredWork(25); // Deliberately stale epoch must be replaced by each scene phase.
     const CK_RENDER_FLAGS flags = static_cast<CK_RENDER_FLAGS>(CK_RENDER_SKIP3D | CK_RENDER_BACKGROUNDSPRITES | CK_RENDER_FOREGROUNDSPRITES);
     ASSERT_EQ(CK_OK, Device->DrawScene(flags));
-    ASSERT_EQ(1, Boundary.BackgroundDraws);
-    ASSERT_EQ(1, Boundary.ForegroundDraws);
+    ASSERT_EQ(1, ObservedRasterizer.BackgroundDraws);
+    ASSERT_EQ(1, ObservedRasterizer.ForegroundDraws);
     ASSERT_EQ(1, beforeBackground.Calls);
     ASSERT_EQ(1, beforeForeground.Calls);
     ASSERT_EQ(1, measured.SpriteCaptures);
-    const float drawWork = Boundary.BackgroundWork + Boundary.ForegroundWork;
+    const float drawWork = ObservedRasterizer.BackgroundWork + ObservedRasterizer.ForegroundWork;
     const float callbacks = beforeBackground.Measured + beforeForeground.Measured;
-    EXPECT_GE(Boundary.SpriteAtForeground, Boundary.BackgroundWork + beforeBackground.Measured);
+    EXPECT_GE(ObservedRasterizer.SpriteAtForeground, ObservedRasterizer.BackgroundWork + beforeBackground.Measured);
     EXPECT_GE(measured.BeforeFinal.SpriteTime, drawWork + callbacks);
     VxStats actual = {};
     Device->GetStats(&actual);

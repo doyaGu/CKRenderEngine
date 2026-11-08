@@ -8,7 +8,7 @@
 #include "CKSceneGraph.h"
 
 namespace {
-class SpriteBatchBoundary : public TextureTestObserver {
+class SpriteBatchObserver : public TextureTestObserver {
 public:
     CKSprite3DBatch *Batch = nullptr;
     int Draws = 0, VertexCount = 0, IndexCount = 0;
@@ -45,7 +45,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
-    SpriteBatchBoundary State;
+    SpriteBatchObserver State;
     CKRasterizerDriver Driver;
 
     void SetUp() override {

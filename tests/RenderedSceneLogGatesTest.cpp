@@ -13,7 +13,7 @@
 extern void SetProcessorSpecific_FunctionsPtr();
 
 namespace {
-class LogGatesBoundary : public MaterialRenderObserver {
+class LogGatesObserver : public MaterialRenderObserver {
 public:
     int Begins = 0, Ends = 0, Overlays = 0;
     CKBOOL BeginScene() override { ++Begins; return TRUE; }
@@ -26,7 +26,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
-    LogGatesBoundary Boundary;
+    LogGatesObserver ObservedRasterizer;
     CKRasterizerDriver Driver;
     char Path[1024] = {};
     void SetUp() override {
@@ -49,9 +49,9 @@ protected:
         ASSERT_GT(Manager->m_DriverCount, 0);
         Manager->m_Drivers[0].CapsUpToDate = TRUE;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        ASSERT_TRUE(Manager->RegisterRasterizerContext(&Boundary, 0));
+        ASSERT_TRUE(Manager->RegisterRasterizerContext(&ObservedRasterizer, 0));
         Device = new RCKRenderContext(Context);
-        Device->m_RasterizerContext = &Boundary; Device->m_RasterizerDriver = &Driver;
+        Device->m_RasterizerContext = &ObservedRasterizer; Device->m_RasterizerDriver = &Driver;
         Device->m_DriverIndex = 0;
         Device->m_Settings.m_Rect = CKRECT{0, 0, 320, 240};
         Device->m_ViewportData.ViewWidth = 320; Device->m_ViewportData.ViewHeight = 240;
@@ -132,7 +132,7 @@ TEST_F(RenderedSceneLogGatesTest, FrameOutputTracksLiveSettingsAndLoggerWithoutC
     Setting("Enabled", true); CKDebugLogger::Instance().EnableOutput(false);
     const std::string beforeMuted = Read();
     ASSERT_EQ(CK_OK, Draw(TRUE)); EXPECT_EQ(beforeMuted, Read());
-    EXPECT_EQ(4, Boundary.Begins); EXPECT_EQ(4, Boundary.Ends); EXPECT_EQ(4, Boundary.Overlays);
+    EXPECT_EQ(4, ObservedRasterizer.Begins); EXPECT_EQ(4, ObservedRasterizer.Ends); EXPECT_EQ(4, ObservedRasterizer.Overlays);
 }
 
 TEST_F(RenderedSceneLogGatesTest, CameraOutputIsIndependentAndContainsTheActualAttachedPose) {
@@ -154,11 +154,11 @@ TEST_F(RenderedSceneLogGatesTest, CameraOutputIsIndependentAndContainsTheActualA
             EXPECT_NE(std::string::npos, added.find("root row3=(3.000 4.000 5.000)"));
             EXPECT_NE(std::string::npos, added.find("cam row3=(3.000 4.000 5.000)"));
         } else EXPECT_TRUE(added.empty());
-        EXPECT_FLOAT_EQ(3, Boundary.Matrices[VXMATRIX_VIEW][3].x * -1);
-        EXPECT_FLOAT_EQ(4, Boundary.Matrices[VXMATRIX_VIEW][3].y * -1);
-        EXPECT_FLOAT_EQ(5, Boundary.Matrices[VXMATRIX_VIEW][3].z * -1);
+        EXPECT_FLOAT_EQ(3, ObservedRasterizer.Matrices[VXMATRIX_VIEW][3].x * -1);
+        EXPECT_FLOAT_EQ(4, ObservedRasterizer.Matrices[VXMATRIX_VIEW][3].y * -1);
+        EXPECT_FLOAT_EQ(5, ObservedRasterizer.Matrices[VXMATRIX_VIEW][3].z * -1);
     }
-    EXPECT_EQ(3, Boundary.Begins); EXPECT_EQ(3, Boundary.Ends); EXPECT_EQ(3, Boundary.Overlays);
+    EXPECT_EQ(3, ObservedRasterizer.Begins); EXPECT_EQ(3, ObservedRasterizer.Ends); EXPECT_EQ(3, ObservedRasterizer.Overlays);
 }
 
 TEST_F(RenderedSceneLogGatesTest, Skip3dSuppressesCameraOutputWhileLeavingFrameLoggingAvailable) {
@@ -167,6 +167,6 @@ TEST_F(RenderedSceneLogGatesTest, Skip3dSuppressesCameraOutputWhileLeavingFrameL
     EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, text.find("Draw enter") != std::string::npos);
     EXPECT_EQ(std::string::npos, text.find("camera="));
     EXPECT_EQ(std::string::npos, text.find("Attached camera #"));
-    EXPECT_EQ(1, Boundary.Begins); EXPECT_EQ(1, Boundary.Ends); EXPECT_EQ(1, Boundary.Overlays);
+    EXPECT_EQ(1, ObservedRasterizer.Begins); EXPECT_EQ(1, ObservedRasterizer.Ends); EXPECT_EQ(1, ObservedRasterizer.Overlays);
 }
 } // namespace

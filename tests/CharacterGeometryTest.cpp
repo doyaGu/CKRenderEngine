@@ -247,7 +247,7 @@ TEST_F(CharacterGeometryTest, HeadlessUserBoxQueriesUseOwnBaseGeometryWithoutVir
     EXPECT_NEAR(7, base->GetRadius(), 0.0001f);
     VxVector center; ASSERT_TRUE(base->GetBaryCenter(&center)); Vector(center, 11, 21, 31);
     EXPECT_TRUE(base->GetBaryCenter(nullptr));
-    // No children: this test does not introduce a headless aggregation contract.
+    // With no children, this test measures only the character geometry.
     EXPECT_EQ(0, character->GetChildrenCount()); EXPECT_EQ(0, character->GetBodyPartCount());
 }
 } // namespace

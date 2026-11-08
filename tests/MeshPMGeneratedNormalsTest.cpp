@@ -27,7 +27,7 @@ public:
         const CKBOOL result = TextureTestObserver::SetTextureStageState(stage, state, value);
         if (state == CKRST_TSS_TEXTUREMAPBLEND && value == VXTEXTUREBLEND_MODULATEALPHA) {
             // This fixture uses only the SDK's default legacy blend. The
-            // public rasterizer contract exposes its effective MODULATE op;
+            // rasterizer reports its effective MODULATE color operation;
             // storing the legacy selector alone would falsely disable stage0.
             StageStates[stage][CKRST_TSS_OP] = CKRST_TOP_MODULATE;
         }
@@ -330,7 +330,7 @@ TEST_F(MeshPMGeneratedNormalsTest, PublicDrawOutsideMeshRetainsAutomaticLighting
     ASSERT_EQ(2, State.Count); EXPECT_FALSE(State.Draws[1].Lighting); EXPECT_EQ(0u, State.Draws[1].Flags & CKRST_DP_LIGHT);
 }
 TEST_F(MeshPMGeneratedNormalsTest, ConditionalFallbackEntryConsumesActualPMBuildScratchNormalsAndSameUV) {
-    // This directly tests conditional recovery's consumer contract. Natural PM
+    // This checks scratch normals consumed by RenderMonoPassFallback. Natural PM
     // mono eligibility is not claimed and its authored face cache is untouched.
     GeneratedNormalMesh mesh(Context); RCKMaterial base(Context), layer(Context); RCKTexture color(Context), bump(Context), environment(Context);
     Geometry(mesh, base); const int channel = BumpChannel(mesh, layer, color, bump, environment, TRUE); Build(mesh);

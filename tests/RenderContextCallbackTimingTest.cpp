@@ -54,7 +54,7 @@ void SubmeshCall(CKRenderContext *context, CK3dEntity *, CKMesh *, CKMaterial *,
     static_cast<TimedCall *>(argument)->Run(context);
 }
 
-class TimingBoundary : public TextureTestObserver {
+class TimingObserver : public TextureTestObserver {
 public:
     int Draws = 0, LastCount = 0, LastVertices = 0, DrawDelayMs = 0;
     float DrawElapsed = 0;
@@ -84,12 +84,12 @@ public:
         return UpdateResult;
     }
 };
-class SkinMeshBoundary : public RCKMesh {
+class SkinMeshObserver : public RCKMesh {
 public:
     int Draws = 0, DelayMs = 0;
     float DrawElapsed = 0;
     VxVector Sample;
-    explicit SkinMeshBoundary(CKContext *context) : RCKMesh(context) {}
+    explicit SkinMeshObserver(CKContext *context) : RCKMesh(context) {}
     CKERROR Render(CKRenderContext *, CK3dEntity *) override {
         VxTimeProfiler start;
         ++Draws; GetVertexPosition(1, &Sample);
@@ -105,8 +105,8 @@ protected:
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
     MeasuredSkinEntity *SkinEntity = nullptr;
-    SkinMeshBoundary *SkinMesh = nullptr;
-    TimingBoundary Boundary;
+    SkinMeshObserver *SkinMesh = nullptr;
+    TimingObserver ObservedRasterizer;
     XClassArray<CKRasterizerInfo> SavedRasterizers;
     static constexpr float ObjectsSeed = 101, SpritesSeed = 203, SkinSeed = 307;
     void SetUp() override {
@@ -121,7 +121,7 @@ protected:
         SavedRasterizers = g_RasterizersInfo; g_RasterizersInfo.Clear();
         ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
         Manager = new RCKRenderManager(Context); Device = new RCKRenderContext(Context);
-        Device->DetachAll(); Device->m_RasterizerContext = &Boundary;
+        Device->DetachAll(); Device->m_RasterizerContext = &ObservedRasterizer;
         Device->m_Settings.m_Rect = {0,0,200,200};
         VxRect viewRect(0,0,200,200); Device->SetViewRect(viewRect);
         Device->SetWorldTransformationMatrix(VxMatrix::Identity());
@@ -174,7 +174,7 @@ protected:
         EXPECT_FLOAT_EQ(SkinSeed,Device->m_Stats.SkinTime);
     }
     void PrepareSkin(CKBOOL progressive, int count=4096) {
-        SkinEntity = new MeasuredSkinEntity(Context); SkinMesh = new SkinMeshBoundary(Context);
+        SkinEntity = new MeasuredSkinEntity(Context); SkinMesh = new SkinMeshObserver(Context);
         Fill(SkinMesh,count);
         if (progressive) { ASSERT_EQ(CK_OK,SkinMesh->CreatePM()); ASSERT_TRUE(SkinMesh->IsPM()); }
         SkinEntity->SetCurrentMesh(SkinMesh);
@@ -236,11 +236,11 @@ TEST_F(RenderContextCallbackTimingTest, SubmeshCallbacksExcludeTheActualSubmitte
     VxDrawPrimitiveData data={}; data.Flags=static_cast<CKRST_DPFLAGS>(CKRST_DP_TRANSFORM|CKRST_DP_DIFFUSE);
     data.VertexCount=3; data.PositionPtr=positions; data.PositionStride=sizeof(VxVector);
     data.ColorPtr=colors; data.ColorStride=sizeof(CKDWORD);
-    Boundary.DrawDelayMs=31;
+    ObservedRasterizer.DrawDelayMs=31;
     VxTimeProfiler start; ASSERT_EQ(1,mesh->RenderGroup(Device,&group,nullptr,&data)); const float wall=Milliseconds(start);
-    EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,post.Calls); ASSERT_EQ(1,Boundary.Draws);
-    EXPECT_EQ(3,Boundary.LastCount); EXPECT_EQ(3,Boundary.LastVertices);
-    Interval(Device->m_Stats.ObjectsCallbacksTime-ObjectsSeed,pre.Elapsed+post.Elapsed,wall,Boundary.DrawElapsed);
+    EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,post.Calls); ASSERT_EQ(1,ObservedRasterizer.Draws);
+    EXPECT_EQ(3,ObservedRasterizer.LastCount); EXPECT_EQ(3,ObservedRasterizer.LastVertices);
+    Interval(Device->m_Stats.ObjectsCallbacksTime-ObjectsSeed,pre.Elapsed+post.Elapsed,wall,ObservedRasterizer.DrawElapsed);
     OtherCategoriesUnchanged(TRUE);
 }
 
@@ -256,7 +256,7 @@ TEST_F(RenderContextCallbackTimingTest, Sprite3dCallbacksAccumulateWhileQueueing
     VxTimeProfiler start; ASSERT_TRUE(sprite->Render(Device,0)); const float wall=Milliseconds(start);
     EXPECT_EQ(1,pre.Calls); EXPECT_EQ(1,post.Calls); ASSERT_EQ(1,Device->m_Sprite3DBatches.Size());
     ASSERT_NE(nullptr,material->GetSprite3DBatch()); EXPECT_EQ(4,material->GetSprite3DBatch()->m_Vertices.Size());
-    EXPECT_EQ(0,Boundary.Draws);
+    EXPECT_EQ(0,ObservedRasterizer.Draws);
     Interval(Device->m_Stats.ObjectsCallbacksTime-ObjectsSeed,pre.Elapsed+post.Elapsed,wall);
     OtherCategoriesUnchanged(TRUE);
 }
@@ -270,12 +270,12 @@ TEST_F(RenderContextCallbackTimingTest, TwoDimensionalCallbacksAccumulateAcrossD
     TimedCall pre,post; pre.DelayMs=10; post.DelayMs=16;
     ASSERT_TRUE(entity->AddPreRenderCallBack(ObjectCall,&pre,FALSE));
     ASSERT_TRUE(entity->AddPostRenderCallBack(ObjectCall,&post,FALSE));
-    Boundary.DrawDelayMs=33;
+    ObservedRasterizer.DrawDelayMs=33;
     VxTimeProfiler start;
     ASSERT_EQ(CK_OK,entity->Render(Device)); ASSERT_EQ(CK_OK,entity->Render(Device));
     const float wall=Milliseconds(start);
-    EXPECT_EQ(2,pre.Calls); EXPECT_EQ(2,post.Calls); ASSERT_EQ(2,Boundary.Draws); EXPECT_EQ(4,Boundary.LastVertices);
-    Interval(Device->m_Stats.SpriteCallbacksTime-SpritesSeed,pre.Elapsed+post.Elapsed,wall,Boundary.DrawElapsed);
+    EXPECT_EQ(2,pre.Calls); EXPECT_EQ(2,post.Calls); ASSERT_EQ(2,ObservedRasterizer.Draws); EXPECT_EQ(4,ObservedRasterizer.LastVertices);
+    Interval(Device->m_Stats.SpriteCallbacksTime-SpritesSeed,pre.Elapsed+post.Elapsed,wall,ObservedRasterizer.DrawElapsed);
     OtherCategoriesUnchanged(FALSE);
 }
 

@@ -14,7 +14,7 @@ The initial Windows and Linux references use renderer production sources from
 `99bb47aa26f44fd37221cda0039d201348a83d66`, unchanged by the test repairs. They
 check renderer regressions; original-rasterizer comparisons remain a separate
 diagnostic corpus under `../oracle`. For example, the original DX8 backend cannot
-paste `dump_copy`, whose current exact copy contract checks 27,648 RGB pixels.
+paste `dump_copy`, whose exact source-to-destination comparison checks 27,648 RGB pixels.
 
 Capture proposed references with `ckre_scene_capture --scene all --size 640x480
 --frames 5 --out <review-directory>`, review the changes and compare with the

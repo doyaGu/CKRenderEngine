@@ -24,7 +24,7 @@ public:
     CKBOOL RecurseAtDraw = FALSE;
     CKBOOL SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE state, CKDWORD value) override {
         // This fixture uses only this legacy map-blend mode. Normalize its
-        // public color-operation contract so OP0 does not fake a disabled chain.
+        // effective color operation so OP0 does not falsely disable the texture chain.
         // No shader, pixel composition or other legacy blend mode is modeled.
         if (state == CKRST_TSS_TEXTUREMAPBLEND && value == VXTEXTUREBLEND_MODULATEALPHA)
             MaterialRenderObserver::SetTextureStageState(stage, CKRST_TSS_OP, CKRST_TOP_MODULATE);
@@ -300,7 +300,7 @@ TEST_F(MeshGeneratedNormalsTest, DerivedContextGenerationChangeIsObservedAtBaseD
     ASSERT_EQ(1, mesh.RenderChannels(Device, nullptr, &data, FALSE)); ASSERT_EQ(1, State.DrawCount); NoNormalDeclaration(State.Draws[0]);
     EXPECT_EQ(CKRSTPackTexcoordIndex(0, CKRST_TEXGEN_CAMERASPACEPOSITION), State.Draws[0].Coordinates[0]); EXPECT_EQ(1, Device->Calls);
 }
-TEST_F(MeshGeneratedNormalsTest, DerivedContextDifferentDataCallUsesOrdinaryPublicLightingContract) {
+TEST_F(MeshGeneratedNormalsTest, DerivedContextWithDifferentVertexDataUsesPublicLighting) {
     GeneratedNormalMesh mesh(Context); VxDrawPrimitiveData data = Geometry(mesh); RCKMaterial material(Context); RCKTexture texture(Context); OwnedNormalPlan plan;
     Owned(material, texture, plan); Channel(mesh, material); Device->DrawOtherData = TRUE;
     ASSERT_EQ(1, mesh.RenderChannels(Device, nullptr, &data, FALSE)); ASSERT_EQ(2, State.DrawCount);

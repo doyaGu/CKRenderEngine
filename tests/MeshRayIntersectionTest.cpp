@@ -13,7 +13,7 @@
 extern void SetProcessorSpecific_FunctionsPtr();
 
 namespace {
-// Observe the existing rasterizer contract; no drawing or backend implementation.
+// Record rasterizer state changes without drawing or executing a GPU backend.
 class RayProjectionObserver : public MaterialRenderObserver {
 public:
     int ProjectionReads = 0;

@@ -141,7 +141,7 @@ TEST_F(Entity3dScalePrecisionTest, LocalAndWorldScalePreserveParentCoordinatesAn
     ExpectVector(transformed, 0, 134217728, 0, 2);
 }
 
-TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesPreserveTheMathNormalizationContract) {
+TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesUseVxMathNormalization) {
     RCK3dEntity *entity = Entity();
     ASSERT_NE(nullptr, entity);
     VxMatrix pose = VxMatrix::Identity();
@@ -167,7 +167,7 @@ TEST_F(Entity3dScalePrecisionTest, SmallAndZeroAxesPreserveTheMathNormalizationC
     ExpectVector(entity->GetWorldMatrix()[3], 7, 11, 13);
 }
 
-TEST_F(Entity3dScalePrecisionTest, FiniteAxesPreserveTheMathNormalizationContract) {
+TEST_F(Entity3dScalePrecisionTest, FiniteAxesUseVxMathNormalization) {
     RCK3dEntity *entity = Entity();
     ASSERT_NE(nullptr, entity);
     VxMatrix pose = VxMatrix::Identity();

@@ -18,13 +18,13 @@ struct ManagerContextCalls {
 };
 
 // Observes only the engine/driver interface. No GPU implementation runs.
-class ManagerContextBoundary : public MaterialRenderObserver {
+class ManagerContextObserver : public MaterialRenderObserver {
 public:
     ManagerContextCalls *Calls;
-    ManagerContextBoundary(CKRasterizerDriver *driver, ManagerContextCalls *calls) : Calls(calls) {
+    ManagerContextObserver(CKRasterizerDriver *driver, ManagerContextCalls *calls) : Calls(calls) {
         m_Driver = driver;
     }
-    ~ManagerContextBoundary() override { ++Calls->Destroys; }
+    ~ManagerContextObserver() override { ++Calls->Destroys; }
     CKBOOL Create(WIN_HANDLE window, int x, int y, int width, int height, int bpp,
                   CKBOOL fullscreen, int refresh, int zbpp, int stencil) override {
         ++Calls->Creates;
@@ -68,7 +68,7 @@ public:
         return TRUE;
     }
     CKRasterizerContext *CreateContext() override {
-        ManagerContextBoundary *context = new ManagerContextBoundary(this, &Calls);
+        ManagerContextObserver *context = new ManagerContextObserver(this, &Calls);
         AddContext(context);
         return context;
     }
@@ -179,7 +179,7 @@ TEST_F(RenderManagerContextTest, ContextDriverRegistrationRetainsIdentityAndForg
     CKRenderContext *created = Create();
     ASSERT_NE(nullptr, created);
     RCKRenderContext *view = static_cast<RCKRenderContext *>(created);
-    ManagerContextBoundary *boundary = static_cast<ManagerContextBoundary *>(view->m_RasterizerContext);
+    ManagerContextObserver *boundary = static_cast<ManagerContextObserver *>(view->m_RasterizerContext);
     VxDriverDescEx *driver = Manager->GetDriverDescription(0);
     EXPECT_EQ(driver, Manager->GetDriverDescription(boundary));
     EXPECT_TRUE(Manager->RegisterRasterizerContext(boundary, 0));

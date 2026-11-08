@@ -106,7 +106,7 @@ TEST_F(CharacterOwnershipTest, ConstructorCreatesPrivateWarperWithActualDynamicC
     }
 }
 
-TEST_F(CharacterOwnershipTest, BodyListPublicOperationsKeepOrderIdentityAndDuplicateContract) {
+TEST_F(CharacterOwnershipTest, BodyListOperationsPreserveOrderIdentityAndDuplicates) {
     OwnershipCharacter character(Context); RCKBodyPart a(Context), b(Context);
     EXPECT_EQ(CKERR_INVALIDPARAMETER, character.AddBodyPart(nullptr));
     EXPECT_EQ(CKERR_INVALIDPARAMETER, character.RemoveBodyPart(nullptr));

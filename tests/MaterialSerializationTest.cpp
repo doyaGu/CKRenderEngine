@@ -111,7 +111,7 @@ TEST_F(MaterialSerializationTest, LiteralPackedColorsAndModesDecodeEveryIndepend
     EXPECT_TRUE(m.IsTwoSided()); EXPECT_TRUE(m.AlphaBlendEnabled()); EXPECT_FALSE(m.ZWriteEnabled());
     EXPECT_EQ(6, m.GetZFunc()); EXPECT_EQ(5, m.GetAlphaFunc()); EXPECT_EQ(0xabu, m.GetAlphaRef());
 }
-TEST_F(MaterialSerializationTest, VersionsFiveTenAndTwelveShareThePackedWireContract) {
+TEST_F(MaterialSerializationTest, VersionsFiveTenAndTwelveUseTheSamePackedFields) {
     for (int version : {5, 10, 12}) { SerializedMaterial m(Context); CKStateChunk chunk(CKCID_MATERIAL, nullptr); Begin(chunk, version); Packed(chunk);
         ASSERT_EQ(CK_OK, Load(m, chunk)); EXPECT_FLOAT_EQ(2, m.GetPower()); EXPECT_EQ(0xabu, m.GetAlphaRef()); EXPECT_EQ(6, m.GetZFunc()); }
 }

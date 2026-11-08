@@ -50,7 +50,7 @@ option(CKRE_ENABLE_RENDER_STATS "Enable frame traversal and render wrapper timin
 option(CKRE_ENABLE_FFP_DIAGNOSTICS "Enable fixed-function pipeline stats, uniform histogram, and draw logging diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
 option(CKRE_ENABLE_FRAME_COST_STATS "Enable low-overhead aggregate frame cost stats support" OFF)
 option(CKRE_ENABLE_FRAME_DIAGNOSTICS "Enable frame, camera, and present-sync diagnostic log gates" ${CKRE_ENABLE_DIAGNOSTICS})
-option(CKRE_ENABLE_MESH_DIAGNOSTICS "Enable mesh contract and hardware index diagnostic log gates" ${CKRE_ENABLE_DIAGNOSTICS})
+option(CKRE_ENABLE_MESH_DIAGNOSTICS "Enable mesh draw, vertex stream and hardware index diagnostics" ${CKRE_ENABLE_DIAGNOSTICS})
 
 function(ckre_apply_diagnostic_definitions TARGET_NAME SCOPE)
     target_compile_definitions(${TARGET_NAME} ${SCOPE}

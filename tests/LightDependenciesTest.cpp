@@ -129,7 +129,7 @@ TEST_F(LightDependenciesTest, CopyDeepCopiesOwnedSkinBonesAndVertexWeights) {
     Vector(initial, copied->GetVertexData(0)->GetInitialPos()); copied->GetVertexData(0)->SetWeight(0, .125f);
     EXPECT_EQ(.75f, vertex->GetWeight(0));
 }
-TEST_F(LightDependenciesTest, SourceWithoutSkinRetainsExistingDestinationSkinContract) {
+TEST_F(LightDependenciesTest, CopyFromSourceWithoutSkinRetainsDestinationSkin) {
     DependencyLight source(Context), destination(Context); CKSkin *skin = destination.CreateSkin();
     ASSERT_NE(nullptr, skin); skin->SetBoneCount(2); ASSERT_EQ(CK_OK, Copy(destination, source));
     EXPECT_EQ(skin, destination.GetSkin()); EXPECT_EQ(2, skin->GetBoneCount());

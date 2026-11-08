@@ -36,7 +36,7 @@ CKBOOL ObserveTraversal(CKRenderContext *, CKRenderObject *object, void *argumen
 
 // Only the external device submission is observed. Nodes, entities, meshes,
 // callback dispatch, transparency queues and context membership remain real.
-class TraversalBoundary : public MaterialRenderObserver {
+class TraversalObserver : public MaterialRenderObserver {
 public:
     RCKRenderContext *Device = nullptr;
     TraversalTrace *Trace = nullptr;
@@ -76,7 +76,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr, *Other = nullptr;
-    TraversalBoundary Boundary, OtherBoundary;
+    TraversalObserver ObservedRasterizer, OtherBoundary;
     CKRasterizerDriver Driver;
     void SetUp() override {
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK, CKStartUp());
@@ -100,7 +100,7 @@ protected:
         Manager->m_Drivers[0].Caps3D.MaxNumberTextureStage = 8;
         Manager->m_Drivers[0].Caps3D.MaxNumberBlendStage = 8;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        Device = CreateView(Boundary); ASSERT_NE(nullptr, Device);
+        Device = CreateView(ObservedRasterizer); ASSERT_NE(nullptr, Device);
     }
     void TearDown() override {
         if (Context) Context->m_BehaviorContext.CurrentRenderContext = nullptr;
@@ -109,7 +109,7 @@ protected:
         if (Context) CKCloseContext(Context);
         CKShutdown();
     }
-    RCKRenderContext *CreateView(TraversalBoundary &boundary) {
+    RCKRenderContext *CreateView(TraversalObserver &boundary) {
         if (!Manager->RegisterRasterizerContext(&boundary, 0)) return nullptr;
         RCKRenderContext *view = static_cast<RCKRenderContext *>(Context->CreateObject(CKCID_RENDERCONTEXT));
         if (!view) return nullptr;
@@ -180,20 +180,20 @@ TEST_F(SceneGraphTraversalTest, StablePackedPrioritySortTouchesOnlyTheParsedPref
     EXPECT_EQ(equal->m_SceneGraphNode, node->m_Children[1]);
     EXPECT_EQ(subtree->m_SceneGraphNode, node->m_Children[2]);
     EXPECT_EQ(hidden->m_SceneGraphNode, suffix); EXPECT_EQ(suffix, node->m_Children[3]); Indices(node);
-    TraversalTrace trace; TraversalCallback pre = {&trace, 1}, post = {&trace, 3}; Boundary.Trace = &trace;
+    TraversalTrace trace; TraversalCallback pre = {&trace, 1}, post = {&trace, 3}; ObservedRasterizer.Trace = &trace;
     RCK3dEntity *expected[4] = {first, equal, subtree, grandchild};
     for (int i = 0; i < 4; ++i) {
         ASSERT_TRUE(expected[i]->AddPreRenderCallBack(ObserveTraversal, &pre, FALSE));
         ASSERT_TRUE(expected[i]->AddPostRenderCallBack(ObserveTraversal, &post, FALSE));
     }
     node->MarkNeedSort(); node->NoTestsTraversal(Device, CKRENDER_UPDATEEXTENTS);
-    ASSERT_EQ(4, Boundary.Draws); ASSERT_EQ(12, trace.Count);
+    ASSERT_EQ(4, ObservedRasterizer.Draws); ASSERT_EQ(12, trace.Count);
     for (int i = 0; i < 4; ++i) for (int phase = 0; phase < 3; ++phase) {
         EXPECT_EQ(expected[i]->GetID(), trace.Objects[i * 3 + phase]); EXPECT_EQ(phase + 1, trace.Phases[i * 3 + phase]);
     }
     EXPECT_EQ(4, Device->m_ObjectExtents.Size()); Indices(node);
     equal->SetZOrder(11); node->NoTestsTraversal(Device, 0);
-    ASSERT_EQ(8, Boundary.Draws); EXPECT_EQ(equal->GetID(), Boundary.Objects[4]); EXPECT_EQ(first->GetID(), Boundary.Objects[5]);
+    ASSERT_EQ(8, ObservedRasterizer.Draws); EXPECT_EQ(equal->GetID(), ObservedRasterizer.Objects[4]); EXPECT_EQ(first->GetID(), ObservedRasterizer.Objects[5]);
     EXPECT_EQ(4, Device->m_ObjectExtents.Size()); Indices(node);
 }
 
@@ -213,7 +213,7 @@ TEST_F(SceneGraphTraversalTest, OwnContextMaskDoesNotHideAnEligibleDescendantOrV
     other->m_SceneGraphNode->ClearTransparentFlags();
     const CKDWORD before = Device->m_SceneTraversalCalls;
     node->NoTestsTraversal(Device, 0);
-    ASSERT_EQ(2, Boundary.Draws); EXPECT_EQ(own->GetID(), Boundary.Objects[0]); EXPECT_EQ(shared->GetID(), Boundary.Objects[1]);
+    ASSERT_EQ(2, ObservedRasterizer.Draws); EXPECT_EQ(own->GetID(), ObservedRasterizer.Objects[0]); EXPECT_EQ(shared->GetID(), ObservedRasterizer.Objects[1]);
     EXPECT_EQ(before + 3, Device->m_SceneTraversalCalls);
     EXPECT_TRUE(other->m_SceneGraphNode->IsAllOutsideFrustum());
     EXPECT_FALSE(other->m_SceneGraphNode->CheckHierarchyFrustum());
@@ -233,23 +233,23 @@ TEST_F(SceneGraphTraversalTest, TransparentMembershipDeduplicatesWhileFrameStamp
     CKSceneGraphNode *node = transparent->m_SceneGraphNode;
     Device->m_TimeFpsCalc = 100;
     parent->m_SceneGraphNode->NoTestsTraversal(Device, CKRENDER_UPDATEEXTENTS);
-    ASSERT_EQ(1, Boundary.Draws); EXPECT_EQ(opaque->GetID(), Boundary.Objects[0]);
+    ASSERT_EQ(1, ObservedRasterizer.Draws); EXPECT_EQ(opaque->GetID(), ObservedRasterizer.Objects[0]);
     ASSERT_EQ(1, root.m_TransparentObjects.Size()); EXPECT_EQ(node, root.m_TransparentObjects[0].m_Node);
     EXPECT_EQ(100u, node->m_TimeFpsCalc); EXPECT_TRUE(node->IsInTransparentList());
     parent->m_SceneGraphNode->NoTestsTraversal(Device, 0);
-    EXPECT_EQ(2, Boundary.Draws); ASSERT_EQ(1, root.m_TransparentObjects.Size());
+    EXPECT_EQ(2, ObservedRasterizer.Draws); ASSERT_EQ(1, root.m_TransparentObjects.Size());
     root.SortTransparentObjects(Device, CKRENDER_UPDATEEXTENTS);
-    ASSERT_EQ(3, Boundary.Draws); EXPECT_EQ(transparent->GetID(), Boundary.Objects[2]);
+    ASSERT_EQ(3, ObservedRasterizer.Draws); EXPECT_EQ(transparent->GetID(), ObservedRasterizer.Objects[2]);
     EXPECT_EQ(2, Device->m_ObjectExtents.Size());
     ++Device->m_TimeFpsCalc; transparent->Show(CKHIDE); Device->AddRemoveSequence(FALSE);
     parent->m_SceneGraphNode->NoTestsTraversal(Device, 0);
-    ASSERT_EQ(4, Boundary.Draws); root.SortTransparentObjects(Device, 0);
-    EXPECT_EQ(4, Boundary.Draws); EXPECT_EQ(0, root.m_TransparentObjects.Size()); EXPECT_FALSE(node->IsInTransparentList());
+    ASSERT_EQ(4, ObservedRasterizer.Draws); root.SortTransparentObjects(Device, 0);
+    EXPECT_EQ(4, ObservedRasterizer.Draws); EXPECT_EQ(0, root.m_TransparentObjects.Size()); EXPECT_FALSE(node->IsInTransparentList());
     transparent->Show(CKSHOW); Device->AddRemoveSequence(FALSE);
     parent->m_SceneGraphNode->NoTestsTraversal(Device, 0);
     ASSERT_EQ(1, root.m_TransparentObjects.Size()); EXPECT_EQ(101u, node->m_TimeFpsCalc);
     root.SortTransparentObjects(Device, 0);
-    ASSERT_EQ(6, Boundary.Draws); EXPECT_EQ(transparent->GetID(), Boundary.Objects[5]);
+    ASSERT_EQ(6, ObservedRasterizer.Draws); EXPECT_EQ(transparent->GetID(), ObservedRasterizer.Objects[5]);
 }
 
 TEST_F(SceneGraphTraversalTest, ClearingVisibilityRecursesOnlyTheParsedPrefixAndRetainsLiveTransparentMembership) {
@@ -261,7 +261,7 @@ TEST_F(SceneGraphTraversalTest, ClearingVisibilityRecursesOnlyTheParsedPrefixAnd
     ASSERT_EQ(1, node->m_ChildToBeParsedCount); ASSERT_EQ(suffix, node->m_Children[1]);
     Manager->m_SortTransparentObjects.Value = FALSE; Device->m_TimeFpsCalc = 55;
     node->NoTestsTraversal(Device, 0);
-    ASSERT_EQ(1, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size()); EXPECT_EQ(0, Boundary.Draws);
+    ASSERT_EQ(1, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size()); EXPECT_EQ(0, ObservedRasterizer.Draws);
     suffix->SetAsInsideFrustum(); node->MarkNeedSort();
     const CKDWORD oldNode = node->m_Flags, oldActive = active->m_Flags, oldSuffix = suffix->m_Flags;
     node->ClearTransparentFlags();
@@ -269,7 +269,7 @@ TEST_F(SceneGraphTraversalTest, ClearingVisibilityRecursesOnlyTheParsedPrefixAnd
     EXPECT_EQ((oldActive & ~CKSGN_INSIDEFRUSTUM) | CKSGN_OUTSIDEFRUSTUM, active->m_Flags);
     EXPECT_EQ(oldSuffix, suffix->m_Flags); EXPECT_TRUE(active->IsInTransparentList()); EXPECT_TRUE(node->NeedsSort());
     Manager->m_SceneGraphRootNode.SortTransparentObjects(Device, 0);
-    ASSERT_EQ(1, Boundary.Draws); EXPECT_EQ(transparent->GetID(), Boundary.Objects[0]);
+    ASSERT_EQ(1, ObservedRasterizer.Draws); EXPECT_EQ(transparent->GetID(), ObservedRasterizer.Objects[0]);
     EXPECT_TRUE(active->IsInTransparentList()); EXPECT_TRUE(active->CheckHierarchyFrustum());
 }
 
@@ -279,38 +279,38 @@ TEST_F(SceneGraphTraversalTest, PlaceClipReachesTheActualMeshAndRestoresViewport
     Child(place, child); Attach(place);
     place->ViewportClip() = VxRect(.25f, .25f, .75f, .75f);
     const VxMatrix original = Device->GetProjectionTransformationMatrix();
-    const int writes = Boundary.ViewportWrites;
+    const int writes = ObservedRasterizer.ViewportWrites;
     place->m_SceneGraphNode->NoTestsTraversal(Device, 0);
-    ASSERT_EQ(1, Boundary.Draws); EXPECT_EQ(child->GetID(), Boundary.Objects[0]);
-    EXPECT_EQ(25u, Boundary.DrawViewport[0].ViewX); EXPECT_EQ(25u, Boundary.DrawViewport[0].ViewY);
-    EXPECT_EQ(50u, Boundary.DrawViewport[0].ViewWidth); EXPECT_EQ(50u, Boundary.DrawViewport[0].ViewHeight);
+    ASSERT_EQ(1, ObservedRasterizer.Draws); EXPECT_EQ(child->GetID(), ObservedRasterizer.Objects[0]);
+    EXPECT_EQ(25u, ObservedRasterizer.DrawViewport[0].ViewX); EXPECT_EQ(25u, ObservedRasterizer.DrawViewport[0].ViewY);
+    EXPECT_EQ(50u, ObservedRasterizer.DrawViewport[0].ViewWidth); EXPECT_EQ(50u, ObservedRasterizer.DrawViewport[0].ViewHeight);
     VxMatrix clipped = original; for (int row = 0; row < 4; ++row) { clipped[row][0] *= 2; clipped[row][1] *= 2; }
-    Matrix(Boundary.DrawProjection[0], clipped); Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], original);
+    Matrix(ObservedRasterizer.DrawProjection[0], clipped); Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], original);
     Matrix(Device->GetProjectionTransformationMatrix(), original);
-    EXPECT_EQ(0u, Boundary.Viewport.ViewX); EXPECT_EQ(0u, Boundary.Viewport.ViewY);
-    EXPECT_EQ(100u, Boundary.Viewport.ViewWidth); EXPECT_EQ(100u, Boundary.Viewport.ViewHeight);
-    EXPECT_EQ(writes + 2, Boundary.ViewportWrites);
+    EXPECT_EQ(0u, ObservedRasterizer.Viewport.ViewX); EXPECT_EQ(0u, ObservedRasterizer.Viewport.ViewY);
+    EXPECT_EQ(100u, ObservedRasterizer.Viewport.ViewWidth); EXPECT_EQ(100u, ObservedRasterizer.Viewport.ViewHeight);
+    EXPECT_EQ(writes + 2, ObservedRasterizer.ViewportWrites);
     const VxRect skipped[3] = {VxRect(0, 0, 0, 0), VxRect(0, 0, 1, 1), VxRect(.2f, .2f, .2f, .8f)};
     for (int i = 0; i < 3; ++i) {
-        place->ViewportClip() = skipped[i]; const int count = Boundary.ViewportWrites;
+        place->ViewportClip() = skipped[i]; const int count = ObservedRasterizer.ViewportWrites;
         place->m_SceneGraphNode->NoTestsTraversal(Device, 0);
-        EXPECT_EQ(count, Boundary.ViewportWrites); Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], original);
+        EXPECT_EQ(count, ObservedRasterizer.ViewportWrites); Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], original);
     }
-    EXPECT_EQ(4, Boundary.Draws);
+    EXPECT_EQ(4, ObservedRasterizer.Draws);
 }
 
 TEST_F(SceneGraphTraversalTest, CharacterTraversalMarksTheEnteredCharacterAndForwardsExtentsPolicyToItsMesh) {
     RCK3dEntity *character = Triangle(CKCID_CHARACTER); ASSERT_NE(nullptr, character); Attach(character);
     EXPECT_EQ(0u, character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED);
     character->m_SceneGraphNode->NoTestsTraversal(Device, CKRENDER_UPDATEEXTENTS);
-    ASSERT_EQ(1, Boundary.Draws); EXPECT_EQ(character->GetID(), Boundary.Objects[0]);
+    ASSERT_EQ(1, ObservedRasterizer.Draws); EXPECT_EQ(character->GetID(), ObservedRasterizer.Objects[0]);
     EXPECT_NE(0u, character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED);
     ASSERT_EQ(1, Device->m_ObjectExtents.Size());
     EXPECT_EQ(reinterpret_cast<CK3dEntity *>(character), Device->m_ObjectExtents[0].m_Entity);
     character->ModifyMoveableFlags(0, VX_MOVEABLE_CHARACTERRENDERED);
     character->Show(CKHIDE); Device->AddRemoveSequence(FALSE);
     character->m_SceneGraphNode->NoTestsTraversal(Device, 0);
-    EXPECT_EQ(1, Boundary.Draws); EXPECT_NE(0u, character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED);
+    EXPECT_EQ(1, ObservedRasterizer.Draws); EXPECT_NE(0u, character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED);
     EXPECT_EQ(1, Device->m_ObjectExtents.Size());
 }
 }

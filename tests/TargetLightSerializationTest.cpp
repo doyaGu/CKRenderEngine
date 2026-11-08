@@ -247,7 +247,7 @@ TEST_F(TargetLightSerializationTest, NullOrUnresolvedFilelessTargetIsWrittenAsZe
     }
 }
 
-TEST_F(TargetLightSerializationTest, FilelessDynamicTargetIsFilteredByChunkObjectContract) {
+TEST_F(TargetLightSerializationTest, FilelessChunkOmitsDynamicTargetReferences) {
     SerializationTargetLight light(Context); RCK3dEntity target(Context); target.ModifyObjectFlags(CK_OBJECT_DYNAMIC, 0);
     light.SetRawTarget(target.GetID()); CKStateChunk *chunk = light.Save(nullptr, 0x80000000u);
     ASSERT_NE(nullptr, chunk); EXPECT_EQ(0, SavedTarget(*chunk)); DeleteCKStateChunk(chunk);

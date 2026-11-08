@@ -1508,7 +1508,7 @@ void TestVertexShaders() {
     TestCheck(shader.Nodes.Size() == 3 && shader.Node(shader.Outputs[0].Value).Op == CKJIT_OP_MUL,
               "DCE keeps varying-only dependencies and removes unused arithmetic");
     TestCheck(std::strstr(CKJitDump(shader).CStr(), "output location0 flat %") != nullptr,
-              "vertex dumps include the varying contract");
+              "vertex dumps include output locations and flat interpolation");
     CKJitFragmentShader fragment;
     TestCheck(!b.Finish(position, CKJitValue(), fragment), "fragment programs reject vertex attributes");
     TestCheck(!b.FinishVertex(b.Swizzle(position, "xyz"), {}, shader), "position must have four components");

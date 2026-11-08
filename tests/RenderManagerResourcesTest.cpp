@@ -6,7 +6,7 @@
 
 namespace {
 // Owns test resource bytes and acknowledges the public resource calls. No
-// production rasterizer or GPU backend runs in these manager contract tests.
+// production rasterizer or GPU backend runs in these resource-manager tests.
 class ManagerResourceObserver : public TextureTestObserver {
 public:
     CKVertexBufferDesc Vertices[16];

@@ -38,7 +38,7 @@ CKBOOL RecordEntityCallback(CKRenderContext *context, CKRenderObject *object, vo
 
 // The engine's actual DrawScene, entity Render and callback dispatch run intact.
 // These tests have no mesh and observe only the external frame phase boundary.
-class CallbackPhaseBoundary : public MaterialRenderObserver {
+class CallbackPhaseObserver : public MaterialRenderObserver {
 public:
     CallbackDispatchTrace *Trace = nullptr;
     CKRenderContext *Device = nullptr;
@@ -54,7 +54,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
-    CallbackPhaseBoundary Boundary;
+    CallbackPhaseObserver ObservedRasterizer;
     CKRasterizerDriver Driver;
     CallbackDispatchTrace Trace;
     void SetUp() override {
@@ -72,14 +72,14 @@ protected:
         Manager->m_Drivers[0].Caps3D.MaxNumberTextureStage = 8;
         Manager->m_Drivers[0].Caps3D.MaxNumberBlendStage = 8;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        ASSERT_TRUE(Manager->RegisterRasterizerContext(&Boundary, 0));
+        ASSERT_TRUE(Manager->RegisterRasterizerContext(&ObservedRasterizer, 0));
         Device = static_cast<RCKRenderContext *>(Context->CreateObject(CKCID_RENDERCONTEXT)); ASSERT_NE(nullptr, Device);
-        Device->DetachAll(); Device->m_RasterizerContext = &Boundary; Device->m_RasterizerDriver = &Driver;
-        Boundary.Device = Device;
+        Device->DetachAll(); Device->m_RasterizerContext = &ObservedRasterizer; Device->m_RasterizerDriver = &Driver;
+        ObservedRasterizer.Device = Device;
         Device->m_Settings.m_Rect = {0, 0, 100, 100};
         Device->m_ViewportData.ViewWidth = Device->m_ViewportData.ViewHeight = 100;
         Device->m_ViewportData.ViewZMin = 0; Device->m_ViewportData.ViewZMax = 1;
-        Boundary.Viewport = Device->m_ViewportData;
+        ObservedRasterizer.Viewport = Device->m_ViewportData;
         Device->m_Fov = PI / 2; Device->m_NearPlane = 1; Device->m_FarPlane = 100;
         VxMatrix projection; projection.Perspective(PI / 2, 1, 1, 100);
         Device->SetProjectionTransformationMatrix(projection); Device->SetViewTransformationMatrix(VxMatrix::Identity());
@@ -157,7 +157,7 @@ TEST_F(CallbacksDispatchTest, ActualSceneDispatchSeparatesTwoArgumentContextAndT
     ASSERT_TRUE(entity->AddPreRenderCallBack(RecordEntityCallback, &objectPre, FALSE));
     ASSERT_TRUE(entity->SetRenderCallBack(RecordEntityCallback, &main));
     ASSERT_TRUE(entity->AddPostRenderCallBack(RecordEntityCallback, &objectPost, FALSE));
-    Boundary.Trace = &Trace;
+    ObservedRasterizer.Trace = &Trace;
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
     ASSERT_EQ(10, Trace.Count);
     EXPECT_EQ(10, Trace.Values[0]); Expect(1, pre); Expect(2, objectPre, entity); Expect(3, main, entity);

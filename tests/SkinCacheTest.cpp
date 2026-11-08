@@ -139,7 +139,7 @@ TEST_F(SkinCacheTest, BoneDataBindingsMatricesFlagsAndBorrowedLifetimeReachSkinC
     EXPECT_FLOAT_EQ(10, first.GetWorldMatrix()[3][0]); EXPECT_FLOAT_EQ(20, second.GetWorldMatrix()[3][0]);
 }
 
-TEST_F(SkinCacheTest, BoneAndPointStorageLayoutMatchesPortableOwnershipContract) {
+TEST_F(SkinCacheTest, BoneAndPointArraysMatchPointerSizeLayout) {
     MeasuredSkinBone bone;
     const size_t pointer = sizeof(void *);
     EXPECT_EQ(pointer, bone.BoneOffset()); EXPECT_EQ(pointer * 2, bone.FlagsOffset());

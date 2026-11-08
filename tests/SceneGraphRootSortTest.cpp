@@ -66,7 +66,7 @@ public:
     }
 };
 
-class SortMatrixBoundary : public MaterialRenderObserver {
+class SortMatrixObserver : public MaterialRenderObserver {
 public:
     int ViewReads = 0, ProjectionReads = 0;
     CKBOOL RejectView = FALSE, RejectProjection = FALSE;
@@ -88,7 +88,7 @@ protected:
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr, *Other = nullptr;
     SortTrace Trace;
-    SortMatrixBoundary Boundary;
+    SortMatrixObserver ObservedRasterizer;
     void SetUp() override {
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK, CKStartUp());
         CKCLASSREGISTERCID(RCKRenderObject, CKCID_BEOBJECT);
@@ -167,15 +167,15 @@ protected:
 };
 
 TEST_F(SceneGraphRootSortTest, EmptySingleAndDisabledQueuesKeepOrderWithoutProjectingBoxes) {
-    Device->m_RasterizerContext = &Boundary;
-    Sort(); EXPECT_EQ(0, Trace.Count); EXPECT_EQ(0, Boundary.ViewReads);
+    Device->m_RasterizerContext = &ObservedRasterizer;
+    Sort(); EXPECT_EQ(0, Trace.Count); EXPECT_EQ(0, ObservedRasterizer.ViewReads);
     SortEntity first(Context, Trace, 1), second(Context, Trace, 2);
     Place(first, 0, 0, 2); Place(second, 0, 0, 9); Attach(first); Attach(second);
     Enqueue(first); Sort(); ASSERT_EQ(1, Trace.Count); EXPECT_EQ(1, Trace.Values[0]);
     EXPECT_EQ(0x12345678u, Trace.Flags[0]); EXPECT_EQ(0, first.BoxReads);
     Trace.Reset(); Enqueue(second); Manager->m_SortTransparentObjects.Value = FALSE;
     Sort(); Order(1, 2); EXPECT_EQ(0, first.BoxReads); EXPECT_EQ(0, second.BoxReads);
-    EXPECT_EQ(0, Boundary.ViewReads); EXPECT_EQ(0, Boundary.ProjectionReads);
+    EXPECT_EQ(0, ObservedRasterizer.ViewReads); EXPECT_EQ(0, ObservedRasterizer.ProjectionReads);
 }
 
 TEST_F(SceneGraphRootSortTest, EnabledMultiSortRemovesForeignAndStaleEntriesAndAllowsOtherViewToRequeue) {
@@ -234,35 +234,35 @@ TEST_F(SceneGraphRootSortTest, ProjectionUsesTheLocalBoxAndAppliesTheWorldTransf
 TEST_F(SceneGraphRootSortTest, DirectBackendViewWritesControlDepthWithoutChangingTheCpuCache) {
     SortEntity first(Context, Trace, 1), second(Context, Trace, 2);
     Place(first, 1, 0, 3); Place(second, 4, 0, 1); Attach(first); Attach(second);
-    Device->m_RasterizerContext = &Boundary;
-    Boundary.Matrices[VXMATRIX_VIEW][0].Set(0, 0, 1, 0);
-    Boundary.Matrices[VXMATRIX_VIEW][2].Set(-1, 0, 0, 0);
+    Device->m_RasterizerContext = &ObservedRasterizer;
+    ObservedRasterizer.Matrices[VXMATRIX_VIEW][0].Set(0, 0, 1, 0);
+    ObservedRasterizer.Matrices[VXMATRIX_VIEW][2].Set(-1, 0, 0, 0);
     Enqueue(first); Enqueue(second); Sort(); Order(2, 1);
     Depth(first, .99f, 1.01f); Depth(second, 3.99f, 4.01f);
-    Matrix(Device->m_ViewMatrix, VxMatrix::Identity()); EXPECT_GT(Boundary.ViewReads, 0);
+    Matrix(Device->m_ViewMatrix, VxMatrix::Identity()); EXPECT_GT(ObservedRasterizer.ViewReads, 0);
 }
 
 TEST_F(SceneGraphRootSortTest, DirectBackendProjectiveWControlsNormalizedDepthWithoutChangingTheCpuCache) {
     SortEntity first(Context, Trace, 1), second(Context, Trace, 2);
     Place(first, 2, 0, 3); Place(second, 0, 0, 2); Attach(first); Attach(second);
-    Device->m_RasterizerContext = &Boundary; Boundary.Matrices[VXMATRIX_PROJECTION][0][3] = 1;
+    Device->m_RasterizerContext = &ObservedRasterizer; ObservedRasterizer.Matrices[VXMATRIX_PROJECTION][0][3] = 1;
     Enqueue(first); Enqueue(second); Sort(); Order(2, 1);
     Depth(first, 2.99f / 3.01f, 3.01f / 2.99f);
     Depth(second, 1.99f / 1.01f, 2.01f / .99f);
-    Matrix(Device->m_ProjectionMatrix, VxMatrix::Identity()); EXPECT_GT(Boundary.ProjectionReads, 0);
+    Matrix(Device->m_ProjectionMatrix, VxMatrix::Identity()); EXPECT_GT(ObservedRasterizer.ProjectionReads, 0);
 }
 
 TEST_F(SceneGraphRootSortTest, RefusedMatrixQueriesRetainKnownCpuMatricesAndAcceptTheOtherIndependentQuery) {
     SortEntity first(Context, Trace, 1), second(Context, Trace, 2);
     Place(first, 2, 0, 3); Place(second, 0, 0, 2); Attach(first); Attach(second);
-    Device->m_RasterizerContext = &Boundary;
-    Boundary.RejectView = Boundary.RejectProjection = TRUE;
+    Device->m_RasterizerContext = &ObservedRasterizer;
+    ObservedRasterizer.RejectView = ObservedRasterizer.RejectProjection = TRUE;
     Enqueue(first); Enqueue(second); Sort(); Order(1, 2);
     Depth(first, 2.99f, 3.01f); Depth(second, 1.99f, 2.01f);
-    Trace.Reset(); Boundary.RejectProjection = FALSE;
-    Boundary.Matrices[VXMATRIX_PROJECTION][0][3] = 1;
+    Trace.Reset(); ObservedRasterizer.RejectProjection = FALSE;
+    ObservedRasterizer.Matrices[VXMATRIX_PROJECTION][0][3] = 1;
     Sort(); Order(2, 1); Depth(first, 2.99f / 3.01f, 3.01f / 2.99f);
-    EXPECT_GE(Boundary.ViewReads, 2); EXPECT_GE(Boundary.ProjectionReads, 2);
+    EXPECT_GE(ObservedRasterizer.ViewReads, 2); EXPECT_GE(ObservedRasterizer.ProjectionReads, 2);
     Matrix(Device->m_ViewMatrix, VxMatrix::Identity()); Matrix(Device->m_ProjectionMatrix, VxMatrix::Identity());
 }
 

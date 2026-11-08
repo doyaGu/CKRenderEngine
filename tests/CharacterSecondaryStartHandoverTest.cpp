@@ -200,7 +200,7 @@ TEST_F(CharacterSecondaryStartHandoverTest, NegativeOriginalClockStartsAtSignedR
         Gate(rig, *warp, 0); Main(rig); Pose(rig, 102, 100); EXPECT_FLOAT_EQ(0, rig.Secondary.GetFrame());
         EXPECT_TRUE(warp->IsLinkedToFrameRate()); EXPECT_FLOAT_EQ(0, warp->GetLinkedFrameRate());
         EXPECT_FLOAT_EQ(4, warp->GetLength());
-        // The paused main's existing future forecast is a separate contract. Here only
+        // The paused main's future pose is checked separately. Here only
         // the real reverse endpoint capture, phase, retained identity and gate are certified.
     }
 }

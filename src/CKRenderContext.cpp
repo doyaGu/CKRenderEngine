@@ -2814,7 +2814,7 @@ VxDirectXData *RCKRenderContext::GetDirectXInfo() {
 
 void RCKRenderContext::WarnEnterThread() {
     // Legacy API-context thread migration is not supported. The portable
-    // rasterizer contract requires engine calls on its render thread.
+    // engine and rasterizer calls must run on the render thread.
 }
 
 void RCKRenderContext::WarnExitThread() {

@@ -11,7 +11,7 @@
 extern void SetProcessorSpecific_FunctionsPtr();
 
 namespace {
-class DelegationBoundary : public MaterialRenderObserver {
+class DelegationObserver : public MaterialRenderObserver {
 public:
     struct Draw {
         CKDWORD Lighting = 0, Flags = 0;
@@ -57,7 +57,7 @@ public:
 class DelegatingContext : public RCKRenderContext {
 public:
     enum Plan { Once, RepeatAfterFalse, RepeatAfterCaughtThrow, Nested, NestedCaughtThrow } Mode = Once;
-    DelegationBoundary *Boundary = nullptr;
+    DelegationObserver *ObservedRasterizer = nullptr;
     RCKMesh *Child = nullptr;
     VxDrawPrimitiveData *ChildData = nullptr;
     int Calls = 0, Depth = 0, Caught = 0;
@@ -77,7 +77,7 @@ public:
         } depth(Depth);
         if (Mode == Nested || Mode == NestedCaughtThrow) {
             EXPECT_NE(nullptr, Child); EXPECT_NE(nullptr, ChildData);
-            if (Mode == NestedCaughtThrow) Boundary->ThrowAt = Boundary->Attempts;
+            if (Mode == NestedCaughtThrow) ObservedRasterizer->ThrowAt = ObservedRasterizer->Attempts;
             try {
                 if (Child && ChildData) EXPECT_EQ(1, Child->RenderChannels(this, nullptr, ChildData, FALSE));
             } catch (const std::runtime_error &) {
@@ -85,13 +85,13 @@ public:
             }
         }
         if (Mode == RepeatAfterFalse) {
-            Boundary->FailAt = Boundary->Attempts;
+            ObservedRasterizer->FailAt = ObservedRasterizer->Attempts;
             FirstResult = RCKRenderContext::DrawPrimitive(type, indices, count, data);
             SecondResult = RCKRenderContext::DrawPrimitive(type, indices, count, data);
             return SecondResult;
         }
         if (Mode == RepeatAfterCaughtThrow) {
-            Boundary->ThrowAt = Boundary->Attempts;
+            ObservedRasterizer->ThrowAt = ObservedRasterizer->Attempts;
             try {
                 FirstResult = RCKRenderContext::DrawPrimitive(type, indices, count, data);
             } catch (const std::runtime_error &) {
@@ -116,13 +116,13 @@ class MeshDrawDelegationTest : public ::testing::Test {
 protected:
     CKContext *Context = nullptr;
     DelegatingContext *Device = nullptr;
-    DelegationBoundary State;
+    DelegationObserver State;
     void SetUp() override {
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK, CKStartUp());
         CKCLASSREGISTERCID(RCKMesh, CKCID_BEOBJECT); CKCLASSREGISTERCID(RCKMaterial, CKCID_BEOBJECT);
         CKBuildClassHierarchyTable(); ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
         new RCKRenderManager(Context); Device = new DelegatingContext(Context);
-        Device->DetachAll(); Device->m_RasterizerContext = &State; Device->Boundary = &State;
+        Device->DetachAll(); Device->m_RasterizerContext = &State; Device->ObservedRasterizer = &State;
         Device->BeginFrameErrorTracking();
     }
     void TearDown() override {
@@ -155,7 +155,7 @@ protected:
         data.TexCoordPtr = mesh.GetTextureCoordinatesPtr(&data.TexCoordStride, -1);
         return data;
     }
-    static void Payload(const DelegationBoundary::Draw &draw, int marker, CKBOOL lighting) {
+    static void Payload(const DelegationObserver::Draw &draw, int marker, CKBOOL lighting) {
         EXPECT_EQ(lighting, draw.Lighting); EXPECT_NE(0u, draw.Flags & CKRST_DP_LIGHT);
         ASSERT_EQ(3, draw.Count); ASSERT_EQ(3, draw.VertexCount);
         const int order[] = {2, 0, 1};

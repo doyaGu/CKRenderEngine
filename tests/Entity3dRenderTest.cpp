@@ -406,7 +406,7 @@ TEST_F(Entity3dRenderTest, DrawnDiagnosticIdentifiesTransparentObjectAndDecremen
     EXPECT_NE(nullptr, strstr(Device->m_CurrentObjectDesc.CStr(), "Drawn"));
 }
 
-TEST_F(Entity3dRenderTest, DrawnDiagnosticZeroIntervalPresentsUsingSignedUnderflowContract) {
+TEST_F(Entity3dRenderTest, DrawnDiagnosticZeroIntervalPresentsAfterSignedCounterUnderflow) {
     AttachMesh(); Cached(); Device->m_Flags = 1; Device->m_FpsInterval = 0;
     Device->m_RenderFlags = CK_RENDER_DOBACKTOFRONT;
     ASSERT_TRUE(Object->Render(Device, 0)); EXPECT_EQ(1, State.PresentCount);

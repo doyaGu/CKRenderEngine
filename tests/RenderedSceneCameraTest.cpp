@@ -8,7 +8,7 @@
 #include "../src/CKRasterizer/CKRasterizerLib/CKRenderSettings.h"
 
 namespace {
-class CameraSubmissionBoundary : public MaterialRenderObserver {
+class CameraSubmissionObserver : public MaterialRenderObserver {
 public:
     int ViewportWrites = 0;
     int ProjectionWrites = 0;
@@ -29,7 +29,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
-    CameraSubmissionBoundary Boundary;
+    CameraSubmissionObserver ObservedRasterizer;
     CKRasterizerDriver Driver;
 
     void SetUp() override {
@@ -54,9 +54,9 @@ protected:
         ASSERT_GT(Manager->m_DriverCount, 0);
         Manager->m_Drivers[0].CapsUpToDate = TRUE;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        ASSERT_TRUE(Manager->RegisterRasterizerContext(&Boundary, 0));
+        ASSERT_TRUE(Manager->RegisterRasterizerContext(&ObservedRasterizer, 0));
         Device = new RCKRenderContext(Context);
-        Device->m_RasterizerContext = &Boundary;
+        Device->m_RasterizerContext = &ObservedRasterizer;
         Device->m_RasterizerDriver = &Driver;
         Device->m_DriverIndex = 0;
         Device->m_Settings.m_Rect = CKRECT{0, 0, 640, 360};
@@ -100,7 +100,7 @@ protected:
         Device->m_ViewportData.ViewHeight = height;
         Device->m_ViewportData.ViewZMin = .125f;
         Device->m_ViewportData.ViewZMax = .875f;
-        ASSERT_TRUE(Boundary.SetViewport(&Device->m_ViewportData));
+        ASSERT_TRUE(ObservedRasterizer.SetViewport(&Device->m_ViewportData));
     }
     void Viewport(int x, int y, int width, int height) {
         VxRect rect;
@@ -109,10 +109,10 @@ protected:
         EXPECT_FLOAT_EQ(static_cast<float>(y), rect.top);
         EXPECT_FLOAT_EQ(static_cast<float>(x + width), rect.right);
         EXPECT_FLOAT_EQ(static_cast<float>(y + height), rect.bottom);
-        EXPECT_EQ(static_cast<CKDWORD>(x), Boundary.Viewport.ViewX);
-        EXPECT_EQ(static_cast<CKDWORD>(y), Boundary.Viewport.ViewY);
-        EXPECT_EQ(static_cast<CKDWORD>(width), Boundary.Viewport.ViewWidth);
-        EXPECT_EQ(static_cast<CKDWORD>(height), Boundary.Viewport.ViewHeight);
+        EXPECT_EQ(static_cast<CKDWORD>(x), ObservedRasterizer.Viewport.ViewX);
+        EXPECT_EQ(static_cast<CKDWORD>(y), ObservedRasterizer.Viewport.ViewY);
+        EXPECT_EQ(static_cast<CKDWORD>(width), ObservedRasterizer.Viewport.ViewWidth);
+        EXPECT_EQ(static_cast<CKDWORD>(height), ObservedRasterizer.Viewport.ViewHeight);
     }
     static void Matrix(const VxMatrix &actual, const VxMatrix &expected) {
         for (int row = 0; row < 4; ++row)
@@ -148,7 +148,7 @@ TEST_F(RenderedSceneCameraTest, DirtyPerspectiveCameraCopiesPoseLensAndClippingP
     Viewport(80, 0, 480, 360);
     VxMatrix expected;
     expected.Perspective(PI / 2, 4.0f / 3.0f, 2, 20);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], expected);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], expected);
     EXPECT_TRUE(camera->IsUpToDate());
 }
 
@@ -156,14 +156,14 @@ TEST_F(RenderedSceneCameraTest, CleanAttachedCameraRefreshesPoseWithoutRebuildin
     RCKCamera *camera = Camera();
     ASSERT_NE(nullptr, camera);
     Scene().PrepareCameras(CK_RENDER_USECAMERARATIO);
-    const int writes = Boundary.ProjectionWrites;
-    const VxMatrix projection = Boundary.Matrices[VXMATRIX_PROJECTION];
+    const int writes = ObservedRasterizer.ProjectionWrites;
+    const VxMatrix projection = ObservedRasterizer.Matrices[VXMATRIX_PROJECTION];
     camera->SetPosition3f(11, 13, 17);
     camera->ModifyObjectFlags(CK_OBJECT_UPTODATE, 0);
     Scene().PrepareCameras(CK_RENDER_USECAMERARATIO);
     Matrix(Device->GetViewpoint()->GetWorldMatrix(), camera->GetWorldMatrix());
-    EXPECT_EQ(writes, Boundary.ProjectionWrites);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], projection);
+    EXPECT_EQ(writes, ObservedRasterizer.ProjectionWrites);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], projection);
 }
 
 TEST_F(RenderedSceneCameraTest, DirtyOrthographicCameraUsesZoomAndViewportAspect) {
@@ -178,7 +178,7 @@ TEST_F(RenderedSceneCameraTest, DirtyOrthographicCameraUsesZoomAndViewportAspect
     EXPECT_FLOAT_EQ(3, Device->m_Zoom);
     VxMatrix expected;
     expected.Orthographic(3, 4.0f / 3.0f, 4, 40);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], expected);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], expected);
     EXPECT_TRUE(camera->IsUpToDate());
 }
 
@@ -194,10 +194,10 @@ TEST_F(RenderedSceneCameraTest, WithoutAttachedCameraKeepsFreeViewpointAndUpdate
     Matrix(Device->GetViewpoint()->GetWorldMatrix(), pose);
     VxMatrix expected;
     expected.Perspective(.8f, 640.0f / 360.0f, 3, 30);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], expected);
-    const int writes = Boundary.ProjectionWrites;
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], expected);
+    const int writes = ObservedRasterizer.ProjectionWrites;
     Scene().PrepareCameras(CK_RENDER_USECAMERARATIO);
-    EXPECT_EQ(writes, Boundary.ProjectionWrites);
+    EXPECT_EQ(writes, ObservedRasterizer.ProjectionWrites);
 }
 
 TEST_F(RenderedSceneCameraTest, CameraRatioFitsWideAndTallWindowsWithCenteredIntegerViewport) {
@@ -209,7 +209,7 @@ TEST_F(RenderedSceneCameraTest, CameraRatioFitsWideAndTallWindowsWithCenteredInt
     Viewport(0, 137, 300, 225);
     VxMatrix expected;
     expected.Perspective(Device->m_Fov, 4.0f / 3.0f, Device->m_NearPlane, Device->m_FarPlane);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], expected);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], expected);
 }
 
 TEST_F(RenderedSceneCameraTest, StoredRatioDisabledPreventsExplicitRatioFromChangingTheCurrentViewport) {
@@ -217,10 +217,10 @@ TEST_F(RenderedSceneCameraTest, StoredRatioDisabledPreventsExplicitRatioFromChan
     Device->m_RenderFlags = CK_RENDER_CLEARZ;
     SetViewport(7, 9, 320, 200);
     Device->m_ProjectionUpdated = TRUE;
-    const int writes = Boundary.ViewportWrites;
+    const int writes = ObservedRasterizer.ViewportWrites;
     Scene().UpdateViewportSize(FALSE, CK_RENDER_USECAMERARATIO);
     Viewport(7, 9, 320, 200);
-    EXPECT_EQ(writes, Boundary.ViewportWrites);
+    EXPECT_EQ(writes, ObservedRasterizer.ViewportWrites);
 }
 
 TEST_F(RenderedSceneCameraTest, StoredRatioEnabledAllowsExplicitFullViewportToRestoreTheWindow) {
@@ -241,22 +241,22 @@ TEST_F(RenderedSceneCameraTest, IgnoreAspectPreservesManualViewportAndForcedProj
     ASSERT_NE(nullptr, camera);
     camera->SetFlags(camera->GetFlags() | CK_3DENTITY_CAMERAIGNOREASPECT);
     SetViewport(17, 19, 450, 150);
-    const int writes = Boundary.ProjectionWrites;
+    const int writes = ObservedRasterizer.ProjectionWrites;
     Scene().UpdateViewportSize(FALSE, CK_RENDER_USECAMERARATIO);
     Viewport(17, 19, 450, 150);
-    EXPECT_EQ(writes, Boundary.ProjectionWrites);
+    EXPECT_EQ(writes, ObservedRasterizer.ProjectionWrites);
     Scene().UpdateViewportSize(TRUE, CK_RENDER_USECAMERARATIO);
     Viewport(17, 19, 450, 150);
-    EXPECT_EQ(writes + 1, Boundary.ProjectionWrites);
+    EXPECT_EQ(writes + 1, ObservedRasterizer.ProjectionWrites);
 }
 
 TEST_F(RenderedSceneCameraTest, NoAttachedCameraForceRefreshesWithoutApplyingTheDefaultRatio) {
     SetViewport(13, 17, 310, 190);
-    const int writes = Boundary.ProjectionWrites;
+    const int writes = ObservedRasterizer.ProjectionWrites;
     Scene().UpdateViewportSize(FALSE, CK_RENDER_USECAMERARATIO);
-    EXPECT_EQ(writes, Boundary.ProjectionWrites);
+    EXPECT_EQ(writes, ObservedRasterizer.ProjectionWrites);
     Scene().UpdateViewportSize(TRUE, CK_RENDER_USECAMERARATIO);
-    EXPECT_EQ(writes + 1, Boundary.ProjectionWrites);
+    EXPECT_EQ(writes + 1, ObservedRasterizer.ProjectionWrites);
     Viewport(13, 17, 310, 190);
 }
 
@@ -264,44 +264,44 @@ TEST_F(RenderedSceneCameraTest, ForcedCameraSettingsRefreshChangedLensImmediatel
     RCKCamera *camera = Camera();
     ASSERT_NE(nullptr, camera);
     Scene().PrepareCameras(CK_RENDER_USECAMERARATIO);
-    const int writes = Boundary.ProjectionWrites;
+    const int writes = ObservedRasterizer.ProjectionWrites;
     camera->SetProjectionType(CK_ORTHOGRAPHICPROJECTION);
     camera->SetOrthographicZoom(7);
     camera->SetFrontPlane(4);
     camera->SetBackPlane(90);
     camera->SetPosition3f(13, 17, 19);
     Scene().ForceCameraSettingsUpdate();
-    EXPECT_EQ(writes + 1, Boundary.ProjectionWrites);
+    EXPECT_EQ(writes + 1, ObservedRasterizer.ProjectionWrites);
     Viewport(80, 0, 480, 360);
     Matrix(Device->GetViewpoint()->GetWorldMatrix(), camera->GetWorldMatrix());
     VxMatrix expected;
     expected.Orthographic(7, 4.0f / 3.0f, 4, 90);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], expected);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], expected);
 }
 
 TEST_F(RenderedSceneCameraTest, ForceWithoutAttachedCameraLeavesViewpointAndProjectionUntouched) {
     Device->GetViewpoint()->SetPosition3f(17, 19, 23);
     const VxMatrix pose = Device->GetViewpoint()->GetWorldMatrix();
-    const VxMatrix projection = Boundary.Matrices[VXMATRIX_PROJECTION];
-    const int writes = Boundary.ProjectionWrites;
+    const VxMatrix projection = ObservedRasterizer.Matrices[VXMATRIX_PROJECTION];
+    const int writes = ObservedRasterizer.ProjectionWrites;
     Scene().ForceCameraSettingsUpdate();
     Matrix(Device->GetViewpoint()->GetWorldMatrix(), pose);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], projection);
-    EXPECT_EQ(writes, Boundary.ProjectionWrites);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], projection);
+    EXPECT_EQ(writes, ObservedRasterizer.ProjectionWrites);
 }
 
 TEST_F(RenderedSceneCameraTest, RestoringCameraViewportKeepsDepthRangeAndDoesNotRebuildProjection) {
     ASSERT_NE(nullptr, Camera());
     Scene().PrepareCameras(CK_RENDER_USECAMERARATIO);
-    const VxMatrix projection = Boundary.Matrices[VXMATRIX_PROJECTION];
-    const int writes = Boundary.ProjectionWrites;
+    const VxMatrix projection = ObservedRasterizer.Matrices[VXMATRIX_PROJECTION];
+    const int writes = ObservedRasterizer.ProjectionWrites;
     SetViewport(0, 0, 640, 360);
     Scene().ResizeViewport(VxRect(80.75f, .75f, 560.75f, 360.75f));
     Viewport(80, 0, 480, 360);
-    EXPECT_FLOAT_EQ(.125f, Boundary.Viewport.ViewZMin);
-    EXPECT_FLOAT_EQ(.875f, Boundary.Viewport.ViewZMax);
-    EXPECT_EQ(writes, Boundary.ProjectionWrites);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], projection);
+    EXPECT_FLOAT_EQ(.125f, ObservedRasterizer.Viewport.ViewZMin);
+    EXPECT_FLOAT_EQ(.875f, ObservedRasterizer.Viewport.ViewZMax);
+    EXPECT_EQ(writes, ObservedRasterizer.ProjectionWrites);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], projection);
 }
 
 TEST_F(RenderedSceneCameraTest, TargetCamerasAndNonPointLightsTrackTargetsBeforeCopyingTheViewpoint) {

@@ -180,7 +180,7 @@ TEST_F(BodyPartLoadTest, BooleanOnlyLegacyPrefixRetainsDeterministicZeroLimitsFo
     Pose(*body, .7f, -.6f, .8f); ASSERT_EQ(CK_OK, body->FitToJoint()); SingleAxisMatrix(body->GetLocalMatrix(), 0, 0);
 }
 
-TEST_F(BodyPartLoadTest, CurrentDataVersionsFiveAndSixKeepNamedJointPayloadAndFitContract) {
+TEST_F(BodyPartLoadTest, DataVersionsFiveAndSixRestoreNamedJointsAndFitBounds) {
     for (int version = 5; version <= 6; ++version) {
         SCOPED_TRACE(version);
         RCKBodyPart *body = Body(); RCKCharacter *character = Character(); ASSERT_NE(nullptr, body); ASSERT_NE(nullptr, character);

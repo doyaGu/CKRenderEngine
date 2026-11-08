@@ -26,10 +26,10 @@ struct ParentWindowCalls {
     int Shutdowns = 0;
 };
 
-class ParentWindowBoundary : public MaterialRenderObserver {
+class ParentWindowObserver : public MaterialRenderObserver {
 public:
     ParentWindowCalls *Calls;
-    ParentWindowBoundary(CKRasterizerDriver *driver, ParentWindowCalls *calls) : Calls(calls) {
+    ParentWindowObserver(CKRasterizerDriver *driver, ParentWindowCalls *calls) : Calls(calls) {
         m_Driver = driver;
     }
     CKBOOL Create(WIN_HANDLE window, int x, int y, int width, int height, int bpp,
@@ -59,7 +59,7 @@ public:
     ~ParentWindowDriver() override { DestroyContexts(); }
     CKBOOL GetNativeCaps(CKRasterizerNativeCapsDesc *) const override { return FALSE; }
     CKRasterizerContext *CreateContext() override {
-        ParentWindowBoundary *context = new ParentWindowBoundary(this, &Calls);
+        ParentWindowObserver *context = new ParentWindowObserver(this, &Calls);
         AddContext(context);
         return context;
     }

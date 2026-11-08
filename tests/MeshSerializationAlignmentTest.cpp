@@ -266,7 +266,7 @@ TEST_F(MeshSerializationAlignmentTest, CheckPreDeletionClearsReferencedMaterials
     ASSERT_EQ(1, mesh.GetChannelCount()); EXPECT_EQ(nullptr, mesh.GetChannelMaterial(0)); float u = 0, v = 0; mesh.GetVertexTextureCoordinates(0, &u, &v, 0);
     EXPECT_FLOAT_EQ(.25f, u); EXPECT_FLOAT_EQ(.75f, v); doomed.ModifyObjectFlags(0, CK_OBJECT_TOBEDELETED);
 }
-TEST_F(MeshSerializationAlignmentTest, IsObjectUsedAndSceneDependenciesFollowNativeFaceMaterialContract) {
+TEST_F(MeshSerializationAlignmentTest, ObjectUsageAndSceneDependenciesFollowFaceMaterials) {
     SerializedMesh mesh(Context); RCKMaterial face(Context), channel(Context); Triangle(mesh); mesh.SetFaceMaterial(0, &face); ASSERT_EQ(0, mesh.AddChannel(&channel));
     EXPECT_TRUE(mesh.IsObjectUsed(&face, CKCID_MATERIAL)); EXPECT_FALSE(mesh.IsObjectUsed(&channel, CKCID_MATERIAL));
     CKScene *scene = static_cast<CKScene *>(Context->CreateObject(CKCID_SCENE)); ASSERT_NE(nullptr, scene);

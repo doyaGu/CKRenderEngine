@@ -276,7 +276,7 @@ TEST_F(AnimationDependenciesTest, InheritedObjectPrepareCollectsSelfAndHonorsSav
     EXPECT_FALSE(dependencies.IsDependenciesHere(root.GetID()));
     EXPECT_FALSE(dependencies.IsDependenciesHere(character.GetID()));
     // There is no Animation Prepare override. Its registered zero own-option
-    // count does not suppress the ordinary Object save exclusion contract.
+    // count does not override CKObject flags that exclude it from saving.
     animation.ModifyObjectFlags(CK_OBJECT_NOTTOBESAVED, 0);
     CKDependenciesContext saving(Context);
     saving.SetOperationMode(CK_DEPENDENCIES_SAVE);

@@ -11,7 +11,7 @@ public:
     CKViewportData DrawViewport = {};
     int Draws = 0;
     CKBOOL ApplyMaterial(const CKMaterialRenderState &state) override {
-        // ApplyMaterial's public contract uploads both payload and states.
+        // ApplyMaterial uploads material values and render states.
         Material = state.Material;
         return TextureTestObserver::ApplyMaterial(state);
     }

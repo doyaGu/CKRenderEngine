@@ -461,7 +461,7 @@ if (TARGET gtest_main)
             MaterialSlotBudgetTest MeshSameContextReentryTest
             MeshCallbackStateReentryTest RasterizerCallbackIdentityTest CallbackEntryObservationTest
             CallbackObservationLifetimeTest CallbackObservationDeviceTest
-            MeshRenderCompletionTest MeshSerializationCompletionTest MeshGeometryCompletionTest MaterialCompletionTest
+            MeshRenderTest MeshSerializationTest MeshGeometryTest MaterialTextureStageTest
             SkinStorageTest SkinCalculationTest SkinCacheTest SkinEntityIntegrationTest
             KinematicChainLifecycleTest KinematicChainSolveTest KinematicChainMathTest
             VertexBufferStagingTest VertexBufferUploadTest VertexBufferDrawTest
@@ -478,15 +478,15 @@ if (TARGET gtest_main)
             TCBScaleAxisLifecycleTest TCBScaleAxisEvaluationTest TCBScaleAxisStorageTest
               BezierPositionLifecycleTest BezierPositionEvaluationTest
               BezierScaleLifecycleTest BezierScaleEvaluationTest BezierStorageTest
-              ControllerContractsTest ControllerQuaternionEvaluationTest
-            AnimationAbiCompletionTest AnimationClockCompletionTest
-            KeyedAnimationAbiCompletionTest KeyedAnimationCompositionCompletionTest KeyedAnimationLifetimeCompletionTest
-            GridAbiCompletionTest GridGeometryCompletionTest GridStorageCompletionTest GridDisplayCompletionTest
-            LayerAbiCompletionTest LayerCellCompletionTest LayerStorageCompletionTest
+              KeyframeControllerTest ControllerQuaternionEvaluationTest
+            AnimationAbiTest AnimationClockPredictionTest
+            KeyedAnimationAbiTest KeyedAnimationCompositionPrecisionTest KeyedAnimationLifetimeTest
+            GridAbiTest GridGeometryTest GridStorageTest GridDisplayTest
+            LayerAbiTest LayerCellTest LayerStorageTest
             MeshGeneratedNormalsTest MeshPMGeneratedNormalsTest
-            MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshPositiveStageContractTest
+            MeshMaterialOwnershipTest MeshMonoPassFallbackTest MeshChannelStateTest MeshTextureStageTest
             MeshRenderGroupsTest MeshHardwareBufferTest MeshGroupSubmissionTest MeshEditingStateTest
-            MeshLifetimeMemoryTest MeshPMConsumersTest MeshRenderVisibilityTest MeshInterfaceContractsTest
+            MeshLifetimeMemoryTest MeshPMConsumersTest MeshRenderVisibilityTest MeshVertexFaceTest
             MeshStateAlignmentTest MeshGeometryAlignmentTest MeshSerializationAlignmentTest MeshRenderAlignmentTest
             TextureLifecycleTest TextureImageLifecycleTest TextureSerializationTest TextureCopyTest
             TextureUploadTest TextureContextCopyTest TextureStateTest
@@ -511,20 +511,20 @@ if (TARGET gtest_main)
             Entity2dLifecycleTest Entity2dHierarchyTest Entity2dLayoutTest Entity2dFlagsTest Entity2dSerializationTest Entity2dDependenciesTest Entity2dRenderTest
         Entity3dFrustumTest Entity3dHierFrustumTest Entity3dRenderTest
             Entity3dLifecycleTest Entity3dHierarchyTest
-            Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest Entity3dScalePrecisionTest Entity3dMathContractTest
+            Entity3dSerializationTest Entity3dDependenciesTest Entity3dTransformTest Entity3dGeometryTest Entity3dScalePrecisionTest Entity3dParentTransformTest
             RenderManagerLifecycleTest RenderManagerContextTest RenderManagerOptionsTest
             RenderManagerSceneTest RenderManagerCallbacksTest RenderManagerResourcesTest
-            RenderManagerHelpersCompletionTest RenderContextReadbackCompletionTest RenderContextStateCompletionTest
-            RenderContextLifecycleCompletionTest RenderContextDeviceCompletionTest
-            RenderContextFrameCompletionTest RenderContextCallbackCompletionTest
-            RenderContextGeometryCompletionTest RenderContextPickingCompletionTest
-            RenderContextTransparencyCompletionTest RenderContextTransferCompletionTest
-            RenderContextInterfaceCompletionTest RenderContextSubmissionCompletionTest
-            RenderContextGuardCompletionTest RenderContextPlatformCompletionTest
-            RenderContextVertexContractTest RenderContextQueryCompletionTest
-            RenderContextObjectCompletionTest RenderContextOptionsCompletionTest
-            RenderContextDispatchCompletionTest RenderContextDiagnosticCompletionTest
-            RenderContextAbiCompletionTest RenderContextStorageCompletionTest
+            RenderManagerConfigurationTest RenderContextReadbackTest RenderContextStateTest
+            RenderContextLifecycleTest RenderContextDeviceTest
+            RenderContextFrameTest RenderContextCallbackTest
+            RenderContextGeometryTest RenderContextPickingTest
+            RenderContextTransparencyTest RenderContextTransferTest
+            RenderContextWindowCoordinatesTest RenderContextSubmissionTest
+            RenderContextStateRestoreTest RenderContextPixelFormatTest
+            RenderContextVertexStreamsTest RenderContextStateQueryTest
+            RenderContextObjectTest RenderContextOptionsTest
+            RenderContextDispatchTest RenderContextDiagnosticTest
+            RenderContextAbiTest RenderContextSnapshotStorageTest
             RenderContextCallbackTimingTest RenderContextTraversalTimingTest RenderContextParentWindowTest
             RenderedSceneLifecycleTest RenderedSceneCameraTest RenderedSceneDrawTest RenderedSceneFloatStateTest
             SceneGraphLifecycleTest SceneGraphVisibilityTest SceneGraphTraversalTest
@@ -539,7 +539,7 @@ if (TARGET gtest_main)
             VertexCacheOptimizerTopologyTest VertexCacheOptimizerStateTest
             NvStripifierTopologyTest NvStripifierLifetimeTest NvStripifierOptimizationTest
             ProgressiveMeshTopologyTest ProgressiveMeshHeapTest ProgressiveMeshOwnershipTest
-            ProgressiveMeshCollapseTest ProgressiveMeshCallbackTest LegacyMeshLoadTest PMChainGeoMorphTest BuildRenderMeshCompletionTest
+            ProgressiveMeshCollapseTest ProgressiveMeshCallbackTest LegacyMeshLoadTest PMChainGeoMorphTest MeshLodBuildTest
             MaterialGroupStorageTest VertexBufferRemapTest MaterialChannelStorageTest VertexPackingTest
             MeshDrawScopeTest MeshDrawDelegationTest MeshSubmissionGuardsTest MeshStateHelpersTest MeshDrawAnnotationTest
             MeshNormalGenerationTest MeshVertexStorageTest MeshRayIntersectionTest
@@ -550,7 +550,7 @@ if (TARGET gtest_main)
             KeyedAnimationPlaybackTest AnimationClockTest AnimationFlagsTest AnimationLifecycleTest
             AnimationFieldsTest KeyedAnimationFieldsTest AnimationInterfaceTest
             CharacterLoadTest CharacterSaveTest BodyPartSerializationTest BodyPartRegistrationTest BodyPartLoadTest
-            CharacterOwnershipTest CharacterDependenciesTest SecondaryAnimationStorageTest AnimationClockBoundaryTest BodyPartJointTest
+            CharacterOwnershipTest CharacterDependenciesTest SecondaryAnimationStorageTest AnimationClockRoundingTest BodyPartJointTest
             CharacterPrimaryPlaybackTest CharacterSecondaryPlaybackTest CharacterProcessAnimationTest
             CharacterPrimaryMotionTest CharacterSecondaryReverseTest CharacterPrimaryReverseTest
             CharacterTerminalRotationTest CharacterPrimaryMixedTimeTest CharacterPrimaryTypesTest CharacterReverseWarpReadinessTest
@@ -560,7 +560,7 @@ if (TARGET gtest_main)
             CharacterSecondaryHeldEntryTest CharacterSecondaryHeldClockTest CharacterSecondaryHeldStartTest
             CharacterSecondaryStartHandoverTest CharacterSecondaryPausedReturnTest
             CharacterSecondaryForwardTerminalTest
-            CharacterRegistrationTest CharacterGeometryTest CharacterFloorVelocityTest CharacterPlaybackCompletionTest)
+            CharacterRegistrationTest CharacterGeometryTest CharacterFloorVelocityTest CharacterPlaybackTest)
         ckre_add_engine_test(${animation_test} ${animation_test}.cpp)
         target_link_libraries(${animation_test} PRIVATE gtest_main)
         target_compile_features(${animation_test} PRIVATE cxx_std_17)
@@ -574,7 +574,7 @@ if (TARGET gtest_main)
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(PMChainGeoMorphTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
-    target_include_directories(BuildRenderMeshCompletionTest PRIVATE
+    target_include_directories(MeshLodBuildTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
     target_include_directories(MeshSubmissionGuardsTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
@@ -687,11 +687,11 @@ if (TARGET gtest_main)
     endif ()
     target_include_directories(RenderedSceneFloatStateTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
-    target_include_directories(RenderContextFrameCompletionTest PRIVATE
+    target_include_directories(RenderContextFrameTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
-    target_include_directories(RenderContextOptionsCompletionTest PRIVATE
+    target_include_directories(RenderContextOptionsTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
-    target_include_directories(RenderContextDispatchCompletionTest PRIVATE
+    target_include_directories(RenderContextDispatchTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
 
     # Validate both render-statistics variants independently of the main engine.
@@ -764,19 +764,19 @@ if (TARGET gtest_main)
 
     # Exercise the enabled Context paths even when the regular engine has its
     # optional diagnostics disabled. Direct Context objects precede the archive.
-    ckre_add_engine_test(RenderContextLoggingCompletionTest
-        RenderContextLoggingCompletionTest.cpp
+    ckre_add_engine_test(RenderContextLoggingTest
+        RenderContextLoggingTest.cpp
         ../src/CKRenderContext.cpp
         ../src/CKRasterizer/CKRasterizerLib/CKDebugLogger.cpp)
-    get_target_property(context_logging_definitions RenderContextLoggingCompletionTest COMPILE_DEFINITIONS)
+    get_target_property(context_logging_definitions RenderContextLoggingTest COMPILE_DEFINITIONS)
     list(FILTER context_logging_definitions EXCLUDE
         REGEX "^CKRE_ENABLE_(DEBUG_LOGGER|FRAME_DIAGNOSTICS)=")
-    set_property(TARGET RenderContextLoggingCompletionTest PROPERTY
+    set_property(TARGET RenderContextLoggingTest PROPERTY
         COMPILE_DEFINITIONS "${context_logging_definitions}")
-    target_compile_definitions(RenderContextLoggingCompletionTest PRIVATE
+    target_compile_definitions(RenderContextLoggingTest PRIVATE
         CKRE_ENABLE_DEBUG_LOGGER=1 CKRE_ENABLE_FRAME_DIAGNOSTICS=1)
-    target_include_directories(RenderContextLoggingCompletionTest PRIVATE
+    target_include_directories(RenderContextLoggingTest PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKRasterizerLib)
-    target_link_libraries(RenderContextLoggingCompletionTest PRIVATE gtest_main)
-    target_compile_features(RenderContextLoggingCompletionTest PRIVATE cxx_std_17)
+    target_link_libraries(RenderContextLoggingTest PRIVATE gtest_main)
+    target_compile_features(RenderContextLoggingTest PRIVATE cxx_std_17)
 endif ()

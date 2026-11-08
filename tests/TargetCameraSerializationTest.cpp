@@ -222,7 +222,7 @@ TEST_F(TargetCameraSerializationTest, NullOrUnresolvedFilelessTargetIsWrittenAsZ
     }
 }
 
-TEST_F(TargetCameraSerializationTest, FilelessDynamicTargetIsFilteredByChunkObjectContract) {
+TEST_F(TargetCameraSerializationTest, FilelessChunkOmitsDynamicTargetReferences) {
     SerializationTargetCamera camera(Context); RCK3dEntity target(Context);
     target.ModifyObjectFlags(CK_OBJECT_DYNAMIC, 0); camera.SetRawTarget(target.GetID());
     CKStateChunk *chunk = camera.Save(nullptr, 0x10000000); ASSERT_NE(nullptr, chunk);

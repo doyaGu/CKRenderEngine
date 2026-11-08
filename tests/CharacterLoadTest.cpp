@@ -264,7 +264,7 @@ TEST_F(CharacterLoadTest, ModernChildLoadFailureReturnsRealErrorAndStopsLaterSna
     EXPECT_EQ(1, bad.Calls); EXPECT_EQ(nullptr, bad.LastFile); EXPECT_EQ(CKCID_BODYPART, bad.LastClass);
     ExpectPose(later, 51, 52, 53);
     EXPECT_EQ(reinterpret_cast<CKBodyPart *>(&oldRoot), character.GetRootBodyPart());
-    EXPECT_EQ(2, character.GetBodyPartCount()); // Incremental load, no rollback contract.
+    EXPECT_EQ(2, character.GetBodyPartCount()); // Loading appends body parts before later errors; it does not roll back.
 }
 
 TEST_F(CharacterLoadTest, LegacyChildLoadFailureReturnsRealErrorAndStopsLaterPairs) {

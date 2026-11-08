@@ -56,7 +56,7 @@ protected:
 };
 
 // Registered objects must be cloned by the context's dependency transaction.
-// Traits inspect the compiler contract without executing an unsafe shallow
+// Type traits inspect copy construction and assignment without executing a shallow
 // copy, and also allow the same test to run against the pre-fix headers.
 TEST_F(AnimationInterfaceTest, RegisteredIdentityRejectsCppCopyAndMove) {
     EXPECT_FALSE(std::is_copy_constructible<RCKAnimation>::value);

@@ -19,7 +19,7 @@ extern void SetProcessorSpecific_FunctionsPtr();
 
 namespace {
 // Observe genuine entity/mesh submissions, not a replacement Render method.
-class RootTraversalBoundary : public MaterialRenderObserver {
+class RootTraversalObserver : public MaterialRenderObserver {
 public:
     RCKRenderContext *Device = nullptr;
     int Draws = 0;
@@ -53,7 +53,7 @@ protected:
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr, *Other = nullptr;
-    RootTraversalBoundary Boundary, OtherBoundary;
+    RootTraversalObserver ObservedRasterizer, OtherBoundary;
     CKRasterizerDriver Driver;
     void SetUp() override {
         SetProcessorSpecific_FunctionsPtr(); ASSERT_EQ(CK_OK, CKStartUp());
@@ -76,7 +76,7 @@ protected:
         Manager->m_Drivers[0].Caps3D.MaxNumberTextureStage = 8;
         Manager->m_Drivers[0].Caps3D.MaxNumberBlendStage = 8;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
-        Device = View(Boundary); ASSERT_NE(nullptr, Device);
+        Device = View(ObservedRasterizer); ASSERT_NE(nullptr, Device);
         Context->GetTimeManager()->ChangeLimitOptions(CK_FRAMERATE_FREE);
     }
     void TearDown() override {
@@ -86,7 +86,7 @@ protected:
         if (Context) CKCloseContext(Context);
         CKShutdown();
     }
-    RCKRenderContext *View(RootTraversalBoundary &boundary) {
+    RCKRenderContext *View(RootTraversalObserver &boundary) {
         if (!Manager->RegisterRasterizerContext(&boundary, 0)) return nullptr;
         RCKRenderContext *view = static_cast<RCKRenderContext *>(Context->CreateObject(CKCID_RENDERCONTEXT));
         if (!view) return nullptr;
@@ -133,20 +133,20 @@ protected:
         for (int i = 0; i < count; ++i) Attach(entities[i]);
         const CKDWORD stamp = Device->m_TimeFpsCalc;
         ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-        ASSERT_EQ(count, Boundary.Draws);
+        ASSERT_EQ(count, ObservedRasterizer.Draws);
         EXPECT_EQ(stamp, Device->m_TimeFpsCalc);
         for (int i = 0; i < count; ++i) { entities[i]->Show(CKHIDE); EXPECT_EQ(stamp, entities[i]->m_SceneGraphNode->m_TimeFpsCalc); }
         Device->AddRemoveSequence(FALSE);
         ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
         EXPECT_EQ(stamp, Device->m_TimeFpsCalc);
-        EXPECT_EQ(count, Boundary.Draws) << "A new DrawScene must not replay the previous visibility sample";
+        EXPECT_EQ(count, ObservedRasterizer.Draws) << "A new DrawScene must not replay the previous visibility sample";
         EXPECT_EQ(0, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
         for (int i = 0; i < count; ++i) EXPECT_FALSE(entities[i]->m_SceneGraphNode->IsInTransparentList());
         entities[0]->Show(CKSHOW); Device->AddRemoveSequence(FALSE);
-        const int beforeVisible = Boundary.Draws;
+        const int beforeVisible = ObservedRasterizer.Draws;
         ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-        ASSERT_EQ(beforeVisible + 1, Boundary.Draws); EXPECT_EQ(entities[0]->GetID(), Boundary.Objects[beforeVisible]);
-        EXPECT_TRUE(Boundary.Transparent[beforeVisible]);
+        ASSERT_EQ(beforeVisible + 1, ObservedRasterizer.Draws); EXPECT_EQ(entities[0]->GetID(), ObservedRasterizer.Objects[beforeVisible]);
+        EXPECT_TRUE(ObservedRasterizer.Transparent[beforeVisible]);
     }
     void EqualCounterViews(CKBOOL sorted, int count) {
         Manager->m_SortTransparentObjects.Value = sorted;
@@ -160,7 +160,7 @@ protected:
         ASSERT_EQ(Device->m_TimeFpsCalc, Other->m_TimeFpsCalc);
         const CKDWORD sharedStamp = Other->m_TimeFpsCalc;
         ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
-        ASSERT_EQ(count, Boundary.Draws);
+        ASSERT_EQ(count, ObservedRasterizer.Draws);
         for (int i = 0; i < count; ++i) EXPECT_EQ(sharedStamp, entities[i]->m_SceneGraphNode->m_TimeFpsCalc);
         ASSERT_EQ(CK_OK, Other->Render(CK_RENDER_DONOTUPDATEEXTENTS));
         EXPECT_EQ(0, OtherBoundary.Draws) << "Other camera rejects every triangle; matching counters are not visibility";
@@ -194,11 +194,11 @@ TEST_F(SceneGraphRootTraversalTest, TwoRealCameraRendersWithEqualCountersDoNotSh
 
 TEST_F(SceneGraphRootTraversalTest, SwitchingATransparentEntityToOpaqueDoesNotAlsoReplayItsOldDeferredEntry) {
     RCK3dEntity *entity = Triangle(); ASSERT_NE(nullptr, entity); Attach(entity);
-    ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS)); ASSERT_EQ(1, Boundary.Draws);
-    EXPECT_TRUE(Boundary.Transparent[0]);
+    ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS)); ASSERT_EQ(1, ObservedRasterizer.Draws);
+    EXPECT_TRUE(ObservedRasterizer.Transparent[0]);
     entity->SetRenderAsTransparent(FALSE);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    EXPECT_EQ(2, Boundary.Draws); EXPECT_FALSE(Boundary.Transparent[1]);
+    EXPECT_EQ(2, ObservedRasterizer.Draws); EXPECT_FALSE(ObservedRasterizer.Transparent[1]);
     EXPECT_EQ(0, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
     EXPECT_FALSE(entity->m_SceneGraphNode->IsInTransparentList());
 }
@@ -211,16 +211,16 @@ TEST_F(SceneGraphRootTraversalTest, IntersectingHierarchyClipsEachLeafThenSubmit
     ASSERT_TRUE(transparent->SetParent(reinterpret_cast<CK3dEntity *>(parent), TRUE));
     ASSERT_TRUE(outside->SetParent(reinterpret_cast<CK3dEntity *>(parent), TRUE)); Attach(parent);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    ASSERT_EQ(2, Boundary.Draws); EXPECT_EQ(opaque->GetID(), Boundary.Objects[0]); EXPECT_FALSE(Boundary.Transparent[0]);
-    EXPECT_EQ(transparent->GetID(), Boundary.Objects[1]); EXPECT_TRUE(Boundary.Transparent[1]);
+    ASSERT_EQ(2, ObservedRasterizer.Draws); EXPECT_EQ(opaque->GetID(), ObservedRasterizer.Objects[0]); EXPECT_FALSE(ObservedRasterizer.Transparent[0]);
+    EXPECT_EQ(transparent->GetID(), ObservedRasterizer.Objects[1]); EXPECT_TRUE(ObservedRasterizer.Transparent[1]);
     EXPECT_FALSE(parent->m_SceneGraphNode->CheckHierarchyFrustum());
     EXPECT_TRUE(outside->m_SceneGraphNode->IsAllOutsideFrustum());
     outside->SetPosition3f(.5f, 0, 5);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    ASSERT_EQ(5, Boundary.Draws); EXPECT_TRUE(parent->m_SceneGraphNode->CheckHierarchyFrustum());
-    EXPECT_EQ(opaque->GetID(), Boundary.Objects[2]); EXPECT_EQ(outside->GetID(), Boundary.Objects[3]);
-    EXPECT_FALSE(Boundary.Transparent[2]); EXPECT_FALSE(Boundary.Transparent[3]);
-    EXPECT_EQ(transparent->GetID(), Boundary.Objects[4]); EXPECT_TRUE(Boundary.Transparent[4]);
+    ASSERT_EQ(5, ObservedRasterizer.Draws); EXPECT_TRUE(parent->m_SceneGraphNode->CheckHierarchyFrustum());
+    EXPECT_EQ(opaque->GetID(), ObservedRasterizer.Objects[2]); EXPECT_EQ(outside->GetID(), ObservedRasterizer.Objects[3]);
+    EXPECT_FALSE(ObservedRasterizer.Transparent[2]); EXPECT_FALSE(ObservedRasterizer.Transparent[3]);
+    EXPECT_EQ(transparent->GetID(), ObservedRasterizer.Objects[4]); EXPECT_TRUE(ObservedRasterizer.Transparent[4]);
 }
 
 TEST_F(SceneGraphRootTraversalTest, CulledCharacterUsesExpandedVisibilityOnlyForItsRenderedMarker) {
@@ -231,12 +231,12 @@ TEST_F(SceneGraphRootTraversalTest, CulledCharacterUsesExpandedVisibilityOnlyFor
     ASSERT_TRUE(child->SetParent(reinterpret_cast<CK3dEntity *>(character), TRUE)); Attach(character);
     ASSERT_EQ(1, character->m_SceneGraphNode->m_ChildToBeParsedCount);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    EXPECT_EQ(0, Boundary.Draws); EXPECT_TRUE(character->m_SceneGraphNode->IsAllOutsideFrustum());
+    EXPECT_EQ(0, ObservedRasterizer.Draws); EXPECT_TRUE(character->m_SceneGraphNode->IsAllOutsideFrustum());
     EXPECT_EQ(0u, character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED);
     character->ModifyMoveableFlags(0, VX_MOVEABLE_CHARACTERRENDERED);
     character->SetPosition3f(0, 0, .6f);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    EXPECT_EQ(0, Boundary.Draws); EXPECT_TRUE(character->m_SceneGraphNode->IsAllOutsideFrustum());
+    EXPECT_EQ(0, ObservedRasterizer.Draws); EXPECT_TRUE(character->m_SceneGraphNode->IsAllOutsideFrustum());
     EXPECT_NE(0u, character->GetMoveableFlags() & VX_MOVEABLE_CHARACTERRENDERED);
     EXPECT_TRUE(child->m_SceneGraphNode->IsAllOutsideFrustum());
 }
@@ -246,15 +246,15 @@ TEST_F(SceneGraphRootTraversalTest, VisiblePlaceCropsTheActualSubtreeDrawAndRest
     RCK3dEntity *child = Triangle(0, 5, FALSE); ASSERT_NE(nullptr, place); ASSERT_NE(nullptr, child);
     ASSERT_TRUE(child->SetParent(reinterpret_cast<CK3dEntity *>(place), TRUE)); Attach(place);
     place->ViewportClip() = VxRect(.25f, .25f, .75f, .75f);
-    ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS)); ASSERT_EQ(1, Boundary.Draws);
-    EXPECT_EQ(child->GetID(), Boundary.Objects[0]); EXPECT_FALSE(Boundary.Transparent[0]);
-    EXPECT_EQ(25u, Boundary.DrawViewport[0].ViewX); EXPECT_EQ(25u, Boundary.DrawViewport[0].ViewY);
-    EXPECT_EQ(50u, Boundary.DrawViewport[0].ViewWidth); EXPECT_EQ(50u, Boundary.DrawViewport[0].ViewHeight);
+    ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS)); ASSERT_EQ(1, ObservedRasterizer.Draws);
+    EXPECT_EQ(child->GetID(), ObservedRasterizer.Objects[0]); EXPECT_FALSE(ObservedRasterizer.Transparent[0]);
+    EXPECT_EQ(25u, ObservedRasterizer.DrawViewport[0].ViewX); EXPECT_EQ(25u, ObservedRasterizer.DrawViewport[0].ViewY);
+    EXPECT_EQ(50u, ObservedRasterizer.DrawViewport[0].ViewWidth); EXPECT_EQ(50u, ObservedRasterizer.DrawViewport[0].ViewHeight);
     VxMatrix expected = Device->GetProjectionTransformationMatrix();
     expected[0][0] *= 2; expected[1][1] *= 2;
-    Matrix(Boundary.DrawProjection[0], expected);
-    Matrix(Boundary.Matrices[VXMATRIX_PROJECTION], Device->GetProjectionTransformationMatrix());
-    EXPECT_EQ(0u, Boundary.Viewport.ViewX); EXPECT_EQ(0u, Boundary.Viewport.ViewY);
-    EXPECT_EQ(100u, Boundary.Viewport.ViewWidth); EXPECT_EQ(100u, Boundary.Viewport.ViewHeight);
+    Matrix(ObservedRasterizer.DrawProjection[0], expected);
+    Matrix(ObservedRasterizer.Matrices[VXMATRIX_PROJECTION], Device->GetProjectionTransformationMatrix());
+    EXPECT_EQ(0u, ObservedRasterizer.Viewport.ViewX); EXPECT_EQ(0u, ObservedRasterizer.Viewport.ViewY);
+    EXPECT_EQ(100u, ObservedRasterizer.Viewport.ViewWidth); EXPECT_EQ(100u, ObservedRasterizer.Viewport.ViewHeight);
 }
 }

@@ -12,7 +12,7 @@ specialized state for precompiled shaders. A changed uniform block alone does
 not imply that JIT code reads the changed component, or that a shader or PSO
 must be rebuilt.
 
-## Dependency contract
+## Fragment specialization key and runtime inputs
 
 | State change | Canonical fragment key | Runtime value or other dependency |
 | --- | --- | --- |

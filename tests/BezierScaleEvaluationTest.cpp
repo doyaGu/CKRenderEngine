@@ -45,7 +45,7 @@ protected:
     }
 };
 
-TEST_F(BezierScaleEvaluationTest, EmptyAndSingleKeyRespectTheThreeComponentOutputContract) {
+TEST_F(BezierScaleEvaluationTest, EmptyAndSingleKeyWriteExactlyThreeScaleComponents) {
     InspectBezierScale controller;
     float output[] = { 70, 80, 90, 123 };
     EXPECT_FALSE(controller.Evaluate(2, output)); EXPECT_FLOAT_EQ(70, output[0]); EXPECT_FALSE(controller.Computed());

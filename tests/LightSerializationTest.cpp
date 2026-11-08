@@ -138,7 +138,7 @@ TEST_F(LightSerializationTest, CurrentPowerOnlyChangesPowerAndAncestorModificati
     EXPECT_TRUE(light.GetObjectFlags() & CK_OBJECT_UPTODATE);
 }
 
-TEST_F(LightSerializationTest, CurrentVersionFiveSixAndEightShareThePackedWireContract) {
+TEST_F(LightSerializationTest, VersionsFiveSixAndEightUseTheSamePackedFields) {
     SerializationLight light(Context); const int versions[] = {5, 6, 8};
     for (int version : versions) {
         CKStateChunk chunk(CKCID_LIGHT, nullptr); chunk.StartWrite(); chunk.SetDataVersion(version);

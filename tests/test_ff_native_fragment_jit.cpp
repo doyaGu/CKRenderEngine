@@ -2479,7 +2479,7 @@ void TestStateDependencies() {
             if (!raw || !canonical) {
                 std::printf("\nDependency %s, layout %u: raw changed=%d canonical changed=%d\n",
                             dependency.Name, unsigned(layout), ka != kb, Canonical(ka, layout) != Canonical(kb, layout));
-                TestFail("constant changes obey the raw and canonical key dependency contract");
+                TestFail("constant changes affect only the expected raw and canonical key fields");
             }
         }
     }

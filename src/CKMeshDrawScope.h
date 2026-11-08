@@ -30,7 +30,7 @@ private:
 };
 
 // A derived context may delegate the original packet to the base. Unrelated
-// packets/contexts and recursive base calls retain the public SDK contract.
+// packets/contexts and recursive base calls select their own lighting state.
 class CKMeshDrawCall {
 public:
     CKMeshDrawCall(CKRenderContext *context, VxDrawPrimitiveData *data)

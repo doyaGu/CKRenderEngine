@@ -1982,7 +1982,7 @@ void LoadedMorphRejectsInvalidRequests() {
     }
 }
 
-void LoadedMorphRetainsValidOutputContracts() {
+void LoadedMorphWritesSelectedVerticesAndOptionalOutputs() {
     CKContext context(nullptr, 0, 0);
     RCKObjectAnimation source(&context, "MorphOutputSource"), loaded(&context, "MorphOutputLoaded");
     AddMorphRequestKeys(source);
@@ -2028,7 +2028,7 @@ void LoadedMorphRetainsValidOutputContracts() {
     Check(!empty.Evaluate(5.0f, 0, nullptr, 0, nullptr), "Keyless Morph succeeded");
     empty.AddKey(0.0f, TRUE);
     Check(empty.Evaluate(5.0f, 0, nullptr, 0, nullptr) && !empty.Evaluate(5.0f, 1, nullptr, 0, nullptr),
-          "Zero-sized Morph key request contract changed");
+          "Zero-sized morph key allocation changed");
     // Duplicate stored times remain valid: the first equal key is selected,
     // and a time beyond the duplicate group selects its final key.
     CKMorphKey *last = static_cast<CKMorphKey *>(source.GetMorphController()->GetKey(1));
@@ -2437,7 +2437,7 @@ void MorphReplacementPreservesStateOnAllocationFailure() {
         s_MorphArrayAllocationFailure = -1;
         if (result) {
             Check(result == (Clone ? TRUE : static_cast<int>(expected.size() * 4)), "Replacement returned an incorrect result");
-            Check(target->GetLength() == (Clone ? 27.0f : 10.0f), "Replacement changed the controller length contract");
+            Check(target->GetLength() == (Clone ? 27.0f : 10.0f), "Replacing the controller changed its expected length");
             WireWords output(expected.size(), 0u);
             Check(target->DumpKeysTo(output.data()) == static_cast<int>(expected.size() * 4) && output == expected,
                   "Replacement did not retain independent expected bytes");
@@ -3396,7 +3396,7 @@ void LegacyObjectMorphNormalsUseInitializedConversionEntries() {
             }
         }
         LoadChunk(animation,chunk.get());
-        // Check first-load values against the wire contract, then their modern save.
+        // Check loaded fields against the serialized bytes, then save them in the current format.
         for (int pass=0; pass<2; ++pass) {
             RCKObjectAnimation &actual=pass ? reloaded : animation;
             CKMorphController *controller=actual.GetMorphController();
@@ -3635,7 +3635,7 @@ void TransformRawReadPreservesStateOnAllocationFailure() {
 }
 
 template<CKANIMATION_CONTROLLER Type>
-void TransformReadRetainsValidWireAndLengthContracts() {
+void TransformReadRestoresKeyFieldsAndControllerLength() {
     CKContext context(nullptr, 0, 0);
     RCKObjectAnimation animation(&context, "TransformValidRead");
     WireWords words = TransformControllerWire(Type);
@@ -3662,7 +3662,7 @@ void TransformReadRetainsValidWireAndLengthContracts() {
           "Transform read changed duplicate-time wire bytes");
     CKDWORD empty = 0;
     Check(controller->ReadKeysFrom(&empty) == 4 && controller->GetKeyCount() == 0 &&
-          !controller->GetKey(0) && controller->GetLength() == 37.0f, "Empty transform read changed the native length contract");
+          !controller->GetKey(0) && controller->GetLength() == 37.0f, "Reading an empty transform changed the original controller length");
 }
 
 void LoadedTransformReportsKeyAllocationFailure() {
@@ -4335,7 +4335,7 @@ void BezierRemoveAllocationFailurePreservesState() {
 
 
 template<class Controller, CKANIMATION_CONTROLLER Type>
-void BezierLegalEditsFollowNativeValueAndTangentContract() {
+void BezierEditsPreserveNativeValuesAndTangents() {
     BezierEditProbe<Controller> controller;
     WireWords original = TransformControllerWire(Type);
     Check(controller.ReadKeysFrom(original.data()) > 0, "Cannot initialize native Bezier edit test");
@@ -4442,7 +4442,7 @@ void MorphEditRemovalFailurePreservesPayloads() {
           "Final Morph removal allocated or changed length");
 }
 
-void MorphEditPreservesNativeDuplicateAndMixedPayloadContract() {
+void MorphEditsPreserveDuplicateTimesAndMixedVertexPayloads() {
     RCKMorphController controller;
     WireWords words = MorphWire<true>();
     Check(controller.ReadKeysFrom(words.data()) == static_cast<int>(words.size() * 4), "Cannot prepare Morph functional edit fixture");
@@ -4487,7 +4487,7 @@ void MorphEditWrapperPropagatesAllocationFailure() {
         CKMorphKey *added = static_cast<CKMorphKey *>(controller.GetKey(0));
         Check(added->PosArray && added->NormArray && Equal(added->PosArray[0], VxVector(0.0f)) &&
               added->NormArray[0].xa == 0 && added->NormArray[0].ya == 0,
-              "Morph insertion wrapper lost its allocation/default payload contract");
+              "Morph insertion lost its allocated vertex arrays or default values");
     }
 }
 
@@ -4938,7 +4938,7 @@ void MorphEditingMatchesOriginalRuntime() {
 // Count-only native fixtures document the intentional difference: portable
 // resizing discards truncated vertices and clears newly introduced storage.
 template<int FixtureIndex>
-void MorphCountEditingUsesPortableStorageContract() {
+void MorphCountEditingPreservesOwnedVertexAndNormalArrays() {
     const MorphEditReference::Fixture &fixture = MorphEditReference::Fixtures[FixtureIndex];
     const bool normals = FixtureIndex == 12;
     CKContext context(nullptr, 0, 0);
@@ -5346,7 +5346,7 @@ void ObjectPlaybackCheckScaleAndComparePreserveNativeDirectionality() {
     Check(first.HasScaleInfo() && first.GetScaleController()->GetKeyCount()==1, "Rotation fixup did not supply a scale key");
     VxVector actual; Check(first.EvaluateScale(0,actual) && Equal(actual,scale), "Scale fixup did not use provided scale");
     first.CheckScaleKeys(pos); Check(first.EvaluateScale(0,actual) && Equal(actual,scale), "Scale fixup replaced an existing key");
-    Check(first.Compare(&first) && !first.Compare(nullptr), "Compare self/null contract changed");
+    Check(first.Compare(&first) && !first.Compare(nullptr), "Compare must accept itself and reject null");
     Check(!first.Compare(&second), "Compare missed a source controller");
     second.AddRotationKey(0,&rotation); second.AddScaleKey(0,&scale); second.AddPositionKey(0,&pos);
     Check(first.Compare(&second) && !second.Compare(&first), "Native Compare is a left-controller subset check");
@@ -5612,8 +5612,8 @@ public:
         const size_t portable64[] = {56, 64, 72, 80, 84, 88, 96, 104, 112};
         const size_t *expected = sizeof(void *) == 4 ? native32 : portable64;
         Check(sizeof(RCKObjectAnimation) == (sizeof(void *) == 4 ? 64u : 120u) &&
-              alignof(RCKObjectAnimation) == sizeof(void *), "ObjectAnimation size/alignment differs from platform contract");
-        for (int i = 0; i < 9; ++i) Check(offsets[i] == expected[i], "ObjectAnimation field offset differs from platform contract");
+              alignof(RCKObjectAnimation) == sizeof(void *), "ObjectAnimation size or alignment differs from the expected pointer-size layout");
+        for (int i = 0; i < 9; ++i) Check(offsets[i] == expected[i], "ObjectAnimation field offset differs from the expected pointer-size layout");
         const CKKeyframeData *data = Data();
         const char *dataBase = reinterpret_cast<const char *>(data);
         const size_t dataOffsets[] = {
@@ -5629,8 +5629,8 @@ public:
         const size_t portableData64[] = {0, 8, 16, 24, 32, 40, 44, 48};
         const size_t *dataExpected = sizeof(void *) == 4 ? nativeData32 : portableData64;
         Check(sizeof(CKKeyframeData) == (sizeof(void *) == 4 ? 32u : 56u) && alignof(CKKeyframeData) == sizeof(void *),
-              "Keyframe data size/alignment differs from platform contract");
-        for (int i = 0; i < 8; ++i) Check(dataOffsets[i] == dataExpected[i], "Keyframe data offset differs from platform contract");
+              "Keyframe data size or alignment differs from the expected pointer-size layout");
+        for (int i = 0; i < 8; ++i) Check(dataOffsets[i] == dataExpected[i], "Keyframe data offset differs from the expected pointer-size layout");
     }
 };
 
@@ -6119,8 +6119,8 @@ void ObjectPlaybackMergedPublicAPIBlendsControllersAndTracksInfo() {
     merged->Set3dEntity(nullptr); first.Set3dEntity(nullptr); context.DestroyObject(merged);
 }
 
-void ObjectPlaybackInfoEmptyControllersAndKeyShortcutsUseContracts() {
-    CKContext context(nullptr,0,0); RCKObjectAnimation animation(&context,"InfoContracts"),same(&context,"CompareChannels");
+void ObjectPlaybackQueriesEmptyControllersAndKeyShortcuts() {
+    CKContext context(nullptr,0,0); RCKObjectAnimation animation(&context,"PlaybackInfo"),same(&context,"CompareChannels");
     animation.AddPositionKey(0,nullptr); animation.AddScaleKey(0,nullptr); animation.AddRotationKey(0,nullptr); animation.AddScaleAxisKey(0,nullptr);
     Check(!animation.HasPositionInfo() && !animation.HasScaleInfo() && !animation.HasRotationInfo() && !animation.HasScaleAxisInfo(), "Null shortcut materialized controllers");
     animation.CreateController(CKANIMATION_LINPOS_CONTROL); animation.CreateController(CKANIMATION_LINROT_CONTROL);
@@ -6305,7 +6305,7 @@ void ObjectPlaybackTransitionMorphUnsupportedSourcesRetainPreviousChannel() {
     Check(!target.HasMorphInfo() && !target.GetMorphController(), "Absent outgoing Morph should delete previous transition channel");
 }
 
-void ObjectPlaybackMergedCreationFlagsAndDetachedPhaseRespectContract() {
+void ObjectPlaybackPreservesCreationFlagsAndDetachedPhase() {
     CKContext context(nullptr,0,0); RCKObjectAnimation first(&context,"DynamicMergedFirst"),second(&context,"DynamicMergedSecond");
     VxVector p(1,2,3); first.AddPositionKey(0,&p); second.AddPositionKey(0,&p);
     first.SetLength(10); second.SetLength(20);
@@ -6755,7 +6755,7 @@ void LayerCellsUseFourByteValuesAndNativeCoordinates() {
           "Layer memory estimate did not use the host runtime object overhead");
 }
 
-void LayerSquareArrayTransfersCurrentPointerAndKeepsReplacementContract() {
+void LayerSquareArrayTransfersOwnershipAndReplacesPreviousAllocation() {
     CKContext context(nullptr, 0, 0); RCKGrid grid(&context, "LayerArrayGrid");
     grid.SetDimensions(2, 2, 2.0f, 2.0f); RCKLayer layer(&context, "LayerArray", grid.GetID());
     CKSquare *previous = layer.GetSquareArray(); CKSquare *replacement = new CKSquare[4]();
@@ -6880,7 +6880,7 @@ bool GridPoseNear(const VxVector &a, const VxVector &b) {
     return std::fabs(a.x - b.x) < 0.0001f && std::fabs(a.y - b.y) < 0.0001f && std::fabs(a.z - b.z) < 0.0001f;
 }
 
-void GridDimensionsCoordinateAndStateContract() {
+void GridDimensionsCoordinatesAndStateRoundTrip() {
     CKContext context(nullptr, 0, 0);
     new RCKRenderManager(&context);
     RCKGrid grid(&context, "GeometryGrid");
@@ -6924,7 +6924,7 @@ void GridDimensionsCoordinateAndStateContract() {
           "An empty grid axis corrupted the remaining entity scale");
 }
 
-void GridCopyDependencyMetadataContract() {
+void GridCopyPreservesLayerReferencesAndDependencyMetadata() {
     Check(RCKGrid::GetDependenciesCount(CK_DEPENDENCIES_COPY) == 1 &&
           RCKGrid::GetDependenciesCount(CK_DEPENDENCIES_DELETE) == 0 &&
           RCKGrid::GetDependenciesCount(CK_DEPENDENCIES_BUILD) == 0,
@@ -6955,7 +6955,7 @@ void GridLayerRemovalDestroysEveryObject() {
     Check(layer && grid->GetLayer(type) == layer && grid->GetLayerByName(const_cast<char *>("Intensity")) == layer &&
           grid->GetLayerByIndex(0) == layer && grid->GetLayerByIndex(-1) == nullptr &&
           grid->AddLayer(type) == nullptr && grid->AddLayer(type, 1) == nullptr,
-          "Grid layer lookup/duplicate/format contract changed");
+          "Grid layer lookup, duplicate insertion or cell format changed");
     const CK_ID layerID = layer->GetID();
     Check(grid->RemoveLayer(type) == CK_OK && context.GetObject(gridID) == grid &&
           context.GetObject(layerID) == nullptr && grid->GetLayerCount() == 0,
@@ -7168,9 +7168,8 @@ void GridMemoryIncludesInheritedSceneStorageAndLayerCells() {
           "Grid memory retained removed layer cell bytes");
 }
 
-// Pass 26 grid-contract functional regressions.
-// Pass 26: Grid public contracts. Root adds CKLevel.h and CKScene.h at file scope.
-void GridRegistrationDescriptorMatchesNativeContract() {
+// Grid class registration, layer references and generated display mesh tests.
+void GridRegistrationMatchesNativeClassDescriptor() {
     RCKGrid::Register();
     CKClassDesc *descriptor = CKGetClassDesc(CKCID_GRID);
     Check(descriptor && descriptor->Parameter == CKPGUID_3DENTITY &&
@@ -7622,7 +7621,7 @@ void GridDisplaySurfaceFailureCleansResourcesAndCanRetry() {
     Check(context.GetObject(caller->GetID()) == caller, "Surface failure cleanup destroyed caller-owned geometry");
 }
 
-void GridDisplayLevelMembershipCacheAndDeletionContract() {
+void GridDisplayTracksLevelMembershipCacheAndDeletion() {
     CKContext context(nullptr, 0, 0);
     new RCKRenderManager(&context);
     auto *registry = new SerializationGridRegistry(&context);
@@ -7986,7 +7985,7 @@ void GridDisplayDestroyHandlesEditedMaterialSlots() {
 }
 
 // Pass 27 grid functional regressions.
-// Pass27: actual Grid API contracts; no shared test source edits.
+// Grid dimensions, cell coordinates and layer storage tests.
 class Pass27GridRegistry : public SerializationGridRegistry {
 public:
     explicit Pass27GridRegistry(CKContext *context) : SerializationGridRegistry(context), category(-1) {}
@@ -8748,7 +8747,7 @@ int main(int argc, char **argv) {
         {"Object playback merged in-place transition source capture", ObjectPlaybackMergedInPlaceTransitionCapturesLiveSourcePose},
         {"Object playback transition typed velocity reuse", ObjectPlaybackTransitionVelocityReusesMatchingTypedController},
         {"Object playback transition unsupported Morph sources", ObjectPlaybackTransitionMorphUnsupportedSourcesRetainPreviousChannel},
-        {"Object playback native merged creation flags detached phase", ObjectPlaybackMergedCreationFlagsAndDetachedPhaseRespectContract},
+        {"Object playback native merged creation flags detached phase", ObjectPlaybackPreservesCreationFlagsAndDetachedPhase},
 
         {"Legacy snapshot stops at identifier", &LegacyTransformRecordsStopAtTheirIdentifier<1>},
         {"Legacy v0 position stops at identifier", &LegacyTransformRecordsStopAtTheirIdentifier<0>},
@@ -8759,7 +8758,7 @@ int main(int argc, char **argv) {
         {"Legacy converted normals cover declared vertices", &LegacyNormalsCoverDeclaredVertices<2>},
         {"Legacy compressed normals stop at identifier", &LegacyNormalRecordsStopAtTheirIdentifier<1>},
         {"Legacy converted normals stop at identifier", &LegacyNormalRecordsStopAtTheirIdentifier<2>},
-        {"Object playback empty info key shortcuts comparison", ObjectPlaybackInfoEmptyControllersAndKeyShortcutsUseContracts},
+        {"Object playback empty info key shortcuts comparison", ObjectPlaybackQueriesEmptyControllersAndKeyShortcuts},
         {"Object playback transition in-place Morph", ObjectPlaybackTransitionInPlaceMorphCapturesBeforeReplacement},
 
         {"Object playback partial pose and child hierarchy", ObjectPlaybackPartialChannelsPreserveEntityPoseAndHierarchy},
@@ -8898,11 +8897,11 @@ int main(int argc, char **argv) {
         {"BEZIERSCL Add preserves OOM state", BezierAddAllocationFailurePreservesState<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
         {"BEZIERPOS Remove preserves OOM state", BezierRemoveAllocationFailurePreservesState<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
         {"BEZIERSCL Remove preserves OOM state", BezierRemoveAllocationFailurePreservesState<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
-        {"BEZIERPOS native duplicate and tangent contract", BezierLegalEditsFollowNativeValueAndTangentContract<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
-        {"BEZIERSCL native duplicate and tangent contract", BezierLegalEditsFollowNativeValueAndTangentContract<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
+        {"BEZIERPOS duplicate key times and native tangents", BezierEditsPreserveNativeValuesAndTangents<RCKBezierPositionController, CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL duplicate key times and native tangents", BezierEditsPreserveNativeValuesAndTangents<RCKBezierScaleController, CKANIMATION_BEZIERSCL_CONTROL>},
         {"Morph edit insertion failures preserve owned arrays", MorphEditInsertionFailuresPreserveEveryOwnedArray},
         {"Morph edit removal failure preserves payloads", MorphEditRemovalFailurePreservesPayloads},
-        {"Morph native duplicate and mixed payload contract", MorphEditPreservesNativeDuplicateAndMixedPayloadContract},
+        {"Morph duplicate key times and mixed vertex payloads", MorphEditsPreserveDuplicateTimesAndMixedVertexPayloads},
         {"Morph time-only insertion propagates allocation failure", MorphEditWrapperPropagatesAllocationFailure<true>},
         {"Morph generic insertion propagates allocation failure", MorphEditWrapperPropagatesAllocationFailure<false>},
 
@@ -8936,16 +8935,16 @@ int main(int argc, char **argv) {
         {"TCBSCLAXIS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_TCBSCLAXIS_CONTROL>},
         {"BEZIERPOS read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_BEZIERPOS_CONTROL>},
         {"BEZIERSCL read allocation failure", TransformRawReadPreservesStateOnAllocationFailure<CKANIMATION_BEZIERSCL_CONTROL>},
-        {"LINPOS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINPOS_CONTROL>},
-        {"LINROT valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINROT_CONTROL>},
-        {"LINSCL valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINSCL_CONTROL>},
-        {"LINSCLAXIS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_LINSCLAXIS_CONTROL>},
-        {"TCBPOS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBPOS_CONTROL>},
-        {"TCBROT valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBROT_CONTROL>},
-        {"TCBSCL valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBSCL_CONTROL>},
-        {"TCBSCLAXIS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_TCBSCLAXIS_CONTROL>},
-        {"BEZIERPOS valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_BEZIERPOS_CONTROL>},
-        {"BEZIERSCL valid read contracts", TransformReadRetainsValidWireAndLengthContracts<CKANIMATION_BEZIERSCL_CONTROL>},
+        {"LINPOS serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_LINPOS_CONTROL>},
+        {"LINROT serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_LINROT_CONTROL>},
+        {"LINSCL serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_LINSCL_CONTROL>},
+        {"LINSCLAXIS serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_LINSCLAXIS_CONTROL>},
+        {"TCBPOS serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_TCBPOS_CONTROL>},
+        {"TCBROT serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_TCBROT_CONTROL>},
+        {"TCBSCL serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_TCBSCL_CONTROL>},
+        {"TCBSCLAXIS serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_TCBSCLAXIS_CONTROL>},
+        {"BEZIERPOS serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_BEZIERPOS_CONTROL>},
+        {"BEZIERSCL serialized key fields and controller length", TransformReadRestoresKeyFieldsAndControllerLength<CKANIMATION_BEZIERSCL_CONTROL>},
         {"Transform Load reports key allocation failure", LoadedTransformReportsKeyAllocationFailure},
         {"Transform Load canonicalizes supported base types", LoadedTransformCanonicalizesSupportedBaseTypes},
         {"Transform Load skips unknown records and padding", LoadedTransformSkipsUnknownRecordsAndPadding},
@@ -8997,7 +8996,7 @@ int main(int argc, char **argv) {
         {"Loaded Morph rejects excessive/negative counts", LoadedMorphRejectsInvalidRequests<0>},
         {"Loaded Morph rejects nonfinite requested times", LoadedMorphRejectsInvalidRequests<1>},
         {"Loaded Morph rejects nonfinite/unordered key times", LoadedMorphRejectsInvalidRequests<2>},
-        {"Loaded Morph valid subset/optional output contracts", LoadedMorphRetainsValidOutputContracts},
+        {"Loaded Morph vertex subsets and optional outputs", LoadedMorphWritesSelectedVerticesAndOptionalOutputs},
         {"Loaded Morph large finite key-time interval", LoadedMorphInterpolationAvoidsIntermediateLoss<0>},
         {"Loaded Morph finite vector interpolation avoids overflow", LoadedMorphInterpolationAvoidsIntermediateLoss<1>},
         {"Loaded Morph retains tiny-phase contribution", LoadedMorphInterpolationAvoidsIntermediateLoss<2>},
@@ -9211,8 +9210,8 @@ int main(int argc, char **argv) {
         {"Morph editing duplicate source keys", MorphEditingMatchesOriginalRuntime<9>},
         {"Morph editing duplicate time keeps normals", MorphEditingMatchesOriginalRuntime<10>},
         {"Morph editing duplicate time keeps absent normals", MorphEditingMatchesOriginalRuntime<11>},
-        {"Morph count editing uses safe storage with normals", MorphCountEditingUsesPortableStorageContract<12>},
-        {"Morph count editing uses safe storage without normals", MorphCountEditingUsesPortableStorageContract<13>},
+        {"Morph count editing uses safe storage with normals", MorphCountEditingPreservesOwnedVertexAndNormalArrays<12>},
+        {"Morph count editing uses safe storage without normals", MorphCountEditingPreservesOwnedVertexAndNormalArrays<13>},
         {"Morph editing removes and reinserts keys", MorphEditingMatchesOriginalRuntime<14>},
         {"Morph editing null and empty keys", MorphEditingMatchesOriginalRuntime<15>},
         {"Morph editing zero vertices without normals", MorphEditingMatchesOriginalRuntime<16>},
@@ -9241,7 +9240,7 @@ int main(int argc, char **argv) {
         {"Layer nonzero format clears old cells", LayerWireNonzeroFormatReloadDropsPreviousCells},
         {"Layer native dependency descriptions", &LayerNativeDependencyDescriptions},
         {"Layer cells preserve four-byte value semantics", &LayerCellsUseFourByteValuesAndNativeCoordinates},
-        {"Layer SetSquareArray transfers current pointer", &LayerSquareArrayTransfersCurrentPointerAndKeepsReplacementContract},
+        {"Layer SetSquareArray transfers current pointer", &LayerSquareArrayTransfersOwnershipAndReplacesPreviousAllocation},
         {"Layer SetOwner and InitOwner have distinct semantics", &LayerOwnerAssignmentAndInitializationKeepDistinctSemantics},
         {"Layer dependency preparation excludes owner", &LayerPreparesItselfWithoutAddingItsOwnerDependency},
         {"Layer pre-deletion detaches deleted owner", &LayerPreDeletionClearsOnlyAnOwnerMarkedForDeletion},
@@ -9253,8 +9252,8 @@ int main(int argc, char **argv) {
         {"Layer Copy to self keeps owned cells", &LayerCopyToSelfKeepsOwnedCells},
         {"Layer Copy allocation failure preserves cells", &LayerCopyAllocationFailureKeepsExistingLayerState},
         {"Layer factory allocation failure returns null", &LayerFactoryAllocationFailureReturnsNull},
-        {"Grid dimensions coordinate and state contract", GridDimensionsCoordinateAndStateContract},
-        {"Grid copy dependency metadata contract", GridCopyDependencyMetadataContract},
+        {"Grid dimensions, coordinates and state round trip", GridDimensionsCoordinatesAndStateRoundTrip},
+        {"Grid copy preserves layer references and dependency metadata", GridCopyPreservesLayerReferencesAndDependencyMetadata},
         {"Grid layer removal destroys every object", GridLayerRemovalDestroysEveryObject},
         {"Grid legal resize rebuilds display geometry", GridLegalResizeRebuildsDisplayGeometry},
         {"Grid copy remaps layers and owns display resources", GridCopyRemapsLayersAndOwnsDisplayResources},
@@ -9262,7 +9261,7 @@ int main(int argc, char **argv) {
         {"Scene memory includes object body and owned name", SceneMemoryIncludesObjectBodyAndOwnedName},
         {"Scene memory counts allocated bits after clear", SceneMemoryCountsAllocatedBitsAfterClear},
         {"Grid memory includes inherited scene storage and layer cells", GridMemoryIncludesInheritedSceneStorageAndLayerCells},
-        {"Grid registration descriptor native contract", GridRegistrationDescriptorMatchesNativeContract},
+        {"Grid native class registration descriptor", GridRegistrationMatchesNativeClassDescriptor},
         {"Grid external Layer deletion registered notification", GridExternalLayerDeletionPrunesRegisteredLinks<true>},
         {"Grid manual callback after NONOTIFY Layer deletion", GridExternalLayerDeletionPrunesRegisteredLinks<false>},
         {"Grid activity follows current scene transitions", GridActivityUsesOnlyTheCurrentSceneFlags},
@@ -9285,7 +9284,7 @@ int main(int argc, char **argv) {
         {"Grid display missing manager cleanup and retry", GridDisplayWithoutManagerLeavesNoPartialResourcesAndCanRetry},
         {"Grid display texture Create failure cleanup and retry", GridDisplaySurfaceFailureCleansResourcesAndCanRetry<true>},
         {"Grid display unavailable surface cleanup and retry", GridDisplaySurfaceFailureCleansResourcesAndCanRetry<false>},
-        {"Grid display level membership cache and deletion", GridDisplayLevelMembershipCacheAndDeletionContract},
+        {"Grid display level membership cache and deletion", GridDisplayTracksLevelMembershipCacheAndDeletion},
         {"Grid Load Layer-first Fit failure and retry", GridLoadPropagatesLayerFirstFitFailureAndCanRetry},
         {"Grid embedded Save allocation failure and retry", GridEmbeddedSavePropagatesLayerAllocationFailureAndCanRetry},
         {"Grid embedded Load manager failure and retry", GridEmbeddedLoadPropagatesMissingManagerAndCanRetry},

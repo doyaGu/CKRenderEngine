@@ -13,7 +13,7 @@
 extern void SetProcessorSpecific_FunctionsPtr();
 
 namespace {
-class ManagerOptionsBoundary : public MaterialRenderObserver {
+class ManagerOptionsObserver : public MaterialRenderObserver {
 public:
     int OptionWrites = 0;
     CKRasterizerOptions LastOptions;
@@ -108,7 +108,7 @@ TEST_F(RenderManagerOptionsTest, FormatOptionsAreCaseInsensitiveCreationDefaults
 }
 
 TEST_F(RenderManagerOptionsTest, ChangingOptionsDoesNotReconfigureExistingContexts) {
-    ManagerOptionsBoundary boundary;
+    ManagerOptionsObserver boundary;
     RCKRenderContext view(Context);
     view.m_RasterizerContext = &boundary;
     Manager->m_RenderContexts.PushBack(view.GetID());
@@ -202,7 +202,7 @@ TEST_F(RenderManagerOptionsTest, AddedEffectCopiesDescriptionAssignsIndexAndRuns
     EXPECT_EQ(ObserveManagerEffect, stored.SetCallback);
     EXPECT_EQ(&calls, stored.CallbackArg);
 
-    ManagerOptionsBoundary boundary;
+    ManagerOptionsObserver boundary;
     RCKRenderContext view(Context);
     view.m_RasterizerContext = &boundary;
     RCKMaterial material(Context);

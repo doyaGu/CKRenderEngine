@@ -4252,7 +4252,7 @@ void CheckFirstFrame(Backend &b)
     TestCheck(PixelNear(first, 2, 2, 0, 0, 0), "the first frame's clear colour reads back");
 }
 
-void CheckImportedBackBufferContract()
+void CheckImportedBackBufferOwnership()
 {
     const char *driver = GetEnvValue("CKRE_SDL_GPU_DRIVER");
     if (driver && strcmp(driver, "auto") == 0)
@@ -4624,8 +4624,8 @@ void CheckImportedBackBufferContract()
               "the imported handle is deletable after resize unbinds it");
 
     // Shutdown clears any remaining borrowed handle, but never releases the
-    // caller-owned SDL object. Releasing it once afterwards is the ownership
-    // contract and is checked by SDL validation builds as well.
+    // caller-owned SDL texture. The caller releases it once after shutdown;
+    // SDL validation builds also check for double release.
     CKDWORD shutdownHandle = 0;
     TestCheck(CKSdlGpuImportTexture(b.Context, &desc, device, native,
                                     &shutdownHandle),
@@ -4947,7 +4947,7 @@ void BackendRendersFixedFunctionSemantics()
         SDL_Quit();
         return;
     }
-    CheckImportedBackBufferContract();
+    CheckImportedBackBufferOwnership();
     Samples samples;
     Samples precompiled;
     auto replayCases = MakeFFReplayCases();

@@ -234,7 +234,7 @@ struct CallbackStateCall {
         if (Fired || Stage != TriggerStage) return;
         Fired = TRUE; ++Entries;
         // Always acquire the interface while inside the callback. A previously
-        // cached raw backend pointer is deliberately outside this contract.
+        // cached raw backend pointer would bypass callback state restoration.
         CKRasterizerContext *rasterizer = Device->m_RasterizerContext;
         EXPECT_TRUE(rasterizer->SetMaterial(&Payload));
         EXPECT_TRUE(rasterizer->SetViewport(&Viewport));

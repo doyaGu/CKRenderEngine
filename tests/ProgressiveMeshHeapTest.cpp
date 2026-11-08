@@ -104,7 +104,7 @@ void RegisterDefaultFace(PMEdgeCollapseData &owner, PMFace *face,
                          PMVertexEx *a, PMVertexEx *b, PMVertexEx *c) {
     // The default constructor intentionally leaves an inert face. Build this
     // graph explicitly so the test is independent of the parameterized
-    // constructor's registration contract.
+    // constructor's face registration and vertex adjacency updates.
     face->vertices[0] = a;
     face->vertices[1] = b;
     face->vertices[2] = c;

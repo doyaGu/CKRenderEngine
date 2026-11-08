@@ -27,7 +27,7 @@ CK2 draw state
 | Responsibility | Main implementation |
 | --- | --- |
 | IR types, nodes, verification and dumps | `CKJitIR.h`, `CKJitIR.cpp` |
-| Operations and their semantic contract | `CKJitOps.def` |
+| IR opcodes, operand types and evaluation rules | `CKJitOps.def` |
 | Construction, folding, hash-consing and structured regions | `CKJitBuilder.h`, `CKJitBuilder.cpp` |
 | DXBC shader-model emission | `CKJitDxbc.h`, `CKJitDxbc.cpp` |
 | SPIR-V emission | `CKJitSpirv.h`, `CKJitSpirv.cpp` |
@@ -41,7 +41,7 @@ fixed-function shaders remain required: they provide immediate and failure-safe
 rendering while asynchronous shader or pipeline work is pending, unavailable or
 rejected.
 
-## IR contract
+## IR types and evaluation rules
 
 The IR currently has 66 operations. It supports scalar and two-to-four-component
 boolean, signed integer and binary32 values; pure arithmetic and comparisons;
@@ -60,7 +60,7 @@ The IR deliberately does not promise bit-exact arithmetic across APIs or GPU
 vendors. Native multiply-add, signed zero and ordered/unordered comparison
 rules are explicit, while transcendental accuracy, denormal handling and some
 NaN details remain backend properties. `CKJitOps.def` is the authoritative
-operation-level contract.
+definition of opcode types and evaluation rules.
 
 ## Translated fixed-function coverage
 
@@ -125,15 +125,15 @@ failure.
 | 1 | Decide 2D render-target visibility semantics | Choose immediate visibility or the original DX8 one-render delay, then encode that policy in a renderer-level regression. This belongs to render-target management rather than shader IR. |
 | 1 | Decide `CopyToVideo` compatibility | Keep the working modern copy or emulate the original no-paste result for this callback sequence. Preserve the existing exact source-to-destination validation either way. |
 | 2 | Resolve exact cube boundary and filter residuals | Explain and, if compatible with the selected policy, remove the remaining one-to-sixteen-pixel face/texel differences without masks, epsilon guesses or relaxed thresholds. |
-| 2 | Close the spotlight reference split | Select the original hardware result or the bounded software/reference formula as the contract. The mismatch also occurs with JIT disabled, so it is not evidence of an IR translation defect. |
+| 2 | Close the spotlight reference split | Select the original hardware result or the bounded software/reference formula as the spotlight attenuation reference. The mismatch also occurs with JIT disabled, so it is not evidence of an IR translation defect. |
 | 3 | Measure the new cube sampling path | Add a focused benchmark for multi-mip, mixed min/mag and worst-case anisotropic cube filtering. The existing composite benchmark predates this path and cannot quantify its cost. |
 | 3 | Broaden device coverage | Run the complete scene and GPU suites on at least one non-NVIDIA device. Current evidence covers two APIs on one RTX 4090. |
 | 3 | Refresh manual acceptance | Use the prepared manual launcher for the latest runtime on Vulkan and D3D12; cover menu/UI, ordinary gameplay, pause/resume and a transition. No automated playthrough is required. |
 | 4 | Generalize replay capture if needed | The replay suite uses named versioned fixtures. Add an arbitrary captured-draw loader only when a real regression needs that feedback loop. |
 
-The first two items require a compatibility decision before implementation.
-Matching an original quirk and preserving the current useful behavior are both
-coherent choices, but tests and documentation must state which contract wins.
+The first two items require original-DX8 captures of render-target visibility
+and texture copies before changing the renderer. Tests must record the observed
+image and frame in which each target update becomes visible.
 The cube and spotlight rows should be diagnosed against the strict original
 reference; they must not be hidden by looser scene tolerances.
 
@@ -149,7 +149,7 @@ When adding or changing an IR operation:
 
 When changing fixed-function specialization:
 
-1. update the canonical-key/runtime dependency contract;
+1. update the canonical-key fields and runtime shader inputs together;
 2. prove inactive state is removed and dynamic state stays out of the key;
 3. add cold, warm and A-B-A replay coverage where cache identity can change;
 4. exercise the generated path in a normal CK2 2D or 3D scene;
