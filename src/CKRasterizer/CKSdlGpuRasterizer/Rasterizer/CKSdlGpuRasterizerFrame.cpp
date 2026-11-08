@@ -448,7 +448,7 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
     const CKFFProgramContext &ProgramContext,
     const CKFFTextureBindingSet &Textures,
     const CKFFConstantSet *Constants,
-    CKBOOL PositionTDepthPad)
+    CKBOOL PositionTDepthPad, CKBOOL DepthClipEnabled)
 {
     const CKFFProgramVariant variant =
         CKFFShaderCache::ProgramVariantForKey(ProgramContext.ShaderKey);
@@ -457,10 +457,13 @@ CKDWORD CKSdlGpuRasterizerContext::ResolveNativeFFProgram(
             Textures.SamplerLayoutPlan, Textures.RequiresShaderSampling,
             artifact))
         return 0;
+    artifact.DepthClamp = ShaderDepthClamp && !DepthClipEnabled;
     const CKDWORD precompiled =
         NativeFFProgram(variant, artifact, PositionTDepthPad);
     if (!precompiled)
         return 0;
+    if (artifact.DepthClamp)
+        return precompiled;
     return ResolveFFJitProgram(ProgramContext.FragmentProgram, Constants,
                                artifact, variant, precompiled);
 }
@@ -494,7 +497,17 @@ CKDWORD CKSdlGpuRasterizerContext::NativeFFProgram(
     PositionTDepthPad = PositionTDepthPad && positionT &&
         comparisonResourceCount != 0;
     CKDWORD vertexShader = 0;
-    if (PositionTDepthPad) {
+    if (Artifact.DepthClamp) {
+        const unsigned index = !positionT ? 0 : PositionTDepthPad ? 2 : 1;
+        if (!m_NativeFFDepthClampVertexShaders[index]) {
+            CKShaderDesc vertexDesc;
+            if (!CKSdlGpuFFDepthClampVertexShader(ShaderFormat, positionT,
+                                                 PositionTDepthPad, vertexDesc) ||
+                CreateShader(&vertexDesc, &m_NativeFFDepthClampVertexShaders[index], Job) != CK_OK)
+                return 0;
+        }
+        vertexShader = m_NativeFFDepthClampVertexShaders[index];
+    } else if (PositionTDepthPad) {
         const CKDWORD clip = Variant == CKFF_PROGRAM_POSITIONT_CLIP ? 1u : 0u;
         if (!m_NativeFFDepthPadVertexShaders[clip]) {
             CKShaderDesc vertexDesc;
@@ -557,6 +570,11 @@ void CKSdlGpuRasterizerContext::ClearNativeFFPrograms()
             DestroyObject(m_NativeFFDepthPadVertexShaders[clip], CKRST_OBJ_SHADER);
         m_NativeFFDepthPadVertexShaders[clip] = 0;
     }
+    for (unsigned index = 0; index < 3; ++index) {
+        if (m_NativeFFDepthClampVertexShaders[index])
+            DestroyObject(m_NativeFFDepthClampVertexShaders[index], CKRST_OBJ_SHADER);
+        m_NativeFFDepthClampVertexShaders[index] = 0;
+    }
     for (CKDWORD artifact = 0;
          artifact < CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT; ++artifact) {
         if (m_NativeFFPixelShaders[artifact])
@@ -593,7 +611,7 @@ CKBOOL CKSdlGpuRasterizerContext::SubmitPreparedDraw()
     }
     const CKDWORD program = ResolveNativeFFProgram(
         programContext, drawTextures, draw.Constants,
-        positionTDepthPad);
+        positionTDepthPad, draw.Pipeline.DepthClipEnabled);
     const CKDWORD vertexLayout = GetNativeVertexLayout(draw.VertexFormat);
     if (!program || !vertexLayout)
         return m_FFP.FinishDraw(CKERR_INVALIDOPERATION, 0);

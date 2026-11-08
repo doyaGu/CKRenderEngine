@@ -814,8 +814,16 @@ int main()
                 ++uniqueArtifactCount;
             }
         }
-        check(uniqueArtifactCount == CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT,
-              "fragment artifact cache index covers every precompiled artifact");
+        check(uniqueArtifactCount == CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT,
+              "fragment artifact cache index covers every sampling layout");
+        for (CKDWORD index = 0; index < CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT; ++index) {
+            CKSdlGpuFFFragmentArtifactKey key;
+            check(CKSdlGpuFFFragmentArtifactKeyAt(index, key) && !key.DepthClamp,
+                  "ordinary fragment programs retain hardware depth");
+            key.DepthClamp = TRUE;
+            check(CKSdlGpuFFFragmentArtifactIndex(key) == index + CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT,
+                  "fragment depth clamp has a separate program cache entry");
+        }
         bool inverted = true;
         for (CKDWORD index = 0; index <= CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT; ++index) {
             CKSdlGpuFFFragmentArtifactKey key;

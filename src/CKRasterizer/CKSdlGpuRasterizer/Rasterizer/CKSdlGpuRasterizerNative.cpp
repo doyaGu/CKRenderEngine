@@ -130,6 +130,10 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     DebugFlags = desc->DebugFlags;
     CKShaderDesc payload;
     CKSdlGpuShaderPayload(ShaderFormat, payload);
+    // Metal's paravirtual driver accepts MTLDepthClipModeClamp but clips
+    // outside triangles anyway. Carry depth through the pixel shader when
+    // clipping is disabled; normal draws retain hardware depth testing.
+    ShaderDepthClamp = ShaderFormat == SDL_GPU_SHADERFORMAT_MSL;
     Caps.ShaderFormat = payload.Format;
     Caps.ShaderProfile = payload.Profile;
     Caps.RequiresIntermediateTarget = TRUE;

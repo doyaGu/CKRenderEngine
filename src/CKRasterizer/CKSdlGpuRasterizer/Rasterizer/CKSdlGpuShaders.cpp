@@ -54,6 +54,19 @@ CKBOOL CKSdlGpuFFDxbcVertexShader(CKFFProgramVariant variant,
 }
 #endif
 
+CKBOOL CKSdlGpuFFDepthClampVertexShader(SDL_GPUShaderFormat format,
+                                       CKBOOL positionT, CKBOOL depthPad,
+                                       CKShaderDesc &out)
+{
+    out = CKShaderDesc();
+    out.Stage = CKRST_SHADER_VERTEX;
+    out.UniformBufferCount = positionT ? CKSDL_SHADER_FF_POSITIONT_UNIFORM_BUFFERS :
+                                        CKSDL_SHADER_FF_3D_UNIFORM_BUFFERS;
+    return SetShaderCode(format, !positionT ? CKSDL_SHADER_VS_FF_3D_DEPTH_CLAMP :
+        depthPad ? CKSDL_SHADER_VS_FF_POSITIONT_DEPTH_PAD_DEPTH_CLAMP :
+                   CKSDL_SHADER_VS_FF_POSITIONT_DEPTH_CLAMP, out);
+}
+
 CKBOOL CKSdlGpuBuildFFFragmentArtifactKey(
     const CKFFSamplerLayoutPlan &samplerLayoutPlan,
     CKBOOL requiresShaderSampling,
@@ -96,23 +109,25 @@ CKDWORD CKSdlGpuFFFragmentArtifactIndex(
     const CKDWORD layout = (CKDWORD)artifactKey.SamplerLayout;
     const CKDWORD compareCount = artifactKey.ComparisonResourceCount;
     if (layout >= CKFF_SAMPLER_LAYOUT_COUNT ||
+        (artifactKey.DepthClamp != FALSE && artifactKey.DepthClamp != TRUE) ||
         (artifactKey.UsesShaderSampling != FALSE &&
          artifactKey.UsesShaderSampling != TRUE))
         return CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
 
+    const CKDWORD depthOffset = artifactKey.DepthClamp ? CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT : 0;
     if (layout == CKFF_SAMPLER_LAYOUT_WIDE_2D) {
         if (compareCount > CKFF_MAX_TEXTURE_STAGES ||
             (compareCount != 0 && !artifactKey.UsesShaderSampling))
             return CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
         if (compareCount != 0)
-            return compareCount + 1;
-        return artifactKey.UsesShaderSampling ? 1u : 0u;
+            return depthOffset + compareCount + 1;
+        return depthOffset + (artifactKey.UsesShaderSampling ? 1u : 0u);
     }
 
     if (compareCount != 0)
         return CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT;
     const CKDWORD mixedLayoutBase = CKFF_MAX_TEXTURE_STAGES + 2u;
-    return mixedLayoutBase + (layout - 1u) * 2u +
+    return depthOffset + mixedLayoutBase + (layout - 1u) * 2u +
         (artifactKey.UsesShaderSampling ? 1u : 0u);
 }
 
@@ -122,6 +137,8 @@ CKBOOL CKSdlGpuFFFragmentArtifactKeyAt(CKDWORD index,
     out = CKSdlGpuFFFragmentArtifactKey();
     if (index >= CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT)
         return FALSE;
+    out.DepthClamp = index >= CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT;
+    index %= CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT;
     // The wide 2D layout without shader sampling, with it, then with each
     // comparison count; then each other layout without and with it.
     const CKDWORD mixedLayoutBase = CKFF_MAX_TEXTURE_STAGES + 2u;
@@ -150,6 +167,13 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat format,
         CKSDL_SHADER_FS_FF_STAGE_COMPARE7, CKSDL_SHADER_FS_FF_STAGE_COMPARE8,
         CKSDL_SHADER_FS_FF_STAGE_CUBE_NATIVE, CKSDL_SHADER_FS_FF_STAGE_CUBE,
         CKSDL_SHADER_FS_FF_STAGE_VOLUME_NATIVE, CKSDL_SHADER_FS_FF_STAGE_VOLUME,
+        CKSDL_SHADER_FS_FF_STAGE_NATIVE_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_DEPTH_CLAMP,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE1_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_COMPARE2_DEPTH_CLAMP,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE3_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_COMPARE4_DEPTH_CLAMP,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE5_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_COMPARE6_DEPTH_CLAMP,
+        CKSDL_SHADER_FS_FF_STAGE_COMPARE7_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_COMPARE8_DEPTH_CLAMP,
+        CKSDL_SHADER_FS_FF_STAGE_CUBE_NATIVE_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_CUBE_DEPTH_CLAMP,
+        CKSDL_SHADER_FS_FF_STAGE_VOLUME_NATIVE_DEPTH_CLAMP, CKSDL_SHADER_FS_FF_STAGE_VOLUME_DEPTH_CLAMP,
     };
     const CKDWORD index = CKSdlGpuFFFragmentArtifactIndex(artifactKey);
     out = CKShaderDesc();

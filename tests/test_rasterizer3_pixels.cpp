@@ -24,7 +24,6 @@
 #include <thread>
 #include <vector>
 
-bool CheckSdlGpuDepthClipping();
 
 namespace {
 
@@ -2310,6 +2309,37 @@ void CheckClippingDisablesUserPlanes(Backend &b)
     ReadBackbuffer(ctx, unclipped);
     TestCheck(PixelNear(unclipped, 32, 32, 0, 255, 0),
               "depth clamp occurs after primitive depth interpolation");
+
+    // POSITIONT vertices may have different reciprocal W. Depth remains
+    // linear in screen space after perspective interpolation and division.
+    screenPositions[0][2] = screenPositions[1][2] = -1.0f;
+    screenPositions[2][2] = 1.0f;
+    screenPositions[0][3] = 0.5f;
+    screenPositions[1][3] = 1.0f;
+    screenPositions[2][3] = 2.0f;
+    screenData.ColorPtr = const_cast<CKDWORD *>(kGreen);
+    TestCheck(ctx->Clear(CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH,
+                         0xFF000000u, 0.25f, 0, 0, NULL),
+              "clear depth for POSITIONT clamp interpolation");
+    TestCheck(ctx->BeginScene(), "BeginScene (POSITIONT depth clamp)");
+    TestCheck(ctx->DrawPrimitive(VX_TRIANGLELIST, NULL, 0, &screenData),
+              "draw POSITIONT triangle with unequal reciprocal W");
+    EndFrame(ctx);
+    ReadBackbuffer(ctx, unclipped);
+    TestCheck(PixelNear(unclipped, 32, 32, 0, 255, 0),
+              "POSITIONT depth clamp preserves screen-space interpolation");
+
+    ctx->SetRenderState(VXRENDERSTATE_ZFUNC, VXCMP_GREATER);
+    TestCheck(ctx->Clear(CKRST_CTXCLEAR_COLOR | CKRST_CTXCLEAR_DEPTH,
+                         0xFF000000u, 0.75f, 0, 0, NULL),
+              "clear depth for far-plane clamp");
+    TestCheck(ctx->BeginScene(), "BeginScene (far-plane depth clamp)");
+    TestCheck(DrawColorTriangle(ctx, outsideFar, kBlue),
+              "draw beyond far plane with a greater depth test");
+    EndFrame(ctx);
+    ReadBackbuffer(ctx, unclipped);
+    TestCheck(PixelNear(unclipped, 32, 32, 0, 0, 255),
+              "far-plane clamp writes depth one rather than rasterizer depth");
 
     ctx->SetRenderState(VXRENDERSTATE_ZENABLE, FALSE);
     ctx->SetRenderState(VXRENDERSTATE_ZWRITEENABLE, FALSE);
@@ -5091,13 +5121,16 @@ void BackendWideSamplerLayouts()
     RunBackendPixelCheck(CheckCompiledWideSamplerLayouts);
 }
 
+void CheckShaderDepthClipping(Backend &backend)
+{
+    static_cast<CKSdlGpuRasterizerContext *>(backend.Context)->SetShaderDepthClampForTests();
+    CheckClippingDisablesUserPlanes(backend);
+}
+
 void BackendDepthClipping()
 {
-    TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
-    const bool native = CheckSdlGpuDepthClipping();
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
-    TestCheck(native, "SDL depth clipping without fixed-function state translation");
     RunBackendPixelCheck(CheckClippingDisablesUserPlanes);
+    RunBackendPixelCheck(CheckShaderDepthClipping);
 }
 
 void BackendOrderedReadbacks()

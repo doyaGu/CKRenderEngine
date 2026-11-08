@@ -242,6 +242,7 @@ public:
     // False when CKRE_SDL_GPU_FF_JIT=0 or the compiler emits no format of
     // the device, as on Metal.
     CKBOOL IsFFJitEnabledForTests() const { return m_FFJitFormat != SDL_GPU_SHADERFORMAT_INVALID; }
+    void SetShaderDepthClampForTests() { ShaderDepthClamp = true; }
     const char *GetDeviceNameForTests() const {
         return SDL_GetStringProperty(SDL_GetGPUDeviceProperties(Device), SDL_PROP_GPU_DEVICE_NAME_STRING, "");
     }
@@ -452,7 +453,7 @@ private:
         const CKFFProgramContext &ProgramContext,
         const CKFFTextureBindingSet &Textures,
         const CKFFConstantSet *Constants,
-        CKBOOL PositionTDepthPad);
+        CKBOOL PositionTDepthPad, CKBOOL DepthClipEnabled);
     // The precompiled program of an artifact, created on first use. Job,
     // when given, creates the shaders it adds.
     CKDWORD NativeFFProgram(CKFFProgramVariant Variant,
@@ -592,6 +593,7 @@ private:
                                 [2] = {};
     CKDWORD m_NativeFFVertexShaders[CKFF_PROGRAM_VARIANT_COUNT] = {};
     CKDWORD m_NativeFFDepthPadVertexShaders[2] = {};
+    CKDWORD m_NativeFFDepthClampVertexShaders[3] = {};
     CKDWORD m_NativeFFPixelShaders[
         CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT] = {};
     // INVALID when every program draws with the precompiled shaders.
@@ -671,6 +673,7 @@ private:
     bool WindowClaimed = false;
     SDL_ThreadID Thread = 0;
     SDL_GPUShaderFormat ShaderFormat = 0;
+    bool ShaderDepthClamp = false;
     CKRasterizerDeviceCaps Caps;
     CKSdlGpuSubmissionStats Stats;
     CKSdlGpuSubmissionStats FrameStats;

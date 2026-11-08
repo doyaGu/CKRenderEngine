@@ -12,15 +12,17 @@ struct CKSdlGpuFFFragmentArtifactKey {
     CKFFSamplerLayout SamplerLayout;
     CKBYTE ComparisonResourceCount;
     CKBOOL UsesShaderSampling;
+    CKBOOL DepthClamp;
 
     CKSdlGpuFFFragmentArtifactKey()
         : SamplerLayout(CKFF_SAMPLER_LAYOUT_WIDE_2D),
-          ComparisonResourceCount(0), UsesShaderSampling(FALSE) {}
+          ComparisonResourceCount(0), UsesShaderSampling(FALSE), DepthClamp(FALSE) {}
 };
 
 enum {
-    CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT =
-        CKFF_SAMPLER_LAYOUT_COUNT * 2 + CKFF_MAX_TEXTURE_STAGES
+    CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT =
+        CKFF_SAMPLER_LAYOUT_COUNT * 2 + CKFF_MAX_TEXTURE_STAGES,
+    CKSDL_GPU_FF_FRAGMENT_ARTIFACT_COUNT = CKSDL_GPU_FF_FRAGMENT_SAMPLING_COUNT * 2
 };
 
 // The shader targets the plugin has artifacts for, in device preference order.
@@ -42,6 +44,9 @@ CKBOOL CKSdlGpuFFFragmentShader(SDL_GPUShaderFormat Format,
 CKBOOL CKSdlGpuFFDepthPadVertexShader(SDL_GPUShaderFormat Format,
                                      CKBOOL Clipping,
                                      CKShaderDesc &Out);
+CKBOOL CKSdlGpuFFDepthClampVertexShader(SDL_GPUShaderFormat Format,
+                                       CKBOOL PositionT, CKBOOL DepthPad,
+                                       CKShaderDesc &Out);
 #if CKRE_ENABLE_DIRECTX
 // The vertex shader of a program variant as shader model 5.1 DXBC. A D3D12
 // pipeline cannot mix DXBC and DXIL, so it pairs with a DXBC fragment shader.

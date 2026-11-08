@@ -63,8 +63,15 @@ SHADERS = [
     ("fs_volume_mip", "fs_volume_mip", False, 0, 0),
     ("fs_dither_resolve", "fs_dither_resolve", False, 0, 0),
 ]
+# Depth is carried independently of the rasterizer position in these programs.
+# The pixel shader clamps it after interpolation, preserving perspective and
+# depth tests on Metal devices whose native depth-clamp mode still clips.
+SHADERS += [(name + "_depth_clamp", source, clipping, compare_count, sampler_layout)
+            for name, source, clipping, compare_count, sampler_layout in SHADERS
+            if source == "fs_ff_stage" or
+            (source in ("vs_ff_3d", "vs_ff_positiont") and not clipping)]
 DXBC_SHADERS = [name for name, source, _, _, _ in SHADERS
-                if source in ("vs_ff_3d", "vs_ff_positiont")]
+                if source in ("vs_ff_3d", "vs_ff_positiont") and not name.endswith("_depth_clamp")]
 BLOCKS = [
     ("float4x4", "u_ffMatrices", 8),
     ("float4x4", "u_vertexBlendMatrices", 4),
@@ -199,6 +206,8 @@ def uniform_declaration(source: str) -> str:
 
 def make_source(shader_name: str, source: str, clipping: bool,
                 compare_count: int, sampler_layout: int) -> str:
+    depth_clamp = shader_name.endswith("_depth_clamp")
+    base_name = shader_name.removesuffix("_depth_clamp")
     vertex = source.startswith("vs_")
     if source == "fs_volume_mip":
         return "\n".join([uniform_declaration(source), HERE.joinpath("volume_mip.hlsl").read_text(encoding="utf-8")])
@@ -217,6 +226,8 @@ def make_source(shader_name: str, source: str, clipping: bool,
         qualifier = "nointerpolation " if name.startswith("v_flat") else ""
         declarations.append(
             f"    CK_LOCATION({i}) {qualifier}{varying_type(name)} {name} : TEXCOORD{i};")
+    if depth_clamp:
+        declarations.append(f"    CK_LOCATION({len(varying)}) float2 depth : TEXCOORD{len(varying)};")
     if clipping:
         declarations += ["    float4 v_clipDistance0 : SV_ClipDistance0;",
                          "    float4 v_clipDistance1 : SV_ClipDistance1;"]
@@ -236,17 +247,28 @@ def make_source(shader_name: str, source: str, clipping: bool,
         entry = ["CKVaryings main(CKInput input) {"]
         entry += [f"    {name} = input.{name};" for _, _, name in used]
         entry += ["    ckffEvaluate();", "    CKVaryings output;", "    output.position = gl_Position;"]
+        if depth_clamp:
+            entry += ["    output.depth = gl_Position.zw;",
+                      "    output.position.z = 0.5 * gl_Position.w;"]
         entry += [f"    output.{name} = {name};" for name, _ in globals_]
         entry += ["    return output;", "}"]
     else:
-        entry = ["float4 main(CKVaryings input) : SV_Target0 {"]
+        entry = (["struct CKFragmentOutput { float4 color : SV_Target0; float depth : SV_Depth; };",
+                  "CKFragmentOutput main(CKVaryings input) {"] if depth_clamp else
+                 ["float4 main(CKVaryings input) : SV_Target0 {"])
         entry += [f"    {name} = input.{name};" for name in varying]
         entry += ["    gl_FragCoord = input.position;"]
-        entry += ["    ckffEvaluate();", "    return gl_FragColor;", "}"]
+        entry += ["    ckffEvaluate();"]
+        if depth_clamp:
+            entry += ["    CKFragmentOutput output;", "    output.color = gl_FragColor;",
+                      "    output.depth = saturate(input.depth.x / input.depth.y);", "    return output;"]
+        else:
+            entry += ["    return gl_FragColor;"]
+        entry += ["}"]
     return "\n".join([f"#define CKFF_VS_CLIP_DISTANCE {int(clipping)}",
-                       f"#define CKFF_VS_DEPTH_PAD {int(shader_name.endswith('_depth_pad'))}",
+                       f"#define CKFF_VS_DEPTH_PAD {int(base_name.endswith('_depth_pad'))}",
                        f"#define CKFF_NATIVE_FFP_STAGE {int(source == 'fs_ff_stage')}",
-                       f"#define CKFF_HARDWARE_SAMPLING {int(shader_name.endswith('_native'))}",
+                       f"#define CKFF_HARDWARE_SAMPLING {int(base_name.endswith('_native'))}",
                        f"#define CKFF_DEPTH_COMPARE_SAMPLER_COUNT {compare_count}",
                        f"#define CKFF_NATIVE_SAMPLER_LAYOUT {sampler_layout}",
                        HERE.joinpath("native_compat.hlsli").read_text(encoding="utf-8") +

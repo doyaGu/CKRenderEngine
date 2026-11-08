@@ -390,7 +390,6 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
         ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer
     )
     target_compile_definitions(sdl_gpu_ffp_pixel_tests PRIVATE CKRE_PIXEL_SDL_GPU=1)
-    target_sources(sdl_gpu_ffp_pixel_tests PRIVATE rasterizers/test_sdl_gpu_depth_clipping.cpp)
     target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
     # Software rasterizers on CI runners (lavapipe, WARP) take several minutes.
     set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE)
