@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "renderer_revision": "99bb47aa26f44fd37221cda0039d201348a83d66",
   "scene_revision": "d14e20557ed3e6d5b2f57e3102ae79a055dfa11f",
   "width": 640,
@@ -36,7 +36,18 @@
     },
     {
       "name": "cube_mip_dynamic",
-      "sha256": "bd8822886d1ab3b4ced6fff6dfd023fd66c0184965b399c8b65c86dd087f7b3b"
+      "sha256": "bd8822886d1ab3b4ced6fff6dfd023fd66c0184965b399c8b65c86dd087f7b3b",
+      "variants": [
+        {
+          "name": "d3d12_warp",
+          "sha256": "5430563b5f5badc1a7237d2455ff2e6f80091937644e971a8be913dcb652b405",
+          "renderer_revision": "949a647a1648d159f3e79e67f51a8ec2074450e4",
+          "scene_revision": "4ec807b541223fa245144f3c7917d1ba3d420cee",
+          "sdl_version": "3.4.20",
+          "backend": "direct3d12",
+          "gpu_device": "Microsoft Basic Render Driver"
+        }
+      ]
     },
     {
       "name": "cutout",

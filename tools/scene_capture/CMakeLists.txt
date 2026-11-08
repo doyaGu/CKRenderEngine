@@ -127,6 +127,10 @@ ckre_copy_runtime_dependencies(ckre_scene_capture)
 
 if (CKRE_BUILD_TESTS AND TARGET CKSdlGpuRasterizer)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME scene_capture_compare
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_scene_capture_compare.py"
+            "$<TARGET_FILE:ckre_scene_capture>")
     add_test(NAME scene_capture_jit_report
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/test_scene_capture_jit.py")

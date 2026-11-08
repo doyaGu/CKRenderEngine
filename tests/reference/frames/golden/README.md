@@ -10,6 +10,17 @@ heights are specified in pixels so desktop DPI does not change the fixture.
 image at threshold 2/255 and 99.5% passing pixels. Missing references fail. Tests
 never generate or update expected images, and scene exclusions are rejected.
 
+Format 2 manifests can name additional complete reference frames for a scene.
+Every frame has its own SHA-256 and source revisions. Each captured image must
+match one whole reviewed frame at the same threshold. The manifest covers every
+registered scene and every reference PNG exactly once.
+
+Windows includes a WARP reference for `cube_mip_dynamic`, alongside the NVIDIA
+reference. Native cube anisotropic filtering and LOD estimates can differ across
+GPU implementations; see the [Direct3D filtering specification](https://microsoft.github.io/DirectX-Specs/d3d/archive/D3D11_3_FunctionalSpec.htm).
+The WARP capture uses SDL 3.4.20. Its off, fragment and full JIT modes match at all
+six replay checkpoints; the complete suite also checks compiled-pipeline use.
+
 The initial Windows and Linux references use renderer production sources from
 `99bb47aa26f44fd37221cda0039d201348a83d66`, unchanged by the test repairs. They
 check renderer regressions; original-rasterizer comparisons remain a separate

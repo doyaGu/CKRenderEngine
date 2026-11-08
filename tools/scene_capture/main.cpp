@@ -5,11 +5,12 @@
 //                      [--native-window-handle] [--hidden] [--verbose]
 //                      [--compare REFDIR [--mask-dir DIR] [--threshold T] [--min-pass P]
 //                       [--require-all]] [--list-scenes]
+//   ckre_scene_capture --compare-only --out DIR --compare REFDIR [--scene NAME|all]
 //
 // With --scene all every scene runs in its own child process (a crashing
 // engine takes down one scene, not the run; present_* scenes need a fresh
 // CK2_3D.ini per process). Exit codes: 0 ok, 1 usage, 2 boot failure,
-// 3 scene failure, 4 capture failure, 5 comparison failure.
+// 3 scene failure, 4 capture/image failure, 5 pixel comparison failure.
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,7 @@ struct Args {
     int Threshold = -1;       // -1 = per-scene suggestion
     float MinPass = -1.0f;    // -1 = per-scene suggestion
     bool RequireAll = false;
+    bool CompareOnly = false;
     bool ListScenes = false;
     std::vector<std::string> Skip; // scenes excluded from --scene all
     bool Single = false;      // internal: run the scene in this process
@@ -60,6 +62,7 @@ struct Args {
 void PrintUsage()
 {
     printf("usage: ckre_scene_capture --render-engine-dir DIR [options]\n"
+           "       ckre_scene_capture --compare-only --out DIR --compare REFDIR [options]\n"
            "  --render-engine-dir DIR   directory holding CK2_3D.dll and its rasterizer DLLs\n"
            "  --driver N                render driver index (default 0)\n"
            "  --rasterizer NAME         stable provider: sdlgpu or null; excludes --driver\n"
@@ -82,9 +85,10 @@ void PrintUsage()
            "  --no-present-last         do not present the last frame before reading it back\n"
            "  --settings-ini FILE       CK2_3D.ini to load instead of the engine's own (our engine only)\n"
            "  --compare REFDIR          compare captured PNGs with REFDIR/<scene>.png\n"
+           "  --compare-only            compare existing --out PNGs; requires every reference\n"
            "  --mask-dir DIR            optional DIR/<scene>.mask.png (non-zero red = ignored)\n"
            "  --threshold T             per-channel tolerance 0..255 (default per scene)\n"
-           "  --min-pass P              required passing pixel ratio 0..1 (default per scene)\n"
+           "  --min-pass P              required passing pixel ratio (0,1] (default per scene)\n"
            "  --require-all             a missing reference image is a failure\n"
            "  --skip A,B                scenes to leave out of --scene all (known engine limitations)\n"
            "  --list-scenes             print the scene table and exit\n"
@@ -174,9 +178,30 @@ bool ParseArgs(int argc, char **argv, Args &args)
         else if (a == "--no-present-last") args.Capture.PresentLastFrame = false;
         else if (a == "--settings-ini") { if (!value(args.Capture.SettingsIni)) return false; }
         else if (a == "--compare") { if (!value(args.CompareDir)) return false; }
+        else if (a == "--compare-only") args.CompareOnly = true;
         else if (a == "--mask-dir") { if (!value(args.MaskDir)) return false; }
-        else if (a == "--threshold") { if (!value(v)) return false; args.Threshold = atoi(v.c_str()); }
-        else if (a == "--min-pass") { if (!value(v)) return false; args.MinPass = (float)atof(v.c_str()); }
+        else if (a == "--threshold") {
+            if (!value(v)) return false;
+            char *end = NULL;
+            errno = 0;
+            const long threshold = strtol(v.c_str(), &end, 10);
+            if (v.empty() || *end || errno == ERANGE || threshold < 0 || threshold > 255) {
+                fprintf(stderr, "--threshold must be an integer from 0 to 255\n");
+                return false;
+            }
+            args.Threshold = (int)threshold;
+        }
+        else if (a == "--min-pass") {
+            if (!value(v)) return false;
+            char *end = NULL;
+            errno = 0;
+            const float minPass = strtof(v.c_str(), &end);
+            if (v.empty() || *end || errno == ERANGE || !(minPass > 0.0 && minPass <= 1.0)) {
+                fprintf(stderr, "--min-pass must be greater than zero and at most one\n");
+                return false;
+            }
+            args.MinPass = minPass;
+        }
         else if (a == "--require-all") args.RequireAll = true;
         else if (a == "--skip") {
             if (!value(v)) return false;
@@ -233,6 +258,14 @@ bool ParseArgs(int argc, char **argv, Args &args)
             fprintf(stderr, "--profile-json requires --frames greater than --profile-warmup, up to 1000000 frames\n");
             return false;
         }
+    }
+    if (args.CompareOnly) {
+        if (args.CompareDir.empty() || args.Single || !args.CapsJson.empty() ||
+            !args.Capture.ProfileJson.empty() || !args.Skip.empty()) {
+            fprintf(stderr, "--compare-only requires --compare and cannot render, profile or exclude scenes\n");
+            return false;
+        }
+        args.RequireAll = true;
     }
     return true;
 }
@@ -360,6 +393,7 @@ struct CompareSummary {
     int Passed = 0;
     int Missing = 0;
     int Failed = 0;
+    int ImageErrors = 0;
 };
 
 void CompareSceneImage(const Args &args, const SceneDef &scene, CompareSummary &summary, const std::string &suffix)
@@ -371,8 +405,10 @@ void CompareSceneImage(const Args &args, const SceneDef &scene, CompareSummary &
         ++summary.Missing;
         printf("[%s] no reference image (%s)%s\n", label.c_str(), referencePath.c_str(),
                args.RequireAll ? " FAIL" : " skipped");
-        if (args.RequireAll)
+        if (args.RequireAll) {
             ++summary.Failed;
+            ++summary.ImageErrors;
+        }
         return;
     }
     RgbaImage captured, reference, mask;
@@ -380,11 +416,13 @@ void CompareSceneImage(const Args &args, const SceneDef &scene, CompareSummary &
     if (!ReadPng(capturedPath, captured, error)) {
         printf("[%s] cannot read %s: %s FAIL\n", label.c_str(), capturedPath.c_str(), error.c_str());
         ++summary.Failed;
+        ++summary.ImageErrors;
         return;
     }
     if (!ReadPng(referencePath, reference, error)) {
         printf("[%s] cannot read %s: %s FAIL\n", label.c_str(), referencePath.c_str(), error.c_str());
         ++summary.Failed;
+        ++summary.ImageErrors;
         return;
     }
     const RgbaImage *maskPtr = NULL;
@@ -402,6 +440,7 @@ void CompareSceneImage(const Args &args, const SceneDef &scene, CompareSummary &
         printf("[%s] size mismatch %dx%d vs %dx%d FAIL\n", label.c_str(), captured.Width, captured.Height,
                reference.Width, reference.Height);
         ++summary.Failed;
+        ++summary.ImageErrors;
         return;
     }
     const std::string diffPath = JoinPath(args.OutDir, label + ".diff.png");
@@ -444,7 +483,7 @@ int main(int argc, char **argv)
         }
         return EXIT_OK;
     }
-    if (args.Capture.RenderEngineDir.empty()) {
+    if (!args.CompareOnly && args.Capture.RenderEngineDir.empty()) {
         fprintf(stderr, "--render-engine-dir is required\n");
         PrintUsage();
         return EXIT_USAGE;
@@ -510,6 +549,8 @@ int main(int argc, char **argv)
     }
     std::vector<int> results(scenes.size(), EXIT_OK);
     for (size_t i = 0; i < scenes.size(); ++i) {
+        if (args.CompareOnly)
+            continue;
         const SceneDef &scene = *scenes[i];
         std::string settingsIni;
         if (scene.IniOverrides) {
@@ -542,6 +583,8 @@ int main(int argc, char **argv)
         }
         printf("compare: %d compared, %d passed, %d failed, %d without reference\n", summary.Compared,
                summary.Passed, summary.Failed, summary.Missing);
+        if (summary.ImageErrors > 0 || summary.Compared == 0)
+            return EXIT_CAPTURE;
         if (summary.Failed > 0)
             return EXIT_COMPARE;
     }
