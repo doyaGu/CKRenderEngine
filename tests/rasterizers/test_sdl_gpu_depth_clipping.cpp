@@ -8,8 +8,7 @@ bool CheckSdlGpuDepthClipping()
 {
     const char *driver = SDL_getenv("CKRE_SDL_GPU_DRIVER");
     if (driver && SDL_strcmp(driver, "auto") == 0) driver = NULL;
-    // Keep the existing device's debug mode. Enabling the D3D12 debug layer
-    // after that device was created would invalidate it.
+    // Use the same validation mode as the rasterizer.
     const char *debugSetting = SDL_getenv("CKRE_SDL_GPU_DEBUG");
     const bool debug = debugSetting && SDL_strcmp(debugSetting, "0") != 0;
     SDL_GPUDevice *device = SDL_CreateGPUDevice(CKSdlGpuShaderPackFormats(), debug, driver);

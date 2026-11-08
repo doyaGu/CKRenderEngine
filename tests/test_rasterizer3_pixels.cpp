@@ -2197,7 +2197,6 @@ void CheckPointFilledTriangleSizes(Backend &b)
 
 void CheckClippingDisablesUserPlanes(Backend &b)
 {
-    TestCheck(CheckSdlGpuDepthClipping(), "SDL depth clipping without fixed-function state translation");
     auto *ctx = b.Context;
     const CKDWORD approximationsBefore =
         ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_CLIPPING_OFF];
@@ -5072,6 +5071,10 @@ void BackendWideSamplerLayouts()
 
 void BackendDepthClipping()
 {
+    TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
+    const bool native = CheckSdlGpuDepthClipping();
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    TestCheck(native, "SDL depth clipping without fixed-function state translation");
     RunBackendPixelCheck(CheckClippingDisablesUserPlanes);
 }
 
