@@ -68,6 +68,7 @@ public:
     CKJitValue Exp2(CKJitValue x);
     CKJitValue Log2(CKJitValue x);
     CKJitValue Sqrt(CKJitValue x);
+    CKJitValue Rsqrt(CKJitValue x);
     CKJitValue Dot(CKJitValue a, CKJitValue b);
     CKJitValue Ddx(CKJitValue x);
     CKJitValue Ddy(CKJitValue x);

@@ -71,6 +71,7 @@ void TestConstantFolding() {
     TestCheck(IsOp(b, b.Exp2(b.Float(0.5f)), CKJIT_OP_EXP2), "fractional exp2 stays for the GPU");
     TestCheck(IsOp(b, b.Exp2(b.Float(-127.0f)), CKJIT_OP_EXP2), "exp2 into the denormal range stays");
     TestCheck(IsOp(b, b.Sqrt(b.Float(4.0f)), CKJIT_OP_SQRT), "sqrt is never folded");
+    TestCheck(IsOp(b, b.Rsqrt(b.Float(4.0f)), CKJIT_OP_RSQRT), "reciprocal sqrt keeps the GPU's native rounding");
     TestCheck(IsOp(b, b.Log2(b.Float(8.0f)), CKJIT_OP_LOG2), "log2 is never folded");
     TestCheck(Same(b.Ddx(b.Float3(1.0f, -2.0f, 0.5f)), b.Float3(0.0f, 0.0f, 0.0f)) &&
                   Same(b.Ddy(b.Float(-3.0f)), b.Float(0.0f)),

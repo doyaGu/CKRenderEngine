@@ -25,8 +25,8 @@ CKJIT_OP(CONSTRUCT,  4, CKJIT_OPFLAG_VARIADIC)
 // Float arithmetic uses binary32. The host's FP rounding mode is not shader
 // state. ROUND_EVEN rounds to the nearest integer, ties to even, preserving
 // signed zero. NaN payloads, denormal preservation and the accuracy of DIV,
-// DOT and transcendental functions depend on the backend; this is not a
-// bit-exact cross-device arithmetic contract. Algebraic identities must not
+// DOT and transcendental functions depend on the backend and can round
+// differently between devices. Algebraic identities must not
 // change zero signs or assume finite operands.
 CKJIT_OP(ADD,        2, CKJIT_OPFLAG_COMMUTATIVE)
 CKJIT_OP(SUB,        2, 0)
@@ -50,6 +50,8 @@ CKJIT_OP(ROUND_EVEN, 1, 0)
 CKJIT_OP(EXP2,       1, 0)
 CKJIT_OP(LOG2,       1, 0)
 CKJIT_OP(SQRT,       1, 0)
+// Keep the GPU reciprocal square root; SQRT followed by DIV rounds differently.
+CKJIT_OP(RSQRT,      1, 0)
 CKJIT_OP(DOT,        2, CKJIT_OPFLAG_COMMUTATIVE)
 
 // Screen-space derivatives: the difference across the pixel quad along x or

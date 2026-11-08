@@ -700,6 +700,7 @@ CKJitValue CKJitBuilder::RoundEven(CKJitValue x) { return FloatUnary(CKJIT_OP_RO
 CKJitValue CKJitBuilder::Exp2(CKJitValue x) { return FloatUnary(CKJIT_OP_EXP2, x); }
 CKJitValue CKJitBuilder::Log2(CKJitValue x) { return FloatUnary(CKJIT_OP_LOG2, x); }
 CKJitValue CKJitBuilder::Sqrt(CKJitValue x) { return FloatUnary(CKJIT_OP_SQRT, x); }
+CKJitValue CKJitBuilder::Rsqrt(CKJitValue x) { return FloatUnary(CKJIT_OP_RSQRT, x); }
 CKJitValue CKJitBuilder::Ddx(CKJitValue x) { return FloatUnary(CKJIT_OP_DDX, x); }
 CKJitValue CKJitBuilder::Ddy(CKJitValue x) { return FloatUnary(CKJIT_OP_DDY, x); }
 

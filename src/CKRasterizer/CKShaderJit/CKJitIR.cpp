@@ -98,7 +98,8 @@ bool CheckTypes(const CKJitShader &shader, const CKJitNode &node) {
     case CKJIT_OP_ADD: case CKJIT_OP_SUB: case CKJIT_OP_MUL: case CKJIT_OP_MAD: case CKJIT_OP_MIX: case CKJIT_OP_DIV:
     case CKJIT_OP_MIN: case CKJIT_OP_MAX: case CKJIT_OP_NEG: case CKJIT_OP_ABS:
     case CKJIT_OP_SATURATE: case CKJIT_OP_FLOOR: case CKJIT_OP_CEIL: case CKJIT_OP_ROUND_EVEN:
-    case CKJIT_OP_EXP2: case CKJIT_OP_LOG2: case CKJIT_OP_SQRT: case CKJIT_OP_DDX: case CKJIT_OP_DDY:
+    case CKJIT_OP_EXP2: case CKJIT_OP_LOG2: case CKJIT_OP_SQRT: case CKJIT_OP_RSQRT:
+    case CKJIT_OP_DDX: case CKJIT_OP_DDY:
         return CKJitIsFloat(node.Type) && same();
     case CKJIT_OP_DOT:
         return node.Type == CKJIT_TYPE_FLOAT && CKJitIsFloat(operand(0)) &&

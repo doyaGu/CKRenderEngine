@@ -58,6 +58,7 @@ enum {
     kOpRoundNi = 65,
     kOpRoundPi = 66,
     kOpSample = 69,
+    kOpRsq = 68,
     kOpSampleC = 70,
     kOpSampleCLz = 71,
     kOpSampleL = 72,
@@ -665,7 +666,7 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     value = b.Min(value, b.Neg(diffuse));
     const CKJitValue rounded = b.Add(b.RoundEven(value), b.Mul(b.Floor(diffuse), b.Ceil(tint)));
     const CKJitValue shade = b.Dot(b.Swizzle(diffuse, "xyz"), direction);
-    const CKJitValue spot = b.Sqrt(b.Exp2(b.Log2(b.Component(params, 1))));
+    const CKJitValue spot = b.Sqrt(b.Rsqrt(b.Exp2(b.Log2(b.Component(params, 1)))));
     const CKJitValue slope = b.Add(b.Ddx(uv), b.Ddy(b.Neg(b.Swizzle(direction, "xy"))));
     const CKJitValue assembled = b.Construct({b.Add(b.Swizzle(value, "xy"), slope), shade, spot});
 
@@ -980,6 +981,7 @@ void TestLowering() {
     TestCheck(program.Count(kOpMov, kSaturate) == 1, "saturate is a saturated move");
     TestCheck(program.Count(kOpRoundNi) == 1 && program.Count(kOpRoundPi) == 1 && program.Count(kOpRoundNe) == 1 &&
                   program.Count(kOpExp) == 1 && program.Count(kOpLog) == 1 && program.Count(kOpSqrt) == 1 &&
+                  program.Count(kOpRsq) == 1 &&
                   program.Count(kOpDp3) == 1,
               "unary functions and the dot product are single instructions");
     TestCheck(program.Count(kOpDerivRtxCoarse) == 1 && program.CountModified(kOpDerivRtyCoarse, kModifierNeg) == 1,

@@ -108,6 +108,7 @@ enum {
     kGlslExp2 = 29,
     kGlslLog2 = 30,
     kGlslSqrt = 31,
+    kGlslInverseSqrt = 32,
     kGlslSMin = 39,
     kGlslSMax = 42,
     kGlslFClamp = 43,
@@ -267,7 +268,7 @@ void BuildEveryOperation(CKJitBuilder &b, CKJitValue &color, CKJitValue &discard
     value = b.Min(value, b.Neg(diffuse));
     const CKJitValue rounded = b.Add(b.RoundEven(value), b.Mul(b.Floor(diffuse), b.Ceil(tint)));
     const CKJitValue shade = b.Dot(b.Swizzle(diffuse, "xyz"), direction);
-    const CKJitValue spot = b.Sqrt(b.Exp2(b.Log2(b.Component(params, 1))));
+    const CKJitValue spot = b.Sqrt(b.Rsqrt(b.Exp2(b.Log2(b.Component(params, 1)))));
     const CKJitValue slope = b.Add(b.Ddx(uv), b.Ddy(b.Neg(b.Swizzle(direction, "xy"))));
     const CKJitValue assembled = b.Construct({b.Add(b.Swizzle(value, "xy"), slope), shade, spot});
 
@@ -529,7 +530,7 @@ void TestLowering() {
     TestCheck(module.CountGlsl(kGlslFAbs) == 1 && module.CountGlsl(kGlslFloor) == 1 &&
                   module.CountGlsl(kGlslCeil) == 1 && module.CountGlsl(kGlslRoundEven) == 1 &&
                   module.CountGlsl(kGlslExp2) == 1 && module.CountGlsl(kGlslLog2) == 1 &&
-                  module.CountGlsl(kGlslSqrt) == 1,
+                  module.CountGlsl(kGlslSqrt) == 1 && module.CountGlsl(kGlslInverseSqrt) == 1,
               "unary functions are GLSL.std.450 instructions");
     TestCheck(module.Count(kOpDPdx) == 1 && module.Count(kOpDPdy) == 1, "derivatives are OpDPdx and OpDPdy");
 

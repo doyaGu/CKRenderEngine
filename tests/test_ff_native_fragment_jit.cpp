@@ -404,6 +404,7 @@ void ExecuteNodes(const CKJitShader &shader, const Fragment &fragment, XArray<Va
         case CKJIT_OP_EXP2: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::exp2(a.F[i]); break;
         case CKJIT_OP_LOG2: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::log2(a.F[i]); break;
         case CKJIT_OP_SQRT: for (uint32_t i = 0; i < width; ++i) out.F[i] = std::sqrt(a.F[i]); break;
+        case CKJIT_OP_RSQRT: for (uint32_t i = 0; i < width; ++i) out.F[i] = 1.0f / std::sqrt(a.F[i]); break;
         case CKJIT_OP_DOT: {
             float sum = a.F[0] * b.F[0];
             for (uint32_t i = 1; i < operandWidth; ++i) {

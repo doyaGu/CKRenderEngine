@@ -52,6 +52,7 @@ enum : uint32_t {
     DxbcOpRoundNe = 64,
     DxbcOpRoundNi = 65,
     DxbcOpRoundPi = 66,
+    DxbcOpRsq = 68,
     DxbcOpSample = 69,
     DxbcOpSampleC = 70,
     DxbcOpSampleCLz = 71,
@@ -1145,6 +1146,7 @@ void DxbcEmitter::Translate(uint32_t index) {
     case CKJIT_OP_EXP2: Unary(DxbcOpExp, dest, a); break;
     case CKJIT_OP_LOG2: Unary(DxbcOpLog, dest, a); break;
     case CKJIT_OP_SQRT: Unary(DxbcOpSqrt, dest, a); break;
+    case CKJIT_OP_RSQRT: Unary(DxbcOpRsq, dest, a); break;
     case CKJIT_OP_DOT: Dot(dest, a, b); break;
     case CKJIT_OP_DDX: Unary(DxbcOpDerivRtxCoarse, dest, a); break;
     case CKJIT_OP_DDY: Unary(DxbcOpDerivRtyCoarse, dest, a); break;

@@ -138,6 +138,7 @@ enum {
     GLSLstd450Exp2 = 29,
     GLSLstd450Log2 = 30,
     GLSLstd450Sqrt = 31,
+    GLSLstd450InverseSqrt = 32,
     GLSLstd450SMin = 39,
     GLSLstd450SMax = 42,
     GLSLstd450FClamp = 43,
@@ -706,6 +707,7 @@ uint32_t SpirvEmitter::Translate(uint32_t index) {
     case CKJIT_OP_EXP2: return Glsl(GLSLstd450Exp2, type, {a});
     case CKJIT_OP_LOG2: return Glsl(GLSLstd450Log2, type, {a});
     case CKJIT_OP_SQRT: return Glsl(GLSLstd450Sqrt, type, {a});
+    case CKJIT_OP_RSQRT: return Glsl(GLSLstd450InverseSqrt, type, {a});
     case CKJIT_OP_DOT: return Op(SpvOpDot, type, {a, b});
     case CKJIT_OP_DDX: return Op(SpvOpDPdx, type, {a});
     case CKJIT_OP_DDY: return Op(SpvOpDPdy, type, {a});
