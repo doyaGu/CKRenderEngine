@@ -20,7 +20,7 @@ string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" _platform)
 set(_golden "${GOLDEN_ROOT}/${_platform}")
 file(MAKE_DIRECTORY "${OUT_DIR}")
 set(_capture "${TOOL}" --render-engine-dir "${ENGINE_DIR}"
-    --rasterizer sdlgpu --scene all --size 640x480 --frames 5 --out "${OUT_DIR}")
+    --rasterizer sdlgpu --scene all --size 640x480 --frames 5 --capture-frames 5 --out "${OUT_DIR}")
 if (NOT EXISTS "${_golden}/baseline.json")
     execute_process(COMMAND ${_capture} RESULT_VARIABLE _capture_result)
     message(FATAL_ERROR "Missing reviewed scene baseline for ${_platform}: ${_golden}; candidate frames (${_capture_result}) are in ${OUT_DIR}")
