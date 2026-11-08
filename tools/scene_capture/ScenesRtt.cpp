@@ -237,11 +237,14 @@ void RttPreFrame(SceneContext &sc)
         if (rc->SetRenderTarget(g_Rtt.Target, 0)) {
             if (rc->Render(flags) != CK_OK)
                 sc.Error = "rtt_2d: rendering the target failed";
-            if (sc.Verbose && sc.FrameIndex == 0) {
+            if (sc.Verbose) {
+                VxStats stats = {};
+                rc->GetStats(&stats);
                 VxRect view;
                 rc->GetViewRect(view);
                 const VxMatrix &projection = rc->GetProjectionTransformationMatrix();
-                printf("rtt_2d: view=(%.0f %.0f %.0f %.0f) projection=(%.6f %.6f)\n",
+                printf("rtt_2d frame=%d: objects=%d triangles=%d vertices=%d view=(%.0f %.0f %.0f %.0f) projection=(%.6f %.6f)\n",
+                       sc.FrameIndex + 1, stats.NbObjectDrawn, stats.NbTrianglesDrawn, stats.NbVerticesProcessed,
                        view.left, view.top, view.right, view.bottom, projection[0][0], projection[1][1]);
             }
             if (!rc->SetRenderTarget(NULL, 0))
@@ -259,12 +262,15 @@ void RttPreFrame(SceneContext &sc)
             if (rc->SetRenderTarget(g_Rtt.Target, face)) {
                 if (rc->Render(flags) != CK_OK)
                     sc.Error = "rtt_cube: rendering face " + std::to_string(face) + " failed";
-                if (sc.Verbose && sc.FrameIndex == 0) {
+                if (sc.Verbose) {
+                    VxStats stats = {};
+                    rc->GetStats(&stats);
                     VxRect view;
                     rc->GetViewRect(view);
                     const VxMatrix &projection = rc->GetProjectionTransformationMatrix();
-                    printf("rtt_cube face=%d: view=(%.0f %.0f %.0f %.0f) projection=(%.6f %.6f)\n",
-                           face, view.left, view.top, view.right, view.bottom, projection[0][0], projection[1][1]);
+                    printf("rtt_cube frame=%d face=%d: objects=%d triangles=%d vertices=%d view=(%.0f %.0f %.0f %.0f) projection=(%.6f %.6f)\n",
+                           sc.FrameIndex + 1, face, stats.NbObjectDrawn, stats.NbTrianglesDrawn, stats.NbVerticesProcessed,
+                           view.left, view.top, view.right, view.bottom, projection[0][0], projection[1][1]);
                 }
                 if (!rc->SetRenderTarget(NULL, 0))
                     sc.Error = "rtt_cube: releasing face " + std::to_string(face) + " failed";
