@@ -660,7 +660,12 @@ def main() -> None:
             else:
                 validate_dxil(assembly.read_text(encoding="utf-8"), source, vertex, samplers, uniforms)
                 code = strip_reflection(dxc, args.work_dir / f"{format_}_{name}_stripped.bin", code)
-            assert code[:4] == {"spirv": b"\x03\x02\x23\x07", "msl": b"#inc"}.get(format_, b"DXBC")
+            if format_ == "msl":
+                # SPIRV-Cross can prepend Clang diagnostic directives to MSL.
+                # Its entry point and resource declarations were checked above.
+                assert re.match(rb'(?:#pragma clang diagnostic[^\n]*\n\s*)*#include <metal_stdlib>', code)
+            else:
+                assert code[:4] == {"spirv": b"\x03\x02\x23\x07"}.get(format_, b"DXBC")
             codes[format_, name] = code
             # MSL records the SPIR-V it translates, which verification checks.
             translated = {"spirv_sha256": hashlib.sha256(codes["spirv", name]).hexdigest()} if format_ == "msl" else {}
