@@ -731,7 +731,9 @@ CKJitValue NativeFragmentCompiler::SampleTexture(CKDWORD stage) {
 // original direction supplies LOD and projected gradients before addressing.
 CKJitValue NativeFragmentCompiler::SampleCube(uint32_t slot, CKJitValue direction, CKJitValue lodBias) {
     const CKJitValue info = Uniform(m_Rows.SamplerInfo, slot);
-    const CKJitValue levels = m_B.TextureLevels(slot, CKJIT_SAMPLER_CUBE);
+    const CKJitValue packed = m_B.FloatToInt(m_B.Component(info, 3));
+    const CKJitValue levels = m_B.IntAdd(Bits(packed, CKFF_NATIVE_SAMPLER_MIP_COUNT_SHIFT,
+        CKFF_NATIVE_SAMPLER_MIP_COUNT_MASK), m_B.Int(1));
     const CKJitValue simple = m_B.And(m_B.IntEqual(levels, m_B.Int(1)), m_B.And(
         m_B.NotEqual(m_B.Component(info, 1), m_B.Float(float(VXTEXTUREFILTER_ANISOTROPIC))),
         m_B.Equal(m_B.Component(info, 1), m_B.Component(info, 2))));
@@ -769,13 +771,14 @@ CKJitValue NativeFragmentCompiler::SampleCube(uint32_t slot, CKJitValue directio
         return m_B.Mul(m_B.Div(m_B.Sub(minor(v), m_B.Mul(projected, m_B.Mul(axis(v), sign))), divisor), m_B.Float(0.5f));
     };
     const CKJitValue dx = gradient(m_B.Ddx(direction)), dy = gradient(m_B.Ddy(direction));
-    const CKJitValue packed = m_B.FloatToInt(m_B.Component(info, 3));
     ShaderSampler sampler;
     sampler.Slot = slot; sampler.Dim = CKJIT_SAMPLER_CUBE; sampler.BlendsBorder = false;
-    sampler.Info = info; sampler.Levels = levels; sampler.MipFilter = Bits(packed, 0, 15);
+    sampler.Info = info; sampler.Levels = levels;
+    sampler.MipFilter = Bits(packed, CKFF_NATIVE_SAMPLER_MIP_FILTER_SHIFT, CKFF_NATIVE_SAMPLER_MIP_FILTER_MASK);
     sampler.CubeX = x; sampler.CubeY = y; sampler.CubeSign = sign;
-    sampler.MinMip = m_B.IntToFloat(Bits(packed, 12, 31));
-    sampler.MaxAnisotropy = m_B.Min(m_B.IntToFloat(Bits(packed, 4, 255)), m_B.Float(16));
+    sampler.MinMip = m_B.IntToFloat(Bits(packed, CKFF_NATIVE_SAMPLER_MIN_MIP_SHIFT, CKFF_NATIVE_SAMPLER_MIN_MIP_MASK));
+    sampler.MaxAnisotropy = m_B.Min(m_B.IntToFloat(Bits(packed,
+        CKFF_NATIVE_SAMPLER_ANISOTROPY_SHIFT, CKFF_NATIVE_SAMPLER_ANISOTROPY_MASK)), m_B.Float(16));
     const FilterTaps taps = PlanTaps2D(info, m_B.Splat(size, 2), dx, dy,
         m_B.CalcLod(slot, CKJIT_SAMPLER_CUBE, direction), lodBias, sampler.MinMip, sampler.MaxAnisotropy, false);
     CKJitValue sum;

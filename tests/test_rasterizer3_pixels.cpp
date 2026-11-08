@@ -2914,6 +2914,49 @@ void CheckWideSamplerLayouts(Backend &b)
             checkCenter(pixels, count == 8 ? 255 : count * 32, label);
         }
 
+        if (!volume) {
+            CKTextureDesc mipDesc = desc;
+            mipDesc.MipMapCount = 2;
+            CKDWORD mipTexture = 0;
+            TestCheck(ctx->CreateTexture(&mipDesc, &mipTexture), "create wide cube mip chain");
+            for (unsigned mip = 0; mip < 2; ++mip) {
+                CKDWORD mipTexels[4];
+                for (unsigned i = 0; i < 4; ++i)
+                    mipTexels[i] = mip ? 0xff101010u : 0xff404040u;
+                VxImageDescEx mipImage = mipDesc.Format;
+                mipImage.Width = mipImage.Height = 2 >> mip;
+                mipImage.BytesPerLine = mipImage.Width * 4;
+                mipImage.Image = reinterpret_cast<CKBYTE *>(mipTexels);
+                for (unsigned face = 0; face < 6; ++face)
+                    TestCheck(ctx->LoadTexture(mipTexture, mipImage, mip,
+                        static_cast<CKRST_CUBEFACE>(face), NULL), "upload wide cube mip");
+            }
+            for (int stage = 0; stage < 8; ++stage) {
+                ctx->SetTextureStageState(stage, CKRST_TSS_OP, stage >= 5 ?
+                    CKRST_TOP_DISABLE : stage == 0 ? CKRST_TOP_SELECTARG1 : CKRST_TOP_ADD);
+                // Different min/mag filters exercise manual mip selection even
+                // for a one-level texture. Only the bound mip count changes.
+                ctx->SetTextureStageState(stage, CKRST_TSS_MINFILTER, VXTEXTUREFILTER_MIPNEAREST);
+                ctx->SetTextureStageState(stage, CKRST_TSS_MAGFILTER, VXTEXTUREFILTER_LINEAR);
+                ctx->SetTextureStageState(stage, CKRST_TSS_MAXMIPMLEVEL, 1);
+            }
+            for (int draw = 0; draw < 4; ++draw) {
+                const bool mipChain = (draw & 1) != 0;
+                for (int stage = 0; stage < 8; ++stage)
+                    ctx->SetTexture(stage < 5 ? (mipChain ? mipTexture : texture) : 0, stage);
+                Pixels pixels;
+                RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                    TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, texcoords),
+                              "draw wide cube with unchanged sampler and different mip count");
+                }, pixels);
+                checkCenter(pixels, mipChain ? 80 : 160,
+                            mipChain ? "wide cube mip one after texture switch" :
+                                       "wide cube single level after texture switch");
+            }
+            for (int stage = 0; stage < 8; ++stage)
+                ctx->SetTexture(0, stage);
+            TestCheck(ctx->DeleteObject(mipTexture, CKRST_OBJ_TEXTURE), "delete wide cube mip chain");
+        }
         for (int stage = 0; stage < 8; ++stage)
             ctx->SetTexture(0, stage);
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),

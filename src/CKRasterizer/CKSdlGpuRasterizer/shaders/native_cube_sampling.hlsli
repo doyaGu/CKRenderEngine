@@ -37,9 +37,12 @@ float4 ckCubeLevel(CKFFTextureCube image, CKFFSampler state, float2 uv,
 float4 ckSampleCubeBias(CKFFTextureCube image, CKFFSampler state, uint slot,
                        float3 direction, float bias)
 {
-    uint width, height, levels;
-    image.GetDimensions(0, width, height, levels);
+    uint width, height, unusedLevels;
+    image.GetDimensions(0, width, height, unusedLevels);
     float4 info = ck_samplerInfo[slot];
+    uint packed = uint(info.w);
+    uint levels = ((packed >> CKFF_NATIVE_SAMPLER_MIP_COUNT_SHIFT) &
+                   CKFF_NATIVE_SAMPLER_MIP_COUNT_MASK) + 1;
     float3 axes = abs(direction);
     bool x = axes.x > axes.y && axes.x > axes.z;
     bool y = !x && axes.y > axes.z;
@@ -63,8 +66,8 @@ float4 ckSampleCubeBias(CKFFTextureCube image, CKFFSampler state, uint slot,
     float dyMajor = (x ? dy3.x : (y ? dy3.y : dy3.z)) * sign;
     float2 dx = (ckCubeMinor(dx3, x, y, sign) - projected * dxMajor) / major * 0.5;
     float2 dy = (ckCubeMinor(dy3, x, y, sign) - projected * dyMajor) / major * 0.5;
-    uint packed = uint(info.w);
-    float minMip = float((packed >> 12) & 31);
+    float minMip = float((packed >> CKFF_NATIVE_SAMPLER_MIN_MIP_SHIFT) &
+                         CKFF_NATIVE_SAMPLER_MIN_MIP_MASK);
     float lod = max(image.CalculateLevelOfDetailUnclamped(state, direction) + bias, minMip);
     uint filter = uint(lod > 0.0 ? info.y : info.z);
     uint taps = 1;
@@ -72,13 +75,15 @@ float4 ckSampleCubeBias(CKFFTextureCube image, CKFFSampler state, uint slot,
     if (filter == 7 && lod > 0.0) {
         float lx = length(dx * float(width)), ly = length(dy * float(width));
         float longest = max(lx, ly);
-        float tapLimit = clamp(float((packed >> 4) & 255), 1.0, 16.0);
+        float tapLimit = clamp(float((packed >> CKFF_NATIVE_SAMPLER_ANISOTROPY_SHIFT) &
+                                     CKFF_NATIVE_SAMPLER_ANISOTROPY_MASK), 1.0, 16.0);
         float minor = max(min(lx, ly), longest / tapLimit);
         taps = uint(clamp(ceil(longest / max(minor, 1.0)), 1.0, tapLimit));
         step = (lx > ly ? dx : dy) / float(taps);
         lod = max(log2(max(minor, 1.0)) + bias, minMip);
     }
-    uint mipFilter = packed & 15;
+    uint mipFilter = (packed >> CKFF_NATIVE_SAMPLER_MIP_FILTER_SHIFT) &
+                     CKFF_NATIVE_SAMPLER_MIP_FILTER_MASK;
     lod = mipFilter == 0 ? 0.0 : clamp(lod, 0.0, float(levels - 1));
     bool blend = mipFilter == 2 || mipFilter == 7;
     uint lower = uint(floor(blend ? lod : lod + 0.5));

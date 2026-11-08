@@ -607,11 +607,15 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
         const CKDWORD metadata = draw.Program->SamplerMetadataOffsets[slot];
         if (metadata == UINT32_MAX) continue;
         const CKDWORD metadataBit = 1u << slot;
-        if (bound ? (draw.Program->SamplerMetadataValidMask & metadataBit) != 0 &&
+        const bool cube = texture->Info.type == SDL_GPU_TEXTURETYPE_CUBE;
+        const CKDWORD mipCount = cube ? texture->Info.num_levels : 1u;
+        if (draw.Program->SamplerMetadataMipCounts[slot] == mipCount &&
+            (bound ? (draw.Program->SamplerMetadataValidMask & metadataBit) != 0 &&
                         CKSdlGpuSameSampler(draw.Program->SamplerMetadata[slot], binding.Sampler)
-                  : (draw.Program->SamplerMetadataDefaultMask & metadataBit) != 0)
+                   : (draw.Program->SamplerMetadataDefaultMask & metadataBit) != 0))
             continue;
         draw.Program->SamplerMetadata[slot] = binding.Sampler;
+        draw.Program->SamplerMetadataMipCounts[slot] = mipCount;
         draw.Program->SamplerMetadataValidMask |= metadataBit;
         if (bound)
             draw.Program->SamplerMetadataDefaultMask &= ~metadataBit;
@@ -627,13 +631,8 @@ CKERROR CKSdlGpuRasterizerContext::Draw(const CKDrawCommand *desc)
                                (unsigned(binding.Sampler.AddressV) << 4) |
                                (unsigned(binding.Sampler.AddressW) << 8));
         samplerInfo[1] = float(binding.Sampler.MinFilter); samplerInfo[2] = float(binding.Sampler.MagFilter);
-        CKDWORD packedMipFilter = unsigned(binding.Sampler.MipFilter) & 0xfu;
-        packedMipFilter |= (binding.Sampler.MaxAnisotropy & 0xffu) << 4;
-        // Cube filtering selects individual mips in the shader. Preserve the
-        // native sampler's lower LOD bound in the cube metadata as well.
-        if (texture->Info.type == SDL_GPU_TEXTURETYPE_CUBE)
-            packedMipFilter |= (binding.Sampler.MinMipLevel & 0x1fu) << 12;
-        samplerInfo[3] = float(packedMipFilter);
+        samplerInfo[3] = float(CKFFPackNativeSamplerLod(binding.Sampler.MipFilter,
+            binding.Sampler.MaxAnisotropy, cube ? binding.Sampler.MinMipLevel : 0u, mipCount));
         std::memcpy(uniforms.Data.Begin() + metadata + decl.BorderColorOffset, rgba, sizeof(rgba));
         std::memcpy(uniforms.Data.Begin() + metadata + decl.SamplerStateOffset, samplerInfo, sizeof(samplerInfo));
         const CKDWORD first = (std::min)(decl.BorderColorOffset, decl.SamplerStateOffset);

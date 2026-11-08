@@ -59,6 +59,32 @@ struct CKFFSamplerShaderState {
 static_assert(CKFF_SAMPLER_SHADER_STATE_VALID_MASK < (1u << 24),
               "Sampler shader state must remain exactly representable in fp32");
 
+// ck_samplerInfo.w carries native LOD parameters. Store the immutable cube
+// mip count with the sampler instead of querying it in each fragment.
+enum CKFFNativeSamplerLodABI {
+    CKFF_NATIVE_SAMPLER_MIP_FILTER_SHIFT = 0,
+    CKFF_NATIVE_SAMPLER_MIP_FILTER_MASK = 0x0000000fu,
+    CKFF_NATIVE_SAMPLER_ANISOTROPY_SHIFT = 4,
+    CKFF_NATIVE_SAMPLER_ANISOTROPY_MASK = 0x000000ffu,
+    CKFF_NATIVE_SAMPLER_MIN_MIP_SHIFT = 12,
+    CKFF_NATIVE_SAMPLER_MIN_MIP_MASK = 0x0000001fu,
+    CKFF_NATIVE_SAMPLER_MIP_COUNT_SHIFT = 17,
+    CKFF_NATIVE_SAMPLER_MIP_COUNT_MASK = 0x0000001fu,
+    CKFF_NATIVE_SAMPLER_LOD_VALID_MASK = 0x003fffffu,
+};
+
+inline CKDWORD CKFFPackNativeSamplerLod(CKDWORD mipFilter, CKDWORD anisotropy,
+                                       CKDWORD minimumMip, CKDWORD mipCount)
+{
+    return ((mipFilter & CKFF_NATIVE_SAMPLER_MIP_FILTER_MASK) << CKFF_NATIVE_SAMPLER_MIP_FILTER_SHIFT) |
+           ((anisotropy & CKFF_NATIVE_SAMPLER_ANISOTROPY_MASK) << CKFF_NATIVE_SAMPLER_ANISOTROPY_SHIFT) |
+           ((minimumMip & CKFF_NATIVE_SAMPLER_MIN_MIP_MASK) << CKFF_NATIVE_SAMPLER_MIN_MIP_SHIFT) |
+           (((mipCount - 1) & CKFF_NATIVE_SAMPLER_MIP_COUNT_MASK) << CKFF_NATIVE_SAMPLER_MIP_COUNT_SHIFT);
+}
+
+static_assert(CKFF_NATIVE_SAMPLER_LOD_VALID_MASK < (1u << 24),
+              "Native sampler LOD parameters must remain exactly representable in fp32");
+
 // VXRENDERSTATE_ZBIAS is converted to the D3D8 compatibility depth-bias
 // scale selected for the active depth-buffer format. The resolved positive
 // offset is subtracted in the vertex shaders.

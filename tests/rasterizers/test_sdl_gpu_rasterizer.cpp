@@ -22,6 +22,22 @@ int main()
     unsigned failures = 0;
     auto check = [&](bool value, const char *name) { if (!value) { ++failures; std::fprintf(stderr, "FAIL: %s\n", name); } };
     {
+        bool exact = true;
+        for (CKDWORD count = 1; count <= 32; ++count) {
+            const CKDWORD packed = CKFFPackNativeSamplerLod(15, 255, 31, count);
+            exact = exact && CKDWORD(float(packed)) == packed &&
+                (packed & ~CKFF_NATIVE_SAMPLER_LOD_VALID_MASK) == 0 &&
+                ((packed >> CKFF_NATIVE_SAMPLER_MIP_COUNT_SHIFT) &
+                 CKFF_NATIVE_SAMPLER_MIP_COUNT_MASK) + 1 == count &&
+                ((packed >> CKFF_NATIVE_SAMPLER_MIN_MIP_SHIFT) &
+                 CKFF_NATIVE_SAMPLER_MIN_MIP_MASK) == 31 &&
+                ((packed >> CKFF_NATIVE_SAMPLER_ANISOTROPY_SHIFT) &
+                 CKFF_NATIVE_SAMPLER_ANISOTROPY_MASK) == 255 &&
+                (packed & CKFF_NATIVE_SAMPLER_MIP_FILTER_MASK) == 15;
+        }
+        check(exact, "native sampler LOD fields retain every mip count in fp32");
+    }
+    {
         CKSdlGpuRasterizerContext context;
         CKSdlGpuFFJitSnapshotV1 snapshot;
         snapshot.Requests = 123;

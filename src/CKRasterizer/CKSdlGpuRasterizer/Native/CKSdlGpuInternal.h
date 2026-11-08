@@ -189,6 +189,7 @@ struct CKSdlGpuProgram : std::enable_shared_from_this<CKSdlGpuProgram> {
     XClassArray<std::shared_ptr<CKSdlGpuTexture>> DefaultTextures;
     XArray<CKDWORD> SamplerMetadataOffsets;
     CKSamplerDesc SamplerMetadata[CKFF_TEXTURE_SLOT_COUNT] = {};
+    CKDWORD SamplerMetadataMipCounts[CKFF_TEXTURE_SLOT_COUNT] = {};
     CKDWORD SamplerMetadataValidMask = 0;
     // The slots whose metadata a draw leaving them default has written.
     CKDWORD SamplerMetadataDefaultMask = 0;

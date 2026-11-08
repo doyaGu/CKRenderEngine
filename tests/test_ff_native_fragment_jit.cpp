@@ -1757,7 +1757,11 @@ void ApplySamplers(const CKFFFragmentProgram &program, CKFFSamplerLayout layout,
         const CKDWORD slot = StageSlot(program, stage, layout, comparisons);
         if (type == CKFF_SAMPLER_CUBE) {
             const int minMip = (samplers.State[slot] >> CKFF_SAMPLER_SHADER_MIN_MIP_SHIFT) & CKFF_SAMPLER_SHADER_MIN_MIP_MASK;
-            fragment.Uniforms[ROW_SAMPLER_INFO + slot][3] = float((Truncate(samplers.Info[slot][3]) & 4095) | (minMip << 12));
+            const CKDWORD packed = CKDWORD(Truncate(samplers.Info[slot][3]));
+            fragment.Uniforms[ROW_SAMPLER_INFO + slot][3] = float(CKFFPackNativeSamplerLod(
+                packed & CKFF_NATIVE_SAMPLER_MIP_FILTER_MASK,
+                (packed >> CKFF_NATIVE_SAMPLER_ANISOTROPY_SHIFT) & CKFF_NATIVE_SAMPLER_ANISOTROPY_MASK,
+                CKDWORD(minMip), CKDWORD(fragment.Textures[slot].Levels)));
         }
         const float *coord = fragment.Uniforms[ROW_STAGE_PARAMS + stage * 2];
         fragment.Uniforms[ROW_BUMP_ENV + stage * 2 + 1][3] = coord[2] > 0.5f ? (float)samplers.State[slot] : 0.0f;
