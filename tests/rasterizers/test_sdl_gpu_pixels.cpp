@@ -1113,15 +1113,7 @@ int main(int argc, char **argv)
     if (!window) { SDL_Quit(); return 11; }
     SDL_ShowWindow(window); SDL_RaiseWindow(window);
     SDL_SyncWindow(window);
-    // Window activation completes through the native event queue.
-    const Uint64 focusDeadline = SDL_GetTicks() + 5000;
-    while (!(SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) && SDL_GetTicks() < focusDeadline) {
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) { SDL_DestroyWindow(window); SDL_Quit(); return 18; }
-        }
-        SDL_Delay(10);
-    }
+    SDL_PumpEvents();
     if (SDL_getenv("CKRE_GPU_TEST_INTERACTIVE_START")) {
         SDL_SetWindowTitle(window, "SDL_gpu native tests - press Enter to start");
         const Uint64 deadline = SDL_GetTicks() + 120000;
@@ -1139,12 +1131,14 @@ int main(int argc, char **argv)
         SDL_SetWindowTitle(window, "SDL_gpu rasterizer pixel tests");
     }
     const SDL_WindowFlags visibleFlags = SDL_GetWindowFlags(window);
-    if (!(visibleFlags & SDL_WINDOW_INPUT_FOCUS) || (visibleFlags & SDL_WINDOW_HIDDEN)) {
-        std::fprintf(stderr, "visible GPU acceptance requires a shown foreground window (flags=0x%llx)\n",
+    // Pixel readbacks require a visible drawable. Desktop focus belongs to
+    // the user; the interactive Enter check above verifies keyboard focus.
+    if (visibleFlags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) {
+        std::fprintf(stderr, "visible GPU acceptance requires a shown window (flags=0x%llx)\n",
                      static_cast<unsigned long long>(visibleFlags));
         SDL_DestroyWindow(window); SDL_Quit(); return 27;
     }
-    std::puts("SDL_gpu visible acceptance window is shown and has input focus");
+    std::puts("SDL_gpu visible acceptance window is shown");
     const int result = Run(window, focus);
     SDL_DestroyWindow(window); SDL_Quit();
     return result;
