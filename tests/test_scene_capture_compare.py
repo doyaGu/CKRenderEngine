@@ -1,6 +1,7 @@
 import argparse
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -69,6 +70,19 @@ class SceneImageComparisonTest(unittest.TestCase):
             [str(TOOL), "--compare-only"], capture_output=True, timeout=15,
         ).returncode, 1)
         self.assertEqual(self.compare("--skip", "alpha_blend").returncode, 1)
+
+    def test_capture_mode_cannot_pass_when_every_comparison_was_excluded(self):
+        listing = subprocess.run(
+            [str(TOOL), "--list-scenes"], capture_output=True, text=True, check=True, timeout=15,
+        ).stdout
+        scenes = re.findall(r"^(\w+)\s+oracle=", listing, re.MULTILINE)
+        self.assertTrue(scenes)
+        result = subprocess.run(
+            [str(TOOL), "--render-engine-dir", str(self.root / "missing-renderer"),
+             "--scene", "all", "--skip", ",".join(scenes), "--out", str(self.actual),
+             "--compare", str(self.expected)], capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
 
     def run_golden(self, references, output):
         return subprocess.run(
