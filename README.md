@@ -79,7 +79,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Requirements include CMake 3.16+, SDL3, a C++ toolchain, and CK2/VxMath from sibling projects, installed packages, or a configured Virtools SDK fallback.
+Requirements include CMake 3.16+, SDL3 3.4.20+, a C++ toolchain, and CK2/VxMath from sibling projects, installed packages, or a configured Virtools SDK fallback. The SDL version requirement includes the Metal fence completion and ownership fixes needed to reuse GPU upload buffers safely.
 
 The SDL_gpu shader packs are checked in under
 `src/CKRasterizer/CKSdlGpuRasterizer/shaders/generated/`; builds only verify

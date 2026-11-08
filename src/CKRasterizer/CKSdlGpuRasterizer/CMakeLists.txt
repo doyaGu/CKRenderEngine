@@ -1,5 +1,6 @@
 # RESOLVE_AND_STORE and GPU device properties are part of SDL 3.4.
-find_package(SDL3 3.4 CONFIG REQUIRED)
+# Metal fence completion and fence ownership are fixed in this release.
+find_package(SDL3 3.4.20 CONFIG REQUIRED)
 
 set(CKSDL_GPU_RASTERIZER_SOURCES
     Native/CKSdlGpuCommands.cpp

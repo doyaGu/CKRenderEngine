@@ -148,6 +148,10 @@ static bool CheckExactCopyMatchesBlit(SDL_Window *window)
     fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
     commands = nullptr;
     if (!fence || !SDL_WaitForGPUFences(device, true, &fence, 1)) return fail("submit/wait");
+    if (!SDL_QueryGPUFence(device, fence)) {
+        SDL_SetError("A completed GPU fence must remain signaled");
+        return fail("query completed fence");
+    }
     const void *copyBytes = SDL_MapGPUTransferBuffer(device, copyDownload, false);
     const void *blitBytes = SDL_MapGPUTransferBuffer(device, blitDownload, false);
     if (!copyBytes || !blitBytes) {
