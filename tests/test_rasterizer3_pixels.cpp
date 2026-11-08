@@ -24,6 +24,8 @@
 #include <thread>
 #include <vector>
 
+bool CheckSdlGpuDepthClipping();
+
 namespace {
 
 const int kWidth = 64;
@@ -2195,6 +2197,7 @@ void CheckPointFilledTriangleSizes(Backend &b)
 
 void CheckClippingDisablesUserPlanes(Backend &b)
 {
+    TestCheck(CheckSdlGpuDepthClipping(), "SDL depth clipping without fixed-function state translation");
     auto *ctx = b.Context;
     const CKDWORD approximationsBefore =
         ReadStats(ctx).Diagnostics[CKRST_DIAG_IGNORE_CLIPPING_OFF];
