@@ -95,6 +95,16 @@ class SceneImageComparisonTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertRegex(result.stderr, r"child exited with code (-1|255)\b")
 
+    def test_unwritable_scene_settings_fail_before_starting_a_child(self):
+        (self.actual / "present_fxaa.CK2_3D.ini").mkdir()
+        result = subprocess.run(
+            [str(TOOL), "--render-engine-dir", str(self.root / "missing-renderer"),
+             "--scene", "present_fxaa", "--out", str(self.actual)],
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
+        self.assertIn("cannot write", result.stderr)
+
     def run_golden(self, references, output):
         return subprocess.run(
             ["cmake", f"-DTOOL={TOOL}", f"-DGOLDEN_ROOT={references}",
