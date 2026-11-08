@@ -51,7 +51,7 @@ bool BuildComposite2D(SceneContext &sc) {
     CKSpriteText *text = static_cast<CKSpriteText *>(sc.Context->CreateObject(CKCID_SPRITETEXT, (CKSTRING)"caption", CK_OBJECTCREATION_NONAMECHECK));
     if (!text || !text->Create(550, 48, 32, 0)) return false;
     text->SetDesiredVideoFormat(_32_ARGB8888);
-    text->SetFont((CKSTRING)"Arial", 22, 700, FALSE, FALSE);
+    text->SetFont((CKSTRING)"Arial", -30, 700, FALSE, FALSE);
     text->SetTextColor(0xffffffff); text->SetBackgroundColor(0);
     text->SetText((CKSTRING)"2D / alpha / text");
     text->SetAlign(CKSPRITETEXT_LEFT);
