@@ -22,6 +22,8 @@ original diagnostics before updating the versioned fixtures. Captures contain
 procedural test scenes, never game assets. Original diagnostic images are a
 historical corpus; verify their scene inputs before comparing another version.
 
-Darwin references have not been captured yet. The test renders candidate frames
-and fails explicitly when a reviewed platform baseline is absent; CI retains
-those frames for review instead of reporting a skipped or passing comparison.
+Darwin references use SDL 3.4.20 and the Metal backend. Earlier SDL releases
+reported a busy fence as completed, allowing upload buffers to be reused before
+their draws finished. Both RTT scenes now match exactly between their first and
+fifth frames. The suite compares ARM64 and Rosetta x86_64 execution against
+these frames.
