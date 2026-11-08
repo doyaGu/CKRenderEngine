@@ -16,6 +16,24 @@ function(ckre_configure_test_target TARGET_NAME)
     ckre_copy_runtime_dependencies(${TARGET_NAME})
 endfunction()
 
+set(CKRE_TEST_D3D12_SDK_VERSION "0" CACHE STRING
+    "App-local Direct3D 12 SDK version for Windows GPU tests (0 uses the system runtime)")
+if (NOT CKRE_TEST_D3D12_SDK_VERSION MATCHES "^(0|[1-9][0-9]*)$")
+    message(FATAL_ERROR "CKRE_TEST_D3D12_SDK_VERSION must be an unsigned SDK version")
+endif ()
+if (CKRE_TEST_D3D12_SDK_VERSION AND NOT WIN32)
+    message(FATAL_ERROR "App-local Direct3D 12 SDK selection requires Windows")
+endif ()
+
+function(ckre_configure_test_d3d12_sdk TARGET_NAME)
+    if (WIN32 AND CKRE_TEST_D3D12_SDK_VERSION AND TARGET ${TARGET_NAME})
+        target_sources(${TARGET_NAME} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/rasterizers/D3D12SDKExports.cpp)
+        target_compile_definitions(${TARGET_NAME} PRIVATE
+            CKRE_TEST_D3D12_SDK_VERSION=${CKRE_TEST_D3D12_SDK_VERSION})
+    endif ()
+endfunction()
+
 function(ckre_register_test TARGET_NAME)
     add_test(NAME ${TARGET_NAME} COMMAND $<TARGET_FILE:${TARGET_NAME}>)
     set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 60)
@@ -406,6 +424,11 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
         set_tests_properties(sdl_gpu_${pixel_case}_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE)
     endforeach ()
 endif ()
+
+foreach (gpu_test IN ITEMS shader_jit_dxbc_validator test_sdl_gpu_pixels
+        sdl_gpu_ffp_pixel_tests ckre_scene_capture sdl_gpu_backbuffer_benchmark)
+    ckre_configure_test_d3d12_sdk(${gpu_test})
+endforeach ()
 
 ckre_add_recording_ckff_test(rasterizer_backend_tests
     test_rasterizer_backend.cpp
