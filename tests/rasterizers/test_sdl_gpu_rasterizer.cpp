@@ -1067,8 +1067,28 @@ int main()
                 const bool present = CKSdlGpuShaderCode(format, (CKSdlShader)shader, code, size) != FALSE;
                 const bool expected = packed && shader < CKSDL_SHADER_COUNT &&
                     (format != SDL_GPU_SHADERFORMAT_DXBC || shader <= CKSDL_SHADER_VS_FF_POSITIONT_CLIP_DEPTH_PAD);
+                // SPIRV-Cross may put Clang diagnostics before the MSL include.
+                // Inspect the source after those complete directive lines.
+                const CKBYTE *prefix = code;
+                CKDWORD remaining = size;
+                const char diagnostic[] = "#pragma clang diagnostic";
+                if (present && format == SDL_GPU_SHADERFORMAT_MSL) {
+                    while (remaining >= sizeof(diagnostic) - 1 &&
+                           std::memcmp(prefix, diagnostic, sizeof(diagnostic) - 1) == 0) {
+                        const auto *newline = static_cast<const CKBYTE *>(
+                            std::memchr(prefix, '\n', remaining));
+                        if (!newline) break;
+                        remaining -= static_cast<CKDWORD>(newline + 1 - prefix);
+                        prefix = newline + 1;
+                        while (remaining && (*prefix == ' ' || *prefix == '\t' ||
+                                             *prefix == '\r' || *prefix == '\n')) {
+                            ++prefix;
+                            --remaining;
+                        }
+                    }
+                }
                 complete = complete && present == expected &&
-                           (!present || (size > 4 && std::memcmp(code, magic, 4) == 0));
+                           (!present || (remaining > 4 && std::memcmp(prefix, magic, 4) == 0));
             }
         }
         check(complete, "embedded shader packs hold exactly the shaders of their formats");
