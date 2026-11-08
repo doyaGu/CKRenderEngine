@@ -113,6 +113,31 @@ struct CKFFDepthTexture2D
     }
 };
 
+#if CKFF_CUBE_SLOT_COUNT == 8
+// Keep each half's resource operations in a separate branch. A flat switch
+// merges the results of all eight resources into one large live range.
+#define CKFF_HANDLE_SELECT_CUBE(_statement) \
+    [branch] if (Index < 4) { \
+        [branch] if (Index < 2) { \
+            [branch] if (Index == 0) { _statement(s_textureCube0, s_textureCube0Sampler); } \
+            else { _statement(s_textureCube1, s_textureCube1Sampler); } \
+        } else { \
+            [branch] if (Index == 2) { _statement(s_textureCube2, s_textureCube2Sampler); } \
+            else { _statement(s_textureCube3, s_textureCube3Sampler); } \
+        } \
+    } else if (Index < 8) { \
+        [branch] if (Index < 6) { \
+            [branch] if (Index == 4) { _statement(s_textureCube4, s_textureCube4Sampler); } \
+            else { _statement(s_textureCube5, s_textureCube5Sampler); } \
+        } else { \
+            [branch] if (Index == 6) { _statement(s_textureCube6, s_textureCube6Sampler); } \
+            else { _statement(s_textureCube7, s_textureCube7Sampler); } \
+        } \
+    }
+#else
+#define CKFF_HANDLE_SELECT_CUBE(_statement) CKFF_SELECT_CUBE(Index, _statement)
+#endif
+
 struct CKFFTextureCube
 {
     uint Index;
@@ -121,7 +146,7 @@ struct CKFFTextureCube
     {
         float result = 0.0;
 #define CKFF_METHOD(_texture, _sampler) result = _texture.CalculateLevelOfDetailUnclamped(_sampler, uv)
-        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+        CKFF_HANDLE_SELECT_CUBE(CKFF_METHOD)
 #undef CKFF_METHOD
         return result;
     }
@@ -130,7 +155,7 @@ struct CKFFTextureCube
     {
         float4 result = 0.0;
 #define CKFF_METHOD(_texture, _sampler) result = _texture.SampleLevel(_sampler, uv, lod)
-        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+        CKFF_HANDLE_SELECT_CUBE(CKFF_METHOD)
 #undef CKFF_METHOD
         return result;
     }
@@ -139,7 +164,7 @@ struct CKFFTextureCube
     {
         width = 0; height = 0; levels = 0;
 #define CKFF_METHOD(_texture, _sampler) _texture.GetDimensions(mip, width, height, levels)
-        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+        CKFF_HANDLE_SELECT_CUBE(CKFF_METHOD)
 #undef CKFF_METHOD
     }
 
@@ -147,11 +172,13 @@ struct CKFFTextureCube
     {
         float4 result = 0.0;
 #define CKFF_METHOD(_texture, _sampler) result = _texture.SampleBias(_sampler, uv, bias)
-        CKFF_SELECT_CUBE(Index, CKFF_METHOD)
+        CKFF_HANDLE_SELECT_CUBE(CKFF_METHOD)
 #undef CKFF_METHOD
         return result;
     }
 };
+
+#undef CKFF_HANDLE_SELECT_CUBE
 
 struct CKFFTexture3D
 {
