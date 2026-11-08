@@ -117,7 +117,9 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
         for (unsigned axis = 0; axis < 4; ++axis) columns[axis] = uniform(row, index * 4 + axis);
         return transformColumns(columns, value, translate, homogeneous);
     };
-    const auto normalize = [&](CKJitValue value) { return b.Div(value, b.Length(value)); };
+    // Match normalize's native RSQ/MUL rather than SQRT/DIV. Cube filter
+    // boundaries amplify their different rounding into a different texel.
+    const auto normalize = [&](CKJitValue value) { return b.Mul(value, b.Rsqrt(b.Dot(value, value))); };
     const CKJitValue zero = b.Float(0), one = b.Float(1), half = b.Float(0.5f);
     CKJitValue position = b.Input({0, 3, CKJIT_INPUT_ATTRIBUTE});
     CKJitValue normal = b.Input({1, 3, CKJIT_INPUT_ATTRIBUTE});
@@ -287,7 +289,10 @@ static bool CompileNative3dProgram(const CKFFNativeFragmentKey &input, CKFFSampl
             // The packed state is a nonnegative, exactly representable integer.
             const CKJitValue generation = b.IntShiftRight(packed, b.Int(16));
             const CKJitValue eye = normalize(view);
-            const CKJitValue reflection = b.Sub(eye, b.Mul(b.Mul(b.Dot(viewNormal, eye), b.Float(2)), viewNormal));
+            const CKJitValue twiceProjection = b.Mul(b.Dot(viewNormal, eye), b.Float(2));
+            const CKJitValue reflection = referenceFormat == CKRST_SHADER_FORMAT_DXIL
+                ? b.Mad(viewNormal, b.Neg(twiceProjection), eye)
+                : b.Sub(eye, b.Mul(twiceProjection, viewNormal));
             const CKJitValue m = b.Mul(b.Length(b.Add(reflection, b.Float3(0, 0, 1))), b.Float(2));
             const CKJitValue sphere = b.Construct({b.Add(b.Div(b.Swizzle(reflection, "xy"), b.Max(m, b.Float(0.0001f))), half), zero, one});
             coord = b.Select(b.IntEqual(generation, b.Int(4)), sphere, coord);
