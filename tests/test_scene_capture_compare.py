@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 TOOL = None
+FAILING_CHILD = None
 FRAMES = Path(__file__).parent / "reference" / "frames" / "golden" / "windows"
 GOLDEN_SCRIPT = Path(__file__).parent / "scene_capture_golden.cmake"
 
@@ -84,6 +85,16 @@ class SceneImageComparisonTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
 
+    def test_failed_child_cannot_pass_without_comparison(self):
+        result = subprocess.run(
+            [str(FAILING_CHILD), "--render-engine-dir", str(self.root / "missing-renderer"),
+             "--scene", "alpha_blend", "--out", str(self.actual)],
+            executable=str(TOOL), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertRegex(result.stderr, r"child exited with code (-1|255)\b")
+
     def run_golden(self, references, output):
         return subprocess.run(
             ["cmake", f"-DTOOL={TOOL}", f"-DGOLDEN_ROOT={references}",
@@ -113,6 +124,8 @@ class SceneImageComparisonTest(unittest.TestCase):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("tool", type=Path)
+    parser.add_argument("failing_child", type=Path)
     options, arguments = parser.parse_known_args()
     TOOL = options.tool.resolve()
+    FAILING_CHILD = options.failing_child.resolve()
     unittest.main(argv=[sys.argv[0], *arguments])

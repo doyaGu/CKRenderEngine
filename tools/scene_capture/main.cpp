@@ -385,7 +385,9 @@ int RunChild(const Args &args, const SceneDef &scene, const std::string &setting
     SDL_DestroyProcess(process);
     if (exitCode != EXIT_OK && exitCode != EXIT_CANCELLED)
         fprintf(stderr, "[%s] child exited with code %d\n", scene.Name, exitCode);
-    return exitCode;
+    // Windows exception statuses have the sign bit set. Keep them from
+    // disappearing when the parent selects the largest scene exit code.
+    return exitCode < EXIT_OK ? EXIT_SCENE : exitCode;
 }
 
 struct CompareSummary {
@@ -558,6 +560,8 @@ int main(int argc, char **argv)
             if (!WriteTextFile(settingsIni, scene.IniOverrides)) {
                 fprintf(stderr, "[%s] cannot write %s\n", scene.Name, settingsIni.c_str());
                 results[i] = EXIT_CAPTURE;
+                if (results[i] > worst)
+                    worst = results[i];
                 continue;
             }
         }
