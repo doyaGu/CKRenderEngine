@@ -1109,6 +1109,15 @@ int main(int argc, char **argv)
     if (!window) { SDL_Quit(); return 11; }
     SDL_ShowWindow(window); SDL_RaiseWindow(window);
     SDL_SyncWindow(window);
+    // Window activation completes through the native event queue.
+    const Uint64 focusDeadline = SDL_GetTicks() + 5000;
+    while (!(SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) && SDL_GetTicks() < focusDeadline) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) { SDL_DestroyWindow(window); SDL_Quit(); return 18; }
+        }
+        SDL_Delay(10);
+    }
     if (SDL_getenv("CKRE_GPU_TEST_INTERACTIVE_START")) {
         SDL_SetWindowTitle(window, "SDL_gpu native tests - press Enter to start");
         const Uint64 deadline = SDL_GetTicks() + 120000;
