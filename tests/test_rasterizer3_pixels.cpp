@@ -2286,8 +2286,8 @@ void CheckClippingDisablesUserPlanes(Backend &b)
         TestCheck(DrawColorTriangle(ctx, outsideNear, kRed),
                   "draw before the near plane with clipping disabled");
     }, unclipped);
-    TestCheck(PixelNear(unclipped, 32, 32, 255, 0, 0),
-              "clipping off depth-clamps both canonical planes");
+    ExpectCenter(unclipped, 255, 0, 0,
+                 "clipping off depth-clamps both canonical planes");
 
     // Distinguish true post-interpolation depth clamp from clamping each
     // vertex before rasterization. At the center the original depth is 0,
@@ -2797,15 +2797,7 @@ void CheckLayeredTextureUpdates(Backend &b)
 void CheckWideSamplerLayouts(Backend &b)
 {
     auto *ctx = b.Context;
-    // The paravirtual Metal device of macOS virtual machines samples no cube
-    // stage of the wide cube layout but the first correctly; Apple GPUs pass.
-    const bool paravirtual = strcmp(static_cast<CKSdlGpuRasterizerContext *>(ctx)->GetDeviceNameForTests(),
-                                    "Apple Paravirtual device") == 0;
     for (bool volume : {false, true}) {
-        if (!volume && paravirtual) {
-            printf("  five cube stages: skipped on the Apple Paravirtual device\n");
-            continue;
-        }
         CKTextureDesc desc;
         VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
         desc.Format.Width = desc.Format.Height = 2;
@@ -2955,10 +2947,7 @@ void CheckWideSamplerLayouts(Backend &b)
         mixedTextures[2], mixedTextures[2], mixedTextures[2], mixedTextures[2],
         mixedTextures[2], mixedTextures[1], mixedTextures[0]};
     runMixed(defaultMixed, 3, 48, "mixed default sampler layout");
-    if (paravirtual)
-        printf("  mixed wide-cube sampler layout: skipped on the Apple Paravirtual device\n");
-    else
-        runMixed(wideCubeMixed, 7, 112, "mixed wide-cube sampler layout");
+    runMixed(wideCubeMixed, 7, 112, "mixed wide-cube sampler layout");
     runMixed(wideVolumeMixed, 7, 144, "mixed wide-volume sampler layout");
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         ctx->SetTexture(0, stage);
@@ -4010,10 +3999,6 @@ struct ReadbackCapture {
 void CheckOrderedReadbacks(Backend &b)
 {
     CKRasterizerContext *ctx = b.Context;
-    // The second snapshot of a frame never completes on the paravirtual
-    // Metal device of macOS virtual machines; Apple GPUs pass.
-    const bool paravirtual = strcmp(static_cast<CKSdlGpuRasterizerContext *>(ctx)->GetDeviceNameForTests(),
-                                    "Apple Paravirtual device") == 0;
     SetDiffuseState(ctx);
     ReadbackCapture red, blue;
     BeginFrame(ctx, CKRST_CTXCLEAR_COLOR);
@@ -4021,11 +4006,8 @@ void CheckOrderedReadbacks(Backend &b)
     TestCheck(ctx->RequestReadback(NULL, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &red), "first snapshot");
     TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kBlue), "draw between snapshots");
     CKRECT crop = {28, 28, 36, 36};
-    if (paravirtual)
-        printf("  second cropped snapshot: skipped on the Apple Paravirtual device\n");
-    else
-        TestCheck(ctx->RequestReadback(&crop, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &blue),
-                  "second cropped snapshot");
+    TestCheck(ctx->RequestReadback(&crop, VXBUFFER_BACKBUFFER, ReadbackCapture::Callback, &blue),
+              "second cropped snapshot");
     TestCheck(red.Calls == 0 && blue.Calls == 0, "callbacks are deferred to a frame boundary");
     TestCheck(DrawColorTriangle(ctx, kCenterTriangle, kGreen), "draw after snapshots");
     EndFrame(ctx);
@@ -4033,7 +4015,7 @@ void CheckOrderedReadbacks(Backend &b)
     ReadBackbuffer(ctx, finalImage);
     ExpectCenter(finalImage, 0, 255, 0, "later draws retain the scene attachment");
     const Uint64 deadline = SDL_GetTicks() + 5000;
-    while ((red.Calls == 0 || (!paravirtual && blue.Calls == 0)) && SDL_GetTicks() < deadline) {
+    while ((red.Calls == 0 || blue.Calls == 0) && SDL_GetTicks() < deadline) {
         TestCheck(ctx->BackToFront(FALSE), "submit pending snapshots");
         SDL_PumpEvents();
         SDL_Delay(1);
@@ -4041,8 +4023,6 @@ void CheckOrderedReadbacks(Backend &b)
     TestCheckf(red.Calls == 1 && red.Success,
                "first snapshot completes once: calls=%d success=%d", red.Calls, (int)red.Success);
     ExpectCenter(red.Image, 255, 0, 0, "first snapshot retains earlier draw");
-    if (paravirtual)
-        return;
     TestCheckf(blue.Calls == 1 && blue.Success && blue.Width == 8 && blue.Height == 8,
                "second snapshot completes once with its crop: calls=%d success=%d size=%dx%d",
                blue.Calls, (int)blue.Success, blue.Width, blue.Height);
