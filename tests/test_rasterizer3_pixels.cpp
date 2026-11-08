@@ -4986,7 +4986,6 @@ void BackendRendersFixedFunctionSemantics()
         CheckCompiledFragmentPrograms(backend, precompiled);
         CheckFFReplay(backend, replayCases, replayTextures, replayReference);
         CheckCompiledProgramDepthInvariance(backend);
-        CheckCompiled(backend, "wide sampler layout", CheckWideSamplerLayouts);
         CheckOrderedTextureUpdates(backend);
         CheckPaddedTextureUpload(backend);
         CheckOrderedBufferUpdates(backend);
@@ -4997,7 +4996,6 @@ void BackendRendersFixedFunctionSemantics()
         CheckVertexBufferPointFilledStripsAndFans(backend);
         CheckPointFillTriangleCulling(backend);
         CheckPointFilledTriangleSizes(backend);
-        CheckClippingDisablesUserPlanes(backend);
         CheckCompiled(backend, "border filtering", CheckBorderFiltering);
         CheckCopyAndRectClear(backend);
         CheckLayeredTextureUpdates(backend);
@@ -5011,7 +5009,6 @@ void BackendRendersFixedFunctionSemantics()
         CheckIndependentAttachmentClears(backend);
         CheckCompiled(backend, "filtered depth comparison", CheckFilteredDepthComparison);
         CheckStencilWriteMasks(backend);
-        CheckOrderedReadbacks(backend);
         CheckResizeAndReadback(backend);
         CheckPresentation(backend);
         CheckViewport(backend);
@@ -5050,6 +5047,36 @@ void BackendRendersFixedFunctionSemantics()
     printf("  coverage: pixelCases=%d tolerance=%d\n", (int)SAMPLE_COUNT, kTolerance);
 }
 
+void RunBackendPixelCheck(void (*check)(Backend &))
+{
+    TestCheckf(SDL_Init(SDL_INIT_VIDEO), "SDL video init failed: %s", SDL_GetError());
+    Backend backend;
+    TestCheck(OpenBackend(backend, kWidth, kHeight), "open pixel test backend");
+    check(backend);
+    CloseBackend(backend);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+}
+
+void CheckCompiledWideSamplerLayouts(Backend &backend)
+{
+    CheckCompiled(backend, "wide sampler layout", CheckWideSamplerLayouts);
+}
+
+void BackendWideSamplerLayouts()
+{
+    RunBackendPixelCheck(CheckCompiledWideSamplerLayouts);
+}
+
+void BackendDepthClipping()
+{
+    RunBackendPixelCheck(CheckClippingDisablesUserPlanes);
+}
+
+void BackendOrderedReadbacks()
+{
+    RunBackendPixelCheck(CheckOrderedReadbacks);
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -5064,7 +5091,14 @@ int main(int argc, char **argv)
     // compiled program manifest unless one is named.
     SDL_setenv_unsafe("CKRE_SDL_GPU_FF_JIT_CACHE", "0", 0);
 
-    tests.Run("backend renders the fixed-function semantics through the private interface",
-              &BackendRendersFixedFunctionSemantics);
+    if (argc > 1 && strcmp(argv[1], "--samplers") == 0)
+        tests.Run("wide sampler layouts render every cube and volume stage", &BackendWideSamplerLayouts);
+    else if (argc > 1 && strcmp(argv[1], "--clipping") == 0)
+        tests.Run("clipping controls canonical depth and user planes", &BackendDepthClipping);
+    else if (argc > 1 && strcmp(argv[1], "--readbacks") == 0)
+        tests.Run("ordered snapshots retain each intermediate draw", &BackendOrderedReadbacks);
+    else
+        tests.Run("backend renders the fixed-function semantics through the private interface",
+                  &BackendRendersFixedFunctionSemantics);
     return tests.ExitCode();
 }

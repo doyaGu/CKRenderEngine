@@ -393,6 +393,18 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
     # Software rasterizers on CI runners (lavapipe, WARP) take several minutes.
     set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE)
+    foreach (pixel_case IN ITEMS sampler clipping readback)
+        if (pixel_case STREQUAL "sampler")
+            set(pixel_argument samplers)
+        elseif (pixel_case STREQUAL "readback")
+            set(pixel_argument readbacks)
+        else ()
+            set(pixel_argument clipping)
+        endif ()
+        add_test(NAME sdl_gpu_${pixel_case}_pixel_tests
+            COMMAND sdl_gpu_ffp_pixel_tests --${pixel_argument})
+        set_tests_properties(sdl_gpu_${pixel_case}_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE)
+    endforeach ()
 endif ()
 
 ckre_add_recording_ckff_test(rasterizer_backend_tests
