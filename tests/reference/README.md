@@ -9,8 +9,8 @@ original `CKDX8Rasterizer.dll` is the visual oracle.
   `CKRasterizerCapsBaseline.generated.h`.
 - `frames/oracle/<scene>.png` contains procedural reference frames. These
   fixtures do not contain game assets.
-- `frames/golden/<runner>-<backend>/<scene>.png` is reserved for reviewed
-  same-backend CI output.
+- `frames/golden/<platform>/<scene>.png` contains reviewed SDL GPU regression
+  frames and a `baseline.json` recording their source revisions and hashes.
 
 Local captures, proprietary modules, machine details, process metadata and
 acceptance records are intentionally not versioned.

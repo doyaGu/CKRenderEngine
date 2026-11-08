@@ -1,7 +1,7 @@
 {
   "format": 1,
   "renderer_revision": "99bb47aa26f44fd37221cda0039d201348a83d66",
-  "scene_revision": "caba5980a1096e9f75928093ee853c3885aaeef7",
+  "scene_revision": "d14e20557ed3e6d5b2f57e3102ae79a055dfa11f",
   "width": 640,
   "height": 480,
   "requested_frames": 5,
@@ -20,7 +20,7 @@
     },
     {
       "name": "composite_2d",
-      "sha256": "833a63bc9d37419641431408f14702a4711af2f2d39a5e31cbe3cd2aa8bd0da6"
+      "sha256": "1656e18aca195578d17ff6b9a017e7cfda6e678f8a2faee294c175f2d6feef22"
     },
     {
       "name": "composite_3d",
