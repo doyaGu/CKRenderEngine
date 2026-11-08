@@ -2799,6 +2799,17 @@ void CheckLayeredTextureUpdates(Backend &b)
 void CheckWideSamplerLayouts(Backend &b)
 {
     auto *ctx = b.Context;
+    bool pixelsMatch = true;
+    auto checkCenter = [&](const Pixels &pixels, int expected, const char *label) {
+        CKBYTE bgra[4];
+        GetPixel(pixels, kWidth / 2, kHeight / 2, bgra);
+        const bool matches = PixelNear(pixels, kWidth / 2, kHeight / 2,
+                                      expected, expected, expected);
+        printf("  %s: expected RGB(%d,%d,%d), BGRA=(%u,%u,%u,%u)\n", label,
+               expected, expected, expected, unsigned(bgra[0]), unsigned(bgra[1]),
+               unsigned(bgra[2]), unsigned(bgra[3]));
+        pixelsMatch = pixelsMatch && matches;
+    };
     for (bool volume : {false, true}) {
         CKTextureDesc desc;
         VxPixelFormat2ImageDesc(_32_ARGB8888, desc.Format);
@@ -2827,7 +2838,7 @@ void CheckWideSamplerLayouts(Backend &b)
         SetDiffuseState(ctx);
         VxMatrix identity;
         identity.SetIdentity();
-        for (int stage = 0; stage < 5; ++stage) {
+        for (int stage = 0; stage < 8; ++stage) {
             TestCheck(ctx->SetTexture(texture, stage),
                       volume ? "bind five-stage volume texture" :
                                "bind five-stage cube texture");
@@ -2854,16 +2865,26 @@ void CheckWideSamplerLayouts(Backend &b)
             texcoords[vertex][2] = volume ? 0.5f : 0.0f;
             texcoords[vertex][3] = 0.0f;
         }
-        Pixels pixels;
-        RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
-            TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, texcoords),
-                      volume ? "draw five volume stages" : "draw five cube stages");
-        }, pixels);
-        ExpectCenter(pixels, 160, 160, 160,
-                     volume ? "five volume stages use the wide sampler layout" :
-                              "five cube stages use the wide sampler layout");
+        // Cross both layout boundaries in each direction. Reusing one image
+        // also verifies that separate sampler slots may alias a texture.
+        for (int step = 1; step < 16; ++step) {
+            const int count = step <= 8 ? step : 16 - step;
+            for (int stage = 0; stage < 8; ++stage) {
+                ctx->SetTexture(stage < count ? texture : 0, stage);
+                ctx->SetTextureStageState(stage, CKRST_TSS_OP, stage >= count ?
+                    CKRST_TOP_DISABLE : stage == 0 ? CKRST_TOP_SELECTARG1 : CKRST_TOP_ADD);
+            }
+            Pixels pixels;
+            RenderAndRead(ctx, CKRST_CTXCLEAR_COLOR, NULL, [&]() {
+                TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, texcoords),
+                          "draw layered sampler layout");
+            }, pixels);
+            char label[64];
+            snprintf(label, sizeof(label), "%d %s stages", count, volume ? "volume" : "cube");
+            checkCenter(pixels, count == 8 ? 255 : count * 32, label);
+        }
 
-        for (int stage = 0; stage < 5; ++stage)
+        for (int stage = 0; stage < 8; ++stage)
             ctx->SetTexture(0, stage);
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
                   volume ? "delete five-stage volume texture" :
@@ -2937,7 +2958,7 @@ void CheckWideSamplerLayouts(Backend &b)
             TestCheck(DrawTexturedTriangle(ctx, kCenterTriangle, kWhite, texcoords),
                       label);
         }, pixels);
-        ExpectCenter(pixels, expected, expected, expected, label);
+        checkCenter(pixels, expected, label);
     };
 
     const CKDWORD defaultMixed[] = {
@@ -2960,6 +2981,7 @@ void CheckWideSamplerLayouts(Backend &b)
         TestCheck(ctx->DeleteObject(texture, CKRST_OBJ_TEXTURE),
                   "delete mixed-layout texture");
 
+    TestCheck(pixelsMatch, "default, wide cube and wide volume sampler pixels");
     printf("  exact default, wide cube, and wide volume sampler layouts: passed\n");
 }
 
