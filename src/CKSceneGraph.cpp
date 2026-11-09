@@ -622,18 +622,15 @@ void CKSceneGraphNode::NoTestsTraversal(RCKRenderContext *dev, CKDWORD flags) {
 }
 
 void CKSceneGraphRootNode::RenderTransparentObjects(RCKRenderContext *rc, CKDWORD flags) {
-    // FPS counters can coincide across contexts or repeated DrawScene calls.
-    // Collect a fresh visibility sample for this context before deferring draws.
-    CKTransparentObject *it = m_TransparentObjects.Begin();
-    while (it != m_TransparentObjects.End()) {
-        CKSceneGraphNode *node = it->m_Node;
-        if ((node->m_RenderContextMask & rc->m_MaskFree) != 0) {
-            node->ClearInTransparentList();
-            it = m_TransparentObjects.Remove(it);
-        } else {
-            ++it;
-        }
-    }
+    // CK2_3D.dll CKRenderedScene::Draw calls RenderTransparents @ 0x10077912
+    // directly. The root's transparent list persists across frames: traversal
+    // only appends nodes without flag 0x20, and SortTransparentObjects
+    // @ 0x10078183 drops entries whose m_TimeFpsCalc is not this context's, so
+    // the bubble sort starts from the previous frame's order.
+    //
+    // The stamp is each context's own FPS counter, so an entry stamped by
+    // another context, or by an earlier DrawScene that did not advance the
+    // counter, is drawn again when the values coincide. The DLL keeps that.
     RenderTransparentObjectsRecursive(this, this, rc, flags);
 }
 

@@ -126,6 +126,9 @@ protected:
         camera->SetPosition3f(x, 0, 0); camera->SetFov(PI / 2); camera->SetFrontPlane(1); camera->SetBackPlane(100);
         view->AttachViewpointToCamera(reinterpret_cast<CKCamera *>(camera)); return camera;
     }
+    // CK2_3D.dll keeps the root's transparent list across DrawScene calls and
+    // only drops an entry when its node stamp differs from the drawing
+    // context's m_TimeFpsCalc. DrawScene alone does not advance that counter.
     void RepeatedDraw(CKBOOL sorted, int count) {
         Manager->m_SortTransparentObjects.Value = sorted;
         RCK3dEntity *entities[2] = {Triangle(), count == 2 ? Triangle(0, 7) : nullptr};
@@ -139,7 +142,15 @@ protected:
         Device->AddRemoveSequence(FALSE);
         ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
         EXPECT_EQ(stamp, Device->m_TimeFpsCalc);
-        EXPECT_EQ(count, ObservedRasterizer.Draws) << "A new DrawScene must not replay the previous visibility sample";
+        EXPECT_EQ(2 * count, ObservedRasterizer.Draws) << "Entries stamped with the unchanged counter are drawn again";
+        EXPECT_EQ(count, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
+        for (int i = 0; i < count; ++i) EXPECT_TRUE(entities[i]->m_SceneGraphNode->IsInTransparentList());
+        // Render advances the counter after its DrawScene, which still replays.
+        ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
+        EXPECT_EQ(3 * count, ObservedRasterizer.Draws);
+        ASSERT_NE(stamp, Device->m_TimeFpsCalc);
+        ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
+        EXPECT_EQ(3 * count, ObservedRasterizer.Draws) << "A stale stamp removes the entry instead of drawing it";
         EXPECT_EQ(0, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
         for (int i = 0; i < count; ++i) EXPECT_FALSE(entities[i]->m_SceneGraphNode->IsInTransparentList());
         entities[0]->Show(CKSHOW); Device->AddRemoveSequence(FALSE);
@@ -148,6 +159,9 @@ protected:
         ASSERT_EQ(beforeVisible + 1, ObservedRasterizer.Draws); EXPECT_EQ(entities[0]->GetID(), ObservedRasterizer.Objects[beforeVisible]);
         EXPECT_TRUE(ObservedRasterizer.Transparent[beforeVisible]);
     }
+    // The stamp is each context's own counter, so a context whose counter
+    // equals the one that stamped an entry draws it even when its own
+    // traversal culled the entity.
     void EqualCounterViews(CKBOOL sorted, int count) {
         Manager->m_SortTransparentObjects.Value = sorted;
         Other = View(OtherBoundary); ASSERT_NE(nullptr, Other);
@@ -163,11 +177,10 @@ protected:
         ASSERT_EQ(count, ObservedRasterizer.Draws);
         for (int i = 0; i < count; ++i) EXPECT_EQ(sharedStamp, entities[i]->m_SceneGraphNode->m_TimeFpsCalc);
         ASSERT_EQ(CK_OK, Other->Render(CK_RENDER_DONOTUPDATEEXTENTS));
-        EXPECT_EQ(0, OtherBoundary.Draws) << "Other camera rejects every triangle; matching counters are not visibility";
-        EXPECT_EQ(0, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
+        EXPECT_EQ(count, OtherBoundary.Draws) << "Other camera culls every triangle but accepts Device's equal stamps";
+        EXPECT_EQ(count, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
         for (int i = 0; i < count; ++i) EXPECT_TRUE(entities[i]->m_SceneGraphNode->IsAllOutsideFrustum());
-        // Sampling again from the formerly rejecting real camera must still
-        // render normally once its public pose makes those objects visible.
+        // Once the counters differ, Other draws only what its own traversal sees.
         otherCamera->SetPosition3f(0, 0, 0);
         const int beforeVisible = OtherBoundary.Draws;
         ASSERT_EQ(CK_OK, Other->Render(CK_RENDER_DONOTUPDATEEXTENTS));
@@ -179,28 +192,51 @@ protected:
     }
 };
 
-TEST_F(SceneGraphRootTraversalTest, RepeatedDrawSceneCannotReplayAHiddenSingletonWithTheSameNaturalCounter) {
+TEST_F(SceneGraphRootTraversalTest, RepeatedDrawSceneWithAnUnchangedCounterReplaysAHiddenSingleton) {
     RepeatedDraw(FALSE, 1);
 }
-TEST_F(SceneGraphRootTraversalTest, RepeatedDrawSceneCannotReplayHiddenSortedCandidatesWithTheSameNaturalCounter) {
+TEST_F(SceneGraphRootTraversalTest, RepeatedDrawSceneWithAnUnchangedCounterReplaysHiddenSortedCandidates) {
     RepeatedDraw(TRUE, 2);
 }
-TEST_F(SceneGraphRootTraversalTest, TwoRealCameraRendersWithEqualCountersDoNotShareSingletonVisibility) {
+TEST_F(SceneGraphRootTraversalTest, TwoCameraRendersWithEqualCountersShareSingletonVisibility) {
     EqualCounterViews(FALSE, 1);
 }
-TEST_F(SceneGraphRootTraversalTest, TwoRealCameraRendersWithEqualCountersDoNotShareSortedVisibility) {
+TEST_F(SceneGraphRootTraversalTest, TwoCameraRendersWithEqualCountersShareSortedVisibility) {
     EqualCounterViews(TRUE, 2);
 }
 
-TEST_F(SceneGraphRootTraversalTest, SwitchingATransparentEntityToOpaqueDoesNotAlsoReplayItsOldDeferredEntry) {
+TEST_F(SceneGraphRootTraversalTest, SwitchingATransparentEntityToOpaqueReplaysItsOldEntryUntilTheCounterAdvances) {
     RCK3dEntity *entity = Triangle(); ASSERT_NE(nullptr, entity); Attach(entity);
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS)); ASSERT_EQ(1, ObservedRasterizer.Draws);
     EXPECT_TRUE(ObservedRasterizer.Transparent[0]);
     entity->SetRenderAsTransparent(FALSE);
+    ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
+    ASSERT_EQ(3, ObservedRasterizer.Draws);
+    EXPECT_FALSE(ObservedRasterizer.Transparent[1]); EXPECT_TRUE(ObservedRasterizer.Transparent[2]);
+    EXPECT_EQ(1, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
     ASSERT_EQ(CK_OK, Device->DrawScene(CK_RENDER_DONOTUPDATEEXTENTS));
-    EXPECT_EQ(2, ObservedRasterizer.Draws); EXPECT_FALSE(ObservedRasterizer.Transparent[1]);
+    EXPECT_EQ(4, ObservedRasterizer.Draws); EXPECT_FALSE(ObservedRasterizer.Transparent[3]);
     EXPECT_EQ(0, Manager->m_SceneGraphRootNode.m_TransparentObjects.Size());
     EXPECT_FALSE(entity->m_SceneGraphNode->IsInTransparentList());
+}
+
+TEST_F(SceneGraphRootTraversalTest, SortStartsFromThePreviousFrameOrderSoEqualDepthsKeepIt) {
+    Manager->m_SortTransparentObjects.Value = TRUE;
+    RCK3dEntity *near = Triangle(0, 5), *far = Triangle(0, 7);
+    ASSERT_NE(nullptr, near); ASSERT_NE(nullptr, far);
+    Attach(near); Attach(far);
+    ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
+    ASSERT_EQ(2, ObservedRasterizer.Draws);
+    EXPECT_EQ(far->GetID(), ObservedRasterizer.Objects[0]); EXPECT_EQ(near->GetID(), ObservedRasterizer.Objects[1]);
+    CKSceneGraphRootNode &root = Manager->m_SceneGraphRootNode;
+    ASSERT_EQ(2, root.m_TransparentObjects.Size());
+    EXPECT_EQ(far->m_SceneGraphNode, root.m_TransparentObjects[0].m_Node);
+    // Identical depth ranges leave the bubble sort without a swap, so the
+    // persisted order from the previous frame decides the draw order.
+    far->SetPosition3f(0, 0, 5);
+    ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
+    ASSERT_EQ(4, ObservedRasterizer.Draws);
+    EXPECT_EQ(far->GetID(), ObservedRasterizer.Objects[2]); EXPECT_EQ(near->GetID(), ObservedRasterizer.Objects[3]);
 }
 
 TEST_F(SceneGraphRootTraversalTest, IntersectingHierarchyClipsEachLeafThenSubmitsOpaqueBeforeTransparent) {
