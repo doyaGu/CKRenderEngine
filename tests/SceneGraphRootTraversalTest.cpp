@@ -222,21 +222,21 @@ TEST_F(SceneGraphRootTraversalTest, SwitchingATransparentEntityToOpaqueReplaysIt
 
 TEST_F(SceneGraphRootTraversalTest, SortStartsFromThePreviousFrameOrderSoEqualDepthsKeepIt) {
     Manager->m_SortTransparentObjects.Value = TRUE;
-    RCK3dEntity *near = Triangle(0, 5), *far = Triangle(0, 7);
-    ASSERT_NE(nullptr, near); ASSERT_NE(nullptr, far);
-    Attach(near); Attach(far);
+    RCK3dEntity *nearEntity = Triangle(0, 5), *farEntity = Triangle(0, 7);
+    ASSERT_NE(nullptr, nearEntity); ASSERT_NE(nullptr, farEntity);
+    Attach(nearEntity); Attach(farEntity);
     ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
     ASSERT_EQ(2, ObservedRasterizer.Draws);
-    EXPECT_EQ(far->GetID(), ObservedRasterizer.Objects[0]); EXPECT_EQ(near->GetID(), ObservedRasterizer.Objects[1]);
+    EXPECT_EQ(farEntity->GetID(), ObservedRasterizer.Objects[0]); EXPECT_EQ(nearEntity->GetID(), ObservedRasterizer.Objects[1]);
     CKSceneGraphRootNode &root = Manager->m_SceneGraphRootNode;
     ASSERT_EQ(2, root.m_TransparentObjects.Size());
-    EXPECT_EQ(far->m_SceneGraphNode, root.m_TransparentObjects[0].m_Node);
+    EXPECT_EQ(farEntity->m_SceneGraphNode, root.m_TransparentObjects[0].m_Node);
     // Identical depth ranges leave the bubble sort without a swap, so the
     // persisted order from the previous frame decides the draw order.
-    far->SetPosition3f(0, 0, 5);
+    farEntity->SetPosition3f(0, 0, 5);
     ASSERT_EQ(CK_OK, Device->Render(CK_RENDER_DONOTUPDATEEXTENTS));
     ASSERT_EQ(4, ObservedRasterizer.Draws);
-    EXPECT_EQ(far->GetID(), ObservedRasterizer.Objects[2]); EXPECT_EQ(near->GetID(), ObservedRasterizer.Objects[3]);
+    EXPECT_EQ(farEntity->GetID(), ObservedRasterizer.Objects[2]); EXPECT_EQ(nearEntity->GetID(), ObservedRasterizer.Objects[3]);
 }
 
 TEST_F(SceneGraphRootTraversalTest, IntersectingHierarchyClipsEachLeafThenSubmitsOpaqueBeforeTransparent) {
