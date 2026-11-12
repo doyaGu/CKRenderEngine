@@ -104,7 +104,8 @@ endif ()
 if (WIN32 AND CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION AND NOT (CKRE_BUILD_TESTS AND BUILD_TESTING))
     target_sources(ckre_scene_capture PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/rasterizers/D3D12SDKExports.cpp")
-    target_compile_definitions(ckre_scene_capture PRIVATE
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/rasterizers/D3D12SDKExports.cpp"
+            APPEND PROPERTY COMPILE_DEFINITIONS
             CKRE_TEST_D3D12_SDK_VERSION=${CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION})
 endif ()
 target_include_directories(ckre_scene_capture PRIVATE
