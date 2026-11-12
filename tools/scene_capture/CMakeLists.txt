@@ -92,6 +92,21 @@ add_executable(ckre_scene_capture
         ScenesJit.cpp
 )
 target_compile_features(ckre_scene_capture PRIVATE cxx_std_20)
+set(CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION "0" CACHE STRING
+        "App-local Direct3D 12 SDK version for scene capture (0 uses the system runtime)")
+if (NOT CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION MATCHES "^(0|[1-9][0-9]*)$")
+    message(FATAL_ERROR "CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION must be an unsigned SDK version")
+endif ()
+if (CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION AND NOT WIN32)
+    message(FATAL_ERROR "App-local Direct3D 12 SDK selection requires Windows")
+endif ()
+# Test configurations already add these exports through their existing SDK option.
+if (WIN32 AND CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION AND NOT (CKRE_BUILD_TESTS AND BUILD_TESTING))
+    target_sources(ckre_scene_capture PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/rasterizers/D3D12SDKExports.cpp")
+    target_compile_definitions(ckre_scene_capture PRIVATE
+            CKRE_TEST_D3D12_SDK_VERSION=${CKRE_SCENE_CAPTURE_D3D12_SDK_VERSION})
+endif ()
 target_include_directories(ckre_scene_capture PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../../src/CKRasterizer/CKSdlGpuRasterizer
