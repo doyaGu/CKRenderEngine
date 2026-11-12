@@ -1,6 +1,6 @@
 # CKRenderEngine
 
-CKRenderEngine implements the Virtools rendering layer used by Ballanced: the
+CKRenderEngine implements the Virtools rendering layer: the
 `CK2_3D` engine module, the public rasterizer library, a fixed-function
 compatibility layer and the `CKSdlGpuRasterizer`.
 
@@ -24,24 +24,23 @@ CKNullRasterizer is implemented directly inside CKRasterizerLib.
   including native resources, command submission, synchronization,
   presentation, shader packs and their offline build tools.
 
-The rasterizer is SDL GPU on Direct3D 12, Vulkan and Metal; NULL remains an independent engine fallback. Player selects rasterizers by the stable names `sdlgpu` and `null`. Runtime settings live in `src/CK2_3D.ini`.
+The rasterizer is SDL GPU on Direct3D 12, Vulkan and Metal; NULL remains an independent engine fallback. Applications select rasterizers by the stable names `sdlgpu` and `null`. Runtime settings live in `src/CK2_3D.ini`.
 
 Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance.
 
 ## Support scope
 
-The instructions in this document describe CKRenderEngine's `sdl` branch. That branch is continuously built through [Ballanced](https://github.com/doyaGu/Ballanced) on Windows, Linux, and macOS, including backend runtime gates for Direct3D 12, Vulkan and Metal.
+The instructions in this document describe CKRenderEngine's `sdl` branch. [NeMo2](https://github.com/doyaGu/NeMo2) builds and tests it on Windows, Linux, and macOS, including backend runtime gates for Direct3D 12, Vulkan and Metal.
 
-The standalone `CMakePresets.json` currently provides Visual Studio 2022 presets for Windows x86 and x64 only. That narrower preset list does not limit the platform matrix supported by the Ballanced superproject.
+The standalone `CMakePresets.json` currently provides Visual Studio 2022 presets for Windows x86 and x64 only. That narrower preset list does not limit the platform matrix supported by NeMo2.
 
-## Recommended: Ballanced superproject
+## NeMo2 engine
 
 ```bash
-git clone --recurse-submodules https://github.com/doyaGu/Ballanced.git
-cd Ballanced
-cmake --preset macos-arm64-tests # choose the preset for your host
-cmake --build --preset macos-arm64-tests-release
-ctest --preset macos-arm64-tests-release
+git clone --recurse-submodules https://github.com/doyaGu/NeMo2.git
+cd NeMo2
+cmake --preset macos-arm64-runtime # choose the preset for your host
+cmake --build --preset macos-arm64-runtime-stage-release
 ```
 
 The staged renderer is installed under `build/<preset>/stage/RenderEngines/`.
@@ -68,7 +67,7 @@ Build presets follow `renderengine-<mode>-<arch>-release`.
 
 ## Standalone manual build
 
-A manual CMake build can be used on other CMake-supported hosts. From a Ballanced `Source/RenderEngine` checkout, sibling CK2 and VxMath projects are discovered locally.
+A manual CMake build can be used on other CMake-supported hosts. From a NeMo2 `Source/RenderEngine` checkout, sibling CK2 and VxMath projects are discovered locally.
 
 ```bash
 cmake -S . -B build -G Ninja \
@@ -88,7 +87,7 @@ SPIRV-Cross. Scene capture uses stb headers.
 
 RenderEngine's standard `Runtime` installation owns configuration files, disabled
 provider cleanup and runtime layout verification. This also applies to standalone
-component installs and `cmake --install --prefix`. Ballanced's `stage` simply
+component installs and `cmake --install --prefix`. NeMo2's `stage`
 invokes installation. Cleanup removes only known provider binaries inside an
 isolated build prefix, including the retired `CKBgfxRasterizer`, preserves
 configurations and other plugins, and refuses to modify stale binaries in
@@ -100,7 +99,7 @@ preserving resolved-path containment checks.
 
 ## Versioning
 
-CKRenderEngine is versioned independently. Ballanced releases pin the renderer commit used for a runtime.
+CKRenderEngine is versioned independently. NeMo2 pins the renderer commit used by the engine.
 
 ## License
 

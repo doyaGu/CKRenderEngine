@@ -22,7 +22,7 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Ballanced"
+            VALUE "CompanyName", "NeMo2"
             VALUE "FileDescription", "@CKRE_RC_DESCRIPTION@"
             VALUE "FileVersion", "@CKRE_RC_VERSION_STRING@\0"
             VALUE "InternalName", "@CKRE_RC_TARGET@\0"
