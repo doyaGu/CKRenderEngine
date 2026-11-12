@@ -1,3 +1,4 @@
+#include "CKRenderDiagnosticsContext.h"
 #include "CKRenderProfile.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKFFUniformState.h"
@@ -41,6 +42,7 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
       m_LastDrawRejectReason(CKFF_DRAW_REJECT_NONE),
       m_LastDrawApproximationMask(0),
       m_FrameDrawRejected(FALSE) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     memset(m_DrawRejectCounts, 0, sizeof(m_DrawRejectCounts));
     memset(m_DrawApproximationCounts, 0, sizeof(m_DrawApproximationCounts));
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
@@ -64,12 +66,14 @@ CKFixedFunctionPipeline::CKFixedFunctionPipeline()
 }
 
 CKFixedFunctionPipeline::~CKFixedFunctionPipeline() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     Shutdown();
 }
 
 bool CKFixedFunctionPipeline::Init(uint64_t features,
                                    CKDWORD maxTextureBindings,
                                    CKDWORD shaderTargetFlags) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (Shutdown() != CK_OK)
         return false;
     m_Features = features;
@@ -99,6 +103,7 @@ bool CKFixedFunctionPipeline::Init(uint64_t features,
 }
 
 CKERROR CKFixedFunctionPipeline::Shutdown() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_TransientGeometry.Clear();
     m_ShaderTargetFlags = 0;
     m_TextureBinder.InvalidateAll();
@@ -332,6 +337,7 @@ const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code)
 
 void CKFixedFunctionPipeline::RecordDrawApproximation(CKRST_DIAGNOSTIC code)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if ((CKDWORD)code >= CKRST_DIAG_COUNT)
         return;
     const uint64_t bit = 1ull << (CKDWORD)code;
@@ -348,6 +354,7 @@ void CKFixedFunctionPipeline::RecordDrawApproximation(CKRST_DIAGNOSTIC code)
 
 void CKFixedFunctionPipeline::ResolveStencilWrite(CKDWORD *effectiveWriteMask) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     *effectiveWriteMask =
         m_State.DrawState.GetRenderState(VXRENDERSTATE_STENCILWRITEMASK) & 0xffu;
 }
@@ -365,6 +372,7 @@ static CKDWORD CKFFFormatTexcoordCount(CKDWORD formatFlags)
 
 CKBOOL CKFixedFunctionPipeline::RecordDrawReject(CKFFDrawRejectReason reason)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_LastDrawRejectReason = reason;
     m_FrameDrawRejected = TRUE;
     if (reason > CKFF_DRAW_REJECT_NONE && reason < CKFF_DRAW_REJECT_COUNT) {
@@ -382,6 +390,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
                                                    CKDWORD formatFlags,
                                                    CKDWORD activeTextureCount)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (m_DrawValidationCacheValid &&
         m_DrawValidationCacheTopology == topology &&
         m_DrawValidationCacheFormatFlags == formatFlags &&
@@ -507,6 +516,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateDrawState(VXPRIMITIVETYPE topology,
 
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferWrap(CKDWORD texcoordCount) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     for (CKDWORD stage = 0; stage < texcoordCount && stage < CKFF_MAX_TEXTURE_STAGES; ++stage) {
         if ((m_State.DrawState.GetRenderState(
                  (VXRENDERSTATETYPE)(VXRENDERSTATE_WRAP0 + stage)) & VXWRAP_MASK) != 0)
@@ -518,6 +528,7 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferWrap(CKDWORD texcoordCount) con
 // Native points are one pixel; other sizes are expanded into quads.
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointExpansion(CKDWORD dpFlags) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSPRITEENABLE) ||
            m_State.DrawState.GetRenderState(VXRENDERSTATE_POINTSCALEENABLE) ||
            (dpFlags & CKRST_DP_PSIZE) != 0 ||
@@ -527,6 +538,7 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointExpansion(CKDWORD dpFlags)
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointFillExpansion(
     VXPRIMITIVETYPE type, CKDWORD dpFlags) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (m_State.DrawState.GetRenderState(VXRENDERSTATE_FILLMODE) != VXFILL_POINT)
         return FALSE;
     if (type != VX_TRIANGLELIST && type != VX_TRIANGLESTRIP &&
@@ -543,12 +555,14 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferPointFillExpansion(
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferLinePattern(
     VXPRIMITIVETYPE type) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return CKFFUsesPatternedLines(type, m_State.DrawState) ? TRUE : FALSE;
 }
 
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferEdgeAntialias(
     VXPRIMITIVETYPE type) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return CKFFUsesEdgeAntialiasedLines(type, m_State.DrawState)
         ? TRUE : FALSE;
 }
@@ -556,6 +570,7 @@ CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferEdgeAntialias(
 CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
     CKDWORD dpFlags, CKDWORD formatFlags)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
@@ -568,6 +583,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendWeights(
 
 CKBOOL CKFixedFunctionPipeline::NeedsVertexBufferBlendValidation(CKDWORD formatFlags) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
@@ -581,6 +597,7 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
     const CKWORD *drawIndices,
     int drawIndexCount)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const CKFFVertexBlendState vertexBlend = CKFFResolveVertexBlendState(
         m_State.DrawState.GetRenderState(VXRENDERSTATE_VERTEXBLEND),
         m_State.DrawState.GetRenderState(VXRENDERSTATE_INDEXVBLENDENABLE) != 0,
@@ -626,12 +643,14 @@ CKBOOL CKFixedFunctionPipeline::ValidateVertexBlendIndices(
 
 void CKFixedFunctionPipeline::MarkPreparedProgramDirty()
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_VertexBufferProgramCacheValid = FALSE;
     m_SoftwareProgramCacheValid = FALSE;
 }
 
 void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (changeMask & CKFF_CHANGE_DRAW_VALIDATION)
         m_DrawValidationCacheValid = FALSE;
     if (changeMask & CKFF_CHANGE_OBJECT_UNIFORM) {
@@ -654,6 +673,7 @@ void CKFixedFunctionPipeline::OnFixedFunctionStateChanged(CKDWORD changeMask)
 
 void CKFixedFunctionPipeline::RestoreState(const CKFFStateStore &state)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_State = state;
     m_TextureBinder.InvalidateAll();
     OnFixedFunctionStateChanged(CKFF_CHANGE_PROGRAM |
@@ -663,6 +683,7 @@ void CKFixedFunctionPipeline::RestoreState(const CKFFStateStore &state)
 
 uint64_t CKFixedFunctionPipeline::GetConstantRevision(CKDWORD block) const
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return block < CKFF_CONSTANT_SLOT_COUNT ? m_Constants[block].Change : 0;
 }
 
@@ -670,6 +691,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(const CKFFTextureB
                                                                CKDWORD activeTextureCount,
                                                                const CKFFSamplerLayoutPlan &layoutPlan)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (!bindingSet)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
     *bindingSet = &m_TextureBinder.ResolveBindingSet(
@@ -678,6 +700,7 @@ CKBOOL CKFixedFunctionPipeline::BuildCurrentTextureBindingSet(const CKFFTextureB
 }
 
 void CKFixedFunctionPipeline::BeginDebugFrame() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_FrameDrawRejected = FALSE;
 #if CKRE_ENABLE_FFP_DIAGNOSTICS
     m_DebugState.BeginFrame();
@@ -697,6 +720,7 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareProgram(
     const CKBYTE *texcoordComponentCounts,
     CKBOOL pointSprite)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKRE_PROFILE_SCOPE("CKRE.FFP.PrepareProgram");
     if (!preparation)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
@@ -726,6 +750,7 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareVertexBufferProgram(
     CKDWORD formatFlags,
     CKDWORD activeTextureCount)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (!preparation)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
     *preparation = NULL;
@@ -759,6 +784,7 @@ CKFFProgramPrepareStatus CKFixedFunctionPipeline::PrepareSoftwareProgram(
     const CKBYTE *texcoordComponentCounts,
     CKBOOL pointSprite)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (!preparation || !texcoordComponentCounts)
         return CKFF_PROGRAM_PREPARE_INVALID_INPUT;
     *preparation = NULL;
@@ -797,6 +823,7 @@ CKBOOL CKFixedFunctionPipeline::PreparePrimitive(
     VXPRIMITIVETYPE type, CKWORD *indices, int indexCount,
     VxDrawPrimitiveData *data)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKRE_PROFILE_SCOPE("CKRE.FFP.DrawPrimitive");
     BeginDrawDiagnostics();
     if (!data || data->VertexCount <= 0)
@@ -1176,6 +1203,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
     CKDWORD dpFlags, CKDWORD formatFlags,
     CKDWORD vertexLayout, const CKWORD *indices)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKRE_PROFILE_SCOPE("CKRE.FFP.DrawVertexBuffer");
     BeginDrawDiagnostics();
     if (!vb || vertexCount == 0 ||
@@ -1234,6 +1262,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBuffer(
 
 CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKRE_PROFILE_SCOPE("CKRE.FFP.PrepareDraw");
     const CKFFProgramContext *programContext = submission.ProgramContext;
     const CKFFTextureBindingSet *textures = submission.Textures;
@@ -1352,6 +1381,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareDraw(const CKFFDrawSubmission &submission
 
 CKBOOL CKFixedFunctionPipeline::FinishDraw(CKERROR error, uint64_t approximationMask)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (error != CK_OK)
         return RecordDrawReject(CKFF_DRAW_REJECT_BACKEND_ERROR);
     for (unsigned i = 0;
@@ -1384,6 +1414,7 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
     CKDWORD vertexLayout,
     const CKWORD *indices)
 {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKRE_PROFILE_SCOPE("CKRE.FFP.SubmitVertexBuffer");
     if (!vb)
         return RecordDrawReject(CKFF_DRAW_REJECT_INVALID_INPUT);
@@ -1497,13 +1528,27 @@ CKBOOL CKFixedFunctionPipeline::PrepareVertexBufferImmediate(
 
 
 void CKFixedFunctionPipeline::LogAndResetFrameStats() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKFF_PROBE(m_Probes, LogAndReset(m_State.DrawState));
 }
 
 CKSamplerDesc CKFixedFunctionPipeline::BuildSamplerDesc(int stage) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return m_TextureBinder.BuildSamplerDesc(stage);
 }
 
 float CKFixedFunctionPipeline::ComputeDepthKey() const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return CKFFComputeDepthKey(m_State, m_State.DrawState);
+}
+
+void CKFixedFunctionPipeline::SetDiagnosticContext(const CKRenderDiagnosticHandle *context) {
+    m_DiagnosticContext = context;
+    CKRenderDiagnosticScope scope(context);
+#if CKRE_ENABLE_FFP_DIAGNOSTICS
+    const auto &settings = CKRenderDiagnosticsSettings().FFPStats;
+    m_Probes.Config.StatsEnabled = settings.Enabled;
+    m_Probes.Config.UniformHistEnabled = settings.UniformHistogram;
+    m_Probes.Config.StatsInterval = settings.Interval;
+#endif
 }

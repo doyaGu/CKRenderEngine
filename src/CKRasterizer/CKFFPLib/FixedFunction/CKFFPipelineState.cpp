@@ -1,3 +1,4 @@
+#include "CKRenderDiagnosticsContext.h"
 #include "CKFixedFunctionPipeline.h"
 #include "CKRasterizer.h"
 #include "CKFFStageState.h"
@@ -45,6 +46,7 @@ static CKBOOL CKFFRenderStateAffectsProgram(VXRENDERSTATETYPE state)
 
 void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, CKBOOL DisableMipmaps,
                                                CKBOOL ForceAnisotropicFiltering) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (m_TextureBinder.SetRenderOptions(DisableTextureFiltering, DisableMipmaps,
                                          ForceAnisotropicFiltering))
         OnFixedFunctionStateChanged(CKFF_CHANGE_DRAW_VALIDATION |
@@ -52,6 +54,7 @@ void CKFixedFunctionPipeline::SetRenderOptions(CKBOOL DisableTextureFiltering, C
 }
 
 void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     precision &= 0xFu;
     if (m_State.AlphaTestPrecision == precision)
         return;
@@ -60,10 +63,12 @@ void CKFixedFunctionPipeline::SetAlphaTestPrecision(CKDWORD precision) {
 }
 
 CKDWORD CKFixedFunctionPipeline::GetAlphaTestPrecision() const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return m_State.AlphaTestPrecision;
 }
 
 void CKFixedFunctionPipeline::SetColorTargetFormat(CKFFColorTargetFormat format) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (format < CKFF_COLOR_TARGET_RGBA8 || format >= CKFF_COLOR_TARGET_COUNT)
         format = CKFF_COLOR_TARGET_RGBA8;
     if (m_State.ColorTargetFormat == format)
@@ -74,6 +79,7 @@ void CKFixedFunctionPipeline::SetColorTargetFormat(CKFFColorTargetFormat format)
 }
 
 void CKFixedFunctionPipeline::SetDepthBiasFormat(CK_DEPTH_FORMAT format) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if ((CKDWORD)format > (CKDWORD)CKRST_DEPTHFMT_D32F)
         format = CKRST_DEPTHFMT_D24S8;
     if (m_State.DepthBiasFormat == format)
@@ -83,6 +89,7 @@ void CKFixedFunctionPipeline::SetDepthBiasFormat(CK_DEPTH_FORMAT format) {
 }
 
 CKBOOL CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatrix &matrix) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (index >= CKFF_VERTEX_BLEND_MATRIX_COUNT)
         return FALSE;
     if (m_State.VertexBlendMatrixSet[index] &&
@@ -95,6 +102,7 @@ CKBOOL CKFixedFunctionPipeline::SetVertexBlendMatrix(CKDWORD index, const VxMatr
 }
 
 void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKBOOL changed = FALSE;
     for (int i = 0; i < CKFF_VERTEX_BLEND_MATRIX_COUNT && !changed; ++i)
         changed = m_State.VertexBlendMatrixSet[i];
@@ -108,6 +116,7 @@ void CKFixedFunctionPipeline::ResetVertexBlendMatrices() {
 }
 
 void CKFixedFunctionPipeline::SetTexcoordComponentCount(CKDWORD stage, CKDWORD count) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
     CKBYTE componentCount = CKFFTexcoordComponentCount(count);
@@ -118,6 +127,7 @@ void CKFixedFunctionPipeline::SetTexcoordComponentCount(CKDWORD stage, CKDWORD c
 }
 
 void CKFixedFunctionPipeline::ResetTexcoordComponentCounts() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKBOOL changed = FALSE;
     for (int stage = 0; stage < CKFF_MAX_TEXTURE_STAGES && !changed; ++stage)
         changed = m_State.TexcoordComponentCounts[stage] != 2;
@@ -129,6 +139,7 @@ void CKFixedFunctionPipeline::ResetTexcoordComponentCounts() {
 }
 
 void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD value) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const CKDWORD previous = m_State.DrawState.GetRenderState(state);
     m_State.DrawState.SetRenderState(state, value);
     if (previous == value)
@@ -142,10 +153,12 @@ void CKFixedFunctionPipeline::SetRenderState(VXRENDERSTATETYPE state, CKDWORD va
 }
 
 CKDWORD CKFixedFunctionPipeline::GetRenderState(VXRENDERSTATETYPE state) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return m_State.DrawState.GetRenderState(state);
 }
 
 void CKFixedFunctionPipeline::InitDefaultStates() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_State.DrawState.ResetQueryDefaults();
     for (CKDWORD state = 0; state < VXRENDERSTATE_MAXSTATE; ++state) {
         const CKDWORD value = CKRSTDefaultRenderStateValue((VXRENDERSTATETYPE)state);
@@ -157,6 +170,7 @@ void CKFixedFunctionPipeline::InitDefaultStates() {
 }
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CKBOOL a) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const CKDWORD previous = m_State.DrawState.GetColorWriteMask();
     m_State.DrawState.SetColorWriteMask(r, g, b, a);
     if (m_State.DrawState.GetColorWriteMask() != previous)
@@ -164,10 +178,12 @@ void CKFixedFunctionPipeline::SetColorWriteMask(CKBOOL r, CKBOOL g, CKBOOL b, CK
 }
 
 CKDWORD CKFixedFunctionPipeline::GetColorWriteMask() const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return m_State.DrawState.GetColorWriteMask();
 }
 
 void CKFixedFunctionPipeline::SetColorWriteMask(CKDWORD mask) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const CKDWORD previous = m_State.DrawState.GetColorWriteMask();
     m_State.DrawState.SetColorWriteMask(mask);
     if (m_State.DrawState.GetColorWriteMask() != previous)
@@ -328,6 +344,7 @@ static CKBOOL ResetTextureStageValues(CKFFStateStore &state, int stage,
 }
 
 void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
     if (ResetTextureStageValues(m_State, stage, FALSE)) {
@@ -339,6 +356,7 @@ void CKFixedFunctionPipeline::ResetTextureStage(int stage) {
 }
 
 void CKFixedFunctionPipeline::DisableTextureStagesFrom(int firstStage) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (firstStage < 0)
         firstStage = 0;
     CKBOOL changed = FALSE;
@@ -355,6 +373,7 @@ void CKFixedFunctionPipeline::DisableTextureStagesFrom(int firstStage) {
 }
 
 void CKFixedFunctionPipeline::ResetTextureStages(int firstStage, int stageCount) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (firstStage < 0 || firstStage > CKFF_MAX_TEXTURE_STAGES || stageCount <= 0 ||
         stageCount > CKFF_MAX_TEXTURE_STAGES - firstStage)
         return;
@@ -373,6 +392,7 @@ void CKFixedFunctionPipeline::ResetTextureStages(int firstStage, int stageCount)
 }
 
 void CKFixedFunctionPipeline::SaveTextureStage(int stage, CKFFTextureStageSnapshot &snapshot) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     memset(&snapshot, 0, sizeof(snapshot));
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
@@ -386,6 +406,7 @@ void CKFixedFunctionPipeline::SaveTextureStage(int stage, CKFFTextureStageSnapsh
 }
 
 void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureStageSnapshot &snapshot) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES)
         return;
 
@@ -408,6 +429,7 @@ void CKFixedFunctionPipeline::RestoreTextureStage(int stage, const CKFFTextureSt
 }
 
 void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type, CKDWORD value) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
 
@@ -508,6 +530,7 @@ void CKFixedFunctionPipeline::SetTextureStageState(int stage, CKRST_TEXTURESTAGE
 }
 
 void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return;
     m_State.MarkStageWritten(stage);
@@ -535,18 +558,21 @@ void CKFixedFunctionPipeline::ClearTextureStageState(int stage, CKRST_TEXTURESTA
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return 0;
     if ((int)type < 0 || (int)type >= CKFF_MAX_TEXTURE_STAGE_STATES) return 0;
     return m_State.StageStates[stage][(int)type];
 }
 
 CKDWORD CKFixedFunctionPipeline::QueryTextureStageState(int stage, CKRST_TEXTURESTAGESTATETYPE type) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES || !CKRSTIsValidTextureStageStateType(type))
         return 0;
     return m_State.StageQueryStates[stage][type];
 }
 
 CKBOOL CKFixedFunctionPipeline::GetTransform(VXMATRIX_TYPE type, VxMatrix &matrix) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     const int slot = CKRSTMatrixSlot(type);
     if (slot < 0)
         return FALSE;
@@ -564,6 +590,7 @@ CKBOOL CKFixedFunctionPipeline::GetTransform(VXMATRIX_TYPE type, VxMatrix &matri
 }
 
 void CKFixedFunctionPipeline::SetRenderTargetActive(CKBOOL active) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     active = active ? TRUE : FALSE;
     if (m_State.RenderTargetActive == active)
         return;
@@ -574,11 +601,13 @@ void CKFixedFunctionPipeline::SetRenderTargetActive(CKBOOL active) {
 }
 
 CKBOOL CKFixedFunctionPipeline::RenderTargetOriginFlip() const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     return m_State.RenderTargetActive &&
            (m_ShaderTargetFlags & CKRST_SHADER_TARGET_ORIGIN_BOTTOM_LEFT) != 0;
 }
 
 void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CK_FRAME_COST_ADD_VIEWPORT_SET();
 
     const CKViewportData &current = m_State.ViewportData;
@@ -605,6 +634,7 @@ void CKFixedFunctionPipeline::SetViewport(const CKViewportData &viewport) {
 
 void CKFixedFunctionPipeline::SetTargetExtents(CKDWORD logicalWidth, CKDWORD logicalHeight,
                                                CKDWORD physicalWidth, CKDWORD physicalHeight) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (m_State.TargetLogicalWidth == logicalWidth && m_State.TargetLogicalHeight == logicalHeight &&
         m_State.TargetPhysicalWidth == physicalWidth && m_State.TargetPhysicalHeight == physicalHeight)
         return;
@@ -617,6 +647,7 @@ void CKFixedFunctionPipeline::SetTargetExtents(CKDWORD logicalWidth, CKDWORD log
 }
 
 CKBOOL CKFixedFunctionPipeline::GetViewportScissor(CKRECT *rect) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (rect)
         *rect = m_State.Scissor;
     return m_State.ScissorEnabled;
@@ -626,6 +657,7 @@ CKBOOL CKFixedFunctionPipeline::GetViewportScissor(CKRECT *rect) const {
 // clips to the viewport on the physical target. Identity / no scissor when the
 // viewport covers the whole logical target or the extents are unknown.
 void CKFixedFunctionPipeline::UpdateViewportMapping() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     CKFFStateStore &st = m_State;
     st.MarkObjectViewProjectionDirty();
     st.ViewportRemap[0] = st.ViewportRemap[1] = 1.0f;
@@ -686,6 +718,7 @@ void CKFixedFunctionPipeline::UpdateViewportMapping() {
 }
 
 void CKFixedFunctionPipeline::SetUserClipPlane(int index, const VxPlane &plane) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (index < 0 || index >= 6)
         return;
     if (m_State.UserClipPlanes[index] == plane)
@@ -695,6 +728,7 @@ void CKFixedFunctionPipeline::SetUserClipPlane(int index, const VxPlane &plane) 
 }
 
 void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &matrix) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     switch (type) {
     case VXMATRIX_WORLD:
         if (m_State.World == matrix)
@@ -732,6 +766,7 @@ void CKFixedFunctionPipeline::SetTransform(VXMATRIX_TYPE type, const VxMatrix &m
 }
 
 void CKFixedFunctionPipeline::ApplyMaterial(const CKMaterialRenderState &state) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     SetMaterial(&state.Material);
     SetRenderState(VXRENDERSTATE_CULLMODE, state.CullMode);
     SetRenderState(VXRENDERSTATE_FILLMODE, state.FillMode);
@@ -747,6 +782,7 @@ void CKFixedFunctionPipeline::ApplyMaterial(const CKMaterialRenderState &state) 
 }
 
 void CKFixedFunctionPipeline::ResetMaterial() {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     m_State.Material = CKMaterialData();
     m_State.Material.Diffuse = m_State.Material.Ambient = VxColor(1.0f, 1.0f, 1.0f, 1.0f);
     memset(&m_State.MaterialConstants, 0, sizeof(m_State.MaterialConstants));
@@ -762,6 +798,7 @@ void CKFixedFunctionPipeline::ResetMaterial() {
 }
 
 void CKFixedFunctionPipeline::SetMaterial(const CKMaterialData *mat) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (!mat) return;
     if (memcmp(&m_State.Material, mat, sizeof(*mat)) == 0)
         return;
@@ -787,6 +824,7 @@ void CKFixedFunctionPipeline::SetMaterial(const CKMaterialData *mat) {
 }
 
 void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (index < 0 || index >= CKFF_MAX_LIGHTS || !light) return;
     if (memcmp(&m_State.Lights[index], light, sizeof(*light)) == 0)
         return;
@@ -853,6 +891,7 @@ void CKFixedFunctionPipeline::SetLight(int index, const CKLightData *light) {
 }
 
 void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (index < 0 || index >= CKFF_MAX_LIGHTS) return;
     enable = enable ? TRUE : FALSE;
     if (m_State.LightEnabled[index] == enable)
@@ -867,10 +906,12 @@ void CKFixedFunctionPipeline::EnableLight(int index, CKBOOL enable) {
 }
 
 void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     SetTexture(stage, textureHandle, textureHandle != 0 ? CKRST_TEXTURE_VALID : 0);
 }
 
 void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWORD textureFlags) {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return;
     const CKDWORD normalizedFlags = textureHandle != 0 ? textureFlags : 0;
     if (m_State.TextureHandles[stage] == textureHandle && m_State.TextureFlags[stage] == normalizedFlags)
@@ -896,6 +937,7 @@ void CKFixedFunctionPipeline::SetTexture(int stage, CKDWORD textureHandle, CKDWO
 }
 
 CKDWORD CKFixedFunctionPipeline::GetTexture(int stage) const {
+    CK_DIAGNOSTIC_SCOPE(m_DiagnosticContext);
     if (stage < 0 || stage >= CKFF_MAX_TEXTURE_STAGES) return 0;
     return m_State.TextureHandles[stage];
 }

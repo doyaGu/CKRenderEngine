@@ -11,10 +11,9 @@ set(CKRASTERIZER_LIB_SOURCES
     CKRasterizerDriverCaps.cpp
     CKRasterizerDrawMarker.cpp
     CKRenderSettings.cpp
+    CKRenderDiagnosticsContext.cpp
+    CKDebugLogger.cpp
 )
-if (CKRE_ENABLE_DEBUG_LOGGER)
-    list(APPEND CKRASTERIZER_LIB_SOURCES CKDebugLogger.cpp)
-endif ()
 if (CKRE_ENABLE_RENDER_STATS)
     list(APPEND CKRASTERIZER_LIB_SOURCES CKRenderPerfClock.cpp)
 endif ()
@@ -35,6 +34,7 @@ set(CKRASTERIZER_LIB_HEADERS
     CKRenderPerfClock.h
     CKRenderProfile.h
     CKRenderSettings.h
+    CKRenderDiagnosticsContext.h
     ${CKRE_INCLUDE_DIR}/CKRasterizer.h
     ${CKRE_INCLUDE_DIR}/CKRasterizerEnums.h
     ${CKRE_INCLUDE_DIR}/CKRasterizerRegistration.h

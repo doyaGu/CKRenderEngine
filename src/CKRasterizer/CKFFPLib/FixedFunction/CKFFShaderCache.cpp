@@ -59,7 +59,7 @@ bool CKFFShaderCache::ResolveShaderTarget(const CKRasterizerTargetDesc &target) 
     m_Target = target;
     if (m_Target.ShaderFormat == CKRST_SHADER_FORMAT_UNKNOWN ||
         m_Target.ShaderProfile == CKRST_SHADER_PROFILE_UNKNOWN) {
-        CK_LOG_FMT("ShaderCache", "backend reports no shader target");
+        CK_LOG("ShaderCache", "backend reports no shader target");
         return false;
     }
     if (!m_Shaders.Matches(m_Target.ShaderFormat, m_Target.ShaderProfile)) {

@@ -1,5 +1,6 @@
 #include "CKSdlGpuRasterizerContext.h"
 #include "CKFFContextState.h"
+#include "CKRenderDiagnosticsContext.h"
 
 // CKSdlGpuRasterizerContext lifecycle, fixed-function state access and statistics.
 
@@ -44,6 +45,7 @@ CKSdlGpuRasterizerContext::~CKSdlGpuRasterizerContext()
 CKBOOL CKSdlGpuRasterizerContext::Create(WIN_HANDLE Window, int PosX, int PosY, int Width, int Height, int Bpp,
                                    CKBOOL Fullscreen, int RefreshRate, int Zbpp, int StencilBpp)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (m_Created || !m_Driver)
         return FALSE;
     CKRasterizerInitParameters init;

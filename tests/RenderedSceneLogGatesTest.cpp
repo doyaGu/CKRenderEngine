@@ -1,3 +1,5 @@
+#include "../src/CKRenderContextDiagnostics.h"
+#include <memory>
 #include <gtest/gtest.h>
 #include "../src/CKRenderedScene.cpp"
 #include "RCKMaterial.h"
@@ -23,6 +25,7 @@ public:
 
 class RenderedSceneLogGatesTest : public ::testing::Test {
 protected:
+    std::unique_ptr<CKRenderDiagnosticScope> Scope;
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
@@ -46,6 +49,7 @@ protected:
         CKBuildClassHierarchyTable();
         ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
         Manager = new RCKRenderManager(Context);
+        Scope.reset(new CKRenderDiagnosticScope(Manager->m_Diagnostics->Handle()));
         ASSERT_GT(Manager->m_DriverCount, 0);
         Manager->m_Drivers[0].CapsUpToDate = TRUE;
         Manager->m_Drivers[0].RasterizerDriver = &Driver;
@@ -71,11 +75,12 @@ protected:
             Device->m_RasterizerContext = nullptr; Device->m_RasterizerDriver = nullptr;
             delete Device;
         }
+        Scope.reset();
         if (Context) CKCloseContext(Context);
         CKShutdown(); CKRenderSettingsClearOverridesForTests(); std::remove(Path);
     }
-    static void Setting(const char *key, bool value) {
-        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameLog, key, value ? "true" : "false");
+    void Setting(const char *key, bool value) {
+        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameLog, key, value ? "true" : "false", Manager ? Manager->m_Settings : nullptr);
     }
     std::string Read() {
         CKDebugLogger::Instance().Flush();
@@ -97,24 +102,24 @@ TEST_F(RenderedSceneLogGatesTest, HelpersFollowAllFourIndependentSettingCombinat
             SCOPED_TRACE(frame);
             SCOPED_TRACE(camera);
             Setting("Enabled", frame != 0); Setting("RenderedSceneCamera", camera != 0);
-            EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0 && frame != 0, RenderedSceneFrameLogEnabled());
-            EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0 && camera != 0, RenderedSceneCameraLogEnabled());
+            EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0 && frame != 0, RenderedSceneFrameLogEnabled(Context));
+            EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0 && camera != 0, RenderedSceneCameraLogEnabled(Context));
         }
     }
     Setting("Enabled", false); Setting("RenderedSceneCamera", false);
-    EXPECT_FALSE(RenderedSceneFrameLogEnabled()); EXPECT_FALSE(RenderedSceneCameraLogEnabled());
+    EXPECT_FALSE(RenderedSceneFrameLogEnabled(Context)); EXPECT_FALSE(RenderedSceneCameraLogEnabled(Context));
 }
 
 TEST_F(RenderedSceneLogGatesTest, UnrelatedSettingsAndLoggerOutputDoNotReplaceEitherGate) {
     Setting("CameraAttach", true); Setting("PresentSync", true);
-    EXPECT_FALSE(RenderedSceneFrameLogEnabled()); EXPECT_FALSE(RenderedSceneCameraLogEnabled());
+    EXPECT_FALSE(RenderedSceneFrameLogEnabled(Context)); EXPECT_FALSE(RenderedSceneCameraLogEnabled(Context));
     Setting("Enabled", true); Setting("RenderedSceneCamera", true);
     CKDebugLogger::Instance().EnableOutput(false);
-    EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, RenderedSceneFrameLogEnabled());
-    EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, RenderedSceneCameraLogEnabled());
+    EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, RenderedSceneFrameLogEnabled(Context));
+    EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, RenderedSceneCameraLogEnabled(Context));
     Setting("Enabled", false);
-    EXPECT_FALSE(RenderedSceneFrameLogEnabled());
-    EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, RenderedSceneCameraLogEnabled());
+    EXPECT_FALSE(RenderedSceneFrameLogEnabled(Context));
+    EXPECT_EQ(CKRE_ENABLE_FRAME_DIAGNOSTICS != 0, RenderedSceneCameraLogEnabled(Context));
 }
 
 TEST_F(RenderedSceneLogGatesTest, FrameOutputTracksLiveSettingsAndLoggerWithoutChangingDrawSuccess) {

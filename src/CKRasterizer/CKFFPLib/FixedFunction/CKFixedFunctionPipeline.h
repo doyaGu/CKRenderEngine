@@ -2,6 +2,7 @@
 #define CKFIXEDFUNCTIONPIPELINE_H
 
 #include "VxMath.h"
+struct CKRenderDiagnosticHandle;
 #include "CKRenderEngineTypes.h"
 #include "CKRenderEngineEnums.h"
 #include "CKRasterizerContextEnums.h"
@@ -43,7 +44,10 @@ const char *CKFFDrawRejectReasonName(CKFFDrawRejectReason reason);
 const char *CKFFDrawApproximationName(CKRST_DIAGNOSTIC code);
 
 class CKFixedFunctionPipeline {
+    const CKRenderDiagnosticHandle *m_DiagnosticContext = nullptr;
 public:
+    void SetDiagnosticContext(const CKRenderDiagnosticHandle *context);
+    const CKRenderDiagnosticHandle *GetDiagnosticContext() const { return m_DiagnosticContext; }
     CKFixedFunctionPipeline();
     ~CKFixedFunctionPipeline();
 

@@ -34,7 +34,7 @@ struct CKFFDebugConfig {
     int PositionTLogLimit;
     bool DrawSerialPerFrame;
 
-    static const CKFFDebugConfig &Get();
+    static CKFFDebugConfig Get();
 };
 
 struct CKFFDrawDebugStage {

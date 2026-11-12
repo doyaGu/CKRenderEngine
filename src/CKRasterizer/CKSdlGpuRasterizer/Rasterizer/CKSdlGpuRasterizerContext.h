@@ -183,6 +183,11 @@ public:
     CKBOOL RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Buffer,
                            CKReadbackCallback Callback, void *User) override;
 
+    void SetDiagnosticContext(const CKRenderDiagnosticHandle *context) override {
+        CKRasterizerContext::SetDiagnosticContext(context);
+        m_FFP.SetDiagnosticContext(context);
+    }
+
     // --- Diagnostics ---
     // --- Test access ---
     CKFixedFunctionPipeline *GetFFPipelineForTests() { return &m_FFP; }

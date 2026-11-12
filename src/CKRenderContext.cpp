@@ -1,3 +1,4 @@
+#include "CKRenderContextDiagnostics.h"
 #include "CKRenderProfile.h"
 #include "RCKRenderContext.h"
 
@@ -351,7 +352,7 @@ static CK_RENDER_FLAGS ApplyFrameRateLimitOptions(CK_RENDER_FLAGS Flags, CKTimeM
         resolved = static_cast<CK_RENDER_FLAGS>(resolved & ~CK_RENDER_WAITVBL);
     }
 
-    static int s_PresentSyncLogCount = 0;
+    int &s_PresentSyncLogCount = CKRenderContextLogLimits().PresentSync;
     if (PresentSyncLogEnabled() && s_PresentSyncLogCount < 64) {
         CK_LOG_FMT("PresentSync",
                    "limitOptions=0x%X frameRateMode=0x%X inputFlags=0x%X resolvedFlags=0x%X waitVbl=%d",
@@ -367,7 +368,7 @@ static void LogPresentFrameRateState(const char *stage, CK_RENDER_FLAGS inputFla
     if (!PresentSyncLogEnabled())
         return;
 
-    static int s_PresentFrameLogCount = 0;
+    int &s_PresentFrameLogCount = CKRenderContextLogLimits().PresentFrames;
     if (s_PresentFrameLogCount >= 64)
         return;
 
@@ -584,6 +585,7 @@ void RCKRenderContext::FillStateString() {
 }
 
 CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     if (inputFlags & CK_RENDER_SKIPALL)
         return CK_OK;
@@ -701,6 +703,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
 }
 
 CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     if (inputFlags & CK_RENDER_SKIPALL)
         return CK_OK;
@@ -740,6 +743,7 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
 }
 
 CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     if (inputFlags & CK_RENDER_SKIPALL)
         return CK_OK;
@@ -812,6 +816,7 @@ CKERROR RCKRenderContext::BackToFront(CK_RENDER_FLAGS Flags) {
 }
 
 CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CKRE_PROFILE_SCOPE("CKRE.CK3D.Render");
     CK_RENDER_FLAGS inputFlags = ResolveRenderFlags(Flags);
     // Snapshot the borrowed slot: removing/replacing it during the callback
@@ -1197,6 +1202,8 @@ CKBOOL RCKRenderContext::ChangeDriver(int NewDriver) {
         const CKRenderContextSettings settings = m_FullscreenSettings;
         m_RasterizerDriver = driver;
         m_RasterizerContext = driver ? driver->CreateContext() : nullptr;
+        if (m_RasterizerContext)
+            m_RasterizerContext->SetDiagnosticContext(CKRenderDiagnosticsForContext(m_Context));
         if (!m_RasterizerContext) {
             m_RasterizerDriver = nullptr;
             continue;
@@ -1572,6 +1579,7 @@ CKRasterizerContext *RCKRenderContext::GetRasterizerContext() {
 }
 
 void RCKRenderContext::ApplyRenderOptions() {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CKDWORD debugFlags = m_RasterizerDebugFlags;
     const CKRenderDrawMapConfig &drawMap = CKRenderDiagnosticsSettings(m_Context).DrawMap;
     const CKDWORD drawMapMask = CKRST_DEBUG_DRAWMAP |
@@ -1753,6 +1761,7 @@ CKDWORD RCKRenderContext::GetFogColor() {
 }
 
 CKBOOL RCKRenderContext::DrawPrimitive(VXPRIMITIVETYPE pType, CKWORD *indices, int indexcount, VxDrawPrimitiveData *data) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
 #if CKRE_ENABLE_RENDER_STATS
     const bool renderStats = CKRenderPerfStatsEnabled();
     const double perfStart = renderStats ? CKRenderPerfNow() : 0.0;
@@ -2599,6 +2608,7 @@ CKERROR RCKRenderContext::RectPick(const VxRect &r, XObjectPointerArray &oObject
 }
 
 void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     // IDA: 0x1006b92d
     if (cam) {
         cam->ModifyObjectFlags(0, CK_OBJECT_UPTODATE);
@@ -2608,7 +2618,7 @@ void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
         const VxMatrix &worldMat = cam->GetWorldMatrix();
         m_RenderedScene->m_RootEntity->SetWorldMatrix(worldMat);
 
-        static int s_attachLogCount = 0;
+        int &s_attachLogCount = CKRenderContextLogLimits().CameraAttach;
         if (CameraAttachLogEnabled(m_Context) && s_attachLogCount < 16) {
             CK3dEntity *target = cam->GetClassID() == CKCID_TARGETCAMERA ? cam->GetTarget() : nullptr;
             int aspectWidth = 0;
@@ -3039,6 +3049,7 @@ CKERROR RCKRenderContext::Create(void *Window, int Driver, CKRECT *rect, CKBOOL 
     SetFullViewport(&m_ViewportData, width, height);
 
     m_RasterizerContext = m_RasterizerDriver->CreateContext();
+    if (m_RasterizerContext) m_RasterizerContext->SetDiagnosticContext(CKRenderDiagnosticsForContext(m_Context));
     CKBOOL created = FALSE;
     if (m_RasterizerContext) {
         ApplyRenderOptions();

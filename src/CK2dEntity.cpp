@@ -1,3 +1,4 @@
+#include "CKRenderContextDiagnostics.h"
 #include <CKTexture.h>
 
 #include "RCK2dEntity.h"
@@ -646,6 +647,7 @@ CKBOOL RCK2dEntity::IsClippedToCamera() {
 
 // IDA: 0x1005cce5 - Updates clipped extents (m_VtxPos and m_SrcRect) for rendering
 CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CK_FRAME_COST_ADD_2D_ENTITY_UPDATE_EXTENTS();
     RCKRenderContext *rc = (RCKRenderContext *) dev;
 
@@ -800,6 +802,7 @@ CKBOOL RCK2dEntity::UpdateExtents(CKRenderContext *dev) {
 }
 
 CKERROR RCK2dEntity::Render(CKRenderContext *context) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     // IDA: 0x1005ed00
     RCKRenderContext *dev = (RCKRenderContext *) context;
     CK_FRAME_COST_ADD_2D_ENTITY_RENDER();
@@ -862,6 +865,7 @@ CKERROR RCK2dEntity::Render(CKRenderContext *context) {
 }
 
 CKERROR RCK2dEntity::Draw(CKRenderContext *context) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     // IDA: 0x1005e430
     RCKRenderContext *dev = (RCKRenderContext *) context;
     CK_FRAME_COST_ADD_2D_ENTITY_DRAW();

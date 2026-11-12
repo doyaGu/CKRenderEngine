@@ -13,6 +13,7 @@
 
 #include "FFPRecordingContext.h"
 #include "CKNullRasterizer.h"
+#include "CKRenderDiagnosticsContext.h"
 #include "CKRasterizerCapsBaseline.h"
 #include "FFPRecordingHarness.h"
 #include "TestTriangleMultiset.h"
@@ -230,12 +231,18 @@ void TestLifecycle()
     TestCheck((caps.Features & CKRST_CAPS_TEXTURE_DXT) == (nativeCaps.Features & CKRST_CAPS_TEXTURE_DXT),
               "context DXT capability must match the formats supported by its driver");
     TestCheck(!f.Context->GetCaps(NULL), "GetCaps(NULL) must fail");
-    TestCheck(CKRST_INTERFACE_REVISION == 0x00070000u,
+    TestCheck(CKRST_INTERFACE_REVISION == 0x00080000u,
               "direct concrete-context revision value");
 
     // A second context on the same driver is allowed for the recording backend.
     CKRasterizerContext *second = f.Driver->CreateContext();
     TestCheck(second != NULL, "second context");
+    CKRenderDiagnosticsContext diagnostics;
+    TestCheck(second->GetDiagnosticContext() == NULL, "new context has no diagnostic owner");
+    second->SetDiagnosticContext(diagnostics.Handle());
+    TestCheck(second->GetDiagnosticContext() == diagnostics.Handle(), "context retains its diagnostic owner");
+    TestCheck(f.Context->GetDiagnosticContext() == NULL, "diagnostic owner is not shared with another context");
+    second->SetDiagnosticContext(NULL);
     TestCheck(f.Driver->DestroyContext(second), "DestroyContext");
     TestCheck(!f.Driver->DestroyContext(second), "DestroyContext twice must fail");
     TestCheck(f.Driver->GetContextCount() == 1, "second context removed from the driver");

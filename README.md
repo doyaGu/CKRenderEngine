@@ -26,6 +26,16 @@ CKNullRasterizer is implemented directly inside CKRasterizerLib.
 
 The rasterizer is SDL GPU on Direct3D 12, Vulkan and Metal; NULL remains an independent engine fallback. Applications select rasterizers by the stable names `sdlgpu` and `null`. Runtime settings live in `src/CK2_3D.ini`.
 
+Debug output, render counters, frame-cost sampling and log limits belong to each
+`CKContext`. `CKSetRenderSettingsFile` selects its settings before creating render
+contexts; `CKGetRenderDiagnostics` copies its counters. Read the snapshot on the
+context's render thread or while rendering is idle. Contexts use separate default
+log files; explicit `Debug.LogPath` values are opened for append. Unbound calls
+keep their legacy fallback. Rasterizer providers borrow the engine's diagnostic
+owner, so calls across module boundaries contribute to the same context. The
+private rasterizer interface revision is `0x00080000`; rebuild providers with
+the renderer.
+
 Tests and reference provenance live in `tests/` and `tests/reference/`. The original `CKDX8Rasterizer.dll` is the visual oracle. The scene capture tool compares procedural scenes; GPU pixel gates require a real visible window for local acceptance.
 
 ## Support scope

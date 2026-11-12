@@ -1,3 +1,7 @@
+#include "../src/CKRenderContextDiagnostics.h"
+#include <memory>
+#include <fstream>
+#include <iterator>
 #include <gtest/gtest.h>
 #include "CKAll.h"
 #include "RCKRenderContext.h"
@@ -7,6 +11,7 @@
 #include "RCK2dEntity.h"
 #include "RCKCamera.h"
 #include "RCKMaterial.h"
+#include "CKRenderDiagnostics.h"
 #include "MaterialRenderObserver.h"
 #include "../src/CKRasterizer/CKRasterizerLib/CKDebugLogger.h"
 #include "../src/CKRasterizer/CKRasterizerLib/CKRenderSettings.h"
@@ -48,6 +53,7 @@ size_t Occurrences(const std::string &text, const char *needle) {
 
 class RenderContextLoggingTest : public ::testing::Test {
 protected:
+    std::unique_ptr<CKRenderDiagnosticScope> Scope;
     CKContext *Context = nullptr;
     RCKRenderManager *Manager = nullptr;
     RCKRenderContext *Device = nullptr;
@@ -71,6 +77,7 @@ protected:
         CKBuildClassHierarchyTable();
         ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
         Manager = new RCKRenderManager(Context);
+        Scope.reset(new CKRenderDiagnosticScope(Manager->m_Diagnostics->Handle()));
         Device = new RCKRenderContext(Context);
         Device->m_RasterizerContext = &ObservedRasterizer;
         Device->m_Settings.m_Rect = CKRECT{0, 0, 320, 240};
@@ -92,13 +99,13 @@ protected:
         CKDebugLogger::Instance().EnableFileOutput(false);
         Device->m_RasterizerContext = nullptr;
         delete Device;
-        CKCloseContext(Context);
+        Scope.reset(); CKCloseContext(Context);
         CKShutdown();
         CKRenderSettingsClearOverridesForTests();
         std::remove(Path);
     }
     void Setting(const char *name, bool value) {
-        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameLog, name, value ? "true" : "false");
+        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameLog, name, value ? "true" : "false", Manager ? Manager->m_Settings : nullptr);
     }
     std::string Read() {
         CKDebugLogger::Instance().Flush();
@@ -203,7 +210,7 @@ TEST_F(RenderContextLoggingTest, CameraDiagnosticsUseRealCameraFieldsAndStopAtSi
     EXPECT_EQ(text, Read());
 }
 
-TEST_F(RenderContextLoggingTest, GlobalLoggerOutputGateSuppressesEnabledContextLogsWithoutSuppressingClear) {
+TEST_F(RenderContextLoggingTest, ContextLoggerOutputGateSuppressesEnabledContextLogsWithoutSuppressingClear) {
     Setting("Enabled", true);
     CKDebugLogger::Instance().EnableOutput(false);
     ASSERT_EQ(CK_OK, Device->Clear(CK_RENDER_CLEARBACK));
@@ -213,5 +220,52 @@ TEST_F(RenderContextLoggingTest, GlobalLoggerOutputGateSuppressesEnabledContextL
     ASSERT_EQ(CK_OK, Device->Clear(CK_RENDER_CLEARBACK));
     EXPECT_NE(std::string::npos, Read().find("[Clear] done\n"));
     EXPECT_EQ(2, ObservedRasterizer.Clears);
+}
+
+TEST_F(RenderContextLoggingTest, EngineEntriesSelectTheirOwnContextAndRestoreTheCallerScope) {
+    Setting("Enabled", true);
+    struct OtherContext {
+        CKContext *Context = nullptr;
+        RCKRenderContext *Device = nullptr;
+        LoggingObserver Observer;
+        std::string Path;
+        ~OtherContext() {
+            if (Device) { Device->m_RasterizerContext = nullptr; delete Device; }
+            if (Context) CKCloseContext(Context);
+            std::remove(Path.c_str());
+        }
+    } other;
+    other.Path = std::string(Path) + ".other";
+    std::remove(other.Path.c_str());
+    ASSERT_EQ(CK_OK, CKCreateContext(&other.Context, nullptr, 0, 0));
+    auto *manager = new RCKRenderManager(other.Context);
+    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugFrameLog, "Enabled", "true", manager->m_Settings);
+    {
+        CKRenderDiagnosticScope scope(manager->m_Diagnostics->Handle());
+        CKDebugLogger::Instance().EnableDebuggerOutput(false);
+        CKDebugLogger::Instance().SetLogFilePath(other.Path.c_str());
+        CKDebugLogger::Instance().EnableOutput(true);
+    }
+    other.Device = new RCKRenderContext(other.Context);
+    other.Device->m_RasterizerContext = &other.Observer;
+    other.Device->m_Settings.m_Rect = CKRECT{0, 0, 320, 240};
+    other.Device->m_ViewportData.ViewWidth = 320;
+    other.Device->m_ViewportData.ViewHeight = 240;
+    other.Device->m_Active = TRUE;
+    other.Device->BeginFrameErrorTracking();
+    ASSERT_EQ(CK_OK, other.Device->Clear(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(Manager->m_Diagnostics->Handle(), CKRenderCurrentDiagnostics());
+    EXPECT_TRUE(Read().empty());
+    ASSERT_EQ(CK_OK, Device->Clear(CK_RENDER_CLEARBACK));
+    EXPECT_EQ(1u, Occurrences(Read(), "[Clear] enter\n"));
+    std::ifstream stream(other.Path);
+    const std::string text{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+    EXPECT_EQ(1u, Occurrences(text, "[Clear] enter\n"));
+    CKRenderDiagnosticsSnapshot a = {}, b = {};
+    EXPECT_EQ(CK_OK, CKGetRenderDiagnostics(Context, &a, sizeof(a)));
+    EXPECT_EQ(CK_OK, CKGetRenderDiagnostics(other.Context, &b, sizeof(b)));
+    EXPECT_NE(0u, a.ContextId);
+    EXPECT_NE(a.ContextId, b.ContextId);
+    EXPECT_EQ(CKERR_INVALIDPARAMETER, CKGetRenderDiagnostics(Context, &a, sizeof(a) - 1));
 }
 } // namespace

@@ -1,3 +1,4 @@
+#include "CKRenderContextDiagnostics.h"
 #include "CKRenderedScene.h"
 
 #include "CKDebugLogger.h"
@@ -181,6 +182,7 @@ void CKRenderedScene::DetachAll() {
 }
 
 CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     // IDA: 0x100704ae
     const bool frameLog = RenderedSceneFrameLogEnabled(m_Context);
     if (frameLog)
@@ -252,8 +254,8 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
         rc->m_RasterizerContext->SetTransformMatrix(VXMATRIX_WORLD, VxMatrix::Identity());
         rc->SetViewTransformationMatrix(rootEntity->GetInverseWorldMatrix());
 
-        static int s_camLogCount = 0;
-        static int s_attachedCamLogCount = 0;
+        int &s_camLogCount = CKRenderContextLogLimits().SceneCamera;
+        int &s_attachedCamLogCount = CKRenderContextLogLimits().AttachedCamera;
         const bool cameraLog = RenderedSceneCameraLogEnabled(m_Context);
         if (cameraLog && s_camLogCount < 60 && (s_camLogCount < 5 || s_camLogCount % 20 == 0)) {
             const VxMatrix &invW = rootEntity->GetInverseWorldMatrix();
@@ -683,6 +685,7 @@ void CKRenderedScene::SetDefaultRenderStates(CKRasterizerContext *rst) {
 }
 
 void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS flags) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
 
     for (CKObject **it = m_Cameras.Begin(); it != m_Cameras.End(); ++it) {
@@ -690,7 +693,7 @@ void CKRenderedScene::PrepareCameras(CK_RENDER_FLAGS flags) {
         if (camera && camera->GetClassID() == CKCID_TARGETCAMERA) {
             CK3dEntity *target = camera->GetTarget();
             if (target) {
-                static int s_targetCameraLogCount = 0;
+                int &s_targetCameraLogCount = CKRenderContextLogLimits().TargetCamera;
                 if (s_targetCameraLogCount < 24 && (s_targetCameraLogCount < 8 || s_targetCameraLogCount % 4 == 0)) {
                     const VxMatrix &camW = ((RCKCamera *)camera)->GetWorldMatrix();
                     const VxMatrix &targetW = ((RCK3dEntity *)target)->GetWorldMatrix();

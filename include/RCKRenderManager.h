@@ -15,6 +15,7 @@ class RCKMesh;
 class RCKSprite;
 class RCKTexture;
 struct CKRenderSettingsState;
+class CKRenderDiagnosticsContext;
 struct RCKVertexBuffer;
 
 class RCKRenderManager : public CKRenderManager {
@@ -23,6 +24,7 @@ public:
     ~RCKRenderManager() override;
     void InitializeRenderOptions();
     CKRenderSettingsState *m_Settings = nullptr;
+    CKRenderDiagnosticsContext *m_Diagnostics = nullptr;
 
     CKERROR PreClearAll() override;
     CKERROR PreProcess() override;

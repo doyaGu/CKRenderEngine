@@ -22,6 +22,7 @@ configure_file(Version.h.in "${CKRE_VERSION_HEADER}" @ONLY)
 
 set(CKRE_PUBLIC_HEADERS
         ${CKRE_INCLUDE_DIR}/CKRenderConfiguration.h
+        ${CKRE_INCLUDE_DIR}/CKRenderDiagnostics.h
         ${CKRE_VERSION_HEADER}
         ${CKRE_INCLUDE_DIR}/CKRenderEngineTypes.h
         ${CKRE_INCLUDE_DIR}/CKRenderEngineEnums.h

@@ -21,7 +21,7 @@
 
 // Imported textures and virtual-backbuffer binding extend the interface.
 // Rebuild every rasterizer plugin; older revisions are intentionally incompatible.
-#define CKRST_INTERFACE_REVISION 0x00070000u
+#define CKRST_INTERFACE_REVISION 0x00080000u
 
 // ===========================================================================
 // Limits

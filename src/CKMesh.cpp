@@ -1,3 +1,4 @@
+#include "CKRenderContextDiagnostics.h"
 #include "CKMaterialBindingScope.h"
 #include "CKMeshDrawScope.h"
 #include "CKMeshRenderScope.h"
@@ -3866,6 +3867,7 @@ void RCKMesh::SetChannelDestBlend(int Index, VXBLEND_MODE BlendMode) {
 }
 
 CKERROR RCKMesh::Render(CKRenderContext *Dev, CK3dEntity *Mov) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     // Match IDA at 0x1001d852
     CK_RENDER_PERF_DECLARE_ENABLED(renderStats);
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
@@ -4412,6 +4414,7 @@ CKBOOL RCKMesh::IsPM() {
 // DefaultRender - Main mesh rendering function
 //--------------------------------------------
 int RCKMesh::DefaultRender(RCKRenderContext *rc, RCK3dEntity *ent) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CKMeshContextScope contextScope(rc);
     CKMeshRenderScope renderScope(this, m_ActiveTextureChannels, m_MaterialChannels, m_DrawFlags);
     int renderResult = 1;
@@ -4930,6 +4933,7 @@ int RCKMesh::RenderGroup(RCKRenderContext *dev, CKMaterialGroup *group, RCK3dEnt
 int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *group,
                                      RCK3dEntity *ent, VxDrawPrimitiveData *data,
                                      CKBOOL localChannels) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     class ActiveChannelsScope {
     public:
         ActiveChannelsScope(XArray<int> &channels, CKBOOL active)
@@ -5174,7 +5178,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
                             ++CKRenderPerfCurrent().SoftwarePrimitiveEntries;
                             CKRenderPerfCurrent().TotalGroupIndices += (CKDWORD)prim->m_Indices.Size();
                         );
-                        static int s_meshDrawLogCount = 0;
+                        int &s_meshDrawLogCount = CKRenderContextLogLimits().MeshDraw;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
                         const int meshLogLimit = CKRenderDiagnosticsSettings(m_Context).MeshLog.DrawLimit;
 #else
@@ -5246,7 +5250,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
                         );
                         CKDWORD startIndex = (prim->m_IndexBufferOffset >= 0) ? (CKDWORD)prim->m_IndexBufferOffset : 0;
                         CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
-                        static int s_meshDrawLogCount = 0;
+                        int &s_meshDrawLogCount = CKRenderContextLogLimits().ChannelMeshDraw;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
                         const int meshLogLimit = CKRenderDiagnosticsSettings(m_Context).MeshLog.DrawLimit;
 #else
@@ -5468,6 +5472,7 @@ int RCKMesh::RenderChannels(RCKRenderContext *dev, RCK3dEntity *ent, VxDrawPrimi
 int RCKMesh::RenderChannelsForGroup(RCKRenderContext *dev, RCK3dEntity *ent,
                                    VxDrawPrimitiveData *data, int fogEnable,
                                    CKMaterialGroup *group, int providerPrefix) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CK_RENDER_PERF_DECLARE_ENABLED(renderStats);
     CK_RENDER_PERF_DECLARE_TIMER(perfStart, renderStats);
     CKRasterizerContext *rstContext = dev->m_RasterizerContext;
@@ -6607,6 +6612,7 @@ CKBOOL RCKMesh::CheckHWVertexBuffer(RCKRenderContext *renderContext,
 // Returns TRUE if hardware IB was created/updated successfully
 //--------------------------------------------
 CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     if (!rst)
         return FALSE;
 
@@ -6715,7 +6721,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
     }
 
     CKDWORD currentOffset = 0;
-    static int s_indexRangeLogCount = 0;
+    int &s_indexRangeLogCount = CKRenderContextLogLimits().IndexRange;
 
     // Copy indices for each material group
     for (int i = 0; i < m_MaterialGroups.Size(); i++) {

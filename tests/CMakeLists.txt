@@ -90,6 +90,34 @@ function(ckre_add_ckff_test TARGET_NAME)
     ckre_register_test(${TARGET_NAME})
 endfunction()
 
+# Keep optional diagnostics enabled in a small CPU test and a separate module,
+# without changing the engine's compilation policy or invoking GPU tests.
+add_library(ckre_diagnostic_context_probe SHARED support/DiagnosticContextProbe.cpp
+        ../src/CKRasterizer/CKRasterizerLib/CKRenderFrameCostStats.cpp)
+target_link_libraries(ckre_diagnostic_context_probe PRIVATE CKRasterizerLib)
+target_compile_features(ckre_diagnostic_context_probe PRIVATE cxx_std_20)
+target_compile_definitions(ckre_diagnostic_context_probe PRIVATE
+        CKRE_ENABLE_DEBUG_LOGGER=1 CKRE_ENABLE_FRAME_COST_STATS=1)
+
+ckre_add_ckff_test(RenderDiagnosticContextTest RenderDiagnosticContextTest.cpp
+        ../src/CKRenderPerfStats.cpp
+        ../src/CKRasterizer/CKRasterizerLib/CKRenderPerfClock.cpp
+        ../src/CKRasterizer/CKRasterizerLib/CKRenderFrameCostStats.cpp
+        ../src/CKRasterizer/CKFFPLib/FixedFunction/CKFFDebug.cpp
+        ../src/CKRasterizer/CKFFPLib/FixedFunction/CKFFDrawProbes.cpp
+        ../src/CKRasterizer/CKFFPLib/FixedFunction/CKFFPipelineState.cpp
+        ../src/CKRasterizer/CKFFPLib/FixedFunction/CKFixedFunctionPipeline.cpp)
+get_target_property(_diagnostic_definitions RenderDiagnosticContextTest COMPILE_DEFINITIONS)
+list(FILTER _diagnostic_definitions EXCLUDE REGEX "^CKRE_ENABLE_(DEBUG_LOGGER|RENDER_STATS|FRAME_COST_STATS|FFP_DIAGNOSTICS)=")
+set_property(TARGET RenderDiagnosticContextTest PROPERTY COMPILE_DEFINITIONS "${_diagnostic_definitions}")
+target_compile_definitions(RenderDiagnosticContextTest PRIVATE
+        CKRE_ENABLE_DEBUG_LOGGER=1 CKRE_ENABLE_RENDER_STATS=1
+        CKRE_ENABLE_FRAME_COST_STATS=1 CKRE_ENABLE_FFP_DIAGNOSTICS=1
+        CKRE_DIAGNOSTIC_PROBE="$<TARGET_FILE:ckre_diagnostic_context_probe>")
+target_include_directories(RenderDiagnosticContextTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_link_libraries(RenderDiagnosticContextTest PRIVATE gtest_main)
+add_dependencies(RenderDiagnosticContextTest ckre_diagnostic_context_probe)
+
 function(ckre_add_recording_white_box_test TARGET_NAME)
     add_executable(${TARGET_NAME} ${ARGN})
     ckre_configure_test_target(${TARGET_NAME})

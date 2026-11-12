@@ -1,3 +1,5 @@
+#include "../src/CKRenderContextDiagnostics.h"
+#include <memory>
 #include <gtest/gtest.h>
 #include "../src/CKRenderPerfStats.h"
 #include "CKRenderSettings.h"
@@ -108,7 +110,9 @@ protected:
         std::remove(Path);
     }
     void Setting(bool enabled) {
-        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugRenderStats, "Enabled", enabled ? "true" : "false");
+        const auto *owner = CKRenderCurrentDiagnostics();
+        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugRenderStats, "Enabled", enabled ? "true" : "false",
+            owner ? owner->Settings(owner->Owner) : nullptr);
     }
     std::string Read() {
         CKDebugLogger::Instance().Flush();
@@ -252,6 +256,7 @@ public:
 };
 class RenderPerfStatsWorldTest : public RenderPerfStatsEnabledTest {
 protected:
+    std::unique_ptr<CKRenderDiagnosticScope> Scope;
     CKContext *Context = nullptr;
     RCKRenderContext *Device = nullptr;
     PerfSubmissionObserver Boundary;
@@ -264,7 +269,11 @@ protected:
         CKCLASSREGISTERCID(RCKTexture, CKCID_BEOBJECT);
         CKBuildClassHierarchyTable();
         ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
-        new RCKRenderManager(Context);
+        auto *manager = new RCKRenderManager(Context);
+        Scope.reset(new CKRenderDiagnosticScope(manager->m_Diagnostics->Handle()));
+        CKDebugLogger::Instance().EnableDebuggerOutput(false);
+        CKDebugLogger::Instance().SetLogFilePath(Path);
+        CKDebugLogger::Instance().EnableOutput(true);
         Device = new RCKRenderContext(Context);
         Device->m_RasterizerContext = &Boundary;
         Device->BeginFrameErrorTracking();
@@ -272,6 +281,7 @@ protected:
     }
     void TearDown() override {
         if (Device) { Device->m_RasterizerContext = nullptr; delete Device; }
+        Scope.reset();
         if (Context) CKCloseContext(Context);
         CKShutdown();
         RenderPerfStatsEnabledTest::TearDown();

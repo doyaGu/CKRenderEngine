@@ -49,6 +49,7 @@
 #include "RCKSprite.h"
 #include "RCKSpriteText.h"
 #include "CKRenderFrameCostStats.h"
+#include "CKRenderContextDiagnostics.h"
 
 #if defined(CKRE_STATIC_RENDER_ENGINE)
 #define CKGetPluginInfo CKGet_CK2_3D_PluginInfo
@@ -300,3 +301,19 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID lpReserved) {
 }
 
 #endif // CKRE_DYNAMIC_RENDER_ENGINE && _WIN32
+
+// Context-aware counterparts leave the original unbound diagnostic exports available.
+PLUGIN_EXPORT int CK2_3D_FrameCostStatsIsCollectingForContext(CKContext *context) {
+    const auto *owner = CKRenderDiagnosticsForContext(context);
+    if (!owner) return 0;
+    CKRenderDiagnosticScope scope(owner);
+    return CKRenderFrameCostStatsWantsPlayerTiming() ? 1 : 0;
+}
+PLUGIN_EXPORT void CK2_3D_FrameCostStatsAddPlayerTimingForContext(CKContext *context,
+    double updateUs, double inputUs, double processUs, double renderUs,
+    int processRan, int renderRan) {
+    const auto *owner = CKRenderDiagnosticsForContext(context);
+    if (!owner) return;
+    CKRenderDiagnosticScope scope(owner);
+    CKRenderFrameCostStatsAddPlayerTiming(updateUs, inputUs, processUs, renderUs, processRan, renderRan);
+}

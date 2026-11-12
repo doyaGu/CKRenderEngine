@@ -11,8 +11,8 @@
 #include <stdio.h>
 #include <string.h>
 
-const CKFFDebugConfig &CKFFDebugConfig::Get() {
-    static CKFFDebugConfig value = {};
+CKFFDebugConfig CKFFDebugConfig::Get() {
+    CKFFDebugConfig value = {};
     const CKRenderFFPLogConfig &settings = CKRenderDiagnosticsSettings().FFPLog;
     value.DrawLogLimit = settings.DrawLimit;
     value.Real3DLogLimit = settings.Real3DLimit;
@@ -461,8 +461,8 @@ const char *CKFFDebugState::PrimitiveName(VXPRIMITIVETYPE type) const {
 
 #else
 
-const CKFFDebugConfig &CKFFDebugConfig::Get() {
-    static const CKFFDebugConfig value = {};
+CKFFDebugConfig CKFFDebugConfig::Get() {
+    const CKFFDebugConfig value = {};
     return value;
 }
 

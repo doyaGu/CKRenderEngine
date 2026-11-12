@@ -1,3 +1,4 @@
+#include "CKRenderContextDiagnostics.h"
 #include "RCKSprite.h"
 
 #include "CKPathManager.h"
@@ -243,6 +244,7 @@ CKBOOL RCKSprite::SaveImage(CKSTRING Name, int Slot, CKBOOL CKUseFormat) {
 }
 
 CKERROR RCKSprite::Draw(CKRenderContext *dev) {
+    CK_CONTEXT_DIAGNOSTIC_SCOPE(m_Context);
     CK_FRAME_COST_ADD_SPRITE_DRAW();
     if (m_BitmapData.m_BitmapFlags & CKBITMAPDATA_INVALID)
         return CKERR_INVALIDPARAMETER;

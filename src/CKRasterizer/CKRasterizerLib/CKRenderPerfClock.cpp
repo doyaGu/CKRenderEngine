@@ -1,4 +1,5 @@
 #include "CKRenderPerfClock.h"
+#include "CKRenderDiagnosticsContext.h"
 
 #if CKRE_ENABLE_RENDER_STATS
 
@@ -9,10 +10,12 @@
 #include <Windows.h>
 #endif
 
-static CKDWORD g_RenderPerfNowCallCount = 0;
+static CKDWORD &NowCallCount() {
+    return CKRenderDiagnosticState<CKDWORD>(CK_DIAGNOSTIC_CLOCK);
+}
 
 double CKRenderPerfNow() {
-    ++g_RenderPerfNowCallCount;
+    ++NowCallCount();
 #if defined(_WIN32)
     LARGE_INTEGER counter;
     QueryPerformanceCounter(&counter);
@@ -23,11 +26,11 @@ double CKRenderPerfNow() {
 }
 
 void CKRenderPerfResetNowCallCountForTests() {
-    g_RenderPerfNowCallCount = 0;
+    NowCallCount() = 0;
 }
 
 CKDWORD CKRenderPerfNowCallCountForTests() {
-    return g_RenderPerfNowCallCount;
+    return NowCallCount();
 }
 
 double CKRenderPerfElapsedUs(double start) {

@@ -4,69 +4,7 @@
 #include "CKRenderConfig.h"
 #include "CKTypes.h"
 
-enum CKRenderFrameCostSection {
-    CKRFCS_CLEAR = 0,
-    CKRFCS_DRAW_SCENE,
-    CKRFCS_END_FRAME,
-    CKRFCS_FRAME_SETUP,
-    CKRFCS_BEGIN_FRAME,
-    CKRFCS_DEFAULT_STATES,
-    CKRFCS_BACKGROUND_2D,
-    CKRFCS_SETUP_LIGHTS,
-    CKRFCS_PRE_CALLBACKS,
-    CKRFCS_OPAQUE_TRAVERSAL,
-    CKRFCS_SPRITE3D,
-    CKRFCS_POST_CALLBACKS,
-    CKRFCS_TRANSPARENT_SORT_RENDER,
-    CKRFCS_FOREGROUND_2D,
-    CKRFCS_POST_SPRITE_CALLBACKS,
-    CKRFCS_SECTION_COUNT
-};
-
-struct CKRenderFrameCostStatsSnapshot {
-    CKBOOL Enabled;
-    CKBOOL Collecting;
-    CKBOOL Completed;
-    CKDWORD WarmupFrames;
-    CKDWORD SampleFrames;
-    CKDWORD SampledFrames;
-
-    double PlayerUpdateUs;
-    double PlayerInputUs;
-    double PlayerProcessUs;
-    double PlayerRenderUs;
-    CKDWORD PlayerUpdateCalls;
-    CKDWORD PlayerProcessCalls;
-    CKDWORD PlayerRenderCalls;
-
-    double SectionsUs[CKRFCS_SECTION_COUNT];
-
-    CKDWORD Entities3D;
-    CKDWORD Entities2D;
-    CKDWORD Cameras;
-    CKDWORD Lights;
-    CKDWORD MeshRenderCalls;
-    CKDWORD MeshDefaultCalls;
-    CKDWORD MeshGroupCalls;
-    CKDWORD TwoDEntityRenderCalls;
-    CKDWORD TwoDEntityUpdateExtentsCalls;
-    CKDWORD TwoDEntityDrawCalls;
-    CKDWORD SpriteDrawCalls;
-    CKDWORD MaterialSetCalls;
-    CKDWORD MaterialNoOpCandidates;
-    CKDWORD MaterialNoOpSkips;
-    CKDWORD MaterialDirtyMisses;
-    CKDWORD DrawPrimitiveCalls;
-    CKDWORD DrawPrimitiveSanitizeCalls;
-    CKDWORD TransientPrepareCalls;
-    CKDWORD TransientFanToListConversions;
-    CKDWORD TransientVertexBytes;
-    CKDWORD TransientIndexBytes;
-    CKDWORD ViewportSetCalls;
-    CKDWORD PrimitiveSubmits;
-    CKDWORD MeshSubmits;
-    CKDWORD SubmittedDraws;
-};
+#include "CKRenderDiagnostics.h"
 
 #if CKRE_ENABLE_FRAME_COST_STATS
 

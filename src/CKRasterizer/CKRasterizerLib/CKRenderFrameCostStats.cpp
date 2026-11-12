@@ -1,5 +1,6 @@
 #include "CKRenderFrameCostStats.h"
 #include "CKRenderSettings.h"
+#include "CKRenderDiagnosticsContext.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -11,6 +12,20 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <cstdarg>
+
+static void CKRenderFrameCostWrite(FILE *file, const char *format, ...) {
+    char message[4096];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (const auto *context = CKRenderCurrentDiagnostics()) {
+        const size_t length = strlen(message);
+        if (length && message[length - 1] == '\n') message[length - 1] = '\0';
+        context->Write(context->Owner, "FrameCostStats", message, true);
+    } else if (file) fputs(message, file);
+}
 
 struct CKRenderFrameCostStatsState {
     CKBOOL Initialized;
@@ -26,20 +41,18 @@ struct CKRenderFrameCostStatsState {
     CKRenderFrameCostStatsSnapshot Totals;
 };
 
-static CKRenderFrameCostStatsState g_FrameCostStats = {};
+static CKRenderFrameCostStatsState &FrameCostStats() {
+    return CKRenderDiagnosticState<CKRenderFrameCostStatsState>(CK_DIAGNOSTIC_FRAME_COST);
+}
 
 #ifdef _WIN32
 static double CKRenderFrameCostCounterFrequency()
 {
-    static CKBOOL s_Initialized = FALSE;
-    static double s_Frequency = 0.0;
-    LARGE_INTEGER freq;
-    if (!s_Initialized) {
-        s_Initialized = TRUE;
-        if (QueryPerformanceFrequency(&freq) && freq.QuadPart > 0)
-            s_Frequency = (double)freq.QuadPart;
-    }
-    return s_Frequency;
+    static const double frequency = [] {
+        LARGE_INTEGER value;
+        return QueryPerformanceFrequency(&value) && value.QuadPart > 0 ? double(value.QuadPart) : 0.0;
+    }();
+    return frequency;
 }
 #endif
 
@@ -87,45 +100,45 @@ double CKRenderFrameCostElapsedUs(double start)
 static void CKRenderFrameCostStatsInit()
 {
     const CKRenderFrameCostStatsConfig &config = CKRenderDiagnosticsSettings().FrameCostStats;
-    memset(&g_FrameCostStats, 0, sizeof(g_FrameCostStats));
-    g_FrameCostStats.Initialized = TRUE;
-    g_FrameCostStats.Enabled = config.Enabled ? TRUE : FALSE;
-    g_FrameCostStats.OutputEnabled = TRUE;
-    g_FrameCostStats.WarmupFrames = (CKDWORD)config.WarmupFrames;
-    g_FrameCostStats.SampleFrames = (CKDWORD)config.SampleFrames;
-    if (g_FrameCostStats.SampleFrames == 0)
-        g_FrameCostStats.SampleFrames = 600;
-    g_FrameCostStats.Totals.Enabled = g_FrameCostStats.Enabled;
-    g_FrameCostStats.Totals.WarmupFrames = g_FrameCostStats.WarmupFrames;
-    g_FrameCostStats.Totals.SampleFrames = g_FrameCostStats.SampleFrames;
+    memset(&FrameCostStats(), 0, sizeof(FrameCostStats()));
+    FrameCostStats().Initialized = TRUE;
+    FrameCostStats().Enabled = config.Enabled ? TRUE : FALSE;
+    FrameCostStats().OutputEnabled = TRUE;
+    FrameCostStats().WarmupFrames = (CKDWORD)config.WarmupFrames;
+    FrameCostStats().SampleFrames = (CKDWORD)config.SampleFrames;
+    if (FrameCostStats().SampleFrames == 0)
+        FrameCostStats().SampleFrames = 600;
+    FrameCostStats().Totals.Enabled = FrameCostStats().Enabled;
+    FrameCostStats().Totals.WarmupFrames = FrameCostStats().WarmupFrames;
+    FrameCostStats().Totals.SampleFrames = FrameCostStats().SampleFrames;
     if (CKRenderFrameCostStringEquals(config.Output, "none"))
-        g_FrameCostStats.OutputEnabled = FALSE;
+        FrameCostStats().OutputEnabled = FALSE;
 }
 
 static void CKRenderFrameCostStatsEnsureInit()
 {
-    if (!g_FrameCostStats.Initialized)
+    if (!FrameCostStats().Initialized)
         CKRenderFrameCostStatsInit();
 }
 
 CKBOOL CKRenderFrameCostStatsEnabled()
 {
     CKRenderFrameCostStatsEnsureInit();
-    return g_FrameCostStats.Enabled;
+    return FrameCostStats().Enabled;
 }
 
 CKBOOL CKRenderFrameCostStatsIsCollecting()
 {
     CKRenderFrameCostStatsEnsureInit();
-    return g_FrameCostStats.Enabled &&
-           g_FrameCostStats.Collecting &&
-           !g_FrameCostStats.Completed;
+    return FrameCostStats().Enabled &&
+           FrameCostStats().Collecting &&
+           !FrameCostStats().Completed;
 }
 
 CKBOOL CKRenderFrameCostStatsWantsPlayerTiming()
 {
     CKRenderFrameCostStatsEnsureInit();
-    return g_FrameCostStats.Enabled && !g_FrameCostStats.Completed;
+    return FrameCostStats().Enabled && !FrameCostStats().Completed;
 }
 
 static FILE *CKRenderFrameCostStatsOpenLog()
@@ -138,29 +151,29 @@ static FILE *CKRenderFrameCostStatsOpenLog()
 
 static double CKRenderFrameCostAverage(double value)
 {
-    if (g_FrameCostStats.Totals.SampledFrames == 0)
+    if (FrameCostStats().Totals.SampledFrames == 0)
         return 0.0;
-    return value / (double)g_FrameCostStats.Totals.SampledFrames;
+    return value / (double)FrameCostStats().Totals.SampledFrames;
 }
 
 static CKDWORD CKRenderFrameCostAverageDword(CKDWORD value)
 {
-    if (g_FrameCostStats.Totals.SampledFrames == 0)
+    if (FrameCostStats().Totals.SampledFrames == 0)
         return 0;
-    return value / g_FrameCostStats.Totals.SampledFrames;
+    return value / FrameCostStats().Totals.SampledFrames;
 }
 
 static void CKRenderFrameCostStatsWriteSummary()
 {
-    if (!g_FrameCostStats.OutputEnabled || g_FrameCostStats.SummaryWritten)
+    if (!FrameCostStats().OutputEnabled || FrameCostStats().SummaryWritten)
         return;
 
-    FILE *file = CKRenderFrameCostStatsOpenLog();
-    if (!file)
+    FILE *file = CKRenderCurrentDiagnostics() ? nullptr : CKRenderFrameCostStatsOpenLog();
+    if (!file && !CKRenderCurrentDiagnostics())
         return;
 
-    const CKRenderFrameCostStatsSnapshot &s = g_FrameCostStats.Totals;
-    fprintf(file,
+    const CKRenderFrameCostStatsSnapshot &s = FrameCostStats().Totals;
+    CKRenderFrameCostWrite(file,
             "[CK2_3D] [FrameCostStats.Core] frames=%u warmup=%u sample=%u updateUs=%.3f inputUs=%.3f processUs=%.3f renderUs=%.3f processCalls=%u renderCalls=%u\n",
             s.SampledFrames,
             s.WarmupFrames,
@@ -171,7 +184,7 @@ static void CKRenderFrameCostStatsWriteSummary()
             CKRenderFrameCostAverage(s.PlayerRenderUs),
             s.PlayerProcessCalls,
             s.PlayerRenderCalls);
-    fprintf(file,
+    CKRenderFrameCostWrite(file,
             "[CK2_3D] [FrameCostStats.RenderSections] clearUs=%.3f drawSceneUs=%.3f endFrameUs=%.3f beginFrameUs=%.3f defaultStatesUs=%.3f opaqueUs=%.3f transparentUs=%.3f foreground2DUs=%.3f\n",
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_CLEAR]),
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_DRAW_SCENE]),
@@ -181,7 +194,7 @@ static void CKRenderFrameCostStatsWriteSummary()
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_OPAQUE_TRAVERSAL]),
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_TRANSPARENT_SORT_RENDER]),
             CKRenderFrameCostAverage(s.SectionsUs[CKRFCS_FOREGROUND_2D]));
-    fprintf(file,
+    CKRenderFrameCostWrite(file,
             "[CK2_3D] [FrameCostStats.DrawCounts] entities3D=%u entities2D=%u meshRender=%u meshGroup=%u 2dRender=%u 2dExtents=%u 2dDraw=%u spriteDraw=%u drawPrimitive=%u sanitize=%u submitted=%u primitiveSubmit=%u meshSubmit=%u\n",
             CKRenderFrameCostAverageDword(s.Entities3D),
             CKRenderFrameCostAverageDword(s.Entities2D),
@@ -196,7 +209,7 @@ static void CKRenderFrameCostStatsWriteSummary()
             CKRenderFrameCostAverageDword(s.SubmittedDraws),
             CKRenderFrameCostAverageDword(s.PrimitiveSubmits),
             CKRenderFrameCostAverageDword(s.MeshSubmits));
-    fprintf(file,
+    CKRenderFrameCostWrite(file,
             "[CK2_3D] [FrameCostStats.Primitive] transientPrepare=%u fanToList=%u transientVB=%u transientIB=%u viewportSet=%u materialSet=%u materialNoOpCandidate=%u\n",
             CKRenderFrameCostAverageDword(s.TransientPrepareCalls),
             CKRenderFrameCostAverageDword(s.TransientFanToListConversions),
@@ -205,47 +218,47 @@ static void CKRenderFrameCostStatsWriteSummary()
             CKRenderFrameCostAverageDword(s.ViewportSetCalls),
             CKRenderFrameCostAverageDword(s.MaterialSetCalls),
             CKRenderFrameCostAverageDword(s.MaterialNoOpCandidates));
-    fclose(file);
-    g_FrameCostStats.SummaryWritten = TRUE;
+    if (file) fclose(file);
+    FrameCostStats().SummaryWritten = TRUE;
 }
 
 void CKRenderFrameCostStatsBeginRenderFrame(CKDWORD entities3D, CKDWORD entities2D,
                                             CKDWORD cameras, CKDWORD lights)
 {
     CKRenderFrameCostStatsEnsureInit();
-    if (!g_FrameCostStats.Enabled || g_FrameCostStats.Completed)
+    if (!FrameCostStats().Enabled || FrameCostStats().Completed)
         return;
 
-    ++g_FrameCostStats.FrameIndex;
-    g_FrameCostStats.Collecting =
-        g_FrameCostStats.FrameIndex > g_FrameCostStats.WarmupFrames &&
-        g_FrameCostStats.Totals.SampledFrames < g_FrameCostStats.SampleFrames;
-    g_FrameCostStats.AcceptPlayerTiming = g_FrameCostStats.Collecting;
+    ++FrameCostStats().FrameIndex;
+    FrameCostStats().Collecting =
+        FrameCostStats().FrameIndex > FrameCostStats().WarmupFrames &&
+        FrameCostStats().Totals.SampledFrames < FrameCostStats().SampleFrames;
+    FrameCostStats().AcceptPlayerTiming = FrameCostStats().Collecting;
 
-    if (!g_FrameCostStats.Collecting)
+    if (!FrameCostStats().Collecting)
         return;
 
-    g_FrameCostStats.Totals.Collecting = TRUE;
-    g_FrameCostStats.Totals.Entities3D += entities3D;
-    g_FrameCostStats.Totals.Entities2D += entities2D;
-    g_FrameCostStats.Totals.Cameras += cameras;
-    g_FrameCostStats.Totals.Lights += lights;
+    FrameCostStats().Totals.Collecting = TRUE;
+    FrameCostStats().Totals.Entities3D += entities3D;
+    FrameCostStats().Totals.Entities2D += entities2D;
+    FrameCostStats().Totals.Cameras += cameras;
+    FrameCostStats().Totals.Lights += lights;
 }
 
 void CKRenderFrameCostStatsEndRenderFrame()
 {
     CKRenderFrameCostStatsEnsureInit();
-    if (!g_FrameCostStats.Enabled || g_FrameCostStats.Completed)
+    if (!FrameCostStats().Enabled || FrameCostStats().Completed)
         return;
 
-    if (g_FrameCostStats.Collecting) {
-        ++g_FrameCostStats.Totals.SampledFrames;
-        g_FrameCostStats.Collecting = FALSE;
-        g_FrameCostStats.Totals.Collecting = FALSE;
-        if (g_FrameCostStats.Totals.SampledFrames >= g_FrameCostStats.SampleFrames) {
-            g_FrameCostStats.Completed = TRUE;
-            g_FrameCostStats.Totals.Completed = TRUE;
-            if (!g_FrameCostStats.AcceptPlayerTiming)
+    if (FrameCostStats().Collecting) {
+        ++FrameCostStats().Totals.SampledFrames;
+        FrameCostStats().Collecting = FALSE;
+        FrameCostStats().Totals.Collecting = FALSE;
+        if (FrameCostStats().Totals.SampledFrames >= FrameCostStats().SampleFrames) {
+            FrameCostStats().Completed = TRUE;
+            FrameCostStats().Totals.Completed = TRUE;
+            if (!FrameCostStats().AcceptPlayerTiming)
                 CKRenderFrameCostStatsWriteSummary();
         }
     }
@@ -256,20 +269,20 @@ void CKRenderFrameCostStatsAddPlayerTiming(double updateUs, double inputUs,
                                            CKBOOL processRan, CKBOOL renderRan)
 {
     CKRenderFrameCostStatsEnsureInit();
-    if (!g_FrameCostStats.AcceptPlayerTiming)
+    if (!FrameCostStats().AcceptPlayerTiming)
         return;
 
-    g_FrameCostStats.Totals.PlayerUpdateUs += updateUs;
-    g_FrameCostStats.Totals.PlayerInputUs += inputUs;
-    g_FrameCostStats.Totals.PlayerProcessUs += processUs;
-    g_FrameCostStats.Totals.PlayerRenderUs += renderUs;
-    ++g_FrameCostStats.Totals.PlayerUpdateCalls;
+    FrameCostStats().Totals.PlayerUpdateUs += updateUs;
+    FrameCostStats().Totals.PlayerInputUs += inputUs;
+    FrameCostStats().Totals.PlayerProcessUs += processUs;
+    FrameCostStats().Totals.PlayerRenderUs += renderUs;
+    ++FrameCostStats().Totals.PlayerUpdateCalls;
     if (processRan)
-        ++g_FrameCostStats.Totals.PlayerProcessCalls;
+        ++FrameCostStats().Totals.PlayerProcessCalls;
     if (renderRan)
-        ++g_FrameCostStats.Totals.PlayerRenderCalls;
-    g_FrameCostStats.AcceptPlayerTiming = FALSE;
-    if (g_FrameCostStats.Completed)
+        ++FrameCostStats().Totals.PlayerRenderCalls;
+    FrameCostStats().AcceptPlayerTiming = FALSE;
+    if (FrameCostStats().Completed)
         CKRenderFrameCostStatsWriteSummary();
 }
 
@@ -279,21 +292,21 @@ void CKRenderFrameCostStatsAddSection(CKRenderFrameCostSection section, double u
         return;
     if (section < 0 || section >= CKRFCS_SECTION_COUNT)
         return;
-    g_FrameCostStats.Totals.SectionsUs[section] += us;
+    FrameCostStats().Totals.SectionsUs[section] += us;
 }
 
 void CKRenderFrameCostStatsAddDrawPrimitive()
 {
     if (!CKRenderFrameCostStatsIsCollecting())
         return;
-    ++g_FrameCostStats.Totals.DrawPrimitiveCalls;
+    ++FrameCostStats().Totals.DrawPrimitiveCalls;
 }
 
 void CKRenderFrameCostStatsAddViewportSet()
 {
     if (!CKRenderFrameCostStatsIsCollecting())
         return;
-    ++g_FrameCostStats.Totals.ViewportSetCalls;
+    ++FrameCostStats().Totals.ViewportSetCalls;
 }
 
 void CKRenderFrameCostStatsAddMaterialSet(CKBOOL noOpCandidate,
@@ -302,61 +315,61 @@ void CKRenderFrameCostStatsAddMaterialSet(CKBOOL noOpCandidate,
 {
     if (!CKRenderFrameCostStatsIsCollecting())
         return;
-    ++g_FrameCostStats.Totals.MaterialSetCalls;
+    ++FrameCostStats().Totals.MaterialSetCalls;
     if (noOpCandidate)
-        ++g_FrameCostStats.Totals.MaterialNoOpCandidates;
+        ++FrameCostStats().Totals.MaterialNoOpCandidates;
     if (skipped)
-        ++g_FrameCostStats.Totals.MaterialNoOpSkips;
+        ++FrameCostStats().Totals.MaterialNoOpSkips;
     if (dirtyMiss)
-        ++g_FrameCostStats.Totals.MaterialDirtyMisses;
+        ++FrameCostStats().Totals.MaterialDirtyMisses;
 }
 
 void CKRenderFrameCostStatsAddMeshRender()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.MeshRenderCalls;
+        ++FrameCostStats().Totals.MeshRenderCalls;
 }
 
 void CKRenderFrameCostStatsAddMeshDefault()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.MeshDefaultCalls;
+        ++FrameCostStats().Totals.MeshDefaultCalls;
 }
 
 void CKRenderFrameCostStatsAddMeshGroup()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.MeshGroupCalls;
+        ++FrameCostStats().Totals.MeshGroupCalls;
 }
 
 void CKRenderFrameCostStatsAdd2DEntityRender()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.TwoDEntityRenderCalls;
+        ++FrameCostStats().Totals.TwoDEntityRenderCalls;
 }
 
 void CKRenderFrameCostStatsAdd2DEntityUpdateExtents()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.TwoDEntityUpdateExtentsCalls;
+        ++FrameCostStats().Totals.TwoDEntityUpdateExtentsCalls;
 }
 
 void CKRenderFrameCostStatsAdd2DEntityDraw()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.TwoDEntityDrawCalls;
+        ++FrameCostStats().Totals.TwoDEntityDrawCalls;
 }
 
 void CKRenderFrameCostStatsAddSpriteDraw()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.SpriteDrawCalls;
+        ++FrameCostStats().Totals.SpriteDrawCalls;
 }
 
 void CKRenderFrameCostStatsAddDrawPrimitiveSanitize()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.DrawPrimitiveSanitizeCalls;
+        ++FrameCostStats().Totals.DrawPrimitiveSanitizeCalls;
 }
 
 void CKRenderFrameCostStatsAddTransientPrepare(CKDWORD vertexBytes,
@@ -365,29 +378,29 @@ void CKRenderFrameCostStatsAddTransientPrepare(CKDWORD vertexBytes,
 {
     if (!CKRenderFrameCostStatsIsCollecting())
         return;
-    ++g_FrameCostStats.Totals.TransientPrepareCalls;
+    ++FrameCostStats().Totals.TransientPrepareCalls;
     if (fanToListConversion)
-        ++g_FrameCostStats.Totals.TransientFanToListConversions;
-    g_FrameCostStats.Totals.TransientVertexBytes += vertexBytes;
-    g_FrameCostStats.Totals.TransientIndexBytes += indexBytes;
+        ++FrameCostStats().Totals.TransientFanToListConversions;
+    FrameCostStats().Totals.TransientVertexBytes += vertexBytes;
+    FrameCostStats().Totals.TransientIndexBytes += indexBytes;
 }
 
 void CKRenderFrameCostStatsAddPrimitiveSubmit()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.PrimitiveSubmits;
+        ++FrameCostStats().Totals.PrimitiveSubmits;
 }
 
 void CKRenderFrameCostStatsAddMeshSubmit()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.MeshSubmits;
+        ++FrameCostStats().Totals.MeshSubmits;
 }
 
 void CKRenderFrameCostStatsAddSubmittedDraw()
 {
     if (CKRenderFrameCostStatsIsCollecting())
-        ++g_FrameCostStats.Totals.SubmittedDraws;
+        ++FrameCostStats().Totals.SubmittedDraws;
 }
 
 void CKRenderFrameCostStatsCopySnapshot(CKRenderFrameCostStatsSnapshot *snapshot)
@@ -395,21 +408,21 @@ void CKRenderFrameCostStatsCopySnapshot(CKRenderFrameCostStatsSnapshot *snapshot
     if (!snapshot)
         return;
     CKRenderFrameCostStatsEnsureInit();
-    *snapshot = g_FrameCostStats.Totals;
-    snapshot->Enabled = g_FrameCostStats.Enabled;
-    snapshot->Collecting = g_FrameCostStats.Collecting;
-    snapshot->Completed = g_FrameCostStats.Completed;
-    snapshot->WarmupFrames = g_FrameCostStats.WarmupFrames;
-    snapshot->SampleFrames = g_FrameCostStats.SampleFrames;
+    *snapshot = FrameCostStats().Totals;
+    snapshot->Enabled = FrameCostStats().Enabled;
+    snapshot->Collecting = FrameCostStats().Collecting;
+    snapshot->Completed = FrameCostStats().Completed;
+    snapshot->WarmupFrames = FrameCostStats().WarmupFrames;
+    snapshot->SampleFrames = FrameCostStats().SampleFrames;
 }
 
 void CKRenderFrameCostStatsResetForTests()
 {
-    memset(&g_FrameCostStats, 0, sizeof(g_FrameCostStats));
+    memset(&FrameCostStats(), 0, sizeof(FrameCostStats()));
 }
 
 void CKRenderFrameCostStatsSetOutputEnabledForTests(CKBOOL enabled)
 {
     CKRenderFrameCostStatsEnsureInit();
-    g_FrameCostStats.OutputEnabled = enabled;
+    FrameCostStats().OutputEnabled = enabled;
 }

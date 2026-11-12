@@ -1,5 +1,6 @@
 #include "CKDebugLogger.h"
 #include "CKRenderSettings.h"
+#include "CKRenderDiagnosticsContext.h"
 
 #include <cstdarg>
 #include <cstring>
@@ -21,19 +22,25 @@ static void CKDebugLoggerWriteDebugger(const char *msg) {
 }
 
 CKDebugLogger &CKDebugLogger::Instance() {
+    if (const auto *context = CKRenderCurrentDiagnostics())
+        return *context->Logger(context->Owner);
     static CKDebugLogger instance;
     return instance;
 }
 
 bool CKDebugLogger::OutputEnabled() {
+    if (const auto *context = CKRenderCurrentDiagnostics())
+        return context->OutputEnabled(context->Owner);
     return Instance().IsOutputEnabled();
 }
 
-CKDebugLogger::CKDebugLogger()
+CKDebugLogger::CKDebugLogger() : CKDebugLogger(true) {}
+
+CKDebugLogger::CKDebugLogger(bool legacy)
     : m_OutputEnabled(CKRenderDebugSettings().GetBool("Output", false)),
       m_DebuggerEnabled(true),
       m_FileEnabled(true),
-      m_File(nullptr) {
+      m_File(nullptr), m_Append(!legacy) {
     m_LogFilePath = CKRenderModuleSiblingFile((const void *)&CKDebugLogger::Instance, "CK2_3D_Debug.log");
     if (m_LogFilePath.Length() == 0)
         m_LogFilePath = "CK2_3D_Debug.log";
@@ -160,5 +167,28 @@ void CKDebugLogger::OpenFileIfNeeded() {
         return;
     }
 
-    m_File = fopen(m_LogFilePath.CStr(), "w");
+    m_File = fopen(m_LogFilePath.CStr(), m_Append ? "a" : "w");
+}
+
+void CKDebugLogger::WriteTagged(const char *tag, const char *message) {
+    if (const auto *context = CKRenderCurrentDiagnostics())
+        context->Write(context->Owner, tag, message, false);
+    else Instance().LogTagged(tag, message);
+}
+
+void CKDebugLogger::WriteTaggedf(const char *tag, const char *format, ...) {
+    if (!format) return;
+    char message[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    WriteTagged(tag, message);
+}
+
+void CKDebugLogger::WriteFileLine(const char *message) {
+    if (!message) return;
+    VxMutexLock lock(m_Mutex);
+    if (!m_File) m_File = fopen(m_LogFilePath.CStr(), "a");
+    if (m_File) { fprintf(m_File, "%s\n", message); fflush(m_File); }
 }

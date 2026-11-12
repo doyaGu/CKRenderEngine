@@ -15,6 +15,8 @@
 #include "CKRasterizerTypes.h"
 
 class CKRasterizerDriver;
+struct CKRenderDiagnosticHandle;
+
 class CKRasterizerContext;
 class CKRasterizer;
 
@@ -244,6 +246,10 @@ public:
     virtual CKBOOL RequestReadback(const CKRECT *Rect, VXBUFFER_TYPE Buffer,
                                    CKReadbackCallback Callback, void *User) = 0;
 
+    // Borrowed from the engine context until this rasterizer context is destroyed.
+    virtual void SetDiagnosticContext(const CKRenderDiagnosticHandle *context) { m_DiagnosticContext = context; }
+    const CKRenderDiagnosticHandle *GetDiagnosticContext() const { return m_DiagnosticContext; }
+
     // --- Diagnostics ---
     virtual void SetDebugMarker(CKSTRING Name);
     virtual void GetStats(CKRenderStats &Stats) const;
@@ -254,6 +260,7 @@ protected:
     CKBOOL ResolveResize(int &PosX, int &PosY, int &Width, int &Height, CKDWORD Flags) const;
     void SetContextOptions(const CKRasterizerOptions &Options);
 
+    const CKRenderDiagnosticHandle *m_DiagnosticContext = nullptr;
     CKRasterizerDriver *m_Driver;
     int m_PosX;
     int m_PosY;

@@ -6,6 +6,8 @@
 #include "XString.h"
 #include "VxConfiguration.h"
 
+struct CKRenderSettingsState;
+
 enum class CKRenderSettingsSection {
     Root,
     Debug,
@@ -189,7 +191,8 @@ struct CKRenderDiagnosticsConfig {
 
 const CKRenderDiagnosticsConfig &CKRenderDiagnosticsSettings();
 
-void CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection section, const char *name, const char *value);
+void CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection section, const char *name, const char *value,
+                                       CKRenderSettingsState *state = nullptr);
 bool CKRenderSettingsGetOverrideForTests(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize);
 void CKRenderSettingsClearOverridesForTests();
 
@@ -197,6 +200,7 @@ struct CKRenderSettingsState {
     VxConfiguration Configuration;
     CKRenderDiagnosticsConfig Diagnostics = {};
     bool Load(const char *filename);
+    void LoadDefaults();
 };
 
 // Implemented by the engine; the rasterizer library keeps its standalone default.

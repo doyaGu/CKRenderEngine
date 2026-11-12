@@ -1,4 +1,5 @@
 #include "CKRenderSettings.h"
+#include "CKRenderDiagnosticsContext.h"
 #include "VxConfiguration.h"
 #include "VxMath.h"
 
@@ -146,6 +147,9 @@ static void CKRenderSettingsLoad(VxConfiguration &config) {
 }
 
 static VxConfiguration *CKRenderSettingsGetConfig() {
+    if (const auto *context = CKRenderCurrentDiagnostics()) {
+        if (auto *settings = context->Settings(context->Owner)) return &settings->Configuration;
+    }
     struct DefaultSettings {
         VxConfiguration Configuration;
         DefaultSettings() { CKRenderSettingsLoad(Configuration); }
@@ -210,7 +214,7 @@ static bool CKRenderSettingsStringByName(const char *section, const char *name, 
         return false;
 
     buffer[0] = '\0';
-    if (!configuration && CKRenderSettingsOverrideString(section, name, buffer, bufferSize))
+    if (!configuration && !CKRenderCurrentDiagnostics() && CKRenderSettingsOverrideString(section, name, buffer, bufferSize))
         return true;
 
     VxConfigurationSection *configSection = nullptr;
@@ -274,7 +278,7 @@ bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name
 
     char overrideValue[kRenderSettingsOverrideValueSize] = {0};
     const char *sectionName = CKRenderSettingsSectionName(section);
-    if (!configuration && CKRenderSettingsOverrideString(sectionName, name, overrideValue, (CKDWORD)sizeof(overrideValue))) {
+    if (!configuration && !CKRenderCurrentDiagnostics() && CKRenderSettingsOverrideString(sectionName, name, overrideValue, (CKDWORD)sizeof(overrideValue))) {
         value = overrideValue;
         return true;
     }
@@ -377,6 +381,9 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics(VxConfiguration
 }
 
 const CKRenderDiagnosticsConfig &CKRenderDiagnosticsSettings() {
+    if (const auto *context = CKRenderCurrentDiagnostics()) {
+        if (auto *settings = context->Settings(context->Owner)) return settings->Diagnostics;
+    }
     static CKRenderDiagnosticsConfig s_Config = {};
     static CKDWORD s_Generation = 0;
 
@@ -387,7 +394,21 @@ const CKRenderDiagnosticsConfig &CKRenderDiagnosticsSettings() {
     return s_Config;
 }
 
-void CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection section, const char *name, const char *value) {
+void CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection section, const char *name, const char *value,
+                                       CKRenderSettingsState *state) {
+    if (state && name && *name) {
+        XString path(kRenderSettingsSection);
+        const char *suffix = CKRenderSettingsSectionName(section);
+        if (*suffix) path << "." << suffix;
+        if (value) {
+            XString key = path + "." + name;
+            auto *entry = state->Configuration.GetEntry(key.CStr(), TRUE);
+            if (entry) entry->SetValue(value);
+            else state->Configuration.AddEntry(path.CStr(), name, value);
+        } else state->Configuration.DeleteEntry(path.CStr(), name);
+        state->Diagnostics = CKRenderSettingsReadDiagnostics(&state->Configuration);
+        return;
+    }
     if (!name || name[0] == '\0')
         return;
 
@@ -441,4 +462,18 @@ bool CKRenderSettingsState::Load(const char *filename) {
     if (!CKRenderSettingsLoadFile(Configuration, filename)) return false;
     Diagnostics = CKRenderSettingsReadDiagnostics(&Configuration);
     return true;
+}
+
+void CKRenderSettingsState::LoadDefaults() {
+    CKRenderDiagnosticScope legacy(nullptr);
+    CKRenderSettingsLoad(Configuration);
+    for (const auto &override : g_RenderSettingsOverrides) {
+        if (!override.Used) continue;
+        XString section(kRenderSettingsSection);
+        if (*override.Section) section << "." << override.Section;
+        VxConfigurationEntry *entry = Configuration.GetEntry((section + "." + override.Name).CStr(), TRUE);
+        if (entry) entry->SetValue(override.Value);
+        else Configuration.AddEntry(section.CStr(), override.Name, override.Value);
+    }
+    Diagnostics = CKRenderSettingsReadDiagnostics(&Configuration);
 }

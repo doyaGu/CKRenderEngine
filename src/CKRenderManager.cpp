@@ -9,6 +9,10 @@
 #include "CKParameterManager.h"
 #include "CKRenderSettings.h"
 #include "CKRenderConfiguration.h"
+#include "CKRenderContextDiagnostics.h"
+#include "CKRenderDiagnostics.h"
+#include "CKRenderPerfStats.h"
+#include "CKRenderFrameCostStats.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "RCK2dEntity.h"
@@ -208,18 +212,37 @@ CKRenderSettingsState *CKRenderSettingsForContext(CKContext *context) {
     return manager ? manager->m_Settings : nullptr;
 }
 
+const CKRenderDiagnosticHandle *CKRenderDiagnosticsForContext(CKContext *context) {
+    auto *manager = context ? dynamic_cast<RCKRenderManager *>(context->GetRenderManager()) : nullptr;
+    return manager && manager->m_Diagnostics ? manager->m_Diagnostics->Handle() : nullptr;
+}
+
+CKERROR CKGetRenderDiagnostics(CKContext *context, CKRenderDiagnosticsSnapshot *snapshot, CKDWORD size) {
+    const auto *diagnostics = CKRenderDiagnosticsForContext(context);
+    if (!diagnostics || !snapshot || size != sizeof(*snapshot)) return CKERR_INVALIDPARAMETER;
+    CKRenderDiagnosticScope scope(diagnostics);
+    CKRenderDiagnosticsSnapshot result = {};
+    result.ContextId = diagnostics->Id;
+#if CKRE_ENABLE_RENDER_STATS
+    result.Render = CKRenderPerfCurrent();
+#endif
+    CKRenderFrameCostStatsCopySnapshot(&result.FrameCost);
+    *snapshot = result;
+    return CK_OK;
+}
+
 CKERROR CKSetRenderSettingsFile(CKContext *context, const char *filename) {
     auto *manager = context ? dynamic_cast<RCKRenderManager *>(context->GetRenderManager()) : nullptr;
     if (!manager) return CKERR_INVALIDPARAMETER;
     if (manager->GetRenderContextCount()) return CKERR_INVALIDOPERATION;
-    CKRenderSettingsState *settings = nullptr;
+    CKRenderSettingsState *settings = new CKRenderSettingsState;
     if (filename && *filename) {
-        settings = new CKRenderSettingsState;
         if (!settings->Load(filename)) {
             delete settings;
             return CKERR_INVALIDPARAMETER;
         }
-    }
+    } else settings->LoadDefaults();
+    manager->m_Diagnostics->Configure(settings);
     delete manager->m_Settings;
     manager->m_Settings = settings;
     manager->InitializeRenderOptions();
@@ -227,6 +250,11 @@ CKERROR CKSetRenderSettingsFile(CKContext *context, const char *filename) {
 }
 
 RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
+    m_Settings = new CKRenderSettingsState;
+    m_Settings->LoadDefaults();
+    m_Diagnostics = new CKRenderDiagnosticsContext;
+    m_Diagnostics->Configure(m_Settings);
+    CKRenderDiagnosticScope diagnostics(m_Diagnostics->Handle());
     InitializeRenderOptions();
 
     m_RenderContextMaskFree = -1;
@@ -396,6 +424,7 @@ RCKRenderManager::~RCKRenderManager() {
             m_RasterizerClosers[i](m_Rasterizers[i]);
         }
     }
+    delete m_Diagnostics;
     delete m_Settings;
 }
 

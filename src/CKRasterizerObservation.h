@@ -12,6 +12,11 @@ public:
         : CKRasterizerContext(nullptr), m_Next(Registry()), m_Owner(owner), m_Target(target),
           m_ActiveDepth(0), m_Retired(FALSE), m_MaterialKnown(FALSE), m_ViewportKnown(FALSE) {
         Registry() = this;
+        SetDiagnosticContext(target ? target->GetDiagnosticContext() : nullptr);
+    }
+    void SetDiagnosticContext(const CKRenderDiagnosticHandle *context) override {
+        CKRasterizerContext::SetDiagnosticContext(context);
+        if (m_Target) m_Target->SetDiagnosticContext(context);
     }
     ~CKObservedRasterizerContext() override {
         CKObservedRasterizerContext **link = &Registry();

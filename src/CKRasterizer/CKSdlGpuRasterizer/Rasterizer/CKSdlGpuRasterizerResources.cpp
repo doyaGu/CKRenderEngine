@@ -1,3 +1,4 @@
+#include "CKRenderDiagnosticsContext.h"
 #include "CKSdlGpuRasterizerContext.h"
 
 // CKSdlGpuRasterizerContext resource ownership and buffer translation.
@@ -13,6 +14,7 @@
 
 CKDWORD CKSdlGpuRasterizerContext::GetNativeVertexLayout(CKDWORD FormatFlags)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     const CKDWORD *cached = m_NativeVertexLayouts.FindPtr(FormatFlags);
     if (cached)
         return *cached;
@@ -36,6 +38,7 @@ CKDWORD CKSdlGpuRasterizerContext::GetNativeVertexLayout(CKDWORD FormatFlags)
 
 void CKSdlGpuRasterizerContext::ClearNativeVertexLayouts()
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     for (XSHashTable<CKDWORD, CKDWORD>::Iterator it =
              m_NativeVertexLayouts.Begin();
          it != m_NativeVertexLayouts.End(); ++it)
@@ -45,21 +48,25 @@ void CKSdlGpuRasterizerContext::ClearNativeVertexLayouts()
 
 CKBOOL CKSdlGpuRasterizerContext::GetVertexBufferDesc(CKDWORD VB, CKVertexBufferDesc *Desc) const
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     return m_PublicResources.GetVertexBufferDesc(VB, Desc);
 }
 
 CKBOOL CKSdlGpuRasterizerContext::GetIndexBufferDesc(CKDWORD IB, CKIndexBufferDesc *Desc) const
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     return m_PublicResources.GetIndexBufferDesc(IB, Desc);
 }
 
 int CKSdlGpuRasterizerContext::GetLiveResourceCountForTests(CKDWORD TypeMask) const
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     return m_PublicResources.GetLiveCount((CKRST_OBJECTMASK) TypeMask);
 }
 
 CKBOOL CKSdlGpuRasterizerContext::CreateTexture(const CKTextureDesc *Desc, CKDWORD *OutHandle)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (OutHandle)
         *OutHandle = 0;
     if (!m_Created || m_ShuttingDown || !Desc || !OutHandle)
@@ -97,6 +104,7 @@ CKBOOL CKSdlGpuRasterizerContext::ImportTexture(const CKTextureDesc *Desc,
                                                 const CKTextureImportDesc *Import,
                                                 CKDWORD *OutTexture)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (OutTexture)
         *OutTexture = 0;
     // A wrong-thread call must be a side-effect-free failure: even diagnostic
@@ -146,6 +154,7 @@ CKBOOL CKSdlGpuRasterizerContext::ImportTexture(const CKTextureDesc *Desc,
 CKBOOL CKSdlGpuRasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDescEx &Image, int MipLevel,
                                         CKRST_CUBEFACE Face, const CKRECT *Region)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (!m_Created || m_ShuttingDown)
         return FALSE;
     const CKTextureDesc *texture = m_PublicResources.FindTexture(Texture);
@@ -187,11 +196,13 @@ CKBOOL CKSdlGpuRasterizerContext::LoadTexture(CKDWORD Texture, const VxImageDesc
 
 CKBOOL CKSdlGpuRasterizerContext::GetTextureDesc(CKDWORD Texture, CKTextureDesc *Desc) const
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     return m_PublicResources.GetTextureDesc(Texture, Desc);
 }
 
 CKBOOL CKSdlGpuRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *Desc, const void *Data, CKDWORD *OutHandle)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (OutHandle)
         *OutHandle = 0;
     if (!m_Created || m_ShuttingDown || !Desc || !OutHandle)
@@ -239,6 +250,7 @@ CKBOOL CKSdlGpuRasterizerContext::CreateVertexBuffer(const CKVertexBufferDesc *D
 
 CKBOOL CKSdlGpuRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Desc, const void *Data, CKDWORD *OutHandle)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (OutHandle)
         *OutHandle = 0;
     if (!m_Created || m_ShuttingDown || !Desc || !OutHandle)
@@ -273,6 +285,7 @@ CKBOOL CKSdlGpuRasterizerContext::CreateIndexBuffer(const CKIndexBufferDesc *Des
 
 void *CKSdlGpuRasterizerContext::LockVertexBuffer(CKDWORD VB, CKDWORD StartVertex, CKDWORD VertexCount, CKRST_LOCKFLAGS Flags)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     VertexBufferData *buffer = m_PublicResources.FindVertexBuffer(VB);
     if (!buffer) {
         Diag(CKRST_DIAG_REJECT_INVALID_HANDLE);
@@ -289,6 +302,7 @@ void *CKSdlGpuRasterizerContext::LockVertexBuffer(CKDWORD VB, CKDWORD StartVerte
 
 CKBOOL CKSdlGpuRasterizerContext::UnlockVertexBuffer(CKDWORD VB)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     VertexBufferData *buffer = m_PublicResources.FindVertexBuffer(VB);
     if (!buffer) {
         Diag(CKRST_DIAG_REJECT_INVALID_HANDLE);
@@ -316,6 +330,7 @@ CKBOOL CKSdlGpuRasterizerContext::UnlockVertexBuffer(CKDWORD VB)
 
 void *CKSdlGpuRasterizerContext::LockIndexBuffer(CKDWORD IB, CKDWORD StartIndex, CKDWORD IndexCount, CKRST_LOCKFLAGS Flags)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     IndexBufferData *buffer = m_PublicResources.FindIndexBuffer(IB);
     if (!buffer) {
         Diag(CKRST_DIAG_REJECT_INVALID_HANDLE);
@@ -332,6 +347,7 @@ void *CKSdlGpuRasterizerContext::LockIndexBuffer(CKDWORD IB, CKDWORD StartIndex,
 
 CKBOOL CKSdlGpuRasterizerContext::UnlockIndexBuffer(CKDWORD IB)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     IndexBufferData *buffer = m_PublicResources.FindIndexBuffer(IB);
     if (!buffer) {
         Diag(CKRST_DIAG_REJECT_INVALID_HANDLE);
@@ -358,6 +374,7 @@ CKBOOL CKSdlGpuRasterizerContext::UnlockIndexBuffer(CKDWORD IB)
 
 CKBOOL CKSdlGpuRasterizerContext::DeleteObject(CKRST_HANDLE Handle, CKRST_OBJECTTYPE Type)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (!CKFFIsPublicResourceType(Type)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
@@ -383,6 +400,7 @@ CKBOOL CKSdlGpuRasterizerContext::DeleteObject(CKRST_HANDLE Handle, CKRST_OBJECT
 
 CKBOOL CKSdlGpuRasterizerContext::FlushObjects(CKRST_OBJECTMASK TypeMask)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (!CKFFIsPublicResourceMask(TypeMask)) {
         Diag(CKRST_DIAG_REJECT_INVALID_PARAMETER);
         return FALSE;
@@ -399,6 +417,7 @@ CKBOOL CKSdlGpuRasterizerContext::FlushObjects(CKRST_OBJECTMASK TypeMask)
 CKBOOL CKSdlGpuRasterizerContext::SetResourceName(
     CKRST_HANDLE Handle, CKRST_OBJECTTYPE Type, CKSTRING Name)
 {
+    CK_DIAGNOSTIC_SCOPE(GetDiagnosticContext());
     if (!Name || !m_PublicResources.IsAlive(Handle, Type))
         return FALSE;
     return SetObjectName(Handle, Type, Name) == CK_OK ? TRUE : FALSE;
