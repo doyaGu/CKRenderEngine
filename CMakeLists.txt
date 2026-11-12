@@ -121,7 +121,7 @@ endif ()
 # =============================================================================
 # C++ standard
 # =============================================================================
-# When built as part of Ballanced, inherit the top-level policy.
+# When built as part of NeMo2, inherit the top-level policy.
 # When built standalone, default to C++17.
 if (CKRE_IS_TOP_LEVEL)
     if (NOT CMAKE_CXX_STANDARD)

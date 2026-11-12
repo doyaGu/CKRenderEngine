@@ -245,7 +245,7 @@ bool ValidateSpotlightCone(SceneContext &sc, const RgbaImage &image) {
 }
 
 #ifndef CKRE_SCENE_CAPTURE_VIRTOOLS_SDK
-// The extended tween streams are a Ballanced API. The surrounding world,
+// The extended tween streams are a NeMo2 API. The surrounding world,
 // materials, camera, lighting and render callback use ordinary CK2 objects.
 struct TweenVertex {
     VxVector Position, Normal, Target, TargetNormal;

@@ -77,7 +77,7 @@ bool BuildSpritesText(SceneContext &sc)
     text->SetTextColor(0xFFFFFFFF);
     text->SetBackgroundColor(0x00000000);
     text->SetAlign(CKSPRITETEXT_LEFT);
-    text->SetText((CKSTRING)"Ballanced 0123456789 CK2_3D");
+    text->SetText((CKSTRING)"NeMo2 0123456789 CK2_3D");
     text->SetHomogeneousCoordinates(FALSE);
     Vx2DVector textPos(20.0f, h - 72.0f);
     text->SetPosition(textPos);

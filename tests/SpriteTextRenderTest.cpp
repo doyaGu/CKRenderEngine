@@ -154,7 +154,7 @@ TEST_F(SpriteTextRenderTest, RenderForwardsTheInheritedDrawFailureAfterCPURepain
 TEST_F(SpriteTextRenderTest, ActualFontDrawingProducesReadableCPUImage) {
     TextRenderProbe sprite(Context);
     ASSERT_TRUE(sprite.Create(160, 40, 32));
-    char font[] = "Arial", text[] = "Ballanced";
+    char font[] = "Arial", text[] = "NeMo2";
     sprite.SetFont(font, 18, 700, FALSE, FALSE);
     sprite.SetText(text);
     EXPECT_TRUE(sprite.Ready());

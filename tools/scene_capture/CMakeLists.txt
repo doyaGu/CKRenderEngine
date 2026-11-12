@@ -6,13 +6,13 @@
 # sets. It links only CK2, VxMath and SDL3.
 #
 # Two build modes:
-#   * as part of CKRenderEngine (add_subdirectory): links the Ballanced CK2 /
+#   * as part of CKRenderEngine (add_subdirectory): links the NeMo2 CK2 /
 #     VxMath and drives CK2_3D with the selected rasterizer provider;
 #   * standalone against the Virtools SDK 2.1 (cmake -S tools/scene_capture
 #     -A Win32 -DVIRTOOLS_SDK_PATH=...): links the original CK2.lib /
 #     VxMath.lib import libraries so the same binary drives the original
 #     CK2.dll + CK2_3D.dll + CKDX8Rasterizer.dll - the visual oracle. The
-#     original DLLs cannot bind to the Ballanced CK2.dll (74 + 55 missing
+#     original DLLs cannot bind to the NeMo2 CK2.dll (74 + 55 missing
 #     exports, see tools/check_dll_imports.py), hence the second mode.
 
 cmake_minimum_required(VERSION 3.16)

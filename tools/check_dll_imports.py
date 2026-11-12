@@ -2,7 +2,7 @@
 """Check whether a PE DLL's imports are satisfied by a set of provider DLLs.
 
 Checks whether the original Virtools CK2_3D.dll / CKDX8Rasterizer.dll
-can bind against the Ballanced CK2.dll and
+can bind against the NeMo2 CK2.dll and
 VxMath.dll. Pure Python PE parsing, works for any architecture.
 
 Usage:

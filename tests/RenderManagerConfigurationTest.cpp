@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
     // through the production parser before any manager is constructed.
     const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path path = std::filesystem::temp_directory_path() /
-        ("ballanced-render-settings-" + std::to_string(sizeof(void *)) + "-" + std::to_string(nonce) + ".ini");
+        ("nemo2-render-settings-" + std::to_string(sizeof(void *)) + "-" + std::to_string(nonce) + ".ini");
     FILE *file = fopen(path.string().c_str(), "wb");
     if (!file) return 2;
     fputs("<CK2_3D>\nForceLinearFog=1\nForceSoftware=1\nDisableFilter=1\nAntialias=4\n"
