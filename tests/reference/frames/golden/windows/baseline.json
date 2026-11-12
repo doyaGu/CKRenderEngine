@@ -99,19 +99,47 @@
     },
     {
       "name": "present_fxaa",
-      "sha256": "70ecadb23dc5f5ef528a6fe89a52e3f6fd68d8abb4063a7e264648ef2f558523"
+      "sha256": "21205a6890e810b5389c507a5f2f992dc1c0b1083022d50cb2aaa8a001b8b5dd",
+      "scene_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "renderer_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43221722688",
+      "requested_frames": 5,
+      "backend": "direct3d12",
+      "gpu_device": "Microsoft Basic Render Driver",
+      "gpu_validation": true
     },
     {
       "name": "present_msaa",
-      "sha256": "cbfdb79c3da59acb564a7a364e1fe9664a5976789f7b3a08d663d3ebde6208aa"
+      "sha256": "d157c790bbd3be798f95473cdb5498249345362119f874e7448c53c31c938ef1",
+      "scene_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "renderer_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43221722688",
+      "requested_frames": 5,
+      "backend": "direct3d12",
+      "gpu_device": "Microsoft Basic Render Driver",
+      "gpu_validation": true
     },
     {
       "name": "present_renderscale",
-      "sha256": "042acee3e0c9d0190ffe79879d37be7642d6751c46ee12422a2751ef95120052"
+      "sha256": "632c33b911992a74cde33eccb07f091b67d560c7e5b38c7a5f987483f17eeb93",
+      "scene_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "renderer_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43221722688",
+      "requested_frames": 5,
+      "backend": "direct3d12",
+      "gpu_device": "Microsoft Basic Render Driver",
+      "gpu_validation": true
     },
     {
       "name": "present_sharpness",
-      "sha256": "308da700c9c58e523e3a9a23b61792d1f08757663be122509eb5441a886c59ac"
+      "sha256": "1fc1802b9b163566bf69f20005bb00937478022a91234cfa199ba277b6824d33",
+      "scene_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "renderer_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43221722688",
+      "requested_frames": 5,
+      "backend": "direct3d12",
+      "gpu_device": "Microsoft Basic Render Driver",
+      "gpu_validation": true
     },
     {
       "name": "rtt_2d",
@@ -127,7 +155,14 @@
     },
     {
       "name": "sprites_text",
-      "sha256": "862a8b8c0c203813238a8ecb3b9f47142ed52bd54168ea6c36cec159e95e3576"
+      "sha256": "cd9b36c1a150a985559de98b46a01d7cb502a46a3532729cd8771a75aa1fc44b",
+      "scene_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "renderer_revision": "6475aa2a03e5d086d3310a496044c4988a6bb022",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43221722688",
+      "requested_frames": 5,
+      "backend": "direct3d12",
+      "gpu_device": "Microsoft Basic Render Driver",
+      "gpu_validation": true
     },
     {
       "name": "stencil_clear_midframe",

@@ -4,6 +4,13 @@ Each platform directory contains frozen procedural frames and `baseline.json`,
 which identifies their renderer and scene source revision. Native font
 rasterization requires separate Windows, Linux and Darwin references. Font
 heights are specified in pixels so desktop DPI does not change the fixture.
+Input-only refreshes record `renderer_revision`, `scene_revision` and the
+`capture_run` on the updated scene entries. Other entries retain the manifest's
+original provenance. The engine-neutral text sample is captured separately on
+each platform using its native font rasterizer.
+The Windows text refresh uses five requested frames with GPU validation enabled
+and explicitly selected WARP. Differences outside the caption satisfy the
+existing comparison limits.
 
 `scene_capture_golden` renders every scene at 640x480 with five requested frames
 (scene-specific minimum frame counts still apply), then requires every reference

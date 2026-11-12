@@ -91,19 +91,31 @@
     },
     {
       "name": "present_fxaa",
-      "sha256": "90f6b38c5fd7f48f366d2388a447c138f57ee7fc83df7636f4f73900bc371667"
+      "sha256": "3d6aa6b9de797346c4599e866faaf6ebf2e001377e7311b5bb9f50fbb421011d",
+      "scene_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "renderer_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43193494928"
     },
     {
       "name": "present_msaa",
-      "sha256": "8fbd4a6ed24963a7231de136cc5fbc3583c5e1ccadec3b1dc85bf31240991e8e"
+      "sha256": "83a78024e088b4df4fc9df002c08bcff52648a401eb1624ad2ddc971e07ed73e",
+      "scene_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "renderer_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43193494928"
     },
     {
       "name": "present_renderscale",
-      "sha256": "25b77c1c6593b9abc25604c70968b7f19da843db628240c8360df53a2695df9c"
+      "sha256": "7dd33253aa7fee23feed736e10f7372a5856a82504a411ea0b82ce83bd4794e5",
+      "scene_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "renderer_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43193494928"
     },
     {
       "name": "present_sharpness",
-      "sha256": "d44453fc602d2a75e338bb0b296253759a2e1bff18653ca7f597e126b379e969"
+      "sha256": "488adedfaf70b59d759a62a5ce2e31a73dd941fc3d9919e2f745d8294dd2c110",
+      "scene_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "renderer_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43193494928"
     },
     {
       "name": "rtt_2d",
@@ -119,7 +131,10 @@
     },
     {
       "name": "sprites_text",
-      "sha256": "8712b9e3b05ae2730e0d0926f4f50e35eabe4c86bb2b2d98302d948edae73f82"
+      "sha256": "b4fe0bfe11f73d482e10f9e2ec14f4d4696f0b5414b4aa38c597c2e989c2c283",
+      "scene_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "renderer_revision": "ab2b286e543f7130ddabf92a8a82c797f7947beb",
+      "capture_run": "https://github.com/doyaGu/NeMo2/actions/runs/43193494928"
     },
     {
       "name": "stencil_clear_midframe",
