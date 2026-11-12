@@ -14,12 +14,15 @@ class RCK3dEntity;
 class RCKMesh;
 class RCKSprite;
 class RCKTexture;
+struct CKRenderSettingsState;
 struct RCKVertexBuffer;
 
 class RCKRenderManager : public CKRenderManager {
 public:
     explicit RCKRenderManager(CKContext *context);
     ~RCKRenderManager() override;
+    void InitializeRenderOptions();
+    CKRenderSettingsState *m_Settings = nullptr;
 
     CKERROR PreClearAll() override;
     CKERROR PreProcess() override;

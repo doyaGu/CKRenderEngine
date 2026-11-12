@@ -5176,7 +5176,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
                         );
                         static int s_meshDrawLogCount = 0;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                        const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
+                        const int meshLogLimit = CKRenderDiagnosticsSettings(m_Context).MeshLog.DrawLimit;
 #else
                         const int meshLogLimit = 0;
 #endif
@@ -5248,7 +5248,7 @@ int RCKMesh::RenderGroupWithChannels(RCKRenderContext *dev, CKMaterialGroup *gro
                         CKDWORD ib = (prim->m_IndexBufferOffset >= 0) ? m_IndexBuffer : 0;
                         static int s_meshDrawLogCount = 0;
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                        const int meshLogLimit = CKRenderDiagnosticsSettings().MeshLog.DrawLimit;
+                        const int meshLogLimit = CKRenderDiagnosticsSettings(m_Context).MeshLog.DrawLimit;
 #else
                         const int meshLogLimit = 0;
 #endif
@@ -6738,7 +6738,7 @@ CKBOOL RCKMesh::CheckHWIndexBuffer(CKRasterizerContext *rst) {
                         maxIndex = value;
                 }
 #if CKRE_ENABLE_MESH_DIAGNOSTICS
-                const bool logHwIndexRanges = CKRenderDiagnosticsSettings().MeshLog.HardwareIndexRanges;
+                const bool logHwIndexRanges = CKRenderDiagnosticsSettings(m_Context).MeshLog.HardwareIndexRanges;
 #else
                 const bool logHwIndexRanges = false;
 #endif

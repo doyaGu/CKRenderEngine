@@ -33,17 +33,17 @@ static CKDWORD FloatRenderState(float value)
     return bits;
 }
 
-static bool RenderedSceneFrameLogEnabled() {
+static bool RenderedSceneFrameLogEnabled(CKContext *context) {
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
-    return CKRenderDiagnosticsSettings().FrameLog.Enabled;
+    return CKRenderDiagnosticsSettings(context).FrameLog.Enabled;
 #else
     return false;
 #endif
 }
 
-static bool RenderedSceneCameraLogEnabled() {
+static bool RenderedSceneCameraLogEnabled(CKContext *context) {
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
-    return CKRenderDiagnosticsSettings().FrameLog.RenderedSceneCamera;
+    return CKRenderDiagnosticsSettings(context).FrameLog.RenderedSceneCamera;
 #else
     return false;
 #endif
@@ -182,7 +182,7 @@ void CKRenderedScene::DetachAll() {
 
 CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
     // IDA: 0x100704ae
-    const bool frameLog = RenderedSceneFrameLogEnabled();
+    const bool frameLog = RenderedSceneFrameLogEnabled(m_Context);
     if (frameLog)
         CK_LOG("RenderedScene", "Draw enter");
     RCKRenderContext *rc = (RCKRenderContext *) m_RenderContext;
@@ -254,7 +254,7 @@ CKERROR CKRenderedScene::Draw(CK_RENDER_FLAGS Flags) {
 
         static int s_camLogCount = 0;
         static int s_attachedCamLogCount = 0;
-        const bool cameraLog = RenderedSceneCameraLogEnabled();
+        const bool cameraLog = RenderedSceneCameraLogEnabled(m_Context);
         if (cameraLog && s_camLogCount < 60 && (s_camLogCount < 5 || s_camLogCount % 20 == 0)) {
             const VxMatrix &invW = rootEntity->GetInverseWorldMatrix();
             CK_LOG_FMT("RenderedScene", "Frame %d: camera=%p rootEntity worldMat row3: %.2f %.2f %.2f",

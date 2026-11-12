@@ -12,12 +12,14 @@ endfunction()
 # may still hold their binaries, which the engine would load.
 function(ckre_get_rasterizers OUT_ENABLED OUT_DISABLED_BINARIES STATIC_REGISTRATION)
     set(_enabled "")
+    set(_supported "")
     set(_disabled CKBgfxRasterizer)
     # Target | build option | default
     foreach (_entry IN ITEMS
             "CKSdlGpuRasterizer|CKRE_BUILD_SDL_GPU_RASTERIZER|ON")
         string(REPLACE "|" ";" _fields "${_entry}")
         list(GET _fields 0 _target)
+        list(APPEND _supported "${_target}")
         list(GET _fields 1 _option)
         list(GET _fields 2 _selected)
         if (DEFINED ${_option})
@@ -32,4 +34,7 @@ function(ckre_get_rasterizers OUT_ENABLED OUT_DISABLED_BINARIES STATIC_REGISTRAT
     endforeach ()
     set(${OUT_ENABLED} "${_enabled}" PARENT_SCOPE)
     set(${OUT_DISABLED_BINARIES} "${_disabled}" PARENT_SCOPE)
+    if (ARGC GREATER 3)
+        set(${ARGV3} "${_supported}" PARENT_SCOPE)
+    endif ()
 endfunction()

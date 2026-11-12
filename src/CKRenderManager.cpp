@@ -8,6 +8,7 @@
 #include "CKMaterial.h"
 #include "CKParameterManager.h"
 #include "CKRenderSettings.h"
+#include "CKRenderConfiguration.h"
 #include "RCKRenderContext.h"
 #include "RCK3dEntity.h"
 #include "RCK2dEntity.h"
@@ -143,7 +144,8 @@ static void ApplyIniRenderOptions(RCKRenderManager *manager) {
     if (!manager)
         return;
 
-    const CKRenderSettingsView settings = CKRenderRootSettings();
+    const CKRenderSettingsView settings(CKRenderSettingsSection::Root,
+        manager->m_Settings ? &manager->m_Settings->Configuration : nullptr);
     for (int i = 0; i < manager->m_Options.Size(); ++i) {
         VxOption *option = manager->m_Options[i];
         if (option)
@@ -156,7 +158,8 @@ static void ApplyIniRenderOptions(RCKRenderManager *manager) {
         settings.GetPixelFormat(manager->m_SpriteVideoFormat.Key.CStr(), manager->m_SpriteVideoFormat.Value);
 }
 
-RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
+void RCKRenderManager::InitializeRenderOptions() {
+    m_Options.Clear();
     // Initialize options
     m_TextureVideoFormat.Set("TextureVideoFormat", _32_ARGB8888);
     m_SpriteVideoFormat.Set("SpriteVideoFormat", _32_ARGB8888);
@@ -197,6 +200,34 @@ RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context
     m_Options.PushBack(&m_DisableSpecular);
 
     ApplyIniRenderOptions(this);
+
+}
+
+CKRenderSettingsState *CKRenderSettingsForContext(CKContext *context) {
+    auto *manager = context ? dynamic_cast<RCKRenderManager *>(context->GetRenderManager()) : nullptr;
+    return manager ? manager->m_Settings : nullptr;
+}
+
+CKERROR CKSetRenderSettingsFile(CKContext *context, const char *filename) {
+    auto *manager = context ? dynamic_cast<RCKRenderManager *>(context->GetRenderManager()) : nullptr;
+    if (!manager) return CKERR_INVALIDPARAMETER;
+    if (manager->GetRenderContextCount()) return CKERR_INVALIDOPERATION;
+    CKRenderSettingsState *settings = nullptr;
+    if (filename && *filename) {
+        settings = new CKRenderSettingsState;
+        if (!settings->Load(filename)) {
+            delete settings;
+            return CKERR_INVALIDPARAMETER;
+        }
+    }
+    delete manager->m_Settings;
+    manager->m_Settings = settings;
+    manager->InitializeRenderOptions();
+    return CK_OK;
+}
+
+RCKRenderManager::RCKRenderManager(CKContext *context) : CKRenderManager(context, "Render Manager") {
+    InitializeRenderOptions();
 
     m_RenderContextMaskFree = -1;
     m_Context->RegisterNewManager(this);
@@ -365,6 +396,7 @@ RCKRenderManager::~RCKRenderManager() {
             m_RasterizerClosers[i](m_Rasterizers[i]);
         }
     }
+    delete m_Settings;
 }
 
 CKERROR RCKRenderManager::PreClearAll() {

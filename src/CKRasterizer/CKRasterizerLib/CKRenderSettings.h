@@ -4,6 +4,7 @@
 #include "CKRenderConfig.h"
 #include "CKTypes.h"
 #include "XString.h"
+#include "VxConfiguration.h"
 
 enum class CKRenderSettingsSection {
     Root,
@@ -22,43 +23,45 @@ XString CKRenderModuleSiblingFile(const void *address, const char *file);
 
 bool CKRenderSettingsParseBool(const char *value, bool fallback);
 
-bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize);
-bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, XString &value);
-bool CKRenderSettingsGetBool(CKRenderSettingsSection section, const char *name, bool fallback);
-int CKRenderSettingsGetInt(CKRenderSettingsSection section, const char *name, int fallback);
-CKDWORD CKRenderSettingsGetDword(CKRenderSettingsSection section, const char *name, CKDWORD fallback);
-CKDWORD CKRenderSettingsGetPixelFormat(CKRenderSettingsSection section, const char *name, CKDWORD fallback);
+bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize, VxConfiguration *configuration = nullptr);
+bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, XString &value, VxConfiguration *configuration = nullptr);
+bool CKRenderSettingsGetBool(CKRenderSettingsSection section, const char *name, bool fallback, VxConfiguration *configuration = nullptr);
+int CKRenderSettingsGetInt(CKRenderSettingsSection section, const char *name, int fallback, VxConfiguration *configuration = nullptr);
+CKDWORD CKRenderSettingsGetDword(CKRenderSettingsSection section, const char *name, CKDWORD fallback, VxConfiguration *configuration = nullptr);
+CKDWORD CKRenderSettingsGetPixelFormat(CKRenderSettingsSection section, const char *name, CKDWORD fallback, VxConfiguration *configuration = nullptr);
 
 class CKRenderSettingsView {
 public:
-    explicit CKRenderSettingsView(CKRenderSettingsSection section) : m_Section(section) {}
+    explicit CKRenderSettingsView(CKRenderSettingsSection section, VxConfiguration *configuration = nullptr)
+        : m_Section(section), m_Configuration(configuration) {}
 
     bool GetString(const char *name, char *buffer, CKDWORD bufferSize) const {
-        return CKRenderSettingsGetString(m_Section, name, buffer, bufferSize);
+        return CKRenderSettingsGetString(m_Section, name, buffer, bufferSize, m_Configuration);
     }
 
     bool GetString(const char *name, XString &value) const {
-        return CKRenderSettingsGetString(m_Section, name, value);
+        return CKRenderSettingsGetString(m_Section, name, value, m_Configuration);
     }
 
     bool GetBool(const char *name, bool fallback) const {
-        return CKRenderSettingsGetBool(m_Section, name, fallback);
+        return CKRenderSettingsGetBool(m_Section, name, fallback, m_Configuration);
     }
 
     int GetInt(const char *name, int fallback) const {
-        return CKRenderSettingsGetInt(m_Section, name, fallback);
+        return CKRenderSettingsGetInt(m_Section, name, fallback, m_Configuration);
     }
 
     CKDWORD GetDword(const char *name, CKDWORD fallback) const {
-        return CKRenderSettingsGetDword(m_Section, name, fallback);
+        return CKRenderSettingsGetDword(m_Section, name, fallback, m_Configuration);
     }
 
     CKDWORD GetPixelFormat(const char *name, CKDWORD fallback) const {
-        return CKRenderSettingsGetPixelFormat(m_Section, name, fallback);
+        return CKRenderSettingsGetPixelFormat(m_Section, name, fallback, m_Configuration);
     }
 
 private:
     CKRenderSettingsSection m_Section;
+    VxConfiguration *m_Configuration;
 };
 
 inline CKRenderSettingsView CKRenderSettings(CKRenderSettingsSection section) {
@@ -189,5 +192,22 @@ const CKRenderDiagnosticsConfig &CKRenderDiagnosticsSettings();
 void CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection section, const char *name, const char *value);
 bool CKRenderSettingsGetOverrideForTests(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize);
 void CKRenderSettingsClearOverridesForTests();
+
+struct CKRenderSettingsState {
+    VxConfiguration Configuration;
+    CKRenderDiagnosticsConfig Diagnostics = {};
+    bool Load(const char *filename);
+};
+
+// Implemented by the engine; the rasterizer library keeps its standalone default.
+CKRenderSettingsState *CKRenderSettingsForContext(CKContext *context);
+inline CKRenderSettingsView CKRenderRootSettings(CKContext *context) {
+    CKRenderSettingsState *state = CKRenderSettingsForContext(context);
+    return CKRenderSettingsView(CKRenderSettingsSection::Root, state ? &state->Configuration : nullptr);
+}
+inline const CKRenderDiagnosticsConfig &CKRenderDiagnosticsSettings(CKContext *context) {
+    CKRenderSettingsState *state = CKRenderSettingsForContext(context);
+    return state ? state->Diagnostics : CKRenderDiagnosticsSettings();
+}
 
 #endif

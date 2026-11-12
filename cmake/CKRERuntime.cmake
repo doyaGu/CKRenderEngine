@@ -1,6 +1,7 @@
 # Runtime ownership stays with the component, including standalone installs.
 include(CKRERasterizers)
-ckre_get_rasterizers(_ckre_runtime_providers _ckre_unused FALSE)
+ckre_get_rasterizers(_ckre_runtime_providers _ckre_unused FALSE _ckre_supported_providers)
+set_property(GLOBAL PROPERTY CKRE_SUPPORTED_RUNTIME_TARGETS CK2_3D ${_ckre_supported_providers})
 set_property(GLOBAL PROPERTY CKRE_RUNTIME_TARGETS "CK2_3D;${_ckre_runtime_providers}")
 if (_ckre_runtime_providers)
     set_property(GLOBAL PROPERTY CKRE_HAS_RENDER_OUTPUT TRUE)

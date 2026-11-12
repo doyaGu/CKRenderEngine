@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include "CKAll.h"
+#include "CKRenderConfiguration.h"
 #include "CKRasterizer.h"
 #include "../src/CKRasterizer/CKRasterizerLib/CKRenderSettings.h"
 #include "RCKRenderManager.h"
@@ -126,6 +127,44 @@ TEST_F(RenderManagerConfigurationTest, HardwareClassificationOrdersDriversAndTre
     EXPECT_EQ(1, manager->m_Rasterizers.Size());
 }
 } // namespace
+
+TEST_F(RenderManagerConfigurationTest, ExplicitFilesIsolateContextsAndFailedLoadsPreserveTheirSettings) {
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    struct Files {
+        std::filesystem::path First, Second;
+        ~Files() {
+            std::error_code error;
+            std::filesystem::remove(First, error);
+            std::filesystem::remove(Second, error);
+        }
+    } files{std::filesystem::temp_directory_path() / ("nemo2-context-first-" + std::to_string(nonce) + ".ini"),
+            std::filesystem::temp_directory_path() / ("nemo2-context-second-" + std::to_string(nonce) + ".ini")};
+    for (const auto &entry : {std::make_pair(files.First, 2), std::make_pair(files.Second, 8)}) {
+        FILE *file = fopen(entry.first.string().c_str(), "wb");
+        ASSERT_NE(nullptr, file);
+        fprintf(file, "<CK2_3D>\nAntialias=%d\nRenderScale=0.5\n<Debug>\n<FrameLog>\nEnabled=1\n</FrameLog>\n</Debug>\n</CK2_3D>\n", entry.second);
+        fclose(file);
+    }
+    auto *first = new RCKRenderManager(Context);
+    ASSERT_EQ(CK_OK, CKCreateContext(&Other, nullptr, 0, 0));
+    auto *second = new RCKRenderManager(Other);
+    ASSERT_EQ(CK_OK, CKSetRenderSettingsFile(Context, files.First.string().c_str()));
+    ASSERT_EQ(CK_OK, CKSetRenderSettingsFile(Other, files.Second.string().c_str()));
+    EXPECT_EQ(2u, Option(first, "Antialias"));
+    EXPECT_EQ(8u, Option(second, "Antialias"));
+    EXPECT_EQ(_32_ARGB8888, first->m_TextureVideoFormat.Value);
+    std::filesystem::remove(files.First);
+    XString scale;
+    ASSERT_TRUE(CKRenderRootSettings(Context).GetString("RenderScale", scale));
+    EXPECT_STREQ("0.5", scale.CStr());
+    EXPECT_TRUE(CKRenderDiagnosticsSettings(Context).FrameLog.Enabled);
+    EXPECT_EQ(CKERR_INVALIDPARAMETER, CKSetRenderSettingsFile(Context, "missing-context-settings.ini"));
+    EXPECT_EQ(2u, Option(first, "Antialias"));
+    EXPECT_EQ(CK_OK, CKSetRenderSettingsFile(Other, nullptr));
+    EXPECT_EQ(4u, Option(second, "Antialias"));
+    EXPECT_EQ(2u, Option(first, "Antialias"));
+    EXPECT_EQ(CKERR_INVALIDPARAMETER, CKSetRenderSettingsFile(nullptr, files.First.string().c_str()));
+}
 
 int main(int argc, char **argv) {
     // This executable owns its input file and environment. Settings are read

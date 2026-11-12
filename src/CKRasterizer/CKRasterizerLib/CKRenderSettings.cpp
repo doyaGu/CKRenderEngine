@@ -146,13 +146,12 @@ static void CKRenderSettingsLoad(VxConfiguration &config) {
 }
 
 static VxConfiguration *CKRenderSettingsGetConfig() {
-    static VxConfiguration s_Config;
-    static bool s_Loaded = false;
-    if (!s_Loaded) {
-        s_Loaded = true;
-        CKRenderSettingsLoad(s_Config);
-    }
-    return &s_Config;
+    struct DefaultSettings {
+        VxConfiguration Configuration;
+        DefaultSettings() { CKRenderSettingsLoad(Configuration); }
+    };
+    static DefaultSettings settings;
+    return &settings.Configuration;
 }
 
 static int CKRenderSettingsFindOverride(const char *section, const char *name) {
@@ -206,22 +205,22 @@ bool CKRenderSettingsParseBool(const char *value, bool fallback) {
     return fallback;
 }
 
-static bool CKRenderSettingsStringByName(const char *section, const char *name, char *buffer, CKDWORD bufferSize) {
+static bool CKRenderSettingsStringByName(const char *section, const char *name, char *buffer, CKDWORD bufferSize, VxConfiguration *configuration = nullptr) {
     if (!name || !buffer || bufferSize == 0)
         return false;
 
     buffer[0] = '\0';
-    if (CKRenderSettingsOverrideString(section, name, buffer, bufferSize))
+    if (!configuration && CKRenderSettingsOverrideString(section, name, buffer, bufferSize))
         return true;
 
     VxConfigurationSection *configSection = nullptr;
     if (!section || section[0] == '\0') {
-        configSection = CKRenderSettingsGetConfig()->GetSubSection(kRenderSettingsSection, TRUE);
+        configSection = (configuration ? configuration : CKRenderSettingsGetConfig())->GetSubSection(kRenderSettingsSection, TRUE);
     } else {
         char sectionPath[256] = {0};
     if (snprintf(sectionPath, sizeof(sectionPath), "%s.%s", kRenderSettingsSection, section) < 0)
         return false;
-        configSection = CKRenderSettingsGetConfig()->GetSubSection(sectionPath, TRUE);
+        configSection = (configuration ? configuration : CKRenderSettingsGetConfig())->GetSubSection(sectionPath, TRUE);
     }
     if (!configSection)
         return false;
@@ -233,16 +232,16 @@ static bool CKRenderSettingsStringByName(const char *section, const char *name, 
     return CKRenderSettingsCopyString(buffer, bufferSize, entry->GetValue());
 }
 
-static bool CKRenderSettingsBoolByName(const char *section, const char *name, bool fallback) {
+static bool CKRenderSettingsBoolByName(const char *section, const char *name, bool fallback, VxConfiguration *configuration = nullptr) {
     char value[32] = {0};
-    if (!CKRenderSettingsStringByName(section, name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsStringByName(section, name, value, (CKDWORD)sizeof(value), configuration))
         return fallback;
     return CKRenderSettingsParseBool(value, fallback);
 }
 
-static int CKRenderSettingsIntByName(const char *section, const char *name, int fallback) {
+static int CKRenderSettingsIntByName(const char *section, const char *name, int fallback, VxConfiguration *configuration = nullptr) {
     char value[64] = {0};
-    if (!CKRenderSettingsStringByName(section, name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsStringByName(section, name, value, (CKDWORD)sizeof(value), configuration))
         return fallback;
 
     char *end = nullptr;
@@ -256,9 +255,9 @@ static int CKRenderSettingsIntByName(const char *section, const char *name, int 
     return (int)parsed;
 }
 
-static CKDWORD CKRenderSettingsDwordByName(const char *section, const char *name, CKDWORD fallback) {
+static CKDWORD CKRenderSettingsDwordByName(const char *section, const char *name, CKDWORD fallback, VxConfiguration *configuration = nullptr) {
     char value[64] = {0};
-    if (!CKRenderSettingsStringByName(section, name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsStringByName(section, name, value, (CKDWORD)sizeof(value), configuration))
         return fallback;
 
     char *end = nullptr;
@@ -266,28 +265,28 @@ static CKDWORD CKRenderSettingsDwordByName(const char *section, const char *name
     return (end != value) ? (CKDWORD)parsed : fallback;
 }
 
-bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize) {
-    return CKRenderSettingsStringByName(CKRenderSettingsSectionName(section), name, buffer, bufferSize);
+bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, char *buffer, CKDWORD bufferSize, VxConfiguration *configuration) {
+    return CKRenderSettingsStringByName(CKRenderSettingsSectionName(section), name, buffer, bufferSize, configuration);
 }
 
-bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, XString &value) {
+bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name, XString &value, VxConfiguration *configuration) {
     value = "";
 
     char overrideValue[kRenderSettingsOverrideValueSize] = {0};
     const char *sectionName = CKRenderSettingsSectionName(section);
-    if (CKRenderSettingsOverrideString(sectionName, name, overrideValue, (CKDWORD)sizeof(overrideValue))) {
+    if (!configuration && CKRenderSettingsOverrideString(sectionName, name, overrideValue, (CKDWORD)sizeof(overrideValue))) {
         value = overrideValue;
         return true;
     }
 
     VxConfigurationSection *configSection = nullptr;
     if (!sectionName || sectionName[0] == '\0') {
-        configSection = CKRenderSettingsGetConfig()->GetSubSection(kRenderSettingsSection, TRUE);
+        configSection = (configuration ? configuration : CKRenderSettingsGetConfig())->GetSubSection(kRenderSettingsSection, TRUE);
     } else {
         char sectionPath[256] = {0};
         if (snprintf(sectionPath, sizeof(sectionPath), "%s.%s", kRenderSettingsSection, sectionName) < 0)
             return false;
-        configSection = CKRenderSettingsGetConfig()->GetSubSection(sectionPath, TRUE);
+        configSection = (configuration ? configuration : CKRenderSettingsGetConfig())->GetSubSection(sectionPath, TRUE);
     }
     if (!configSection)
         return false;
@@ -300,38 +299,38 @@ bool CKRenderSettingsGetString(CKRenderSettingsSection section, const char *name
     return true;
 }
 
-bool CKRenderSettingsGetBool(CKRenderSettingsSection section, const char *name, bool fallback) {
-    return CKRenderSettingsBoolByName(CKRenderSettingsSectionName(section), name, fallback);
+bool CKRenderSettingsGetBool(CKRenderSettingsSection section, const char *name, bool fallback, VxConfiguration *configuration) {
+    return CKRenderSettingsBoolByName(CKRenderSettingsSectionName(section), name, fallback, configuration);
 }
 
-int CKRenderSettingsGetInt(CKRenderSettingsSection section, const char *name, int fallback) {
-    return CKRenderSettingsIntByName(CKRenderSettingsSectionName(section), name, fallback);
+int CKRenderSettingsGetInt(CKRenderSettingsSection section, const char *name, int fallback, VxConfiguration *configuration) {
+    return CKRenderSettingsIntByName(CKRenderSettingsSectionName(section), name, fallback, configuration);
 }
 
-CKDWORD CKRenderSettingsGetDword(CKRenderSettingsSection section, const char *name, CKDWORD fallback) {
-    return CKRenderSettingsDwordByName(CKRenderSettingsSectionName(section), name, fallback);
+CKDWORD CKRenderSettingsGetDword(CKRenderSettingsSection section, const char *name, CKDWORD fallback, VxConfiguration *configuration) {
+    return CKRenderSettingsDwordByName(CKRenderSettingsSectionName(section), name, fallback, configuration);
 }
 
-CKDWORD CKRenderSettingsGetPixelFormat(CKRenderSettingsSection section, const char *name, CKDWORD fallback) {
+CKDWORD CKRenderSettingsGetPixelFormat(CKRenderSettingsSection section, const char *name, CKDWORD fallback, VxConfiguration *configuration) {
     char value[64] = {0};
     CKDWORD format = fallback;
-    if (!CKRenderSettingsGetString(section, name, value, (CKDWORD)sizeof(value)))
+    if (!CKRenderSettingsGetString(section, name, value, (CKDWORD)sizeof(value), configuration))
         return fallback;
 
     format = VxString2PixelFormat(value);
     return format != UNKNOWN_PF ? format : fallback;
 }
 
-static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
+static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics(VxConfiguration *configuration = nullptr) {
     CKRenderDiagnosticsConfig config = {};
 
-    const CKRenderSettingsView frameLog = CKRenderFrameLogSettings();
+    const CKRenderSettingsView frameLog = CKRenderSettingsView(CKRenderSettingsSection::DebugFrameLog, configuration);
     config.FrameLog.Enabled = frameLog.GetBool("Enabled", false);
     config.FrameLog.CameraAttach = frameLog.GetBool("CameraAttach", false);
     config.FrameLog.PresentSync = frameLog.GetBool("PresentSync", false);
     config.FrameLog.RenderedSceneCamera = frameLog.GetBool("RenderedSceneCamera", false);
 
-    const CKRenderSettingsView drawMap = CKRenderDrawMapSettings();
+    const CKRenderSettingsView drawMap = CKRenderSettingsView(CKRenderSettingsSection::DebugDrawMap, configuration);
     config.DrawMap.Enabled = drawMap.GetBool("Enabled", false);
     config.DrawMap.Submits = drawMap.GetBool("Submits", false);
     config.DrawMap.Resources = drawMap.GetBool("Resources", false);
@@ -340,9 +339,9 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
     config.DrawMap.Frame = drawMap.GetBool("Frame", false);
     config.DrawMap.Summary = drawMap.GetBool("Summary", false);
 
-    config.RenderStats.Enabled = CKRenderRenderStatsSettings().GetBool("Enabled", false);
+    config.RenderStats.Enabled = CKRenderSettingsView(CKRenderSettingsSection::DebugRenderStats, configuration).GetBool("Enabled", false);
 
-    const CKRenderSettingsView frameCostStats = CKRenderFrameCostStatsSettings();
+    const CKRenderSettingsView frameCostStats = CKRenderSettingsView(CKRenderSettingsSection::DebugFrameCostStats, configuration);
     config.FrameCostStats.Enabled = frameCostStats.GetBool("Enabled", false);
     config.FrameCostStats.WarmupFrames = frameCostStats.GetInt("WarmupFrames", 120);
     if (config.FrameCostStats.WarmupFrames < 0)
@@ -356,21 +355,21 @@ static CKRenderDiagnosticsConfig CKRenderSettingsReadDiagnostics() {
         config.FrameCostStats.Output[sizeof(config.FrameCostStats.Output) - 1] = '\0';
     }
 
-    const CKRenderSettingsView ffpStats = CKRenderFFPStatsSettings();
+    const CKRenderSettingsView ffpStats = CKRenderSettingsView(CKRenderSettingsSection::DebugFFPStats, configuration);
     config.FFPStats.Enabled = ffpStats.GetBool("Enabled", false);
     config.FFPStats.UniformHistogram = ffpStats.GetBool("UniformHistogram", false);
     config.FFPStats.Interval = ffpStats.GetInt("Interval", 60);
     if (config.FFPStats.Interval <= 0)
         config.FFPStats.Interval = 60;
 
-    const CKRenderSettingsView ffpLog = CKRenderFFPLogSettings();
+    const CKRenderSettingsView ffpLog = CKRenderSettingsView(CKRenderSettingsSection::DebugFFPLog, configuration);
     config.FFPLog.DrawLimit = ffpLog.GetInt("DrawLimit", 0);
     config.FFPLog.Real3DLimit = ffpLog.GetInt("Real3DLimit", 0);
     config.FFPLog.Draw3DLimit = ffpLog.GetInt("Draw3DLimit", 0);
     config.FFPLog.PositionTLimit = ffpLog.GetInt("PositionTLimit", 0);
     config.FFPLog.DrawSerialPerFrame = ffpLog.GetBool("DrawSerialPerFrame", false);
 
-    const CKRenderSettingsView meshLog = CKRenderMeshLogSettings();
+    const CKRenderSettingsView meshLog = CKRenderSettingsView(CKRenderSettingsSection::DebugMeshLog, configuration);
     config.MeshLog.DrawLimit = meshLog.GetInt("DrawLimit", 0);
     config.MeshLog.HardwareIndexRanges = meshLog.GetBool("HardwareIndexRanges", false);
 
@@ -436,4 +435,10 @@ void CKRenderSettingsClearOverridesForTests() {
         g_RenderSettingsOverrides[i].Value[0] = '\0';
     }
     ++g_RenderSettingsGeneration;
+}
+
+bool CKRenderSettingsState::Load(const char *filename) {
+    if (!CKRenderSettingsLoadFile(Configuration, filename)) return false;
+    Diagnostics = CKRenderSettingsReadDiagnostics(&Configuration);
+    return true;
 }

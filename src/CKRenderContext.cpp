@@ -315,9 +315,9 @@ CK_RENDER_FLAGS RCKRenderContext::ResolveRenderFlags(CK_RENDER_FLAGS Flags) cons
                : Flags;
 }
 
-static bool FrameLogEnabled() {
+static bool FrameLogEnabled(CKContext *context) {
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
-    return CKRenderDiagnosticsSettings().FrameLog.Enabled;
+    return CKRenderDiagnosticsSettings(context).FrameLog.Enabled;
 #else
     return false;
 #endif
@@ -331,9 +331,9 @@ static bool PresentSyncLogEnabled() {
 #endif
 }
 
-static bool CameraAttachLogEnabled() {
+static bool CameraAttachLogEnabled(CKContext *context) {
 #if CKRE_ENABLE_FRAME_DIAGNOSTICS
-    return CKRenderDiagnosticsSettings().FrameLog.CameraAttach;
+    return CKRenderDiagnosticsSettings(context).FrameLog.CameraAttach;
 #else
     return false;
 #endif
@@ -589,7 +589,7 @@ CKERROR RCKRenderContext::Clear(CK_RENDER_FLAGS Flags, CKDWORD Stencil) {
         return CK_OK;
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
-    const bool frameLog = FrameLogEnabled();
+    const bool frameLog = FrameLogEnabled(m_Context);
     if (frameLog)
         CK_LOG("Clear", "enter");
     if (!m_RasterizerContext)
@@ -707,7 +707,7 @@ CKERROR RCKRenderContext::DrawScene(CK_RENDER_FLAGS Flags) {
     CKRE_PROFILE_SCOPE("CKRE.CK3D.DrawScene");
     CK_FRAME_COST_DECLARE_COLLECTING(frameCostCollecting);
     CK_FRAME_COST_DECLARE_SECTION_START(frameCostStart, frameCostCollecting);
-    const bool frameLog = FrameLogEnabled();
+    const bool frameLog = FrameLogEnabled(m_Context);
     if (frameLog)
         CK_LOG("DrawScene", "enter");
     if (!m_RasterizerContext)
@@ -866,7 +866,7 @@ CKERROR RCKRenderContext::Render(CK_RENDER_FLAGS Flags) {
     // mono view; drawing twice into the same target would not provide stereo.
     CKERROR err = CK_OK;
 
-    const bool frameLog = FrameLogEnabled();
+    const bool frameLog = FrameLogEnabled(m_Context);
     if (frameLog)
         CK_LOG("Render", "about to Clear");
     err = Clear(renderFlags);
@@ -1573,7 +1573,7 @@ CKRasterizerContext *RCKRenderContext::GetRasterizerContext() {
 
 void RCKRenderContext::ApplyRenderOptions() {
     CKDWORD debugFlags = m_RasterizerDebugFlags;
-    const CKRenderDrawMapConfig &drawMap = CKRenderDiagnosticsSettings().DrawMap;
+    const CKRenderDrawMapConfig &drawMap = CKRenderDiagnosticsSettings(m_Context).DrawMap;
     const CKDWORD drawMapMask = CKRST_DEBUG_DRAWMAP |
                                 CKRST_DEBUG_DRAWMAP_SUBMITS |
                                 CKRST_DEBUG_DRAWMAP_RESOURCES |
@@ -1615,17 +1615,17 @@ void RCKRenderContext::ApplyRenderOptions() {
     // clamps RenderScale / Sharpness itself.
     CKRasterizerOptions options;
     options.MSAASamples = (CKDWORD) m_RenderManager->m_Antialias.Value;
-    options.FXAA = CKRenderRootSettings().GetBool("FXAA", false) ? TRUE : FALSE;
+    options.FXAA = CKRenderRootSettings(m_Context).GetBool("FXAA", false) ? TRUE : FALSE;
     XString renderScale;
-    if (CKRenderRootSettings().GetString("RenderScale", renderScale))
+    if (CKRenderRootSettings(m_Context).GetString("RenderScale", renderScale))
         options.RenderScale = ParseSettingFloat(renderScale.CStr(), 1.0f);
     XString sharpness;
-    if (CKRenderRootSettings().GetString("Sharpness", sharpness))
+    if (CKRenderRootSettings(m_Context).GetString("Sharpness", sharpness))
         options.Sharpness = ParseSettingFloat(sharpness.CStr(), 0.0f);
     options.DisableTextureFiltering = m_RenderManager->m_DisableFilter.Value != 0;
     options.DisableMipmaps = m_RenderManager->m_DisableMipmap.Value != 0;
     options.ForceAnisotropicFiltering =
-        CKRenderRootSettings().GetBool("ForceAnisotropicFiltering", false) ? TRUE : FALSE;
+        CKRenderRootSettings(m_Context).GetBool("ForceAnisotropicFiltering", false) ? TRUE : FALSE;
     options.DebugFlags = debugFlags;
     m_RasterizerContext->SetOptions(&options);
 }
@@ -2609,7 +2609,7 @@ void RCKRenderContext::AttachViewpointToCamera(CKCamera *cam) {
         m_RenderedScene->m_RootEntity->SetWorldMatrix(worldMat);
 
         static int s_attachLogCount = 0;
-        if (CameraAttachLogEnabled() && s_attachLogCount < 16) {
+        if (CameraAttachLogEnabled(m_Context) && s_attachLogCount < 16) {
             CK3dEntity *target = cam->GetClassID() == CKCID_TARGETCAMERA ? cam->GetTarget() : nullptr;
             int aspectWidth = 0;
             int aspectHeight = 0;
