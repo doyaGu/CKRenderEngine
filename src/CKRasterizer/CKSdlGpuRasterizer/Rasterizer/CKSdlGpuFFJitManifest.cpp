@@ -220,9 +220,9 @@ bool CKSdlGpuDecodeFFJitManifest(uint64_t Identity, const void *Data, size_t Siz
     return valid;
 }
 
-XString CKSdlGpuFFJitManifestPath(uint64_t Identity)
+XString CKSdlGpuFFJitManifestPath(uint64_t Identity, const char *CacheDirectory)
 {
-    const char *setting = SDL_getenv("CKRE_SDL_GPU_FF_JIT_CACHE");
+    const char *setting = CacheDirectory ? CacheDirectory : SDL_getenv("CKRE_SDL_GPU_FF_JIT_CACHE");
     XString path;
     if (setting && setting[0]) {
         if (SDL_strcmp(setting, "0") == 0)

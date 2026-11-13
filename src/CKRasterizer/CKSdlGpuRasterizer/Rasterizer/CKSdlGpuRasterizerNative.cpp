@@ -87,6 +87,7 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
     if (!desc || !desc->Window || desc->Width <= 0 || desc->Height <= 0) return CKERR_INVALIDPARAMETER;
     if (Device) return CKERR_INVALIDOPERATION;
     if (!SDL_IsMainThread()) return CKERR_INVALIDOPERATION;
+    m_Configuration.Load(GetDiagnosticContext());
     Thread = SDL_GetCurrentThreadID();
     Error = CK_OK;
     // Retain resource-table generations across shutdown, but start the new
@@ -117,8 +118,7 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
         SDL_SetError("Requested shader targets contain no format of the embedded shaders");
         return Fail("Init.shaderTargets");
     }
-    const char *driver = SDL_getenv("CKRE_SDL_GPU_DRIVER");
-    if (driver && SDL_strcmp(driver, "auto") == 0) driver = nullptr;
+    const char *driver = m_Configuration.Driver.Empty() ? nullptr : m_Configuration.Driver.CStr();
     const bool explicitDriver = driver != nullptr;
     auto *external = static_cast<SDL_GPUDevice *>(SDL_GetPointerProperty(
         SDL_GetWindowProperties(Window), CKSDL_GPU_DEVICE_PROPERTY, nullptr));
@@ -130,7 +130,7 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
 #elif defined(__APPLE__)
     if (!driver) driver = allowedFormats & SDL_GPU_SHADERFORMAT_MSL ? "metal" : "vulkan";
 #endif
-    const bool debug = SDL_getenv("CKRE_SDL_GPU_DEBUG") && SDL_strcmp(SDL_getenv("CKRE_SDL_GPU_DEBUG"), "0") != 0;
+    const bool debug = m_Configuration.Debug;
     // Decode the shader packs while the device is created.
     if (external) driver = SDL_GetGPUDeviceDriver(external);
     CKSdlGpuShaderPrefetch prefetch(DriverPackFormats(driver, allowedFormats));
@@ -312,20 +312,9 @@ void CKSdlGpuRasterizerContext::Collect()
     }
 }
 
-// CKRE_SDL_GPU_WORKERS sets the number of worker threads. By default a
-// second one compiles and creates alongside the first when the machine has
-// cores to spare for both.
-static int WorkerThreads()
-{
-    const char *setting = SDL_getenv("CKRE_SDL_GPU_WORKERS");
-    if (setting && *setting)
-        return SDL_atoi(setting);
-    return SDL_GetNumLogicalCPUCores() >= 4 ? 2 : 1;
-}
-
 bool CKSdlGpuRasterizerContext::StartWorker()
 {
-    return Worker.Running() || Worker.Start("CKSdlGpuWorker", WorkerThreads());
+    return Worker.Running() || Worker.Start("CKSdlGpuWorker", m_Configuration.Workers);
 }
 
 bool CKSdlGpuRasterizerContext::SubmitJob(CKSdlGpuJob *job, CKSdlGpuJobPriority priority,

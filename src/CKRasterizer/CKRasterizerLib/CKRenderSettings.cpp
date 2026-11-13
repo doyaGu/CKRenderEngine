@@ -97,6 +97,8 @@ static const char *CKRenderSettingsSectionName(CKRenderSettingsSection section) 
         return "Debug.FFPLog";
     case CKRenderSettingsSection::DebugMeshLog:
         return "Debug.MeshLog";
+    case CKRenderSettingsSection::SdlGpu:
+        return "SdlGpu";
     default:
         return "";
     }

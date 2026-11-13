@@ -84,10 +84,10 @@ void CKSdlGpuEncodeFFJitManifest(uint64_t Identity, const CKSdlGpuFFJitManifest 
 bool CKSdlGpuDecodeFFJitManifest(uint64_t Identity, const void *Data, size_t Size,
                                  CKSdlGpuFFJitManifest &Manifest);
 
-// The manifest file of a device, empty when disabled. CKRE_SDL_GPU_FF_JIT_CACHE
-// names its directory, or disables it when "0"; it defaults to CKSdlGpuCache
-// next to the rasterizer.
-XString CKSdlGpuFFJitManifestPath(uint64_t Identity);
+// The manifest file of a device, empty when disabled. CacheDirectory names its
+// directory, "0" disables it, and "" uses CKSdlGpuCache next to the rasterizer.
+// NULL retains the standalone helper's CKRE_SDL_GPU_FF_JIT_CACHE fallback.
+XString CKSdlGpuFFJitManifestPath(uint64_t Identity, const char *CacheDirectory = nullptr);
 bool CKSdlGpuLoadFFJitManifest(const char *Path, uint64_t Identity,
                                CKSdlGpuFFJitManifest &Manifest);
 // Replaces the file only with a complete manifest.

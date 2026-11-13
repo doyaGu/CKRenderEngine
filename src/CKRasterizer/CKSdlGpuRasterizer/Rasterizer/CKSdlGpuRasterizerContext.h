@@ -14,6 +14,7 @@
 #include "CKFFResourceStore.h"
 #include "CKFFShaderCache.h"
 #include "CKSdlGpuFFJitManifest.h"
+#include "CKSdlGpuConfiguration.h"
 #include "CKSdlGpuPresentStage.h"
 #include "CKSdlGpuRasterizer.h"
 #include "CKSdlGpuShaders.h"
@@ -270,6 +271,7 @@ public:
     };
     PipelineCacheCounts CountPipelineCacheForTests() const;
 private:
+    CKSdlGpuConfiguration m_Configuration;
     friend class CKSdlGpuPresentStage;
     typedef CKFFVertexBufferData VertexBufferData;
     typedef CKFFIndexBufferData IndexBufferData;

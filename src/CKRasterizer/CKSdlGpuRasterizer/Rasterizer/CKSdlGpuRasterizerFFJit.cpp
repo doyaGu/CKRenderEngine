@@ -255,16 +255,14 @@ void CKSdlGpuRasterizerContext::InitFFJit()
 {
     m_FFJitFormat = SDL_GPU_SHADERFORMAT_INVALID;
     m_FFJitStats = {};
-    const char *vertex = SDL_getenv("CKRE_SDL_GPU_FF_VERTEX_JIT");
-    m_FFJitVertexEnabled = !vertex || SDL_strcmp(vertex, "0") != 0;
+    m_FFJitVertexEnabled = m_Configuration.FFVertexJit;
     m_FFJitManifest = "";
     m_FFJitIdentity = 0;
     m_FFJitUses = 0;
     m_FFJitClock = 0;
     m_FFWorkerShaders = 0;
-    // CKRE_SDL_GPU_FF_JIT=0 draws every program with the precompiled shaders.
-    const char *setting = SDL_getenv("CKRE_SDL_GPU_FF_JIT");
-    if (setting && SDL_strcmp(setting, "0") == 0)
+    // Disabling the FF JIT draws every program with the precompiled shaders.
+    if (!m_Configuration.FFJit)
         return;
     // D3D12 runs the DXBC the compiler emits, as DXIL would need DXC.
     if (ShaderFormat == SDL_GPU_SHADERFORMAT_SPIRV)
@@ -284,7 +282,7 @@ void CKSdlGpuRasterizerContext::InitFFJit()
         SDL_GetGPUDeviceProperties(Device), SDL_PROP_GPU_DEVICE_NAME_STRING, "");
     m_FFJitIdentity = CKSdlGpuFFJitManifestIdentity(
         SDL_GetGPUDeviceDriver(Device), device, m_FFJitFormat);
-    m_FFJitManifest = CKSdlGpuFFJitManifestPath(m_FFJitIdentity);
+    m_FFJitManifest = CKSdlGpuFFJitManifestPath(m_FFJitIdentity, m_Configuration.FFJitCache.CStr());
     LoadFFJitManifest();
 }
 
@@ -903,8 +901,7 @@ void CKSdlGpuRasterizerContext::SaveFFJitManifest()
 
 void CKSdlGpuRasterizerContext::ClearFFJitPrograms()
 {
-    const char *report = SDL_getenv("CKRE_SDL_GPU_FF_JIT_STATS");
-    if (report && SDL_strcmp(report, "1") == 0 && m_FFJitStats.Requests) {
+    if (m_Configuration.FFJitStats && m_FFJitStats.Requests) {
         const auto &s = m_FFJitStats;
         SDL_Log("FFJIT_STATS requests=%llu selected=%llu ready=%llu positiont=%llu unlit=%llu lit=%llu tween=%llu blend=%llu clip=%llu pad=%llu "
                 "compile_queued=%llu compile_completed=%llu compile_failed=%llu vertex_failed=%llu "

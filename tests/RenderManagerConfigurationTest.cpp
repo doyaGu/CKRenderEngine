@@ -142,7 +142,8 @@ TEST_F(RenderManagerConfigurationTest, ExplicitFilesIsolateContextsAndFailedLoad
     for (const auto &entry : {std::make_pair(files.First, 2), std::make_pair(files.Second, 8)}) {
         FILE *file = fopen(entry.first.string().c_str(), "wb");
         ASSERT_NE(nullptr, file);
-        fprintf(file, "<CK2_3D>\nAntialias=%d\nRenderScale=0.5\n<Debug>\n<FrameLog>\nEnabled=1\n</FrameLog>\n</Debug>\n</CK2_3D>\n", entry.second);
+        fprintf(file, "<CK2_3D>\nAntialias=%d\nRenderScale=0.5\n<SdlGpu>\nDriver=auto\nWorkers=%d\nFFJit=0\n</SdlGpu>\n"
+                      "<Debug>\n<FrameLog>\nEnabled=1\n</FrameLog>\n</Debug>\n</CK2_3D>\n", entry.second, entry.second);
         fclose(file);
     }
     auto *first = new RCKRenderManager(Context);
@@ -152,6 +153,11 @@ TEST_F(RenderManagerConfigurationTest, ExplicitFilesIsolateContextsAndFailedLoad
     ASSERT_EQ(CK_OK, CKSetRenderSettingsFile(Other, files.Second.string().c_str()));
     EXPECT_EQ(2u, Option(first, "Antialias"));
     EXPECT_EQ(8u, Option(second, "Antialias"));
+    CKRenderSettingsView firstGpu(CKRenderSettingsSection::SdlGpu, &first->m_Settings->Configuration);
+    CKRenderSettingsView secondGpu(CKRenderSettingsSection::SdlGpu, &second->m_Settings->Configuration);
+    EXPECT_EQ(2, firstGpu.GetInt("Workers", -1));
+    EXPECT_EQ(8, secondGpu.GetInt("Workers", -1));
+    EXPECT_FALSE(firstGpu.GetBool("FFJit", true));
     EXPECT_EQ(_32_ARGB8888, first->m_TextureVideoFormat.Value);
     std::filesystem::remove(files.First);
     XString scale;
@@ -159,6 +165,8 @@ TEST_F(RenderManagerConfigurationTest, ExplicitFilesIsolateContextsAndFailedLoad
     EXPECT_STREQ("0.5", scale.CStr());
     EXPECT_TRUE(CKRenderDiagnosticsSettings(Context).FrameLog.Enabled);
     EXPECT_EQ(CKERR_INVALIDPARAMETER, CKSetRenderSettingsFile(Context, "missing-context-settings.ini"));
+    EXPECT_EQ(2, firstGpu.GetInt("Workers", -1));
+    EXPECT_FALSE(firstGpu.GetBool("FFJit", true));
     EXPECT_EQ(2u, Option(first, "Antialias"));
     EXPECT_EQ(CK_OK, CKSetRenderSettingsFile(Other, nullptr));
     EXPECT_EQ(4u, Option(second, "Antialias"));

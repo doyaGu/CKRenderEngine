@@ -17,7 +17,8 @@ enum class CKRenderSettingsSection {
     DebugFrameCostStats,
     DebugFFPStats,
     DebugFFPLog,
-    DebugMeshLog
+    DebugMeshLog,
+    SdlGpu
 };
 
 // Path of file next to the module that contains address, or "" when the module is unknown.

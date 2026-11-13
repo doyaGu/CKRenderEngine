@@ -90,6 +90,16 @@ function(ckre_add_ckff_test TARGET_NAME)
     ckre_register_test(${TARGET_NAME})
 endfunction()
 
+# Configuration and manifest-path coverage is CPU-only, with no GPU device.
+if (TARGET CKSdlGpuRasterizer)
+    ckre_add_ckff_test(SdlGpuConfigurationTest SdlGpuConfigurationTest.cpp
+        ../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer/CKSdlGpuConfiguration.cpp
+        ../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer/CKSdlGpuFFJitManifest.cpp)
+    target_include_directories(SdlGpuConfigurationTest PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../src/CKRasterizer/CKSdlGpuRasterizer/Rasterizer)
+    target_link_libraries(SdlGpuConfigurationTest PRIVATE gtest_main SDL3::SDL3)
+endif ()
+
 # Keep optional diagnostics enabled in a small CPU test and a separate module,
 # without changing the engine's compilation policy or invoking GPU tests.
 add_library(ckre_diagnostic_context_probe SHARED support/DiagnosticContextProbe.cpp

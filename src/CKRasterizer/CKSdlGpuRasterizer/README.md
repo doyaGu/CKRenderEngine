@@ -10,7 +10,7 @@ The SDL_gpu rasterizer advertises complete format/profile targets before device 
 then supplies the matching catalog after initialization. Its native device
 consumes explicit shader and program descriptors from the compatibility layer.
 
-The Player owns its `SDL_Window` and controls fullscreen and window events.
+The host owns its `SDL_Window` and controls fullscreen and window events.
 The backend claims that window on the main thread and releases it during
 shutdown. Default presentation acquires the actual drawable extent each frame.
 Scene rendering uses the native target directly when no scaling, multisampling
@@ -24,6 +24,52 @@ texture import data in `CKSdlGpuRasterizer.h`, and diagnostics in
 in `Native/` and `Rasterizer/`. Only those two external headers
 are installed; white-box tests and benchmarks opt into the internal include
 paths. `shaders/generated/` remains owned by shader generation.
+
+## Runtime configuration
+
+Select a context's configuration with `CKSetRenderSettingsFile` from
+`CKRenderConfiguration.h` before creating render contexts. GPU and JIT settings
+live in the `<SdlGpu>` section under `<CK2_3D>`:
+
+```text
+<CK2_3D>
+    <SdlGpu>
+        Driver = auto
+        Debug = 0
+        Workers = 2
+        FFJit = 1
+        FFVertexJit = 1
+        FFJitCache = /path/to/project/cache
+        FFJitStats = 0
+    </SdlGpu>
+</CK2_3D>
+```
+
+Each entry overrides only its corresponding environment variable. Missing
+entries retain the existing environment behavior and built-in defaults:
+
+| Entry | Environment variable | Built-in default |
+|-------|----------------------|------------------|
+| `Driver` | `CKRE_SDL_GPU_DRIVER` | Platform default; `auto` or an empty entry selects it explicitly |
+| `Debug` | `CKRE_SDL_GPU_DEBUG` | Off; applies when creating an owned device |
+| `Workers` | `CKRE_SDL_GPU_WORKERS` | Two on systems with at least four logical cores, otherwise one |
+| `FFJit` | `CKRE_SDL_GPU_FF_JIT` | On for supported shader formats |
+| `FFVertexJit` | `CKRE_SDL_GPU_FF_VERTEX_JIT` | On for supported shader formats |
+| `FFJitCache` | `CKRE_SDL_GPU_FF_JIT_CACHE` | `CKSdlGpuCache` beside the rasterizer |
+| `FFJitStats` | `CKRE_SDL_GPU_FF_JIT_STATS` | Off |
+
+INI booleans accept `0/1`, `false/true`, `off/on`, and `no/yes`. Unparseable
+booleans and worker counts use the environment default. Workers are clamped to
+one through four when started. `FFJitCache=0` disables the disk manifest;
+an empty entry explicitly selects the built-in directory. Paths are unquoted
+UTF-8 values and may contain spaces. The shipped INI leaves these entries
+commented, preserving environment-based selection.
+
+The resolved values and strings are owned by the rasterizer context and captured
+on each device initialization. Changes to the environment during rendering do
+not change its worker count, JIT policy, cache directory or shutdown statistics.
+Reinitialization resolves defaults again. A borrowed GPU device retains its
+existing creation properties; driver compatibility checks still apply.
 
 External presentation uses the same texture resource and target model as every
 other render target. A host may offer its SDL GPU device through
