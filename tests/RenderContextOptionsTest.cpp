@@ -60,16 +60,15 @@ protected:
         CKCLASSREGISTERCID(RCKMaterial, CKCID_BEOBJECT);
         CKCLASSREGISTERCID(RCKTexture, CKCID_BEOBJECT);
         CKBuildClassHierarchyTable();
-        CKRenderSettingsClearOverridesForTests();
+        ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
+        Manager = new RCKRenderManager(Context);
         Setting("FXAA", "false");
         Setting("ForceAnisotropicFiltering", "false");
         Setting("RenderScale", "1");
         Setting("Sharpness", "0");
         const char *drawMapKeys[] = {"Enabled", "Submits", "Resources", "Passes", "Markers", "Frame", "Summary"};
         for (const char *key : drawMapKeys)
-            CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugDrawMap, key, "false");
-        ASSERT_EQ(CK_OK, CKCreateContext(&Context, nullptr, 0, 0));
-        Manager = new RCKRenderManager(Context);
+            DrawMapSetting(key, "false");
         ASSERT_GT(Manager->m_DriverCount, 0);
         ASSERT_NE(nullptr, Manager->m_2DRootFore);
         ASSERT_NE(nullptr, Manager->m_2DRootBack);
@@ -100,12 +99,14 @@ protected:
         }
         if (Context)
             CKCloseContext(Context);
-        CKRenderSettingsClearOverridesForTests();
         CKShutdown();
     }
 
-    static void Setting(const char *key, const char *value) {
-        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, key, value);
+    void Setting(const char *key, const char *value) {
+        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::Root, key, value, Manager->m_Settings);
+    }
+    void DrawMapSetting(const char *key, const char *value) {
+        CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugDrawMap, key, value, Manager->m_Settings);
     }
     static void Matrix(const VxMatrix &actual, const VxMatrix &expected) {
         for (int row = 0; row < 4; ++row)
@@ -196,13 +197,13 @@ TEST_F(RenderContextOptionsTest, NumericPrefixesAndFiniteOutOfRangeValuesReachRa
 }
 
 TEST_F(RenderContextOptionsTest, DrawMapMasterAndSummaryComposeThePacketWithoutDroppingOtherDebugFlags) {
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugDrawMap, "Enabled", "true");
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugDrawMap, "Summary", "true");
+    DrawMapSetting("Enabled", "true");
+    DrawMapSetting("Summary", "true");
     Device->m_RasterizerDebugFlags = CKRST_DEBUG_WIREFRAME;
     Device->ApplyRenderOptions();
     EXPECT_EQ(CKRST_DEBUG_WIREFRAME | CKRST_DEBUG_DRAWMAP | CKRST_DEBUG_DRAWMAP_FRAME |
                   CKRST_DEBUG_DRAWMAP_SUMMARY, State.Options.DebugFlags);
-    CKRenderSettingsSetOverrideForTests(CKRenderSettingsSection::DebugDrawMap, "Enabled", "false");
+    DrawMapSetting("Enabled", "false");
     Device->ApplyRenderOptions();
     EXPECT_EQ(CKRST_DEBUG_WIREFRAME, State.Options.DebugFlags);
 }

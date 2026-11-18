@@ -175,7 +175,7 @@ TEST_F(RenderManagerLifecycleTest, SdkBaseDispatchAndSharedPrefixFollowThePlatfo
         EXPECT_EQ(sizeof(void *) == 4 ? x86[i] : x64[i], offset);
     }
     EXPECT_EQ(sizeof(void *) == 4 ? 40u : 56u, sizeof(CKRenderManager));
-    EXPECT_EQ(sizeof(void *) == 4 ? 640u : 1128u, sizeof(RCKRenderManager));
+    EXPECT_EQ(sizeof(void *) == 4 ? 648u : 1144u, sizeof(RCKRenderManager));
     EXPECT_EQ(sizeof(void *), alignof(RCKRenderManager));
 }
 } // namespace

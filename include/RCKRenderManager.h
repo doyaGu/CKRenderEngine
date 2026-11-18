@@ -23,8 +23,6 @@ public:
     explicit RCKRenderManager(CKContext *context);
     ~RCKRenderManager() override;
     void InitializeRenderOptions();
-    CKRenderSettingsState *m_Settings = nullptr;
-    CKRenderDiagnosticsContext *m_Diagnostics = nullptr;
 
     CKERROR PreClearAll() override;
     CKERROR PreProcess() override;
@@ -237,6 +235,11 @@ private:
 
     RCKRenderManager(const RCKRenderManager &) = delete;
     RCKRenderManager &operator=(const RCKRenderManager &) = delete;
+
+public:
+    // Context-owned state follows the existing manager layout.
+    CKRenderSettingsState *m_Settings = nullptr;
+    CKRenderDiagnosticsContext *m_Diagnostics = nullptr;
 };
 
 #endif // RCKRENDERMANAGER_H
