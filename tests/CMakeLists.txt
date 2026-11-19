@@ -448,7 +448,14 @@ if (TARGET CKSdlGpuRasterizerStatic AND TARGET SDL3::SDL3)
     target_compile_definitions(sdl_gpu_ffp_pixel_tests PRIVATE CKRE_PIXEL_SDL_GPU=1)
     target_link_libraries(sdl_gpu_ffp_pixel_tests PRIVATE CKSdlGpuRasterizerStatic SDL3::SDL3)
     # Software rasterizers on CI runners (lavapipe, WARP) take several minutes.
-    set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES TIMEOUT 1800 RUN_SERIAL TRUE)
+    set(ffp_pixel_timeout 1800)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+        # The full pixel gate with lavapipe on Linux ARM64 can take over 30
+        # minutes. Leave time for normal runner variation.
+        set(ffp_pixel_timeout 2700)
+    endif ()
+    set_tests_properties(sdl_gpu_ffp_pixel_tests PROPERTIES
+        TIMEOUT ${ffp_pixel_timeout} RUN_SERIAL TRUE)
     foreach (pixel_case IN ITEMS sampler clipping readback)
         if (pixel_case STREQUAL "sampler")
             set(pixel_argument samplers)
