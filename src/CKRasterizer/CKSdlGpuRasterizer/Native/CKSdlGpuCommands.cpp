@@ -1183,6 +1183,22 @@ CKERROR CKSdlGpuRasterizerContext::AcquireSwapchain()
     return CK_OK;
 }
 
+CKERROR CKSdlGpuRasterizerContext::SetPresentMode(CKPresentSync sync)
+{
+    if (sync == CKRST_PRESENT_UNCHANGED)
+        return CK_OK;
+    const auto mode = sync == CKRST_PRESENT_IMMEDIATE && ImmediatePresentSupported
+        ? SDL_GPU_PRESENTMODE_IMMEDIATE : SDL_GPU_PRESENTMODE_VSYNC;
+    if (mode == PresentMode)
+        return CK_OK;
+    if (Swapchain)
+        return CKERR_INVALIDOPERATION;
+    if (!SDL_SetGPUSwapchainParameters(Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
+        return Fail("SetGPUSwapchainParameters");
+    PresentMode = mode;
+    return CK_OK;
+}
+
 CKERROR CKSdlGpuRasterizerContext::PresentTexture(CKDWORD handle, CKDWORD width, CKDWORD height,
                                         CKPresentSync sync)
 {
@@ -1201,16 +1217,8 @@ CKERROR CKSdlGpuRasterizerContext::PresentTexture(CKDWORD handle, CKDWORD width,
     // draw packet, geometry upload and native render-pass setup.
     CKERROR error = Flush();
     if (error != CK_OK) return error;
-    if (sync != CKRST_PRESENT_UNCHANGED) {
-        const auto mode = sync == CKRST_PRESENT_VSYNC
-            ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
-        if (mode != PresentMode) {
-            if (Swapchain) return CKERR_INVALIDOPERATION;
-            if (!SDL_SetGPUSwapchainParameters(Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
-                return Fail("SetGPUSwapchainParameters");
-            PresentMode = mode;
-        }
-    }
+    if (const CKERROR result = SetPresentMode(sync); result != CK_OK)
+        return result;
     if (!EnsureCommands()) return Error;
     error = AcquireSwapchain();
     if (error != CK_OK) return error;
@@ -1346,15 +1354,8 @@ CKERROR CKSdlGpuRasterizerContext::Submit(CKPresentSync sync, CKBOOL presentWind
     if (!presentWindow && !Target &&
         (Draws.Size() != 0 || (PassOpen && Pass.ClearFlags)))
         return CKERR_INVALIDOPERATION;
-    if (sync != CKRST_PRESENT_UNCHANGED) {
-        const auto mode = sync == CKRST_PRESENT_VSYNC ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_IMMEDIATE;
-        if (mode != PresentMode) {
-            if (Swapchain) return CKERR_INVALIDOPERATION;
-            if (!SDL_SetGPUSwapchainParameters(Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
-                return Fail("SetGPUSwapchainParameters");
-            PresentMode = mode;
-        }
-    }
+    if (const CKERROR result = SetPresentMode(sync); result != CK_OK)
+        return result;
     const CKERROR error = Flush(presentWindow != FALSE);
     if (error != CK_OK) return error;
     std::shared_ptr<SDL_GPUFence> fence;

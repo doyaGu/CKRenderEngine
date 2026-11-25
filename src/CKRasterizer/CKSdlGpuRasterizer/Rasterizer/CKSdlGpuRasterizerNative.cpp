@@ -154,6 +154,9 @@ CKERROR CKSdlGpuRasterizerContext::Init(const CKRasterizerInitParameters *desc)
         Fail("ClaimWindowForGPUDevice"); Window = nullptr; Shutdown(); return CKERR_INVALIDOPERATION;
     }
     WindowClaimed = true;
+    // Wayland compositors can offer FIFO without immediate presentation.
+    // Keep presenting in the guaranteed mode when IMMEDIATE is unavailable.
+    ImmediatePresentSupported = SDL_WindowSupportsGPUPresentMode(Device, Window, SDL_GPU_PRESENTMODE_IMMEDIATE);
     if (!SDL_SetGPUSwapchainParameters(Device, Window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
                                        SDL_GPU_PRESENTMODE_VSYNC)) {
         Fail("SetGPUSwapchainParameters"); Shutdown(); return CKERR_INVALIDOPERATION;

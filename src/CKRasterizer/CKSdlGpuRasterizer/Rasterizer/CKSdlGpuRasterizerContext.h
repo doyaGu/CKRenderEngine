@@ -289,6 +289,7 @@ private:
                                            CK_SHADER_PROFILE Profile) const;
     bool EnsureCommands();
     CKERROR AcquireSwapchain();
+    CKERROR SetPresentMode(CKPresentSync sync);
     CKERROR Flush(bool PresentWindow = true);
     // Empties the queued draw batch, keeping its storage warm.
     void ResetBatch();
@@ -693,6 +694,7 @@ private:
     unsigned Width = 0;
     unsigned Height = 0;
     SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
+    bool ImmediatePresentSupported = false;
     SDL_GPUCommandBuffer *Commands = nullptr;
     SDL_GPUTexture *Swapchain = nullptr;
     unsigned SwapWidth = 0;
