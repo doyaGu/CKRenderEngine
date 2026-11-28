@@ -8,6 +8,12 @@
 
 typedef void (*TexturePixelFn)(int x, int y, int w, int h, void *user, CKDWORD *argb);
 
+#ifdef CKRE_SCENE_CAPTURE_BUNDLED_FONT
+inline constexpr char kSceneFontFamily[] = "Noto Sans";
+#else
+inline constexpr char kSceneFontFamily[] = "Arial";
+#endif
+
 CKMaterial *SceneCreateMaterial(SceneContext &sc, const char *name, const VxColor &diffuse, CKTexture *texture = NULL);
 CKTexture *SceneCreateTexture(SceneContext &sc, const char *name, int w, int h, TexturePixelFn fn, void *user);
 CKTexture *SceneCreateCheckerTexture(SceneContext &sc, const char *name, int w, int h, int cell, CKDWORD colorA, CKDWORD colorB);

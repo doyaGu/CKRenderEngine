@@ -66,14 +66,13 @@ bool BuildSpritesText(SceneContext &sc)
     sprite->SetPosition(spritePos);
     SceneAddRenderObject(sc, sprite);
 
-    // Sprite text exercises native font rasterization. Regression references
-    // are platform-specific because system glyph shapes differ.
+    // Sprite text exercises the same bitmap-font path as loaded content.
     CKSpriteText *text = static_cast<CKSpriteText *>(sc.Context->CreateObject(CKCID_SPRITETEXT, (CKSTRING)"text", CK_OBJECTCREATION_NONAMECHECK));
     if (!text || !text->Create(400, 48, 32, 0))
         return false;
     text->SetDesiredVideoFormat(_32_ARGB8888);
     // Negative height specifies pixels; point sizes vary with desktop DPI.
-    text->SetFont((CKSTRING)"Arial", -24, 700, FALSE, FALSE);
+    text->SetFont((CKSTRING)kSceneFontFamily, -24, 700, FALSE, FALSE);
     text->SetTextColor(0xFFFFFFFF);
     text->SetBackgroundColor(0x00000000);
     text->SetAlign(CKSPRITETEXT_LEFT);

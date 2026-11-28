@@ -141,6 +141,17 @@ set_target_properties(ckre_scene_capture PROPERTIES
 )
 ckre_copy_runtime_dependencies(ckre_scene_capture)
 
+# Linux golden frames use VxMath's verified bundled font. Prepare it for
+# standalone capture jobs and renderer tests that do not build FontTest.
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND COMMAND vx_prepare_font_assets)
+    vx_prepare_font_assets(_ckre_font_directory _ckre_font_files)
+    target_compile_definitions(ckre_scene_capture PRIVATE CKRE_SCENE_CAPTURE_BUNDLED_FONT)
+    add_custom_command(TARGET ckre_scene_capture POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:ckre_scene_capture>/data/fonts"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${_ckre_font_files} "$<TARGET_FILE_DIR:ckre_scene_capture>/data/fonts"
+        COMMAND_EXPAND_LISTS VERBATIM)
+endif ()
+
 if (CKRE_BUILD_TESTS AND TARGET CKSdlGpuRasterizer)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_executable(scene_capture_failing_child ../../tests/SceneCaptureFailingChild.c)
